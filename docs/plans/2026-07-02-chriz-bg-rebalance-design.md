@@ -67,10 +67,12 @@ designed when this repo has enough real components to compose.
 
 1. ✅ Scaffold repo, write docs, implement component 100, commit, push (this session).
 2. ✅ Live-install hotfix (this session; recorded in `research/01`).
-3. ⬜ User reviews `research/02-upstream-scs-report-draft.md` → file on
-   Gibberlings3/SwordCoastStratagems.
-4. ⬜ File Aura findings as issues on the Aura patch repo (this session if remote reachable).
-5. ⬜ Update chriz-sod-rebalance scope doc Part 3 → pointer (this session).
+3. ❌ Upstream SCS report — CANCELLED 2026-07-03 (author unresponsive on GitHub; user
+   decision). Draft parked in `research/02`.
+4. ✅ Aura findings filed: Aura-Balance-Patch issue #1.
+5. ✅ chriz-sod-rebalance scope doc Part 3 → pointer, committed.
 6. ⬜ SR wishlist session with user → `research/10-sr-wishlist.md` → design 200-series.
 7. ⬜ SCS component catalog research → candidate 1xx components.
-8. ⬜ When 2xx/3xx mature: design `chriz-bg-collection` umbrella.
+8. ⬜ When 2xx/3xx mature: design `chriz-bg-collection` umbrella — analysis + bootstrap
+   plan in `docs/plans/2026-07-03-umbrella-analysis.md` (recommendation: separate repo,
+   NOT merged into chriz-bg-modpack).

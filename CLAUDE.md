@@ -12,12 +12,16 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes for a heavily-mo
 - Credit upstream mods (SCS: DavidW, SR: Demivrgvs/G3) prominently; report genuine bugs
   upstream before/alongside fixing locally.
 
-## Target install (read-only reference, do NOT modify without sign-off)
+## Target install (READ-ONLY reference — user directive 2026-07-03)
 
-- Game dir: `C:\Games\Baldur's Gate II Enhanced Edition modded\`
+- Game dir: `C:\Games\Baldur's Gate II Enhanced Edition modded\` — **reference only: not a
+  testing ground, not a repo.** Read anything (WeiDU.log, override, mod sources); never
+  write, install, or test there without the user's explicit sign-off in that conversation.
 - Launched via `InfinityLoader.exe` (EEex). WeiDU v24600 `weidu.exe` in game dir;
   v24900 template = copy `Setup-Branwen.exe` as `Setup-<modname>.exe`.
 - The user has an **active playthrough** — prefer changes that apply cleanly on next load.
+- `gh` CLI auth is shared across concurrent agent sessions — check `gh auth status` before
+  gh operations; this repo needs the `Chrizhermann` account.
 
 ## Inherited rules (follow exactly)
 

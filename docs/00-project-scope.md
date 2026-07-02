@@ -52,7 +52,9 @@ symbols; components idempotent + predicate-guarded. Follow CLAUDE.md.
 ## Status
 
 - [x] Repo scaffold, component 100 implemented, live-install hotfix applied (2026-07-02)
-- [ ] Upstream SCS bug report (draft in `research/02`, awaiting user review)
-- [ ] SCS component catalog / touchpoint research
+- [x] Aura findings filed on the Aura patch repo (issue #1)
+- [x] Upstream SCS bug report — PARKED, will not be filed (user decision 2026-07-03;
+      SCS author unresponsive on GitHub). Draft kept in `research/02`.
+- [ ] SCS component catalog / touchpoint research (solo-able — see `docs/handover.md`)
 - [ ] SR wishlist session with user
-- [ ] Aura findings filed on the Aura patch repo
+- [ ] Comp 100 formal tail-install into the live game (pending user sign-off)

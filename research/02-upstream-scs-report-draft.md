@@ -1,8 +1,8 @@
-# DRAFT — upstream bug report for Gibberlings3/SwordCoastStratagems
+# PARKED — upstream bug report for Gibberlings3/SwordCoastStratagems (will not be filed)
 
-> Status: awaiting user review before filing. Target: GitHub issue on
-> https://github.com/Gibberlings3/SwordCoastStratagems (or G3 forum thread, maintainer's
-> preference).
+> Status: **PARKED per user decision 2026-07-03** — the SCS author does not react to GitHub
+> reports; effort goes into our own repos instead. Kept for reference/documentation of the
+> root cause. The fix ships as component 100 of this mod.
 
 ---
 
