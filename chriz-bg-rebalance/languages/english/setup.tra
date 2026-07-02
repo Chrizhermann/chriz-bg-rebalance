@@ -1,0 +1,12 @@
+// chriz-bg-rebalance — English
+
+// Component names (match DESIGNATED numbers)
+@100 = ~SCS: Telekinetic Storm — restore save vs. spell for half damage (+ bypass Mirror Image)~
+
+// Component groups
+@1100 = ~SCS adjustments~
+@1200 = ~Spell Revisions adjustments~
+@1300 = ~Cross-cutting audits~
+
+// Predicate / failure messages
+@9100 = ~SCS's "extra arcane spells" (Telekinetic Storm) is not installed — nothing to fix.~

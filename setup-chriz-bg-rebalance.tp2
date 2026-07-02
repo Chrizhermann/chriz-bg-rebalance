@@ -1,0 +1,60 @@
+BACKUP ~weidu_external/backup/chriz-bg-rebalance~
+AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
+VERSION ~v0.1.0~
+
+AUTO_TRA ~chriz-bg-rebalance/languages/%s~
+LANGUAGE ~English~ ~english~ ~chriz-bg-rebalance/languages/english/setup.tra~
+
+// ============================================================
+// chriz-bg-rebalance — SCS- & SR-adjacent balance adjustments
+//
+// 100-199: SCS adjustments
+// 200-299: SR adjustments
+// 300-399: cross-cutting audits/fixes
+// ============================================================
+
+// ============================================================
+// SCS adjustments (100-199)
+// ============================================================
+
+BEGIN @100 DESIGNATED 100 GROUP @1100 LABEL ~cbr_scs_telekinetic_storm_save_fix~
+REQUIRE_PREDICATE (IDS_OF_SYMBOL (~spell~ ~WIZARD_TELEKINETIC_STORM~) > 2000) @9100
+
+// SCS allocates the spell slot at install time — resolve the resref via spell.ids.
+// spell.ids value 2LNN (2=wizard, L=level, NN=number) maps to SPWI(LNN).spl.
+OUTER_SET cbr_tks_num = (IDS_OF_SYMBOL (~spell~ ~WIZARD_TELEKINETIC_STORM~)) - 2000
+OUTER_SPRINT cbr_tks_res ~SPWI%cbr_tks_num%~
+
+ACTION_IF NOT (FILE_EXISTS_IN_GAME ~%cbr_tks_res%.spl~) BEGIN
+  FAIL ~spell.ids maps WIZARD_TELEKINETIC_STORM to %cbr_tks_res%.spl, but that file does not exist in the game.~
+END
+
+// Upstream bug (SCS stratagems/newspell/extra_arcane_spells.tpa, telekinetic_storm):
+// the op12 damage effect sets s_save_for_half=1 but omits s_save_vs_spell=1 and
+// s_bypass_mirror_image=1 (sibling spells stormbolts/icy_ray in the same file have both).
+// With no save-type bits set the engine never rolls a save, so the save-for-half flag is
+// inert and the spell always deals full damage, contradicting its description
+// ("Saving Throw: 1/2"). Fix: OR save-vs-spell (bit 0) + EE bypass-mirror-image (bit 24)
+// into the savetype dword of every save-for-half op12 effect, in all scaled ability headers.
+COPY_EXISTING ~%cbr_tks_res%.spl~ ~override~
+  READ_LONG  0x64 ext_off
+  READ_SHORT 0x68 ext_cnt
+  READ_LONG  0x6a fx_off
+  FOR (a = 0; a < ext_cnt; ++a) BEGIN
+    // empirical ability layout: 0x1e = nFx, 0x20 = first fx index (IESDP documents these
+    // two bytes earlier; the empirical layout is what shipping engines/WeiDU use)
+    READ_SHORT (ext_off + a * 0x28 + 0x1e) nfx
+    READ_SHORT (ext_off + a * 0x28 + 0x20) first
+    FOR (e = 0; e < nfx; ++e) BEGIN
+      SET eo = fx_off + ((first + e) * 0x30)
+      READ_SHORT eo fx_opcode
+      PATCH_IF (fx_opcode = 12) BEGIN
+        READ_LONG (eo + 0x2c) fx_special
+        PATCH_IF ((fx_special BAND 0x100) = 0x100) BEGIN   // save-for-half flag present
+          READ_LONG (eo + 0x24) fx_savetype
+          WRITE_LONG (eo + 0x24) (fx_savetype BOR 0x1000001)
+        END
+      END
+    END
+  END
+  BUT_ONLY
