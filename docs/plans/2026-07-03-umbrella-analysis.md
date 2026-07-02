@@ -1,7 +1,9 @@
 # Umbrella analysis — should chriz-bg-modpack become the collection?
 
-**Date:** 2026-07-03 · **Status:** analysis delivered, decision pending user.
-User question: "chriz-bg-modpack … might become my umbrella mod? What do you think?"
+**Date:** 2026-07-03 · **Status:** DECIDED — user approved the recommendation 2026-07-03.
+`chriz-bg-collection` bootstrapped the same day (manifest captured: 414 components / 84 mod
+folders); chriz-bg-modpack stays the fixes mod. Optional fixpack rename remains open.
+User question was: "chriz-bg-modpack … might become my umbrella mod? What do you think?"
 
 ## Recommendation: No — keep the modpack as the fixes mod; the umbrella is a different kind of artifact.
 
