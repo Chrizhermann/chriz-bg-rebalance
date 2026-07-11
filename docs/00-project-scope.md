@@ -14,6 +14,13 @@ rationale, fully reversible, idempotent, testable without wrecking a live save.
   but no save type is set → no save ever rolled → always full 16d6–20d6 damage; also missing
   EE bypass-mirror-image convention for AoE damage. Diagnosis: `research/01`. Hotfixed in the
   live install 2026-07-02; component formalizes it. Upstream report draft: `research/02`.
+- **101 — Adventurer's Mart Freedom scrolls** ✅ SHIPPED + live-installed 2026-07-11. SCS
+  v34.3's `freedom_scrolls` spell tweak (5× scrl9z to Galoomp's Books + Adventurer's Mart)
+  was orphaned in the v35 reorganization: dispatch row missing from `spelltweaks.2da`, so it
+  never runs (and the surviving dead code lost the ribald target too). Confirmed
+  unintentional. Component restores the Adventurer's Mart five, idempotently; live saves
+  with the store cached were patched directly (34 saves; backups kept). Diagnosis:
+  `research/03`.
 - **Backlog:** catalog SCS components active in the target install + their balance
   touchpoints; identify small high-value tweaks. (Migrated from chriz-sod-rebalance "Part 3",
   which now points here.)

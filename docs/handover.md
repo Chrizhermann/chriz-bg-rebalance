@@ -9,8 +9,16 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-instal
 Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
 `docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `CLAUDE.md`.
 
-## Status (2026-07-03)
+## Status (2026-07-11)
 
+- **Component 101 (Adventurer's Mart Freedom scrolls): SHIPPED + live-installed.** SCS v35
+  orphaned its `freedom_scrolls` spell tweak (no `spelltweaks.2da` dispatch row; dead code
+  also lost the ribald target); comp 101 restores the Adventurer's Mart 5× scrl9z. Live
+  install got the mod tail-installed (`--force-install-list 101`, user-approved 2026-07-11)
+  — the mod folder + setup exe now live in the game dir. 34 saves with the store cached in
+  `BALDUR.SAV` were patched directly (`research/scripts/patch_sav_store.py`, backups
+  `BALDUR.SAV.bak-cbr101`); 4 live `Interval-Save` slots intentionally skipped
+  (`research/03` §Live install).
 - **Component 100 (SCS Telekinetic Storm save fix): implemented & parse-checked.** NOT yet
   WeiDU-installed into the live game — the live install got an equivalent user-approved
   direct-override hotfix on 2026-07-02 (`research/01`), and comp 100 is idempotent over it.
@@ -42,7 +50,16 @@ to the live install.
 ```bash
 ./weidu.exe --nogame --list-components setup-chriz-bg-rebalance.tp2 0   # parse check
 python research/scripts/parse_spl.py <file.spl>                        # inspect effects
+python research/scripts/parse_sto.py <file.sto>                        # inspect store stock
+python research/scripts/patch_sav_store.py <saveroot> <sto> <itm> <n>  # save-cache surgery
 ```
+
+Save-cache reality: visited stores live inside each save's `BALDUR.SAV`; override store
+patches only reach saves that never loaded that store. EET userdir on this machine is
+OneDrive-redirected (`[Environment]::GetFolderPath('MyDocuments')` →
+`...\OneDrive\Documents\Baldur's Gate - Enhanced Edition Trilogy`), it is SHARED by every
+EET-based install copy, and `Interval-Save` slots may be actively rewritten by a running
+session — always `--exclude` them.
 
 ## Work queue
 

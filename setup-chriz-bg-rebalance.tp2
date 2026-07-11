@@ -58,3 +58,46 @@ COPY_EXISTING ~%cbr_tks_res%.spl~ ~override~
     END
   END
   BUT_ONLY
+
+BEGIN @101 DESIGNATED 101 GROUP @1100 LABEL ~cbr_scs_freedom_scrolls~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9101
+// The tweak belongs to SCS's spell-tweak family, but its rationale (liches love
+// Imprisonment) also holds for AI-only installs — accept either footprint.
+REQUIRE_PREDICATE ((MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 2000)
+                OR (MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 5900)) @9102
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~ribald.sto~) @9103
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~scrl9z.itm~) @9103
+
+// Upstream: SCS v34.3 spell tweak `freedom_scrolls` put 5 Scrolls of Freedom (scrl9z,
+// teaches WIZARD_FREEDOM/SPWI917) into shop08 (Galoomp's Books) AND ribald (Adventurer's
+// Mart). The v35 reorganization dropped the tweak's dispatch row from
+// spell/data/spelltweaks.2da (so it never runs) and dropped ribald from the dead code too.
+// Confirmed unintentional. Restore the Adventurer's Mart half with upstream's own item
+// parameters, only if the store doesn't already offer the scroll (idempotent over a
+// re-run, a v34 install, or a future fixed SCS). See research/03.
+COPY_EXISTING ~ribald.sto~ ~override~
+  READ_LONG 0x34 sale_off
+  READ_LONG 0x38 sale_cnt
+  SET cbr_found = 0 - 1
+  SET cbr_avail = 0
+  FOR (i = 0; i < sale_cnt; ++i) BEGIN
+    READ_ASCII (sale_off + i * 0x1c) cbr_res (8)
+    PATCH_IF (~%cbr_res%~ STRING_EQUAL_CASE ~scrl9z~) AND (cbr_found < 0) BEGIN
+      SET cbr_found = i
+      READ_LONG (sale_off + i * 0x1c + 0x14) cbr_qty   // amount in stock
+      READ_LONG (sale_off + i * 0x1c + 0x18) cbr_inf   // infinite-supply flag
+      PATCH_IF (cbr_qty > 0) OR (cbr_inf > 0) BEGIN
+        SET cbr_avail = 1
+      END
+    END
+  END
+  PATCH_IF (cbr_found < 0) BEGIN
+    ADD_STORE_ITEM ~scrl9z~ AFTER ~scrla5~ #1 #0 #0 ~IDENTIFIED~ #5
+    PATCH_PRINT ~cbr 101: added 5x scrl9z (Scroll of Freedom) to the Adventurer's Mart.~
+  END ELSE PATCH_IF (cbr_avail = 0) BEGIN
+    WRITE_LONG (sale_off + cbr_found * 0x1c + 0x14) 5
+    PATCH_PRINT ~cbr 101: Adventurer's Mart lists scrl9z at zero stock - restocked to 5.~
+  END ELSE BEGIN
+    PATCH_PRINT ~cbr 101: Adventurer's Mart already sells scrl9z - nothing to do.~
+  END
+  BUT_ONLY

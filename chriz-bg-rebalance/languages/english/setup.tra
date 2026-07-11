@@ -2,6 +2,7 @@
 
 // Component names (match DESIGNATED numbers)
 @100 = ~SCS: Telekinetic Storm — restore save vs. spell for half damage (+ bypass Mirror Image)~
+@101 = ~SCS: Adventurer's Mart — restore the five Freedom scrolls (spell tweak orphaned in v35)~
 
 // Component groups
 @1100 = ~SCS adjustments~
@@ -10,3 +11,6 @@
 
 // Predicate / failure messages
 @9100 = ~SCS's "extra arcane spells" (Telekinetic Storm) is not installed — nothing to fix.~
+@9101 = ~This component is for BG2:EE / EET games.~
+@9102 = ~Sword Coast Stratagems (spell tweaks or AI components) is not installed — nothing to restore.~
+@9103 = ~ribald.sto / scrl9z.itm not found in this game.~
