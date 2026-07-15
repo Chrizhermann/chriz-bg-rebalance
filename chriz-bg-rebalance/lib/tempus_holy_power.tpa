@@ -372,6 +372,10 @@ END
 DEFINE_PATCH_FUNCTION cbr_validate_tempus_holy_spell
   STR_VAR
     divine_power_resref = ~~
+    strength_pulse_18   = ~CBRSE18~
+    strength_pulse_19   = ~CBRSE19~
+    strength_pulse_20   = ~CBRSE20~
+    strength_pulse_21   = ~CBRSE21~
 BEGIN
   LPF cbr_validate_spl_v1
     STR_VAR resource_name = ~OHTMPS1.SPL~
@@ -399,6 +403,8 @@ BEGIN
     SET cbr_hp_mechanics = 0
     SET cbr_apr_mechanics = 0
     SET cbr_legacy_strength_mechanics = 0
+    SET cbr_owned_strength_pulses = 0
+    SET cbr_owned_strength_pulse_invalid = 0
     SET cbr_owned_core_invalid = 0
     PATCH_IF (cbr_holy_level <= 6) BEGIN
       SET cbr_expected_duration = 18
@@ -421,6 +427,15 @@ BEGIN
     SET cbr_expected_hp = cbr_holy_level
     PATCH_IF (cbr_expected_hp > 30) BEGIN
       SET cbr_expected_hp = 30
+    END
+    PATCH_IF (cbr_holy_level <= 12) BEGIN
+      SPRINT cbr_expected_strength_pulse ~%strength_pulse_18%~
+    END ELSE PATCH_IF (cbr_holy_level <= 18) BEGIN
+      SPRINT cbr_expected_strength_pulse ~%strength_pulse_19%~
+    END ELSE PATCH_IF (cbr_holy_level <= 24) BEGIN
+      SPRINT cbr_expected_strength_pulse ~%strength_pulse_20%~
+    END ELSE BEGIN
+      SPRINT cbr_expected_strength_pulse ~%strength_pulse_21%~
     END
     FOR (cbr_effect = 0; cbr_effect < cbr_holy_effect_count; ++cbr_effect) BEGIN
       SET cbr_effect_offset = cbr_holy_effect_offset + ((cbr_holy_first_effect + cbr_effect) * 0x30)
@@ -459,6 +474,21 @@ BEGIN
              || (cbr_holy_opcode = 97 && cbr_holy_parameter1 = 100 && cbr_holy_parameter2 = 1)) BEGIN
         ++cbr_legacy_strength_mechanics
       END
+      PATCH_IF (cbr_holy_opcode = 272
+             && (~%cbr_holy_resource%~ STR_EQ ~%strength_pulse_18%~
+              || ~%cbr_holy_resource%~ STR_EQ ~%strength_pulse_19%~
+              || ~%cbr_holy_resource%~ STR_EQ ~%strength_pulse_20%~
+              || ~%cbr_holy_resource%~ STR_EQ ~%strength_pulse_21%~)) BEGIN
+        ++cbr_owned_strength_pulses
+        PATCH_IF (!(~%cbr_holy_resource%~ STR_EQ ~%cbr_expected_strength_pulse%~)
+               || cbr_holy_parameter1 != 1
+               || cbr_holy_parameter2 != 3
+               || cbr_holy_timing != 0
+               || cbr_holy_resist_dispel != 3
+               || cbr_holy_duration != cbr_expected_duration) BEGIN
+          SET cbr_owned_strength_pulse_invalid = 1
+        END
+      END
     END
     PATCH_IF (cbr_own_cleanup != 1 || cbr_divine_cleanup != 1 || cbr_thac0_mechanics != 1 || cbr_hp_mechanics != 1) BEGIN
       PATCH_FAIL ~CBR OHTMPS1.SPL validation failed at header %cbr_header%: expected unique cleanup, THAC0, and temporary-HP mechanics in the supported 20/30-header shape.~
@@ -468,8 +498,12 @@ BEGIN
       PATCH_IF (cbr_expected_apr < 0) BEGIN
         SET cbr_expected_apr_count = 0
       END
-      PATCH_IF (cbr_owned_core_invalid || cbr_apr_mechanics != cbr_expected_apr_count || cbr_legacy_strength_mechanics != 0) BEGIN
-        PATCH_FAIL ~CBR OHTMPS1.SPL 30-header validation failed at header %cbr_header%: THAC0/HP tier duration, APR key, or Strength-floor core does not match the owned progression.~
+      PATCH_IF (cbr_owned_core_invalid
+             || cbr_apr_mechanics != cbr_expected_apr_count
+             || cbr_legacy_strength_mechanics != 0
+             || cbr_owned_strength_pulses != 1
+             || cbr_owned_strength_pulse_invalid) BEGIN
+        PATCH_FAIL ~CBR OHTMPS1.SPL 30-header validation failed at header %cbr_header%: THAC0/HP tier duration, APR key, or owned Strength opcode-272 pulse does not match the progression.~
       END
     END
   END
@@ -781,7 +815,10 @@ BEGIN
     END
   BUT_ONLY
   COPY ~%cbr_holy_path%~ ~%cbr_holy_path%~
-    LPF cbr_validate_tempus_holy_spell STR_VAR divine_power_resref = EVAL ~%divine_power_resref%~ END
+    LPF cbr_validate_tempus_holy_spell
+      STR_VAR
+        divine_power_resref = EVAL ~%divine_power_resref%~
+    END
   BUT_ONLY
   COPY ~%cbr_divine_path%~ ~%cbr_divine_path%~
     LPF cbr_validate_spl_v1 STR_VAR resource_name = ~resolved Divine Power %divine_power_resref%~ END

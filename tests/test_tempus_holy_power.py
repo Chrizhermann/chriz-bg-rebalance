@@ -38,7 +38,6 @@ ORIGINALS = ROOT / "research" / "originals"
 
 HOLY_RESREF = "OHTMPS1"
 CLAB_NAME = "OHTEMPUS.2DA"
-PRIVATE_PREFIX = "CBR"
 SENTINEL_RESOURCE = "CBRSENT"
 PRIVATE_STATE_SYMBOLS = (
     "CBR_TEMPUS_IH",
@@ -53,6 +52,8 @@ APR_STATE_SYMBOL_BY_KEY = {
     7: PRIVATE_STATE_SYMBOLS[3],
 }
 ACTIVE_SPLSTATE_SEMANTIC = (0x112, -1, 1)
+STRENGTH_PULSE_RESREFS = ("CBRSE18", "CBRSE19", "CBRSE20", "CBRSE21")
+FOREIGN_PULSE_RESREF = "F272TEST"
 
 
 @dataclasses.dataclass
@@ -119,6 +120,16 @@ def _rename_spell_resources(spell: SplFile, old: str, new: str) -> SplFile:
     return dataclasses.replace(spell, abilities=tuple(abilities), casting_effects=casting)
 
 
+def _strength_pulse_resref(level: int) -> str:
+    if level <= 12:
+        return "CBRSE18"
+    if level <= 18:
+        return "CBRSE19"
+    if level <= 24:
+        return "CBRSE20"
+    return "CBRSE21"
+
+
 def _make_holy_fixture(divine_resref: str, holy_layout: str = "original") -> SplFile:
     spell = read_spl(ORIGINALS / "OHTMPS1.spl.orig")
     spell = _rename_spell_resources(spell, "SPPR412", divine_resref)
@@ -126,80 +137,125 @@ def _make_holy_fixture(divine_resref: str, holy_layout: str = "original") -> Spl
     abilities[9] = dataclasses.replace(
         abilities[9], effects=abilities[9].effects + (_sentinel_effect(),)
     )
-    if holy_layout in ("stale_30", "valid_30"):
-        donor = abilities[-1]
-        abilities.extend(
-            dataclasses.replace(donor, required_level=level)
-            for level in range(21, 31)
-        )
-        if holy_layout == "valid_30":
-            normalized = []
-            for level, ability in enumerate(abilities, start=1):
-                duration = 18 if level <= 6 else 24 if level <= 12 else 30
-                thac0 = max(0, 21 - level)
-                hp = min(level, 30)
-                apr_key = (
-                    None if level <= 6 else 6 if level <= 12 else 1 if level <= 24 else 7
-                )
-                core_template = next(effect for effect in ability.effects if effect.opcode == 54)
-                effects = []
-                for effect in ability.effects:
-                    if effect.opcode == 54:
-                        effects.append(
-                            dataclasses.replace(
-                                effect,
-                                parameter1=thac0,
-                                parameter2=1,
-                                timing=0,
-                                resist_dispel=3,
-                                duration=duration,
-                            )
-                        )
-                    elif effect.opcode == 18:
-                        effects.append(
-                            dataclasses.replace(
-                                effect,
-                                parameter1=hp,
-                                parameter2=0,
-                                timing=0,
-                                resist_dispel=3,
-                                duration=duration,
-                            )
-                        )
-                    elif effect.opcode in (44, 97) or (
-                        effect.opcode == 1 and effect.parameter2 == 0
-                    ):
-                        continue
-                    else:
-                        effects.append(effect)
-                if apr_key is not None:
+    pulse_fault_by_layout = {
+        "valid_30": None,
+        "valid_30_missing_pulse": "missing",
+        "valid_30_duplicate_pulse": "duplicate",
+        "valid_30_wrong_tier_pulse": "wrong_tier",
+        "valid_30_bad_p1": "bad_p1",
+        "valid_30_bad_p2": "bad_p2",
+        "valid_30_bad_timing": "bad_timing",
+        "valid_30_bad_resist_dispel": "bad_resist_dispel",
+        "valid_30_bad_duration": "bad_duration",
+    }
+    if holy_layout == "original":
+        return dataclasses.replace(spell, abilities=tuple(abilities))
+    if holy_layout != "stale_30" and holy_layout not in pulse_fault_by_layout:
+        raise ValueError(f"unknown Holy Power fixture layout: {holy_layout}")
+
+    donor = abilities[-1]
+    abilities.extend(
+        dataclasses.replace(donor, required_level=level)
+        for level in range(21, 31)
+    )
+    if holy_layout != "stale_30":
+        pulse_fault = pulse_fault_by_layout[holy_layout]
+        normalized = []
+        for level, ability in enumerate(abilities, start=1):
+            duration = 18 if level <= 6 else 24 if level <= 12 else 30
+            thac0 = max(0, 21 - level)
+            hp = min(level, 30)
+            apr_key = (
+                None if level <= 6 else 6 if level <= 12 else 1 if level <= 24 else 7
+            )
+            core_template = next(effect for effect in ability.effects if effect.opcode == 54)
+            effects = []
+            for effect in ability.effects:
+                if effect.opcode == 54:
                     effects.append(
                         dataclasses.replace(
-                            core_template,
-                            opcode=1,
-                            parameter1=apr_key,
+                            effect,
+                            parameter1=thac0,
+                            parameter2=1,
+                            timing=0,
+                            resist_dispel=3,
+                            duration=duration,
+                        )
+                    )
+                elif effect.opcode == 18:
+                    effects.append(
+                        dataclasses.replace(
+                            effect,
+                            parameter1=hp,
                             parameter2=0,
                             timing=0,
                             resist_dispel=3,
                             duration=duration,
                         )
                     )
+                elif effect.opcode in (44, 97) or (
+                    effect.opcode == 1 and effect.parameter2 == 0
+                ):
+                    continue
+                else:
+                    effects.append(effect)
+            if apr_key is not None:
                 effects.append(
                     dataclasses.replace(
                         core_template,
-                        opcode=272,
-                        parameter1=1,
-                        parameter2=3,
+                        opcode=1,
+                        parameter1=apr_key,
+                        parameter2=0,
                         timing=0,
                         resist_dispel=3,
                         duration=duration,
-                        resource="CBRSE18",
                     )
                 )
-                normalized.append(dataclasses.replace(ability, effects=tuple(effects)))
-            abilities = normalized
-    elif holy_layout != "original":
-        raise ValueError(f"unknown Holy Power fixture layout: {holy_layout}")
+
+            pulse = dataclasses.replace(
+                core_template,
+                opcode=272,
+                parameter1=1,
+                parameter2=3,
+                timing=0,
+                resist_dispel=3,
+                duration=duration,
+                resource=_strength_pulse_resref(level),
+            )
+            if level == 13:
+                if pulse_fault == "missing":
+                    pulse = None
+                elif pulse_fault == "wrong_tier":
+                    pulse = dataclasses.replace(pulse, resource="CBRSE18")
+                elif pulse_fault == "bad_p1":
+                    pulse = dataclasses.replace(pulse, parameter1=2)
+                elif pulse_fault == "bad_p2":
+                    pulse = dataclasses.replace(pulse, parameter2=4)
+                elif pulse_fault == "bad_timing":
+                    pulse = dataclasses.replace(pulse, timing=1)
+                elif pulse_fault == "bad_resist_dispel":
+                    pulse = dataclasses.replace(pulse, resist_dispel=2)
+                elif pulse_fault == "bad_duration":
+                    pulse = dataclasses.replace(pulse, duration=duration + 1)
+            if pulse is not None:
+                effects.append(pulse)
+                if level == 13 and pulse_fault == "duplicate":
+                    effects.append(pulse)
+
+            effects.append(
+                dataclasses.replace(
+                    core_template,
+                    opcode=272,
+                    parameter1=99,
+                    parameter2=9,
+                    timing=1,
+                    resist_dispel=2,
+                    duration=0,
+                    resource=FOREIGN_PULSE_RESREF,
+                )
+            )
+            normalized.append(dataclasses.replace(ability, effects=tuple(effects)))
+        abilities = normalized
     return dataclasses.replace(spell, abilities=tuple(abilities))
 
 
@@ -824,6 +880,16 @@ class TempusHolyPowerTests(unittest.TestCase):
         self.assert_success(second)
         self.assertEqual(after_ids.canonical(), read_ids(second.output / "SPLSTATE.IDS").canonical())
         self.assertEqual(after.canonical(), read_2da(second.output / "SPLPROT.2DA").canonical())
+        self.assertEqual(
+            (result.output / "SPLSTATE.IDS").read_bytes(),
+            (second.output / "SPLSTATE.IDS").read_bytes(),
+            "second allocation changed raw SPLSTATE.IDS bytes",
+        )
+        self.assertEqual(
+            (result.output / "SPLPROT.2DA").read_bytes(),
+            (second.output / "SPLPROT.2DA").read_bytes(),
+            "second allocation changed raw SPLPROT.2DA bytes",
+        )
 
         reuse = self.run_case(phase="allocate", splstate_layout="reuse")
         self.assert_success(reuse)
@@ -905,6 +971,36 @@ class TempusHolyPowerTests(unittest.TestCase):
         self.assert_success(result)
         holy = read_spl(result.fixture.root / f"{HOLY_RESREF}.SPL")
         self.assertEqual(30, len(holy.abilities))
+        for level, ability in enumerate(holy.abilities, start=1):
+            with self.subTest(level=level):
+                duration = 18 if level <= 6 else 24 if level <= 12 else 30
+                owned_pulses = [
+                    effect
+                    for effect in ability.effects
+                    if effect.opcode == 272
+                    and effect.resource.upper() in STRENGTH_PULSE_RESREFS
+                ]
+                self.assertEqual(1, len(owned_pulses))
+                pulse = owned_pulses[0]
+                self.assertEqual(_strength_pulse_resref(level), pulse.resource.upper())
+                self.assertEqual(
+                    (1, 3, 0, 3, duration),
+                    (
+                        pulse.parameter1,
+                        pulse.parameter2,
+                        pulse.timing,
+                        pulse.resist_dispel,
+                        pulse.duration,
+                    ),
+                )
+                self.assertTrue(
+                    any(
+                        effect.opcode == 272
+                        and effect.resource.upper() == FOREIGN_PULSE_RESREF
+                        for effect in ability.effects
+                    ),
+                    "valid patched fixture must retain a foreign opcode 272 effect",
+                )
         self.assertTrue(
             any(
                 effect.resource.upper() == SENTINEL_RESOURCE
@@ -913,14 +1009,32 @@ class TempusHolyPowerTests(unittest.TestCase):
             ),
             "valid patched fixture must retain a foreign effect",
         )
-        self.assertTrue(
-            any(
-                effect.opcode == 272 and effect.resource.upper().startswith(PRIVATE_PREFIX)
-                for ability in holy.abilities
-                for effect in ability.effects
-            ),
-            "valid patched fixture must include CBR-owned bridge effects",
-        )
+
+    def test_rejects_malformed_future_strength_pulses(self) -> None:
+        for holy_layout in (
+            "valid_30_missing_pulse",
+            "valid_30_duplicate_pulse",
+            "valid_30_wrong_tier_pulse",
+            "valid_30_bad_p1",
+            "valid_30_bad_p2",
+            "valid_30_bad_timing",
+            "valid_30_bad_resist_dispel",
+            "valid_30_bad_duration",
+        ):
+            with self.subTest(holy_layout=holy_layout):
+                result = self.run_case(
+                    phase="classify",
+                    alternate_ids=True,
+                    holy_layout=holy_layout,
+                )
+                self.assertFalse(
+                    result.succeeded,
+                    f"malformed owned Strength pulse was accepted: {holy_layout}",
+                )
+                self.assertRegex(
+                    result.transcript.upper(),
+                    r"OHTMPS1|30[ _-]?HEADER|STRENGTH|PULSE|OPCODE[ _-]?272|CBRSE",
+                )
 
     def test_rejects_splstate_collisions_and_exhaustion(self) -> None:
         for layout in (
