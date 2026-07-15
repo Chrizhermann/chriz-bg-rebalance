@@ -397,9 +397,39 @@ BEGIN
     SET cbr_divine_cleanup = 0
     SET cbr_thac0_mechanics = 0
     SET cbr_hp_mechanics = 0
+    SET cbr_apr_mechanics = 0
+    SET cbr_legacy_strength_mechanics = 0
+    SET cbr_owned_core_invalid = 0
+    PATCH_IF (cbr_holy_level <= 6) BEGIN
+      SET cbr_expected_duration = 18
+      SET cbr_expected_apr = "-1"
+    END ELSE PATCH_IF (cbr_holy_level <= 12) BEGIN
+      SET cbr_expected_duration = 24
+      SET cbr_expected_apr = 6
+    END ELSE BEGIN
+      SET cbr_expected_duration = 30
+      PATCH_IF (cbr_holy_level <= 24) BEGIN
+        SET cbr_expected_apr = 1
+      END ELSE BEGIN
+        SET cbr_expected_apr = 7
+      END
+    END
+    SET cbr_expected_thac0 = 21 - cbr_holy_level
+    PATCH_IF (cbr_expected_thac0 < 0) BEGIN
+      SET cbr_expected_thac0 = 0
+    END
+    SET cbr_expected_hp = cbr_holy_level
+    PATCH_IF (cbr_expected_hp > 30) BEGIN
+      SET cbr_expected_hp = 30
+    END
     FOR (cbr_effect = 0; cbr_effect < cbr_holy_effect_count; ++cbr_effect) BEGIN
       SET cbr_effect_offset = cbr_holy_effect_offset + ((cbr_holy_first_effect + cbr_effect) * 0x30)
       READ_SHORT cbr_effect_offset cbr_holy_opcode
+      READ_LONG  (cbr_effect_offset + 0x04) cbr_holy_parameter1
+      READ_LONG  (cbr_effect_offset + 0x08) cbr_holy_parameter2
+      READ_BYTE  (cbr_effect_offset + 0x0c) cbr_holy_timing
+      READ_BYTE  (cbr_effect_offset + 0x0d) cbr_holy_resist_dispel
+      READ_LONG  (cbr_effect_offset + 0x0e) cbr_holy_duration
       READ_ASCII (cbr_effect_offset + 0x14) cbr_holy_resource (8) NULL
       PATCH_IF (cbr_holy_opcode = 321 && ~%cbr_holy_resource%~ STR_EQ ~OHTMPS1~) BEGIN
         ++cbr_own_cleanup
@@ -409,20 +439,45 @@ BEGIN
       END
       PATCH_IF (cbr_holy_opcode = 54) BEGIN
         ++cbr_thac0_mechanics
+        PATCH_IF (cbr_holy_parameter1 != cbr_expected_thac0 || cbr_holy_parameter2 != 1 || cbr_holy_timing != 0 || cbr_holy_duration != cbr_expected_duration || cbr_holy_resist_dispel != 3) BEGIN
+          SET cbr_owned_core_invalid = 1
+        END
       END
       PATCH_IF (cbr_holy_opcode = 18) BEGIN
         ++cbr_hp_mechanics
+        PATCH_IF (cbr_holy_parameter1 != cbr_expected_hp || cbr_holy_parameter2 != 0 || cbr_holy_timing != 0 || cbr_holy_duration != cbr_expected_duration || cbr_holy_resist_dispel != 3) BEGIN
+          SET cbr_owned_core_invalid = 1
+        END
+      END
+      PATCH_IF (cbr_holy_opcode = 1 && cbr_holy_parameter2 = 0) BEGIN
+        ++cbr_apr_mechanics
+        PATCH_IF (cbr_expected_apr < 0 || cbr_holy_parameter1 != cbr_expected_apr || cbr_holy_timing != 0 || cbr_holy_duration != cbr_expected_duration || cbr_holy_resist_dispel != 3) BEGIN
+          SET cbr_owned_core_invalid = 1
+        END
+      END
+      PATCH_IF ((cbr_holy_opcode = 44 && cbr_holy_parameter1 = 18 && cbr_holy_parameter2 = 1)
+             || (cbr_holy_opcode = 97 && cbr_holy_parameter1 = 100 && cbr_holy_parameter2 = 1)) BEGIN
+        ++cbr_legacy_strength_mechanics
       END
     END
     PATCH_IF (cbr_own_cleanup != 1 || cbr_divine_cleanup != 1 || cbr_thac0_mechanics != 1 || cbr_hp_mechanics != 1) BEGIN
       PATCH_FAIL ~CBR OHTMPS1.SPL validation failed at header %cbr_header%: expected unique cleanup, THAC0, and temporary-HP mechanics in the supported 20/30-header shape.~
+    END
+    PATCH_IF (cbr_holy_ability_count = 30) BEGIN
+      SET cbr_expected_apr_count = 1
+      PATCH_IF (cbr_expected_apr < 0) BEGIN
+        SET cbr_expected_apr_count = 0
+      END
+      PATCH_IF (cbr_owned_core_invalid || cbr_apr_mechanics != cbr_expected_apr_count || cbr_legacy_strength_mechanics != 0) BEGIN
+        PATCH_FAIL ~CBR OHTMPS1.SPL 30-header validation failed at header %cbr_header%: THAC0/HP tier duration, APR key, or Strength-floor core does not match the owned progression.~
+      END
     END
   END
 END
 
 // Plan all four private states before writing any of them.  Unlike the usual
 // APPEND + CLEAR_IDS_MAP idiom, this rejects duplicate symbols, aliased values,
-// partial prior installs, and exhausted 0..255 spell-state space up front.
+// and exhausted 0..255 space while atomically planning any missing symbols.
 DEFINE_PATCH_FUNCTION cbr_plan_tempus_splstates
   RET
     ih_state
@@ -488,38 +543,35 @@ BEGIN
     PATCH_FAIL ~CBR SPLSTATE.IDS collision: a private Tempus spell-state symbol is defined more than once.~
   END
 
-  SET cbr_private_count = cbr_ih_count + cbr_apr_half_count + cbr_apr_one_count + cbr_apr_one_half_count
-  PATCH_IF (cbr_private_count != 0 && cbr_private_count != 4) BEGIN
-    PATCH_FAIL ~CBR SPLSTATE.IDS collision: private Tempus spell-state allocation is partial; expected either zero or all four symbols.~
+  PATCH_IF ((cbr_ih_count = 1 && $cbr_splstate_value_count(~%ih_state%~) != 1)
+         || (cbr_apr_half_count = 1 && $cbr_splstate_value_count(~%apr_half_state%~) != 1)
+         || (cbr_apr_one_count = 1 && $cbr_splstate_value_count(~%apr_one_state%~) != 1)
+         || (cbr_apr_one_half_count = 1 && $cbr_splstate_value_count(~%apr_one_half_state%~) != 1)) BEGIN
+    PATCH_FAIL ~CBR SPLSTATE.IDS collision: a private Tempus spell-state value is shared by another symbol.~
   END
 
-  PATCH_IF (cbr_private_count = 4) BEGIN
-    PATCH_IF (ih_state = apr_half_state || ih_state = apr_one_state || ih_state = apr_one_half_state || apr_half_state = apr_one_state || apr_half_state = apr_one_half_state || apr_one_state = apr_one_half_state) BEGIN
-      PATCH_FAIL ~CBR SPLSTATE.IDS collision: private Tempus spell-state symbols do not have unique values.~
-    END
-    PATCH_IF ($cbr_splstate_value_count(~%ih_state%~) != 1 || $cbr_splstate_value_count(~%apr_half_state%~) != 1 || $cbr_splstate_value_count(~%apr_one_state%~) != 1 || $cbr_splstate_value_count(~%apr_one_half_state%~) != 1) BEGIN
-      PATCH_FAIL ~CBR SPLSTATE.IDS collision: a private Tempus spell-state value is shared by a foreign symbol.~
-    END
-  END ELSE BEGIN
+  SET cbr_private_count = cbr_ih_count + cbr_apr_half_count + cbr_apr_one_count + cbr_apr_one_half_count
+  PATCH_IF (cbr_private_count < 4) BEGIN
     SET append_states = 1
-    SET cbr_next_private = 0
-    FOR (cbr_candidate = 255; cbr_candidate >= 0 && cbr_next_private < 4; --cbr_candidate) BEGIN
+    SET cbr_missing_count = 4 - cbr_private_count
+    SET cbr_allocated_missing = 0
+    FOR (cbr_candidate = 255; cbr_candidate >= 0 && cbr_allocated_missing < cbr_missing_count; --cbr_candidate) BEGIN
       PATCH_IF ($cbr_splstate_value_count(~%cbr_candidate%~) = 0) BEGIN
-        PATCH_IF (cbr_next_private = 0) BEGIN
+        PATCH_IF (ih_state < 0) BEGIN
           SET ih_state = cbr_candidate
-        END ELSE PATCH_IF (cbr_next_private = 1) BEGIN
+        END ELSE PATCH_IF (apr_half_state < 0) BEGIN
           SET apr_half_state = cbr_candidate
-        END ELSE PATCH_IF (cbr_next_private = 2) BEGIN
+        END ELSE PATCH_IF (apr_one_state < 0) BEGIN
           SET apr_one_state = cbr_candidate
         END ELSE BEGIN
           SET apr_one_half_state = cbr_candidate
         END
         SET $cbr_splstate_value_count(~%cbr_candidate%~) = 1
-        ++cbr_next_private
+        ++cbr_allocated_missing
       END
     END
-    PATCH_IF (cbr_next_private != 4) BEGIN
-      PATCH_FAIL ~CBR SPLSTATE.IDS spell-state allocation is exhausted: four unique values in 0..255 are required.~
+    PATCH_IF (cbr_allocated_missing != cbr_missing_count) BEGIN
+      PATCH_FAIL ~CBR SPLSTATE.IDS spell-state allocation is exhausted: %cbr_missing_count% additional unique values in 0..255 are required.~
     END
   END
 END
@@ -674,10 +726,12 @@ DEFINE_ACTION_FUNCTION cbr_preflight_tempus_holy_power
     resource_dir           = ~~
     divine_power_resref    = ~~
     improved_haste_resref  = ~~
+    improved_haste_semantics = ~~
 BEGIN
   OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
   OUTER_SPRINT divine_power_resref EVALUATE_BUFFER ~%divine_power_resref%~
   OUTER_SPRINT improved_haste_resref EVALUATE_BUFFER ~%improved_haste_resref%~
+  OUTER_SPRINT improved_haste_semantics EVALUATE_BUFFER ~%improved_haste_semantics%~
   LAF cbr_define_tempus_private_resrefs END
 
   ACTION_IF (FILE_EXISTS ~chitin.key~ && !(GAME_IS ~bg2ee eet~)) BEGIN
@@ -735,11 +789,15 @@ BEGIN
   COPY ~%cbr_clab_path%~ ~%cbr_clab_path%~
     LPF cbr_validate_tempus_clab END
   BUT_ONLY
-  COPY ~%cbr_splstate_path%~ ~%cbr_splstate_path%~
-    LPF cbr_plan_tempus_splstates END
-  BUT_ONLY
+  ACTION_IF (~%improved_haste_semantics%~ STR_EQ ~additive~) BEGIN
+    COPY ~%cbr_splstate_path%~ ~%cbr_splstate_path%~
+      LPF cbr_plan_tempus_splstates END
+    BUT_ONLY
+  END
   COPY ~%cbr_splprot_path%~ ~%cbr_splprot_path%~
-    LPF cbr_find_or_append_splprot INT_VAR stat = 0x112 value = "-1" relation = 1 append = 0 STR_VAR row_label = ~CBR_TEMPUS_STATE_ACTIVE~ END
+    PATCH_IF (~%improved_haste_semantics%~ STR_EQ ~additive~) BEGIN
+      LPF cbr_find_or_append_splprot INT_VAR stat = 0x112 value = "-1" relation = 1 append = 0 STR_VAR row_label = ~CBR_TEMPUS_STATE_ACTIVE~ END
+    END
     LPF cbr_find_or_append_splprot INT_VAR stat = 36 value = "-1" relation = 2 append = 0 STR_VAR row_label = ~CBR_TEMPUS_STR_LT~ END
     LPF cbr_find_or_append_splprot INT_VAR stat = 36 value = "-1" relation = 1 append = 0 STR_VAR row_label = ~CBR_TEMPUS_STR_GT~ END
     LPF cbr_find_or_append_splprot INT_VAR stat = 37 value = "-1" relation = 2 append = 0 STR_VAR row_label = ~CBR_TEMPUS_STR_BONUS_LT~ END
@@ -748,38 +806,44 @@ END
 
 DEFINE_ACTION_FUNCTION cbr_allocate_tempus_tables
   STR_VAR
-    resource_dir = ~~
+    resource_dir              = ~~
+    improved_haste_semantics  = ~~
 BEGIN
   OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  OUTER_SPRINT improved_haste_semantics EVALUATE_BUFFER ~%improved_haste_semantics%~
   OUTER_SPRINT cbr_splstate_path ~%resource_dir%/SPLSTATE.IDS~
   OUTER_SPRINT cbr_splprot_path ~%resource_dir%/SPLPROT.2DA~
-  OUTER_SET cbr_append_states = 0
-  COPY ~%cbr_splstate_path%~ ~%cbr_splstate_path%~
-    LPF cbr_plan_tempus_splstates
-      RET
-        cbr_patch_ih_state           = ih_state
-        cbr_patch_apr_half_state     = apr_half_state
-        cbr_patch_apr_one_state      = apr_one_state
-        cbr_patch_apr_one_half_state = apr_one_half_state
-        cbr_patch_append_states      = append_states
+  ACTION_IF (~%improved_haste_semantics%~ STR_EQ ~additive~) BEGIN
+    OUTER_SET cbr_append_states = 0
+    COPY ~%cbr_splstate_path%~ ~%cbr_splstate_path%~
+      LPF cbr_plan_tempus_splstates
+        RET
+          cbr_patch_ih_state           = ih_state
+          cbr_patch_apr_half_state     = apr_half_state
+          cbr_patch_apr_one_state      = apr_one_state
+          cbr_patch_apr_one_half_state = apr_one_half_state
+          cbr_patch_append_states      = append_states
+      END
+      INNER_ACTION BEGIN
+        OUTER_SET cbr_ih_state           = cbr_patch_ih_state
+        OUTER_SET cbr_apr_half_state     = cbr_patch_apr_half_state
+        OUTER_SET cbr_apr_one_state      = cbr_patch_apr_one_state
+        OUTER_SET cbr_apr_one_half_state = cbr_patch_apr_one_half_state
+        OUTER_SET cbr_append_states      = cbr_patch_append_states
+      END
+    BUT_ONLY
+    ACTION_IF (cbr_append_states = 1) BEGIN
+      LAF cbr_find_or_allocate_splstate INT_VAR planned_value = cbr_ih_state STR_VAR resource_path = EVAL ~%cbr_splstate_path%~ symbol = ~CBR_TEMPUS_IH~ END
+      LAF cbr_find_or_allocate_splstate INT_VAR planned_value = cbr_apr_half_state STR_VAR resource_path = EVAL ~%cbr_splstate_path%~ symbol = ~CBR_TEMPUS_APR_HALF~ END
+      LAF cbr_find_or_allocate_splstate INT_VAR planned_value = cbr_apr_one_state STR_VAR resource_path = EVAL ~%cbr_splstate_path%~ symbol = ~CBR_TEMPUS_APR_ONE~ END
+      LAF cbr_find_or_allocate_splstate INT_VAR planned_value = cbr_apr_one_half_state STR_VAR resource_path = EVAL ~%cbr_splstate_path%~ symbol = ~CBR_TEMPUS_APR_ONE_HALF~ END
+      CLEAR_IDS_MAP
     END
-    INNER_ACTION BEGIN
-      OUTER_SET cbr_ih_state           = cbr_patch_ih_state
-      OUTER_SET cbr_apr_half_state     = cbr_patch_apr_half_state
-      OUTER_SET cbr_apr_one_state      = cbr_patch_apr_one_state
-      OUTER_SET cbr_apr_one_half_state = cbr_patch_apr_one_half_state
-      OUTER_SET cbr_append_states      = cbr_patch_append_states
-    END
-  BUT_ONLY
-  ACTION_IF (cbr_append_states = 1) BEGIN
-    LAF cbr_find_or_allocate_splstate INT_VAR planned_value = cbr_ih_state STR_VAR resource_path = EVAL ~%cbr_splstate_path%~ symbol = ~CBR_TEMPUS_IH~ END
-    LAF cbr_find_or_allocate_splstate INT_VAR planned_value = cbr_apr_half_state STR_VAR resource_path = EVAL ~%cbr_splstate_path%~ symbol = ~CBR_TEMPUS_APR_HALF~ END
-    LAF cbr_find_or_allocate_splstate INT_VAR planned_value = cbr_apr_one_state STR_VAR resource_path = EVAL ~%cbr_splstate_path%~ symbol = ~CBR_TEMPUS_APR_ONE~ END
-    LAF cbr_find_or_allocate_splstate INT_VAR planned_value = cbr_apr_one_half_state STR_VAR resource_path = EVAL ~%cbr_splstate_path%~ symbol = ~CBR_TEMPUS_APR_ONE_HALF~ END
-    CLEAR_IDS_MAP
   END
   COPY ~%cbr_splprot_path%~ ~%cbr_splprot_path%~
-    LPF cbr_find_or_append_splprot INT_VAR stat = 0x112 value = "-1" relation = 1 STR_VAR row_label = ~CBR_TEMPUS_STATE_ACTIVE~ END
+    PATCH_IF (~%improved_haste_semantics%~ STR_EQ ~additive~) BEGIN
+      LPF cbr_find_or_append_splprot INT_VAR stat = 0x112 value = "-1" relation = 1 STR_VAR row_label = ~CBR_TEMPUS_STATE_ACTIVE~ END
+    END
     LPF cbr_find_or_append_splprot INT_VAR stat = 36 value = "-1" relation = 2 STR_VAR row_label = ~CBR_TEMPUS_STR_LT~ END
     LPF cbr_find_or_append_splprot INT_VAR stat = 36 value = "-1" relation = 1 STR_VAR row_label = ~CBR_TEMPUS_STR_GT~ END
     LPF cbr_find_or_append_splprot INT_VAR stat = 37 value = "-1" relation = 2 STR_VAR row_label = ~CBR_TEMPUS_STR_BONUS_LT~ END
@@ -819,13 +883,6 @@ BEGIN
     FAIL ~CBR Tempus Holy Power: explicit Divine Power resref is required.~
   END
 
-  LAF cbr_preflight_tempus_holy_power
-    STR_VAR
-      resource_dir           = EVAL ~%resource_dir%~
-      divine_power_resref    = EVAL ~%divine_power_resref%~
-      improved_haste_resref  = EVAL ~%improved_haste_resref%~
-  END
-
   OUTER_SPRINT cbr_improved_haste_path ~%resource_dir%/%improved_haste_resref%.SPL~
   ACTION_IF !(FILE_EXISTS ~%cbr_improved_haste_path%~) BEGIN
     FAIL ~CBR Improved Haste %improved_haste_resref% is missing at the explicit resource path %cbr_improved_haste_path%.~
@@ -839,10 +896,22 @@ BEGIN
     RET cbr_improved_haste_semantics = semantics
   END
 
+  LAF cbr_preflight_tempus_holy_power
+    STR_VAR
+      resource_dir                = EVAL ~%resource_dir%~
+      divine_power_resref         = EVAL ~%divine_power_resref%~
+      improved_haste_resref       = EVAL ~%improved_haste_resref%~
+      improved_haste_semantics    = EVAL ~%cbr_improved_haste_semantics%~
+  END
+
   ACTION_IF (~%phase%~ STR_EQ ~classify~) BEGIN
     PRINT ~CBR Improved Haste %improved_haste_resref% classified as %cbr_improved_haste_semantics%.~
   END ELSE BEGIN
-    LAF cbr_allocate_tempus_tables STR_VAR resource_dir = EVAL ~%resource_dir%~ END
+    LAF cbr_allocate_tempus_tables
+      STR_VAR
+        resource_dir                = EVAL ~%resource_dir%~
+        improved_haste_semantics    = EVAL ~%cbr_improved_haste_semantics%~
+    END
     ACTION_IF (~%phase%~ STR_EQ ~allocate~) BEGIN
       PRINT ~CBR allocated collision-safe Tempus SPLSTATE.IDS values and SPLPROT.2DA semantics.~
     END ELSE BEGIN

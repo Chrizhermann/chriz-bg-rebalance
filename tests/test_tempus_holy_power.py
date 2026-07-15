@@ -119,13 +119,21 @@ def _rename_spell_resources(spell: SplFile, old: str, new: str) -> SplFile:
     return dataclasses.replace(spell, abilities=tuple(abilities), casting_effects=casting)
 
 
-def _make_holy_fixture(divine_resref: str) -> SplFile:
+def _make_holy_fixture(divine_resref: str, holy_layout: str = "original") -> SplFile:
     spell = read_spl(ORIGINALS / "OHTMPS1.spl.orig")
     spell = _rename_spell_resources(spell, "SPPR412", divine_resref)
     abilities = list(spell.abilities)
     abilities[9] = dataclasses.replace(
         abilities[9], effects=abilities[9].effects + (_sentinel_effect(),)
     )
+    if holy_layout == "stale_30":
+        donor = abilities[-1]
+        abilities.extend(
+            dataclasses.replace(donor, required_level=level)
+            for level in range(21, 31)
+        )
+    elif holy_layout != "original":
+        raise ValueError(f"unknown Holy Power fixture layout: {holy_layout}")
     return dataclasses.replace(spell, abilities=tuple(abilities))
 
 
@@ -232,6 +240,7 @@ def build_fixture(
     divine_id: int = 1499,
     haste_id: int = 2699,
     splstate_layout: str = "free",
+    holy_layout: str = "original",
 ) -> Fixture:
     root.mkdir(parents=True, exist_ok=True)
     ids = IdsFile(
@@ -245,7 +254,10 @@ def build_fixture(
     divine_resref = spell_resref(divine_id, "CLERIC_HOLY_POWER")
     haste_resref = spell_resref(haste_id, "WIZARD_IMPROVED_HASTE")
 
-    write_spl(root / f"{HOLY_RESREF}.SPL", _make_holy_fixture(divine_resref))
+    write_spl(
+        root / f"{HOLY_RESREF}.SPL",
+        _make_holy_fixture(divine_resref, holy_layout),
+    )
     write_spl(root / f"{divine_resref}.SPL", _make_divine_fixture(divine_resref))
     haste, helpers = _improved_haste_fixture(variant, haste_resref)
     write_spl(root / f"{haste_resref}.SPL", haste)
@@ -263,6 +275,11 @@ def build_fixture(
     elif splstate_layout == "reuse":
         state_entries = base_states + tuple(
             (240 + index, symbol) for index, symbol in enumerate(PRIVATE_STATE_SYMBOLS)
+        )
+    elif splstate_layout == "partial_clean":
+        state_entries = base_states + (
+            (240, PRIVATE_STATE_SYMBOLS[0]),
+            (242, PRIVATE_STATE_SYMBOLS[2]),
         )
     elif splstate_layout == "duplicate_private_symbol":
         state_entries = base_states + (
@@ -305,6 +322,7 @@ def _run_harness(
     alternate_ids: bool = False,
     phase: str = "full",
     splstate_layout: str = "free",
+    holy_layout: str = "original",
 ) -> HarnessResult:
     temporary = tempfile.TemporaryDirectory(prefix="cbr-tempus-")
     base = Path(temporary.name)
@@ -319,6 +337,7 @@ def _run_harness(
         divine_id=1388 if alternate_ids else 1499,
         haste_id=2788 if alternate_ids else 2699,
         splstate_layout=splstate_layout,
+        holy_layout=holy_layout,
     )
     command = [
         str(WEIDU),
@@ -635,6 +654,7 @@ class TempusHolyPowerTests(unittest.TestCase):
         alternate_ids: bool = False,
         phase: str = "full",
         splstate_layout: str = "free",
+        holy_layout: str = "original",
     ) -> HarnessResult:
         result = _run_harness(
             variant,
@@ -642,6 +662,7 @@ class TempusHolyPowerTests(unittest.TestCase):
             alternate_ids=alternate_ids,
             phase=phase,
             splstate_layout=splstate_layout,
+            holy_layout=holy_layout,
         )
         self._results.append(result)
         return result
@@ -738,6 +759,59 @@ class TempusHolyPowerTests(unittest.TestCase):
             (reuse.fixture.root / "SPLSTATE.IDS").read_bytes(),
             (reuse.output / "SPLSTATE.IDS").read_bytes(),
             "unique preallocated private states must be reused without rewriting SPLSTATE.IDS",
+        )
+
+    def test_doubling_allocation_skips_additive_bridge_states(self) -> None:
+        result = self.run_case("doubling", phase="allocate")
+        self.assert_success(result)
+        before_ids = read_ids(result.fixture.root / "SPLSTATE.IDS")
+        after_ids = read_ids(result.output / "SPLSTATE.IDS")
+        self.assertEqual(before_ids.canonical(), after_ids.canonical())
+        after_symbols = {symbol.upper() for _, symbol in after_ids.entries}
+        self.assertTrue(
+            set(PRIVATE_STATE_SYMBOLS).isdisjoint(after_symbols),
+            "true-doubling Improved Haste must not allocate additive bridge states",
+        )
+        before_semantics = [
+            tuple(int(value, 0) for value in row)
+            for _, row in read_2da(result.fixture.root / "SPLPROT.2DA").rows
+        ]
+        after_semantics = [
+            tuple(int(value, 0) for value in row)
+            for _, row in read_2da(result.output / "SPLPROT.2DA").rows
+        ]
+        self.assertEqual(
+            before_semantics.count(ACTIVE_SPLSTATE_SEMANTIC),
+            after_semantics.count(ACTIVE_SPLSTATE_SEMANTIC),
+            "doubling mode must not create active-Improved-Haste SPLSTATE infrastructure",
+        )
+        for required in ((36, -1, 2), (36, -1, 1), (37, -1, 2)):
+            with self.subTest(required=required):
+                self.assertEqual(1, after_semantics.count(required))
+
+    def test_partial_clean_splstates_are_reused_and_completed(self) -> None:
+        result = self.run_case(phase="allocate", splstate_layout="partial_clean")
+        self.assert_success(result)
+        before = read_ids(result.fixture.root / "SPLSTATE.IDS")
+        after = read_ids(result.output / "SPLSTATE.IDS")
+        after_symbols = {symbol.upper() for _, symbol in after.entries}
+        self.assertEqual(set(PRIVATE_STATE_SYMBOLS), after_symbols & set(PRIVATE_STATE_SYMBOLS))
+        private_values = [after.value(symbol) for symbol in PRIVATE_STATE_SYMBOLS]
+        self.assertEqual(4, len(set(private_values)))
+        for symbol in (PRIVATE_STATE_SYMBOLS[0], PRIVATE_STATE_SYMBOLS[2]):
+            with self.subTest(symbol=symbol):
+                self.assertEqual(before.value(symbol), after.value(symbol))
+        new_symbols = (PRIVATE_STATE_SYMBOLS[1], PRIVATE_STATE_SYMBOLS[3])
+        self.assertTrue(
+            {after.value(symbol) for symbol in new_symbols}.isdisjoint(before.values())
+        )
+
+    def test_rejects_stale_cloned_30_header_holy_power(self) -> None:
+        result = self.run_case(phase="classify", holy_layout="stale_30")
+        self.assertFalse(result.succeeded, "stale cloned 30-header Holy Power was accepted")
+        self.assertRegex(
+            result.transcript.upper(),
+            r"OHTMPS1|HOLY[ _-]?POWER|30[ _-]?HEADER|THAC0|DURATION|APR",
         )
 
     def test_rejects_splstate_collisions_and_exhaustion(self) -> None:
