@@ -1,0 +1,2 @@
+# Exact installed-resource evidence must remain byte-for-byte unchanged.
+research/originals/*.orig binary
