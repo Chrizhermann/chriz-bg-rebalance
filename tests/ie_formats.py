@@ -114,7 +114,7 @@ class SplEffect:
         return bytes(data)
 
     def delivery_key(self) -> tuple[object, ...]:
-        """Fields an additive IH marker must clone from its APR donor."""
+        """Delivery fields an additive IH marker must clone from its APR donor."""
         return (
             self.target,
             self.power,
@@ -123,11 +123,6 @@ class SplEffect:
             self.duration,
             self.probability1,
             self.probability2,
-            self.resource.upper(),
-            self.dice_number,
-            self.dice_size,
-            self.save_type,
-            self.save_bonus,
         )
 
     def preservation_key(self) -> tuple[object, ...]:

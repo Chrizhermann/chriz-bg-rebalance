@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import re
 import shutil
 import subprocess
@@ -39,6 +40,19 @@ HOLY_RESREF = "OHTMPS1"
 CLAB_NAME = "OHTEMPUS.2DA"
 PRIVATE_PREFIX = "CBR"
 SENTINEL_RESOURCE = "CBRSENT"
+PRIVATE_STATE_SYMBOLS = (
+    "CBR_TEMPUS_IH",
+    "CBR_TEMPUS_APR_HALF",
+    "CBR_TEMPUS_APR_ONE",
+    "CBR_TEMPUS_APR_ONE_HALF",
+)
+IH_STATE_SYMBOL = PRIVATE_STATE_SYMBOLS[0]
+APR_STATE_SYMBOL_BY_KEY = {
+    6: PRIVATE_STATE_SYMBOLS[1],
+    1: PRIVATE_STATE_SYMBOLS[2],
+    7: PRIVATE_STATE_SYMBOLS[3],
+}
+ACTIVE_SPLSTATE_SEMANTIC = (0x112, -1, 1)
 
 
 @dataclasses.dataclass
@@ -187,12 +201,28 @@ def _improved_haste_fixture(
     else:
         raise ValueError(f"unknown Improved Haste variant: {variant}")
 
-    return (
-        dataclasses.replace(
-            base, abilities=(dataclasses.replace(ability, effects=tuple(effects)),)
-        ),
-        helpers,
-    )
+    headers = []
+    for required_level, duration_delta, rotation in ((1, 0, 0), (10, 6, 1), (20, 12, 2)):
+        header_effects = [
+            dataclasses.replace(effect, duration=effect.duration + duration_delta)
+            if (
+                (effect.opcode == 1 and effect.parameter1 == 1 and effect.parameter2 == 0)
+                or (effect.opcode in (16, 317) and effect.parameter2 == 1)
+            )
+            else effect
+            for effect in effects
+        ]
+        rotation %= len(header_effects)
+        if rotation:
+            header_effects = header_effects[rotation:] + header_effects[:rotation]
+        headers.append(
+            dataclasses.replace(
+                ability,
+                effects=tuple(header_effects),
+                required_level=required_level,
+            )
+        )
+    return dataclasses.replace(base, abilities=tuple(headers)), helpers
 
 
 def build_fixture(
@@ -201,6 +231,7 @@ def build_fixture(
     *,
     divine_id: int = 1499,
     haste_id: int = 2699,
+    splstate_layout: str = "free",
 ) -> Fixture:
     root.mkdir(parents=True, exist_ok=True)
     ids = IdsFile(
@@ -222,13 +253,32 @@ def build_fixture(
         write_spl(root / f"{resref}.SPL", helper)
 
     shutil.copyfile(ORIGINALS / "OHTEMPUS.2da.orig", root / CLAB_NAME)
-    write_ids(
-        root / "SPLSTATE.IDS",
-        IdsFile(
-            entries=tuple((value, f"FIXTURE_STATE_{value}") for value in range(32))
-            + ((68, "BUFF_ENHANCEMENT"), (200, "FOREIGN_200"), (254, "FOREIGN_254"))
-        ),
+    base_states = tuple((value, f"FIXTURE_STATE_{value}") for value in range(32)) + (
+        (68, "BUFF_ENHANCEMENT"),
+        (200, "FOREIGN_200"),
+        (254, "FOREIGN_254"),
     )
+    if splstate_layout == "free":
+        state_entries = base_states
+    elif splstate_layout == "reuse":
+        state_entries = base_states + tuple(
+            (240 + index, symbol) for index, symbol in enumerate(PRIVATE_STATE_SYMBOLS)
+        )
+    elif splstate_layout == "duplicate_private_symbol":
+        state_entries = base_states + (
+            (240, PRIVATE_STATE_SYMBOLS[0]),
+            (241, PRIVATE_STATE_SYMBOLS[0]),
+        )
+    elif splstate_layout == "shared_private_value":
+        state_entries = base_states + (
+            (240, PRIVATE_STATE_SYMBOLS[0]),
+            (240, "FOREIGN_SHARED_240"),
+        )
+    elif splstate_layout == "exhausted":
+        state_entries = tuple((value, f"FOREIGN_STATE_{value}") for value in range(256))
+    else:
+        raise ValueError(f"unknown SPLSTATE fixture layout: {splstate_layout}")
+    write_ids(root / "SPLSTATE.IDS", IdsFile(entries=state_entries))
     write_2da(
         root / "SPLPROT.2DA",
         TwoDA(
@@ -254,6 +304,7 @@ def _run_harness(
     *,
     alternate_ids: bool = False,
     phase: str = "full",
+    splstate_layout: str = "free",
 ) -> HarnessResult:
     temporary = tempfile.TemporaryDirectory(prefix="cbr-tempus-")
     base = Path(temporary.name)
@@ -267,6 +318,7 @@ def _run_harness(
         variant,
         divine_id=1388 if alternate_ids else 1499,
         haste_id=2788 if alternate_ids else 2699,
+        splstate_layout=splstate_layout,
     )
     command = [
         str(WEIDU),
@@ -385,6 +437,25 @@ class FixtureFormatTests(unittest.TestCase):
             with self.subTest(variant=variant):
                 spell, _ = _improved_haste_fixture(variant, "SPWI699")
                 self.assertEqual(spell, SplFile.from_bytes(spell.to_bytes()))
+                self.assertEqual(
+                    2 if variant == "inconsistent" else 3,
+                    len(spell.abilities),
+                    "fixture must exercise every IH header",
+                )
+                if variant == "additive":
+                    donors = [
+                        [
+                            (index, effect)
+                            for index, effect in enumerate(ability.effects)
+                            if effect.opcode == 1
+                            and effect.parameter1 == 1
+                            and effect.parameter2 == 0
+                        ]
+                        for ability in spell.abilities
+                    ]
+                    self.assertTrue(all(len(header) == 1 for header in donors))
+                    self.assertEqual(3, len({header[0][0] for header in donors}))
+                    self.assertEqual(3, len({header[0][1].duration for header in donors}))
 
         effect = EffV2(
             opcode=326,
@@ -397,8 +468,110 @@ class FixtureFormatTests(unittest.TestCase):
             probability1=100,
             probability2=0,
             resource="CBRTEST",
+            flags=0xA5C39E71,
         )
-        self.assertEqual(effect, EffV2.from_bytes(effect.to_bytes()))
+        encoded_eff = effect.to_bytes()
+        self.assertEqual(0xA5C39E71, int.from_bytes(encoded_eff[0x5C:0x60], "little"))
+        parsed_eff = EffV2.from_bytes(encoded_eff)
+        self.assertEqual(effect, parsed_eff)
+        self.assertEqual(0xA5C39E71, parsed_eff.flags)
+
+        embedded = SplEffect(opcode=326, resist_dispel=3)
+        encoded_embedded = embedded.to_bytes()
+        self.assertEqual(3, encoded_embedded[0x0D])
+        self.assertEqual(3, SplEffect.from_bytes(encoded_embedded).resist_dispel)
+        self.assertFalse(hasattr(parsed_eff, "resist_dispel"))
+
+    def test_tlk_writer_detection_covers_command_families(self) -> None:
+        source = """
+        // SAY_EVALUATED STRING_SET_EVALUATE REPLACE_SAY
+        /* TLK_WRITE_SUFFIX */
+        OUTER_SPRINT harmless ~SAY_EVALUATED is only message text~
+        SAY_EVALUATED @1
+        STRING_SET_EVALUATE 42 @2
+        REPLACE_SAY_EVALUATED ~DIALOG~ 0 @3
+        TLK_WRITE_EVALUATED ~elsewhere.tlk~
+        """
+        self.assertEqual(
+            [
+                "REPLACE_SAY_EVALUATED",
+                "SAY_EVALUATED",
+                "STRING_SET_EVALUATE",
+                "TLK_WRITE_EVALUATED",
+            ],
+            _tlk_writes(source),
+        )
+
+    def test_bridge_condition_reader_rejects_malformed_graphs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cbr-bridge-graph-") as temporary:
+            root = Path(temporary)
+            helper_resref = "CBRAPR6"
+            helper = make_spl(
+                (
+                    SplAbility(
+                        required_level=1,
+                        target=5,
+                        projectile=0,
+                        effects=(
+                            SplEffect(opcode=321, target=1, resource=helper_resref),
+                            SplEffect(
+                                opcode=1,
+                                target=1,
+                                parameter1=6,
+                                parameter2=0,
+                                timing=0,
+                                resist_dispel=2,
+                                duration=1,
+                            ),
+                        ),
+                    ),
+                )
+            )
+            write_spl(root / f"{helper_resref}.SPL", helper)
+            valid = EffV2(
+                opcode=326,
+                target=1,
+                parameter1=210,
+                parameter2=4,
+                timing=1,
+                resource=helper_resref,
+            )
+            (root / "VALID.EFF").write_bytes(valid.to_bytes())
+            self.assertEqual(
+                6,
+                _read_conditional_apr_edge(
+                    root,
+                    "VALID",
+                    expected_state=210,
+                    active_row=4,
+                    expected_helper=helper_resref,
+                ),
+            )
+
+            invalid = {
+                "ALWAYS": dataclasses.replace(valid, opcode=146),
+                "WRONGST": dataclasses.replace(valid, parameter1=211),
+                "WRONGROW": dataclasses.replace(valid, parameter2=5),
+            }
+            for resref, effect in invalid.items():
+                (root / f"{resref}.EFF").write_bytes(effect.to_bytes())
+                with self.subTest(resref=resref), self.assertRaises(AssertionError):
+                    _read_conditional_apr_edge(
+                        root,
+                        resref,
+                        expected_state=210,
+                        active_row=4,
+                        expected_helper=helper_resref,
+                    )
+            for resref in (helper_resref, "MISSING"):
+                with self.subTest(resref=resref), self.assertRaises(AssertionError):
+                    _read_conditional_apr_edge(
+                        root,
+                        resref,
+                        expected_state=210,
+                        active_row=4,
+                        expected_helper=helper_resref,
+                    )
 
     def test_ids_resolution_uses_fixture_symbols(self) -> None:
         ids = IdsFile(entries=((1388, "CLERIC_HOLY_POWER"), (2788, "WIZARD_IMPROVED_HASTE")))
@@ -461,8 +634,15 @@ class TempusHolyPowerTests(unittest.TestCase):
         *,
         alternate_ids: bool = False,
         phase: str = "full",
+        splstate_layout: str = "free",
     ) -> HarnessResult:
-        result = _run_harness(variant, mode, alternate_ids=alternate_ids, phase=phase)
+        result = _run_harness(
+            variant,
+            mode,
+            alternate_ids=alternate_ids,
+            phase=phase,
+            splstate_layout=splstate_layout,
+        )
         self._results.append(result)
         return result
 
@@ -491,6 +671,15 @@ class TempusHolyPowerTests(unittest.TestCase):
         self.assertIn(result.fixture.haste_resref, transcript)
         self.assertRegex(transcript, r"IMPROVED[ _-]?HASTE|HEADER|OPCODE|PROBABIL")
 
+    def assert_allocation_rejected(self, result: HarnessResult) -> None:
+        if not PRODUCTION_TPA.is_file():
+            self.fail(
+                "cannot verify SPLSTATE rejection because production library is missing: "
+                f"{PRODUCTION_TPA}\n{result.transcript}"
+            )
+        self.assertFalse(result.succeeded, "invalid SPLSTATE layout was accepted")
+        self.assertRegex(result.transcript.upper(), r"SPLSTATE|SPELL[ _-]?STATE|COLLIS|EXHAUST")
+
     def test_improved_haste_classification(self) -> None:
         for variant in ("additive", "doubling", "doubling317"):
             with self.subTest(variant=variant, expected="accepted"):
@@ -513,9 +702,15 @@ class TempusHolyPowerTests(unittest.TestCase):
         self.assert_success(result)
         before_ids = read_ids(result.fixture.root / "SPLSTATE.IDS")
         after_ids = read_ids(result.output / "SPLSTATE.IDS")
-        private = [(value, symbol) for value, symbol in after_ids.entries if symbol.upper().startswith("CBR_")]
-        self.assertGreaterEqual(len(private), 4)
+        private = [
+            (value, symbol.upper())
+            for value, symbol in after_ids.entries
+            if symbol.upper() in PRIVATE_STATE_SYMBOLS
+        ]
+        self.assertEqual(set(PRIVATE_STATE_SYMBOLS), {symbol for _, symbol in private})
+        self.assertEqual(4, len(private))
         self.assertEqual(len(private), len({value for value, _ in private}))
+        self.assertTrue(all(0 <= value <= 255 for value, _ in private))
         self.assertTrue({value for value, _ in private}.isdisjoint(before_ids.values()))
 
         before = read_2da(result.fixture.root / "SPLPROT.2DA")
@@ -530,6 +725,31 @@ class TempusHolyPowerTests(unittest.TestCase):
         self.assert_success(second)
         self.assertEqual(after_ids.canonical(), read_ids(second.output / "SPLSTATE.IDS").canonical())
         self.assertEqual(after.canonical(), read_2da(second.output / "SPLPROT.2DA").canonical())
+
+        reuse = self.run_case(phase="allocate", splstate_layout="reuse")
+        self.assert_success(reuse)
+        reuse_before = read_ids(reuse.fixture.root / "SPLSTATE.IDS")
+        reuse_after = read_ids(reuse.output / "SPLSTATE.IDS")
+        for symbol in PRIVATE_STATE_SYMBOLS:
+            with self.subTest(layout="reuse", symbol=symbol):
+                self.assertEqual(reuse_before.value(symbol), reuse_after.value(symbol))
+        self.assertEqual(reuse_before.canonical(), reuse_after.canonical())
+        self.assertEqual(
+            (reuse.fixture.root / "SPLSTATE.IDS").read_bytes(),
+            (reuse.output / "SPLSTATE.IDS").read_bytes(),
+            "unique preallocated private states must be reused without rewriting SPLSTATE.IDS",
+        )
+
+    def test_rejects_splstate_collisions_and_exhaustion(self) -> None:
+        for layout in (
+            "duplicate_private_symbol",
+            "shared_private_value",
+            "exhausted",
+        ):
+            with self.subTest(layout=layout):
+                self.assert_allocation_rejected(
+                    self.run_case(phase="allocate", splstate_layout=layout)
+                )
 
     def test_progression(self) -> None:
         result = self.run_case(phase="progression")
@@ -547,12 +767,34 @@ class TempusHolyPowerTests(unittest.TestCase):
                 hp = min(level, 30)
                 apr_key = None if level <= 6 else 6 if level <= 12 else 1 if level <= 24 else 7
                 effects = holy.ability_for_level(level).effects
-                thac0_effect = next(e for e in effects if e.opcode == 54 and e.parameter2 == 1)
-                hp_effect = next(e for e in effects if e.opcode == 18 and e.parameter2 == 0)
-                self.assertEqual((thac0, duration), (thac0_effect.parameter1, thac0_effect.duration))
-                self.assertEqual((hp, duration), (hp_effect.parameter1, hp_effect.duration))
-                self.assertEqual(3, thac0_effect.resist_dispel)
-                self.assertEqual(3, hp_effect.resist_dispel)
+                thac0_effects = [effect for effect in effects if effect.opcode == 54]
+                hp_effects = [effect for effect in effects if effect.opcode == 18]
+                self.assertEqual(1, len(thac0_effects), "THAC0 mechanic must be unique")
+                self.assertEqual(1, len(hp_effects), "temporary HP mechanic must be unique")
+                thac0_effect = thac0_effects[0]
+                hp_effect = hp_effects[0]
+                self.assertEqual(
+                    (thac0, 1, 0, duration, 3),
+                    (
+                        thac0_effect.parameter1,
+                        thac0_effect.parameter2,
+                        thac0_effect.timing,
+                        thac0_effect.duration,
+                        thac0_effect.resist_dispel,
+                    ),
+                    "THAC0 must be one flat, temporary, dispellable mechanic",
+                )
+                self.assertEqual(
+                    (hp, 0, 0, duration, 3),
+                    (
+                        hp_effect.parameter1,
+                        hp_effect.parameter2,
+                        hp_effect.timing,
+                        hp_effect.duration,
+                        hp_effect.resist_dispel,
+                    ),
+                    "HP must be one cumulative, temporary, dispellable mechanic",
+                )
                 apr = [e for e in effects if e.opcode == 1 and e.parameter2 == 0]
                 if apr_key is None:
                     self.assertEqual([], apr)
@@ -656,73 +898,242 @@ class TempusHolyPowerTests(unittest.TestCase):
     def test_additive_bridge_graph(self) -> None:
         result = self.run_case("additive", "auto", phase="bridge")
         self.assert_success(result)
-        haste = read_spl(result.output / f"{result.fixture.haste_resref}.SPL")
-        donor = next(e for e in haste.abilities[0].effects if e.opcode == 1 and e.parameter1 == 1 and e.parameter2 == 0)
-        haste_before = read_spl(result.fixture.root / f"{result.fixture.haste_resref}.SPL")
-        for effect in haste_before.abilities[0].effects:
-            self.assertIn(
-                effect.canonical(),
-                [candidate.canonical() for candidate in haste.abilities[0].effects],
-                "additive bridge replaced a foreign Improved Haste effect",
-            )
-        self.assertFalse(any(e.opcode in (16, 317) and e.parameter2 == 1 for e in haste.abilities[0].effects))
-        markers = [e for e in haste.abilities[0].effects if e.opcode == 328 and e.special == 1]
-        self.assertEqual(1, len(markers))
-        marker = markers[0]
-        self.assertEqual(donor.delivery_key(), marker.delivery_key())
-        self.assertEqual(donor.parameter1, marker.parameter1)
-
-        holy = read_spl(result.output / f"{HOLY_RESREF}.SPL")
-        state_values = {value for value, symbol in read_ids(result.output / "SPLSTATE.IDS").entries if symbol.upper().startswith("CBR_")}
-        tier_states = set()
-        for level, apr_key in ((7, 6), (13, 1), (25, 7)):
-            ability = holy.ability_for_level(level)
-            tier = [e.parameter2 for e in ability.effects if e.opcode == 328 and e.special == 1 and e.parameter2 in state_values]
-            self.assertEqual(1, len(tier))
-            tier_states.add(tier[0])
-            pulses = [e for e in ability.effects if e.opcode == 272 and e.parameter1 == 1 and e.parameter2 == 3]
-            self.assertTrue(
-                any(
-                    e.duration == _tier_duration(level)
-                    and _resource_apr_key(result.output, e.resource) == apr_key
-                    for e in pulses
-                )
-            )
-            self.assertTrue(
-                any(
-                    e.opcode == 326
-                    and e.timing == 1
-                    and e.parameter1 == marker.parameter2
-                    and _resource_apr_key(result.output, e.resource) == apr_key
-                    for e in ability.effects
-                ),
-                "Holy cast second lacks an immediate Improved Haste kick",
-            )
-        kicks = {
-            e.parameter1: _resource_apr_key(result.output, e.resource)
-            for e in haste.abilities[0].effects
-            if e.opcode == 326 and e.timing == 1
+        state_values = _private_state_values(result.output)
+        ih_state = state_values[IH_STATE_SYMBOL]
+        tier_state_by_key = {
+            key: state_values[symbol] for key, symbol in APR_STATE_SYMBOL_BY_KEY.items()
         }
-        self.assertTrue(tier_states.issubset(kicks), "Improved Haste lacks immediate kicks for active Holy tiers")
-        self.assertEqual({1, 6, 7}, {kicks[state] for state in tier_states})
+        active_row = _active_splstate_row(result.output)
 
-        for helper_resref, apr_key in _apr_helpers(result.output).items():
-            helper = read_spl(result.output / f"{helper_resref}.SPL")
-            effects = helper.abilities[0].effects
-            self.assertEqual((321, helper_resref), (effects[0].opcode, effects[0].resource.upper()))
-            apr = next(e for e in effects if e.opcode == 1 and e.parameter1 == apr_key)
-            self.assertEqual((0, 1, 0), (apr.timing, apr.duration, apr.parameter2))
-            self.assertEqual(2, apr.resist_dispel & 2)
+        helpers = _strict_apr_helpers(result.output)
+        self.assertEqual(3, len(helpers), f"expected one strict APR helper per tier: {helpers}")
+        self.assertEqual({1, 6, 7}, set(helpers.values()))
+        helper_by_key = {key: resource for resource, key in helpers.items()}
+        self.assertEqual(3, len(helper_by_key), "APR helper keys are not one-to-one")
+        helper_resrefs = set(helpers)
+
+        conditions = _apr_condition_resources(result.output, helper_resrefs)
+        self.assertEqual(
+            3,
+            len(conditions),
+            f"expected one standalone conditional EFF per APR tier: {conditions}",
+        )
+        condition_by_key = {}
+        for condition_resref, condition in conditions.items():
+            helper_resref = condition.resource.upper()
+            key = helpers[helper_resref]
+            self.assertNotIn(key, condition_by_key, f"duplicate conditional EFF for APR key {key}")
+            self.assertEqual(
+                key,
+                _read_conditional_apr_edge(
+                    result.output,
+                    condition_resref,
+                    expected_state=ih_state,
+                    active_row=active_row,
+                    expected_helper=helper_resref,
+                ),
+            )
+            condition_by_key[key] = condition_resref
+        self.assertEqual({1, 6, 7}, set(condition_by_key))
+
+        haste = read_spl(result.output / f"{result.fixture.haste_resref}.SPL")
+        haste_before = read_spl(result.fixture.root / f"{result.fixture.haste_resref}.SPL")
+        holy = read_spl(result.output / f"{HOLY_RESREF}.SPL")
+        bridge_resources = helper_resrefs | set(conditions)
+        bridge_states = {ih_state, *tier_state_by_key.values()}
+        for owner, casting_effects in (
+            ("Holy Power", holy.casting_effects),
+            ("Improved Haste", haste.casting_effects),
+        ):
+            self.assertFalse(
+                any(
+                    (effect.opcode == 328 and effect.parameter2 in bridge_states)
+                    or (
+                        effect.opcode in (272, 326)
+                        and effect.resource.upper() in bridge_resources
+                    )
+                    for effect in casting_effects
+                ),
+                f"{owner} bridge effects escaped their caster-level headers",
+            )
+
+        self.assertEqual(len(haste_before.abilities), len(haste.abilities))
+        for header_index, (before_ability, ability) in enumerate(
+            zip(haste_before.abilities, haste.abilities)
+        ):
+            with self.subTest(resource="Improved Haste", header=header_index):
+                self.assertEqual(before_ability.required_level, ability.required_level)
+                donor_before = [
+                    effect
+                    for effect in before_ability.effects
+                    if effect.opcode == 1
+                    and effect.parameter1 == 1
+                    and effect.parameter2 == 0
+                ]
+                donor_after = [
+                    effect
+                    for effect in ability.effects
+                    if effect.opcode == 1
+                    and effect.parameter1 == 1
+                    and effect.parameter2 == 0
+                ]
+                self.assertEqual(1, len(donor_before))
+                self.assertEqual(1, len(donor_after))
+                self.assertEqual(donor_before[0].canonical(), donor_after[0].canonical())
+                for effect in before_ability.effects:
+                    self.assertIn(
+                        effect.canonical(),
+                        [candidate.canonical() for candidate in ability.effects],
+                        "additive bridge replaced a foreign Improved Haste effect",
+                    )
+                self.assertFalse(
+                    any(
+                        effect.opcode in (16, 317) and effect.parameter2 == 1
+                        for effect in ability.effects
+                    )
+                )
+
+                markers = [
+                    effect
+                    for effect in ability.effects
+                    if effect.opcode == 328 and effect.parameter2 == ih_state
+                ]
+                self.assertEqual(1, len(markers), "IH header must contain exactly one marker")
+                marker = markers[0]
+                self.assertEqual(
+                    (328, 0, ih_state, 1),
+                    (marker.opcode, marker.parameter1, marker.parameter2, marker.special),
+                )
+                self.assertEqual(donor_after[0].delivery_key(), marker.delivery_key())
+                self.assertEqual(
+                    ("", 0, 0, 0, 0),
+                    (
+                        marker.resource,
+                        marker.dice_number,
+                        marker.dice_size,
+                        marker.save_type,
+                        marker.save_bonus,
+                    ),
+                    "IH marker copied non-delivery payload fields from its APR donor",
+                )
+
+                kicks = [
+                    effect
+                    for effect in ability.effects
+                    if effect.opcode == 326 and effect.resource.upper() in helper_resrefs
+                ]
+                self.assertEqual(3, len(kicks), "IH header must kick every active Holy APR tier")
+                for key, tier_state in tier_state_by_key.items():
+                    matched = [effect for effect in kicks if effect.parameter1 == tier_state]
+                    self.assertEqual(1, len(matched), f"missing or duplicate IH kick for APR key {key}")
+                    kick = matched[0]
+                    self.assertEqual(
+                        (326, tier_state, active_row, 1, 100, 0, helper_by_key[key]),
+                        (
+                            kick.opcode,
+                            kick.parameter1,
+                            kick.parameter2,
+                            kick.timing,
+                            kick.probability1,
+                            kick.probability2,
+                            kick.resource.upper(),
+                        ),
+                    )
+
+        self.assertEqual(30, len(holy.abilities))
+        self.assertEqual(list(range(1, 31)), [ability.required_level for ability in holy.abilities])
+        tier_state_set = set(tier_state_by_key.values())
+        for ability in holy.abilities:
+            level = ability.required_level
+            duration = _tier_duration(level)
+            expected_key = None if level <= 6 else 6 if level <= 12 else 1 if level <= 24 else 7
+            with self.subTest(resource=HOLY_RESREF, level=level):
+                tier_markers = [
+                    effect
+                    for effect in ability.effects
+                    if effect.opcode == 328 and effect.parameter2 in tier_state_set
+                ]
+                immediate = [
+                    effect
+                    for effect in ability.effects
+                    if effect.opcode == 326 and effect.resource.upper() in helper_resrefs
+                ]
+                pulses = [
+                    effect
+                    for effect in ability.effects
+                    if effect.opcode == 272 and effect.resource.upper() in bridge_resources
+                ]
+                if expected_key is None:
+                    self.assertEqual([], tier_markers, "levels 1-6 must not carry an APR tier state")
+                    self.assertEqual([], immediate, "levels 1-6 must not carry an APR bridge kick")
+                    self.assertEqual([], pulses, "levels 1-6 must not carry an APR bridge pulse")
+                    continue
+
+                expected_state = tier_state_by_key[expected_key]
+                self.assertEqual(1, len(tier_markers), "Holy header must have one APR tier state")
+                marker = tier_markers[0]
+                self.assertEqual(
+                    (328, 0, expected_state, 0, duration, 3, 1),
+                    (
+                        marker.opcode,
+                        marker.parameter1,
+                        marker.parameter2,
+                        marker.timing,
+                        marker.duration,
+                        marker.resist_dispel,
+                        marker.special,
+                    ),
+                )
+
+                self.assertEqual(1, len(immediate), "Holy header must have one immediate IH gate")
+                kick = immediate[0]
+                self.assertEqual(
+                    (326, ih_state, active_row, 1, 100, 0, helper_by_key[expected_key]),
+                    (
+                        kick.opcode,
+                        kick.parameter1,
+                        kick.parameter2,
+                        kick.timing,
+                        kick.probability1,
+                        kick.probability2,
+                        kick.resource.upper(),
+                    ),
+                )
+
+                self.assertEqual(1, len(pulses), "Holy header must have one APR heartbeat")
+                pulse = pulses[0]
+                self.assertEqual(
+                    (272, 1, 3, duration, condition_by_key[expected_key]),
+                    (
+                        pulse.opcode,
+                        pulse.parameter1,
+                        pulse.parameter2,
+                        pulse.duration,
+                        pulse.resource.upper(),
+                    ),
+                )
+                self.assertEqual(
+                    expected_key,
+                    _read_conditional_apr_edge(
+                        result.output,
+                        pulse.resource,
+                        expected_state=ih_state,
+                        active_row=active_row,
+                        expected_helper=helper_by_key[expected_key],
+                    ),
+                )
 
     def test_doubling_needs_no_bridge(self) -> None:
         result = self.run_case("doubling", "auto", phase="bridge")
         self.assert_success(result)
         haste = read_spl(result.output / f"{result.fixture.haste_resref}.SPL")
-        effects = haste.abilities[0].effects
-        self.assertTrue(any(e.opcode in (16, 317) and e.parameter2 == 1 for e in effects))
-        self.assertFalse(any(e.opcode == 1 and e.parameter1 == 1 and e.parameter2 == 0 for e in effects))
-        self.assertFalse(any(e.opcode == 328 and e.special == 1 for e in effects))
-        self.assertEqual({}, _apr_helpers(result.output), "doubling mode created additive bridge resources")
+        for header_index, ability in enumerate(haste.abilities):
+            with self.subTest(header=header_index):
+                effects = ability.effects
+                self.assertTrue(any(e.opcode in (16, 317) and e.parameter2 == 1 for e in effects))
+                self.assertFalse(any(e.opcode == 1 and e.parameter1 == 1 and e.parameter2 == 0 for e in effects))
+                self.assertFalse(any(e.opcode == 328 and e.special == 1 for e in effects))
+        self.assertEqual({}, _strict_apr_helpers(result.output), "doubling mode created additive bridge resources")
         self.assertEqual(
             (result.fixture.root / f"{result.fixture.haste_resref}.SPL").read_bytes(),
             (result.output / f"{result.fixture.haste_resref}.SPL").read_bytes(),
@@ -742,6 +1153,30 @@ class TempusHolyPowerTests(unittest.TestCase):
                 second = _rerun_harness(first)
                 self._results.append(second)
                 self.assert_success(second)
+                first_files = _raw_file_tree(first.output)
+                copied_fixture_files = _raw_file_tree(second.fixture.root)
+                second_files = _raw_file_tree(second.output)
+                self.assertEqual(
+                    first_files,
+                    copied_fixture_files,
+                    "second-pass fixture copy changed raw production output before WeiDU ran",
+                )
+                self.assertEqual(
+                    set(first_files),
+                    set(second_files),
+                    "second application changed the recursive output file set",
+                )
+                for relative in sorted(first_files):
+                    with self.subTest(variant=variant, file=relative):
+                        first_bytes = first_files[relative]
+                        second_bytes = second_files[relative]
+                        self.assertEqual(
+                            first_bytes,
+                            second_bytes,
+                            f"raw bytes changed for {relative}: "
+                            f"{hashlib.sha256(first_bytes).hexdigest()} != "
+                            f"{hashlib.sha256(second_bytes).hexdigest()}",
+                        )
                 self.assertEqual(
                     canonical_resource_tree(first.output), canonical_resource_tree(second.output)
                 )
@@ -757,12 +1192,11 @@ class TempusHolyPowerTests(unittest.TestCase):
             self.assertIsNotNone(match, f"component {component} does not exist")
             blocks.append(match.group(0))
         self.assertTrue(PRODUCTION_TPA.is_file(), f"missing {PRODUCTION_TPA}")
-        source = "\n".join(blocks) + "\n" + _strip_weidu_comments(PRODUCTION_TPA.read_text(encoding="utf-8"))
-        for banned in (r"\bSAY\b", r"\bSTRING_SET\b", r"\bRESOLVE_STR_REF\b", r"DIALOG\.TLK", r"\bTLK_(?:APPEND|WRITE|PATCH)\b"):
-            with self.subTest(banned=banned):
-                self.assertIsNone(re.search(banned, source, re.IGNORECASE))
+        source = "\n".join(blocks) + "\n" + PRODUCTION_TPA.read_text(encoding="utf-8")
+        self.assertEqual([], _tlk_writes(source), "components 401-403 contain TLK writers")
         harness_source = _strip_weidu_comments(HARNESS.read_text(encoding="utf-8"))
-        for banned in (r"\bCOPY_EXISTING\b", r"\bFILE_EXISTS_IN_GAME\b", r"\bSAY\b", r"\bSTRING_SET\b", r"DIALOG\.TLK"):
+        self.assertEqual([], _tlk_writes(harness_source), "harness contains TLK writers")
+        for banned in (r"\bCOPY_EXISTING\b", r"\bFILE_EXISTS_IN_GAME\b"):
             self.assertIsNone(re.search(banned, harness_source, re.IGNORECASE))
 
 
@@ -820,36 +1254,106 @@ class _ConditionGraph:
         return self._apply(pulses, strength, exceptional)
 
 
-def _resource_apr_key(root: Path, resource: str, seen: frozenset[str] = frozenset()) -> int | None:
+def _private_state_values(root: Path) -> dict[str, int]:
+    ids = read_ids(root / "SPLSTATE.IDS")
+    values = {symbol: ids.value(symbol) for symbol in PRIVATE_STATE_SYMBOLS}
+    if len(set(values.values())) != len(values):
+        raise AssertionError(f"private SPLSTATE values are not unique: {values}")
+    return values
+
+
+def _active_splstate_row(root: Path) -> int:
+    table = read_2da(root / "SPLPROT.2DA")
+    rows = [
+        index
+        for index, (_, values) in enumerate(table.rows)
+        if tuple(int(value, 0) for value in values) == ACTIVE_SPLSTATE_SEMANTIC
+    ]
+    if len(rows) != 1:
+        raise AssertionError(
+            f"active-SPLSTATE semantic row matched {len(rows)} rows, expected one: {rows}"
+        )
+    return rows[0]
+
+
+def _read_apr_helper(root: Path, resource: str) -> int:
     resource = resource.upper()
-    if not resource or resource in seen:
-        return None
-    seen = seen | {resource}
-    spl_path = root / f"{resource}.SPL"
-    if spl_path.is_file():
-        effects: tuple[SplEffect | EffV2, ...] = read_spl(spl_path).abilities[0].effects
-    else:
-        eff_path = root / f"{resource}.EFF"
-        if not eff_path.is_file():
-            return None
-        effects = (read_eff_v2(eff_path),)
-    for effect in effects:
-        if effect.opcode == 1 and effect.parameter2 == 0 and effect.duration == 1:
-            return effect.parameter1
-        if effect.opcode in (146, 177, 272, 326):
-            found = _resource_apr_key(root, effect.resource, seen)
-            if found is not None:
-                return found
-    return None
+    path = root / f"{resource}.SPL"
+    if not path.is_file():
+        raise AssertionError(f"APR helper SPL does not exist: {resource}")
+    spell = read_spl(path)
+    if len(spell.abilities) != 1:
+        raise AssertionError(f"APR helper {resource} has {len(spell.abilities)} headers")
+    effects = spell.abilities[0].effects
+    if not effects or (effects[0].opcode, effects[0].resource.upper()) != (321, resource):
+        raise AssertionError(f"APR helper {resource} does not begin with reciprocal self cleanup")
+    apr = [effect for effect in effects if effect.opcode == 1 and effect.parameter2 == 0]
+    if len(apr) != 1:
+        raise AssertionError(f"APR helper {resource} has {len(apr)} cumulative APR effects")
+    mechanic = apr[0]
+    if (mechanic.timing, mechanic.duration) != (0, 1):
+        raise AssertionError(
+            f"APR helper {resource} timing/duration is {(mechanic.timing, mechanic.duration)}, expected (0, 1)"
+        )
+    if mechanic.resist_dispel & 2 != 2:
+        raise AssertionError(f"APR helper {resource} does not bypass magic resistance")
+    return mechanic.parameter1
 
 
-def _apr_helpers(root: Path) -> dict[str, int]:
-    helpers: dict[str, int] = {}
-    for path in root.glob("CBR*.SPL"):
-        key = _resource_apr_key(root, path.stem)
-        if key in (1, 6, 7):
+def _strict_apr_helpers(root: Path) -> dict[str, int]:
+    helpers = {}
+    for path in root.glob("*.SPL"):
+        try:
+            key = _read_apr_helper(root, path.stem)
+        except AssertionError:
+            continue
+        if key in APR_STATE_SYMBOL_BY_KEY:
             helpers[path.stem.upper()] = key
     return helpers
+
+
+def _apr_condition_resources(
+    root: Path, helper_resrefs: set[str]
+) -> dict[str, EffV2]:
+    conditions = {}
+    for path in root.glob("*.EFF"):
+        effect = read_eff_v2(path)
+        if effect.resource.upper() in helper_resrefs:
+            conditions[path.stem.upper()] = effect
+    return conditions
+
+
+def _read_conditional_apr_edge(
+    root: Path,
+    resource: str,
+    *,
+    expected_state: int,
+    active_row: int,
+    expected_helper: str,
+) -> int:
+    resource = resource.upper()
+    expected_helper = expected_helper.upper()
+    path = root / f"{resource}.EFF"
+    if not path.is_file():
+        raise AssertionError(
+            f"heartbeat {resource} must be a standalone conditional EFF, not a direct or missing helper"
+        )
+    effect = read_eff_v2(path)
+    actual = (
+        effect.opcode,
+        effect.parameter1,
+        effect.parameter2,
+        effect.timing,
+        effect.probability1,
+        effect.probability2,
+        effect.resource.upper(),
+    )
+    expected = (326, expected_state, active_row, 1, 100, 0, expected_helper)
+    if actual != expected:
+        raise AssertionError(
+            f"conditional EFF {resource} has {actual}, expected active-SPLSTATE edge {expected}"
+        )
+    return _read_apr_helper(root, expected_helper)
 
 
 def _tier_duration(level: int) -> int:
@@ -863,6 +1367,35 @@ def _tier_duration(level: int) -> int:
 def _strip_weidu_comments(source: str) -> str:
     source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
     return re.sub(r"//.*$", "", source, flags=re.MULTILINE)
+
+
+def _tlk_writes(source: str) -> list[str]:
+    uncommented = _strip_weidu_comments(source)
+    writers = []
+    if re.search(r"DIALOGF?\s*\.\s*TLK", uncommented, re.IGNORECASE):
+        writers.append("DIALOG.TLK")
+    without_strings = re.sub(r"~.*?~|\".*?\"", " ", uncommented, flags=re.DOTALL)
+    tokens = re.findall(r"\b[A-Z][A-Z0-9_]*\b", without_strings.upper())
+    for token in tokens:
+        if (
+            re.fullmatch(r"(?:[A-Z0-9]+_)*SAY(?:_[A-Z0-9]+)*", token)
+            or re.fullmatch(r"(?:[A-Z0-9]+_)*STRING_SET(?:_[A-Z0-9]+)*", token)
+            or token.startswith("RESOLVE_STR_REF")
+            or re.fullmatch(r"(?:TLK_(?:APPEND|WRITE|PATCH|ALTER|SET)|(?:APPEND|WRITE|PATCH|ALTER|SET)_TLK)(?:_[A-Z0-9]+)*", token)
+            or token in {"ADD_TRANSLATED_STRING", "REPLACE_SAY"}
+        ):
+            writers.append(token)
+    return sorted(set(writers))
+
+
+def _raw_file_tree(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(
+            (candidate for candidate in root.rglob("*") if candidate.is_file()),
+            key=lambda candidate: candidate.relative_to(root).as_posix().upper(),
+        )
+    }
 
 
 if __name__ == "__main__":
