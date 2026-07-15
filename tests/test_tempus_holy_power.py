@@ -126,12 +126,78 @@ def _make_holy_fixture(divine_resref: str, holy_layout: str = "original") -> Spl
     abilities[9] = dataclasses.replace(
         abilities[9], effects=abilities[9].effects + (_sentinel_effect(),)
     )
-    if holy_layout == "stale_30":
+    if holy_layout in ("stale_30", "valid_30"):
         donor = abilities[-1]
         abilities.extend(
             dataclasses.replace(donor, required_level=level)
             for level in range(21, 31)
         )
+        if holy_layout == "valid_30":
+            normalized = []
+            for level, ability in enumerate(abilities, start=1):
+                duration = 18 if level <= 6 else 24 if level <= 12 else 30
+                thac0 = max(0, 21 - level)
+                hp = min(level, 30)
+                apr_key = (
+                    None if level <= 6 else 6 if level <= 12 else 1 if level <= 24 else 7
+                )
+                core_template = next(effect for effect in ability.effects if effect.opcode == 54)
+                effects = []
+                for effect in ability.effects:
+                    if effect.opcode == 54:
+                        effects.append(
+                            dataclasses.replace(
+                                effect,
+                                parameter1=thac0,
+                                parameter2=1,
+                                timing=0,
+                                resist_dispel=3,
+                                duration=duration,
+                            )
+                        )
+                    elif effect.opcode == 18:
+                        effects.append(
+                            dataclasses.replace(
+                                effect,
+                                parameter1=hp,
+                                parameter2=0,
+                                timing=0,
+                                resist_dispel=3,
+                                duration=duration,
+                            )
+                        )
+                    elif effect.opcode in (44, 97) or (
+                        effect.opcode == 1 and effect.parameter2 == 0
+                    ):
+                        continue
+                    else:
+                        effects.append(effect)
+                if apr_key is not None:
+                    effects.append(
+                        dataclasses.replace(
+                            core_template,
+                            opcode=1,
+                            parameter1=apr_key,
+                            parameter2=0,
+                            timing=0,
+                            resist_dispel=3,
+                            duration=duration,
+                        )
+                    )
+                effects.append(
+                    dataclasses.replace(
+                        core_template,
+                        opcode=272,
+                        parameter1=1,
+                        parameter2=3,
+                        timing=0,
+                        resist_dispel=3,
+                        duration=duration,
+                        resource="CBRSE18",
+                    )
+                )
+                normalized.append(dataclasses.replace(ability, effects=tuple(effects)))
+            abilities = normalized
     elif holy_layout != "original":
         raise ValueError(f"unknown Holy Power fixture layout: {holy_layout}")
     return dataclasses.replace(spell, abilities=tuple(abilities))
@@ -240,6 +306,7 @@ def build_fixture(
     divine_id: int = 1499,
     haste_id: int = 2699,
     splstate_layout: str = "free",
+    splprot_layout: str = "default",
     holy_layout: str = "original",
 ) -> Fixture:
     root.mkdir(parents=True, exist_ok=True)
@@ -296,17 +363,24 @@ def build_fixture(
     else:
         raise ValueError(f"unknown SPLSTATE fixture layout: {splstate_layout}")
     write_ids(root / "SPLSTATE.IDS", IdsFile(entries=state_entries))
+    splprot_rows = (
+        ("0_KEEP", ("0x10a", "0", "4")),
+        ("1_STATE_N", ("0x112", "-1", "1")),
+        ("2_STR_LT_N", ("36", "-1", "2")),
+        ("3_SENTINEL", ("999", "123", "5")),
+    )
+    if splprot_layout == "no_active_state":
+        splprot_rows = tuple(
+            row for row in splprot_rows if row[0] != "1_STATE_N"
+        )
+    elif splprot_layout != "default":
+        raise ValueError(f"unknown SPLPROT fixture layout: {splprot_layout}")
     write_2da(
         root / "SPLPROT.2DA",
         TwoDA(
             default="0xffff",
             columns=("STAT", "VALUE", "RELATION"),
-            rows=(
-                ("0_KEEP", ("0x10a", "0", "4")),
-                ("1_STATE_N", ("0x112", "-1", "1")),
-                ("2_STR_LT_N", ("36", "-1", "2")),
-                ("3_SENTINEL", ("999", "123", "5")),
-            ),
+            rows=splprot_rows,
         ),
     )
     return Fixture(root=root, divine_resref=divine_resref, haste_resref=haste_resref)
@@ -322,6 +396,7 @@ def _run_harness(
     alternate_ids: bool = False,
     phase: str = "full",
     splstate_layout: str = "free",
+    splprot_layout: str = "default",
     holy_layout: str = "original",
 ) -> HarnessResult:
     temporary = tempfile.TemporaryDirectory(prefix="cbr-tempus-")
@@ -337,6 +412,7 @@ def _run_harness(
         divine_id=1388 if alternate_ids else 1499,
         haste_id=2788 if alternate_ids else 2699,
         splstate_layout=splstate_layout,
+        splprot_layout=splprot_layout,
         holy_layout=holy_layout,
     )
     command = [
@@ -654,6 +730,7 @@ class TempusHolyPowerTests(unittest.TestCase):
         alternate_ids: bool = False,
         phase: str = "full",
         splstate_layout: str = "free",
+        splprot_layout: str = "default",
         holy_layout: str = "original",
     ) -> HarnessResult:
         result = _run_harness(
@@ -662,6 +739,7 @@ class TempusHolyPowerTests(unittest.TestCase):
             alternate_ids=alternate_ids,
             phase=phase,
             splstate_layout=splstate_layout,
+            splprot_layout=splprot_layout,
             holy_layout=holy_layout,
         )
         self._results.append(result)
@@ -762,7 +840,11 @@ class TempusHolyPowerTests(unittest.TestCase):
         )
 
     def test_doubling_allocation_skips_additive_bridge_states(self) -> None:
-        result = self.run_case("doubling", phase="allocate")
+        result = self.run_case(
+            "doubling",
+            phase="allocate",
+            splprot_layout="no_active_state",
+        )
         self.assert_success(result)
         before_ids = read_ids(result.fixture.root / "SPLSTATE.IDS")
         after_ids = read_ids(result.output / "SPLSTATE.IDS")
@@ -812,6 +894,32 @@ class TempusHolyPowerTests(unittest.TestCase):
         self.assertRegex(
             result.transcript.upper(),
             r"OHTMPS1|HOLY[ _-]?POWER|30[ _-]?HEADER|THAC0|DURATION|APR",
+        )
+
+    def test_accepts_exact_future_30_header_holy_power(self) -> None:
+        result = self.run_case(
+            phase="classify",
+            alternate_ids=True,
+            holy_layout="valid_30",
+        )
+        self.assert_success(result)
+        holy = read_spl(result.fixture.root / f"{HOLY_RESREF}.SPL")
+        self.assertEqual(30, len(holy.abilities))
+        self.assertTrue(
+            any(
+                effect.resource.upper() == SENTINEL_RESOURCE
+                for ability in holy.abilities
+                for effect in ability.effects
+            ),
+            "valid patched fixture must retain a foreign effect",
+        )
+        self.assertTrue(
+            any(
+                effect.opcode == 272 and effect.resource.upper().startswith(PRIVATE_PREFIX)
+                for ability in holy.abilities
+                for effect in ability.effects
+            ),
+            "valid patched fixture must include CBR-owned bridge effects",
         )
 
     def test_rejects_splstate_collisions_and_exhaustion(self) -> None:
