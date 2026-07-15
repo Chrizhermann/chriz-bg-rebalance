@@ -147,6 +147,15 @@ def _make_holy_fixture(divine_resref: str, holy_layout: str = "original") -> Spl
         "valid_30_bad_timing": "bad_timing",
         "valid_30_bad_resist_dispel": "bad_resist_dispel",
         "valid_30_bad_duration": "bad_duration",
+        "valid_30_bad_target": "bad_target",
+        "valid_30_bad_power": "bad_power",
+        "valid_30_bad_probability1": "bad_probability1",
+        "valid_30_bad_probability2": "bad_probability2",
+        "valid_30_bad_dice_number": "bad_dice_number",
+        "valid_30_bad_dice_size": "bad_dice_size",
+        "valid_30_bad_save_type": "bad_save_type",
+        "valid_30_bad_save_bonus": "bad_save_bonus",
+        "valid_30_bad_special": "bad_special",
     }
     if holy_layout == "original":
         return dataclasses.replace(spell, abilities=tuple(abilities))
@@ -237,6 +246,24 @@ def _make_holy_fixture(divine_resref: str, holy_layout: str = "original") -> Spl
                     pulse = dataclasses.replace(pulse, resist_dispel=2)
                 elif pulse_fault == "bad_duration":
                     pulse = dataclasses.replace(pulse, duration=duration + 1)
+                elif pulse_fault == "bad_target":
+                    pulse = dataclasses.replace(pulse, target=2)
+                elif pulse_fault == "bad_power":
+                    pulse = dataclasses.replace(pulse, power=3)
+                elif pulse_fault == "bad_probability1":
+                    pulse = dataclasses.replace(pulse, probability1=99)
+                elif pulse_fault == "bad_probability2":
+                    pulse = dataclasses.replace(pulse, probability2=1)
+                elif pulse_fault == "bad_dice_number":
+                    pulse = dataclasses.replace(pulse, dice_number=1)
+                elif pulse_fault == "bad_dice_size":
+                    pulse = dataclasses.replace(pulse, dice_size=1)
+                elif pulse_fault == "bad_save_type":
+                    pulse = dataclasses.replace(pulse, save_type=1)
+                elif pulse_fault == "bad_save_bonus":
+                    pulse = dataclasses.replace(pulse, save_bonus=1)
+                elif pulse_fault == "bad_special":
+                    pulse = dataclasses.replace(pulse, special=1)
             if pulse is not None:
                 effects.append(pulse)
                 if level == 13 and pulse_fault == "duplicate":
@@ -984,13 +1011,22 @@ class TempusHolyPowerTests(unittest.TestCase):
                 pulse = owned_pulses[0]
                 self.assertEqual(_strength_pulse_resref(level), pulse.resource.upper())
                 self.assertEqual(
-                    (1, 3, 0, 3, duration),
+                    (1, 4, 1, 3, 0, 3, duration, 100, 0, 0, 0, 0, 0, 0),
                     (
+                        pulse.target,
+                        pulse.power,
                         pulse.parameter1,
                         pulse.parameter2,
                         pulse.timing,
                         pulse.resist_dispel,
                         pulse.duration,
+                        pulse.probability1,
+                        pulse.probability2,
+                        pulse.dice_number,
+                        pulse.dice_size,
+                        pulse.save_type,
+                        pulse.save_bonus,
+                        pulse.special,
                     ),
                 )
                 self.assertTrue(
@@ -1020,6 +1056,15 @@ class TempusHolyPowerTests(unittest.TestCase):
             "valid_30_bad_timing",
             "valid_30_bad_resist_dispel",
             "valid_30_bad_duration",
+            "valid_30_bad_target",
+            "valid_30_bad_power",
+            "valid_30_bad_probability1",
+            "valid_30_bad_probability2",
+            "valid_30_bad_dice_number",
+            "valid_30_bad_dice_size",
+            "valid_30_bad_save_type",
+            "valid_30_bad_save_bonus",
+            "valid_30_bad_special",
         ):
             with self.subTest(holy_layout=holy_layout):
                 result = self.run_case(

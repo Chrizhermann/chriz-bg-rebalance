@@ -440,12 +440,21 @@ BEGIN
     FOR (cbr_effect = 0; cbr_effect < cbr_holy_effect_count; ++cbr_effect) BEGIN
       SET cbr_effect_offset = cbr_holy_effect_offset + ((cbr_holy_first_effect + cbr_effect) * 0x30)
       READ_SHORT cbr_effect_offset cbr_holy_opcode
+      READ_BYTE  (cbr_effect_offset + 0x02) cbr_holy_effect_target
+      READ_BYTE  (cbr_effect_offset + 0x03) cbr_holy_power
       READ_LONG  (cbr_effect_offset + 0x04) cbr_holy_parameter1
       READ_LONG  (cbr_effect_offset + 0x08) cbr_holy_parameter2
       READ_BYTE  (cbr_effect_offset + 0x0c) cbr_holy_timing
       READ_BYTE  (cbr_effect_offset + 0x0d) cbr_holy_resist_dispel
       READ_LONG  (cbr_effect_offset + 0x0e) cbr_holy_duration
+      READ_BYTE  (cbr_effect_offset + 0x12) cbr_holy_probability1
+      READ_BYTE  (cbr_effect_offset + 0x13) cbr_holy_probability2
       READ_ASCII (cbr_effect_offset + 0x14) cbr_holy_resource (8) NULL
+      READ_LONG  (cbr_effect_offset + 0x1c) cbr_holy_dice_number
+      READ_LONG  (cbr_effect_offset + 0x20) cbr_holy_dice_size
+      READ_LONG  (cbr_effect_offset + 0x24) cbr_holy_save_type
+      READ_LONG  (cbr_effect_offset + 0x28) cbr_holy_save_bonus
+      READ_LONG  (cbr_effect_offset + 0x2c) cbr_holy_special
       PATCH_IF (cbr_holy_opcode = 321 && ~%cbr_holy_resource%~ STR_EQ ~OHTMPS1~) BEGIN
         ++cbr_own_cleanup
       END
@@ -481,11 +490,20 @@ BEGIN
               || ~%cbr_holy_resource%~ STR_EQ ~%strength_pulse_21%~)) BEGIN
         ++cbr_owned_strength_pulses
         PATCH_IF (!(~%cbr_holy_resource%~ STR_EQ ~%cbr_expected_strength_pulse%~)
+               || cbr_holy_effect_target != 1
+               || cbr_holy_power != 4
                || cbr_holy_parameter1 != 1
                || cbr_holy_parameter2 != 3
                || cbr_holy_timing != 0
                || cbr_holy_resist_dispel != 3
-               || cbr_holy_duration != cbr_expected_duration) BEGIN
+               || cbr_holy_duration != cbr_expected_duration
+               || cbr_holy_probability1 != 100
+               || cbr_holy_probability2 != 0
+               || cbr_holy_dice_number != 0
+               || cbr_holy_dice_size != 0
+               || cbr_holy_save_type != 0
+               || cbr_holy_save_bonus != 0
+               || cbr_holy_special != 0) BEGIN
           SET cbr_owned_strength_pulse_invalid = 1
         END
       END
