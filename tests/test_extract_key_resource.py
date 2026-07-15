@@ -20,24 +20,50 @@ SCRIPT = (
     / "extract_key_resource.py"
 )
 SPL_TYPE = 1006
+TARGET_ORDINAL = 0x35
+SERIALIZED_TARGET_LOCATOR = 0xDEADBEEF
 
 
 def write_biff(
     path: Path,
     payload: bytes,
     *,
-    locator: int = 0x35,
+    target_ordinal: int = TARGET_ORDINAL,
+    serialized_locator: int = SERIALIZED_TARGET_LOCATOR,
     declared_size: int | None = None,
 ) -> None:
-    """Write the smallest BIFF V1 file containing one variable resource."""
+    """Write a BIFF V1 with the target after earlier variable-resource decoys."""
     path.parent.mkdir(parents=True, exist_ok=True)
     table_offset = 0x14
-    payload_offset = table_offset + 0x10
-    size = len(payload) if declared_size is None else declared_size
-    data = bytearray(struct.pack("<4s4sIII", b"BIFF", b"V1  ", 1, 0, table_offset))
-    data.extend(struct.pack("<IIIHH", locator, payload_offset, size, SPL_TYPE, 0))
-    data.extend(payload)
-    path.write_bytes(data)
+    variable_count = target_ordinal + 1
+    payload_offset = table_offset + variable_count * 0x10
+    entries = bytearray()
+    payloads = bytearray()
+    for ordinal in range(variable_count):
+        if ordinal == target_ordinal:
+            entry_payload = payload
+            entry_size = len(payload) if declared_size is None else declared_size
+            entry_locator = serialized_locator
+        else:
+            entry_payload = f"decoy {ordinal}".encode("ascii")
+            entry_size = len(entry_payload)
+            entry_locator = 0x70000000 + ordinal
+        entries.extend(
+            struct.pack(
+                "<IIIHH",
+                entry_locator,
+                payload_offset + len(payloads),
+                entry_size,
+                SPL_TYPE,
+                0,
+            )
+        )
+        payloads.extend(entry_payload)
+
+    header = struct.pack(
+        "<4s4sIII", b"BIFF", b"V1  ", variable_count, 0, table_offset
+    )
+    path.write_bytes(header + entries + payloads)
 
 
 def write_key(path: Path, bif_paths: list[Path], locator: int) -> None:
@@ -82,7 +108,7 @@ class ExtractKeyResourceTests(unittest.TestCase):
         self,
         root: Path,
         *,
-        target_locator: int = 0x35,
+        key_resource_index: int = TARGET_ORDINAL,
         target_size: int | None = None,
     ) -> tuple[Path, bytes]:
         decoy = b"wrong BIF"
@@ -93,11 +119,10 @@ class ExtractKeyResourceTests(unittest.TestCase):
         write_biff(
             root / bif_paths[2],
             target,
-            locator=target_locator,
             declared_size=target_size,
         )
         key_path = root / "chitin.key"
-        write_key(key_path, bif_paths, (2 << 20) | 0x35)
+        write_key(key_path, bif_paths, (2 << 20) | key_resource_index)
         return key_path, target
 
     def test_resolves_case_insensitively_and_uses_key_locator_parts(self) -> None:
@@ -106,6 +131,11 @@ class ExtractKeyResourceTests(unittest.TestCase):
             key_path, target = self.make_fixture(root)
             output = root / "chosen-output.bin"
             files_before = {path.relative_to(root) for path in root.rglob("*") if path.is_file()}
+            input_paths = [key_path, *sorted((root / "DATA").glob("*.BIF"))]
+            input_snapshots = {}
+            for path in input_paths:
+                data = path.read_bytes()
+                input_snapshots[path] = (data, hashlib.sha256(data).hexdigest())
 
             result = extract_key_resource.extract_resource(
                 key_path=key_path,
@@ -117,8 +147,13 @@ class ExtractKeyResourceTests(unittest.TestCase):
 
             self.assertEqual(output.read_bytes(), target)
             self.assertEqual(result.bif_index, 2)
-            self.assertEqual(result.resource_index, 0x35)
-            self.assertEqual(result.bif_resource_locator, 0x35)
+            self.assertEqual(result.resource_index, TARGET_ORDINAL)
+            self.assertEqual(result.bif_resource_locator, SERIALIZED_TARGET_LOCATOR)
+            self.assertNotEqual(result.bif_resource_locator, result.resource_index)
+            for path, (before_bytes, before_hash) in input_snapshots.items():
+                after_bytes = path.read_bytes()
+                self.assertEqual(after_bytes, before_bytes)
+                self.assertEqual(hashlib.sha256(after_bytes).hexdigest(), before_hash)
             files_after = {path.relative_to(root) for path in root.rglob("*") if path.is_file()}
             self.assertEqual(files_after - files_before, {Path("chosen-output.bin")})
             self.assertFalse((root / "MIXED.SPL").exists())
@@ -174,9 +209,9 @@ class ExtractKeyResourceTests(unittest.TestCase):
         for option in ("--key", "--game-root", "--resref", "--type", "--output"):
             self.assertIn(option, completed.stderr)
 
-    def test_cli_fails_cleanly_on_locator_or_size_mismatch(self) -> None:
+    def test_cli_fails_cleanly_on_out_of_range_index_or_size_mismatch(self) -> None:
         cases = (
-            ("locator", {"target_locator": 0x36}, "locator"),
+            ("index", {"key_resource_index": TARGET_ORDINAL + 1}, "out of range"),
             ("size", {"target_size": 10_000}, "size"),
         )
         for label, fixture_args, expected_message in cases:

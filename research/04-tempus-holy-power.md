@@ -36,14 +36,17 @@ The extractor independently resolved and validated this chain:
 - KEY resource entry **33414**: `OHTMPS1`, type 1006 (`SPL`), locator
   **`0x01000035`**;
 - the locator high bits, `0x01000035 >> 20`, select BIF index **16**;
-- the locator low 20 bits, `0x01000035 & 0xFFFFF`, select variable resource
-  index **`0x35`**;
+- the locator low 20 bits, `0x01000035 & 0xFFFFF`, select variable-resource table
+  ordinal **`0x35`**;
 - KEY BIF entry 16 names `data\Patch25.bif` (`DATA/PATCH25.BIF` on this
   case-insensitive installation);
 - `PATCH25.BIF`: BIFF V1, 111 variable resources, no fixed resources, 17,396,564
   bytes, modified `2026-02-07T16:15:58.6008646Z`, SHA-256
   `eb4340f6d0628a761ff16c5383c49e36d87b4c071e81fd9ac5ccadb9518b6d6e`;
-- its variable entry stores the low locator **`0x35`**, not the full KEY locator;
+- at ordinal `0x35`, the serialized locator dword also happens to contain **`0x35`**.
+  That equality is live evidence, not the lookup rule. Near Infinity's `BIFFReader.init`
+  regular-resource loop assigns the locator from loop ordinal `i` and explicitly skips
+  this serialized dword; the repository extractor follows that engine-compatible rule;
 - the payload begins at **`0x5EAA08`**, is **13,394** bytes, and hashes to
   **`abd47abfa923196f7c25332a5bc9518ceb08458b0a0bfa25a85fa3be1e1d70ef`**.
 

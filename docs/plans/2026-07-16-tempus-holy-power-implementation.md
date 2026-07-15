@@ -32,9 +32,10 @@ Create a tiny synthetic KEY/BIF pair in a temporary directory. Assert that the e
 
 - resolves a resource by case-insensitive resref and type;
 - selects the BIF from the high locator bits in the KEY entry;
-- compares the BIF variable-resource index against `locator & 0xFFFFF` rather than the full locator;
+- uses `locator & 0xFFFFF` as the BIF variable-resource table ordinal, regardless of the
+  entry's serialized locator dword;
 - writes only to the caller-provided output path; and
-- fails cleanly on a locator/size mismatch.
+- fails cleanly on an out-of-range ordinal or payload-size mismatch.
 
 Run:
 

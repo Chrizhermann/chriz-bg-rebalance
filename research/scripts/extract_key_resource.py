@@ -213,24 +213,18 @@ def _read_biff_resource(
                     f"BIFF variable table size mismatch: expected {table_size}, got {len(table)}"
                 )
 
-            locator_match: tuple[int, int, int, int] | None = None
-            for index in range(variable_count):
-                entry = BIFF_VARIABLE_ENTRY.unpack_from(
-                    table, index * BIFF_VARIABLE_ENTRY.size
-                )
-                locator, payload_offset, payload_size, resource_type, _unknown = entry
-                if locator == resource_index:
-                    locator_match = locator, payload_offset, payload_size, resource_type
-                    break
-
-            if locator_match is None:
+            if resource_index >= variable_count:
                 raise ExtractionError(
-                    f"BIFF variable-resource locator 0x{resource_index:X} was not found"
+                    f"BIFF variable-resource index 0x{resource_index:X} is out of range "
+                    f"for {variable_count} entries"
                 )
-            locator, payload_offset, payload_size, resource_type = locator_match
+            entry_offset = resource_index * BIFF_VARIABLE_ENTRY.size
+            serialized_locator, payload_offset, payload_size, resource_type, _unknown = (
+                BIFF_VARIABLE_ENTRY.unpack_from(table, entry_offset)
+            )
             if resource_type != requested_type:
                 raise ExtractionError(
-                    f"BIFF locator 0x{locator:X} type mismatch: "
+                    f"BIFF variable-resource index 0x{resource_index:X} type mismatch: "
                     f"expected {requested_type}, got {resource_type}"
                 )
             payload_end = payload_offset + payload_size
@@ -245,7 +239,7 @@ def _read_biff_resource(
                 raise ExtractionError(
                     f"BIFF payload size mismatch: expected {payload_size}, got {len(payload)}"
                 )
-            return payload, locator, payload_offset, payload_size
+            return payload, serialized_locator, payload_offset, payload_size
     except ExtractionError:
         raise
     except OSError as error:
@@ -360,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"KEY locator: 0x{result.key_locator:08X}")
     print(f"BIF index: {result.bif_index}")
     print(f"BIF path: {result.bif_path}")
-    print(f"BIF variable locator: 0x{result.bif_resource_locator:X}")
+    print(f"BIF serialized locator field: 0x{result.bif_resource_locator:X}")
     print(f"Payload offset: 0x{result.payload_offset:X}")
     print(f"Payload size: {result.payload_size}")
     print(f"SHA-256: {result.sha256}")
