@@ -122,6 +122,7 @@ class HarnessResult:
     mode: str
     variant: str
     process: subprocess.CompletedProcess[str]
+    source_snapshot: dict[str, bytes] | None = None
 
     @property
     def transcript(self) -> str:
@@ -420,7 +421,7 @@ def _make_holy_fixture(divine_resref: str, holy_layout: str = "original") -> Spl
                 own_cleanup_source, resist_dispel=2
             )
             divine_cleanup = dataclasses.replace(
-                divine_cleanup_source, resist_dispel=2
+                divine_cleanup_source, parameter2=2, resist_dispel=2
             )
             effects = []
             for effect in ability.effects:
@@ -843,6 +844,22 @@ def _improved_haste_fixture(
         del effects[additive_index]
     elif variant == "probabilistic":
         effects[additive_index] = dataclasses.replace(additive, probability1=50)
+    elif variant == "delayed_additive":
+        effects[additive_index] = dataclasses.replace(additive, timing=3)
+    elif variant == "save_conditioned_additive":
+        effects[additive_index] = dataclasses.replace(
+            additive, save_type=1, save_bonus=-1
+        )
+    elif variant == "metadata_additive":
+        effects[additive_index] = dataclasses.replace(
+            additive,
+            resource="FOREIGN",
+            dice_number=1,
+            dice_size=2,
+            special=1,
+        )
+    elif variant == "mr_resistible_additive":
+        effects[additive_index] = dataclasses.replace(additive, resist_dispel=1)
     elif variant == "conditional":
         helper_resref = "CBRIHCON"
         effects[additive_index] = dataclasses.replace(
@@ -911,6 +928,9 @@ def build_fixture(
     strength_helpers_layout: str | None = None,
     clab_layout: str = "original",
     reserved_itm_resref: str | None = None,
+    casting_sentinels: bool = False,
+    effect_partition_layout: str = "canonical",
+    dangling_apr_owner: str | None = None,
 ) -> Fixture:
     root.mkdir(parents=True, exist_ok=True)
     ids = IdsFile(
@@ -924,15 +944,49 @@ def build_fixture(
     divine_resref = spell_resref(divine_id, "CLERIC_HOLY_POWER")
     haste_resref = spell_resref(haste_id, "WIZARD_IMPROVED_HASTE")
 
-    write_spl(
-        root / f"{HOLY_RESREF}.SPL",
-        _make_holy_fixture(divine_resref, holy_layout),
-    )
-    write_spl(root / f"{divine_resref}.SPL", _make_divine_fixture(divine_resref))
+    holy_spell = _make_holy_fixture(divine_resref, holy_layout)
+    divine_spell = _make_divine_fixture(divine_resref)
     haste, helpers = _improved_haste_fixture(variant, haste_resref)
+    if casting_sentinels:
+        holy_spell = dataclasses.replace(holy_spell, casting_effects=(_sentinel_effect(),))
+        divine_spell = dataclasses.replace(divine_spell, casting_effects=(_sentinel_effect(),))
+        haste = dataclasses.replace(haste, casting_effects=(_sentinel_effect(),))
+    if dangling_apr_owner == "holy":
+        abilities = list(holy_spell.abilities)
+        abilities[12] = dataclasses.replace(
+            abilities[12],
+            effects=abilities[12].effects
+            + (_helper_effect(326, resource=APR_HELPER_RESREFS[1]),),
+        )
+        holy_spell = dataclasses.replace(holy_spell, abilities=tuple(abilities))
+    elif dangling_apr_owner == "ih":
+        abilities = list(haste.abilities)
+        abilities[0] = dataclasses.replace(
+            abilities[0],
+            effects=abilities[0].effects
+            + (_helper_effect(326, resource=APR_HELPER_RESREFS[1]),),
+        )
+        haste = dataclasses.replace(haste, abilities=tuple(abilities))
+    elif dangling_apr_owner is not None:
+        raise ValueError(f"unknown dangling APR owner: {dangling_apr_owner}")
+    write_spl(root / f"{HOLY_RESREF}.SPL", holy_spell)
+    write_spl(root / f"{divine_resref}.SPL", divine_spell)
     write_spl(root / f"{haste_resref}.SPL", haste)
     for resref, helper in helpers.items():
         write_spl(root / f"{resref}.SPL", helper)
+    if effect_partition_layout != "canonical":
+        haste_path = root / f"{haste_resref}.SPL"
+        raw_haste = bytearray(haste_path.read_bytes())
+        if effect_partition_layout == "ih_orphan":
+            raw_haste.extend(_sentinel_effect().to_bytes())
+        elif effect_partition_layout == "ih_overlap":
+            ability_offset = int.from_bytes(raw_haste[0x64:0x68], "little")
+            first_index = raw_haste[ability_offset + 0x20 : ability_offset + 0x22]
+            second_header = ability_offset + 0x28
+            raw_haste[second_header + 0x20 : second_header + 0x22] = first_index
+        else:
+            raise ValueError(f"unknown effect partition layout: {effect_partition_layout}")
+        haste_path.write_bytes(raw_haste)
 
     clab_path = root / CLAB_NAME
     shutil.copyfile(ORIGINALS / "OHTEMPUS.2da.orig", clab_path)
@@ -959,6 +1013,7 @@ def build_fixture(
         (200, "FOREIGN_200"),
         (254, "FOREIGN_254"),
     )
+    splstate_extra = b""
     if splstate_layout == "free":
         state_entries = base_states
     elif splstate_layout == "reuse":
@@ -982,9 +1037,21 @@ def build_fixture(
         )
     elif splstate_layout == "exhausted":
         state_entries = tuple((value, f"FOREIGN_STATE_{value}") for value in range(256))
+    elif splstate_layout == "hex_collision":
+        state_entries = base_states
+        splstate_extra = b"   0xFF FOREIGN_HEX_255\n"
+    elif splstate_layout == "hex_reuse":
+        state_entries = base_states
+        splstate_extra = b"".join(
+            f"\t0x{240 + index:X} {symbol}\n".encode("ascii")
+            for index, symbol in enumerate(PRIVATE_STATE_SYMBOLS)
+        )
     else:
         raise ValueError(f"unknown SPLSTATE fixture layout: {splstate_layout}")
-    write_ids(root / "SPLSTATE.IDS", IdsFile(entries=state_entries))
+    splstate_path = root / "SPLSTATE.IDS"
+    write_ids(splstate_path, IdsFile(entries=state_entries))
+    if splstate_extra:
+        splstate_path.write_bytes(splstate_path.read_bytes() + splstate_extra)
     if strength_helpers_layout is None:
         strength_helpers_layout = (
             "exact" if holy_layout.startswith("valid_30") else "absent"
@@ -999,6 +1066,15 @@ def build_fixture(
         splprot_rows = tuple(
             row for row in splprot_rows if row[0] != "1_STATE_N"
         )
+    elif splprot_layout == "duplicate_semantics":
+        splprot_rows += (
+            ("4_ACTIVE_ALIAS", ("0x112", "-1", "1")),
+            ("5_STR_EQ_N", ("36", "-1", "1")),
+            ("6_STR_EQ_ALIAS", ("36", "-1", "1")),
+            ("7_STR_BONUS_LT_N", ("37", "-1", "2")),
+        )
+    elif splprot_layout == "malformed_numeric":
+        splprot_rows += (("4_MALFORMED", ("NOT_A_STAT", "-1", "1")),)
     elif splprot_layout != "default":
         raise ValueError(f"unknown SPLPROT fixture layout: {splprot_layout}")
     if strength_helpers_layout != "absent":
@@ -1018,7 +1094,12 @@ def build_fixture(
     )
     _write_strength_helper_fixture(root, strength_helpers_layout)
     if reserved_itm_resref is not None:
-        if reserved_itm_resref.upper() not in RESERVED_PRIVATE_RESREFS:
+        allowed_itm_resrefs = {
+            *RESERVED_PRIVATE_RESREFS,
+            HOLY_RESREF,
+            divine_resref.upper(),
+        }
+        if reserved_itm_resref.upper() not in allowed_itm_resrefs:
             raise ValueError(
                 f"unknown reserved private resref for ITM collision: {reserved_itm_resref}"
             )
@@ -1126,6 +1207,9 @@ def _run_harness(
     absolute_process_override: bool = False,
     reserved_itm_resref: str | None = None,
     scratch_reserved_resref: str | None = None,
+    casting_sentinels: bool = False,
+    effect_partition_layout: str = "canonical",
+    dangling_apr_owner: str | None = None,
 ) -> HarnessResult:
     temporary = tempfile.TemporaryDirectory(prefix="cbr-tempus-")
     base = Path(temporary.name)
@@ -1155,6 +1239,9 @@ def _run_harness(
         strength_helpers_layout=strength_helpers_layout,
         clab_layout=clab_layout,
         reserved_itm_resref=reserved_itm_resref,
+        casting_sentinels=casting_sentinels,
+        effect_partition_layout=effect_partition_layout,
+        dangling_apr_owner=dangling_apr_owner,
     )
     if scratch_reserved_resref is not None:
         if scratch_reserved_resref.upper() not in RESERVED_PRIVATE_RESREFS:
@@ -1212,13 +1299,26 @@ def _rerun_harness(
     *,
     phase: str = "full",
     absolute_process_override: bool = False,
+    fixture_mutator=None,
+    scratch_sentinel: bool = False,
+    scratch_mutator=None,
 ) -> HarnessResult:
     temporary = tempfile.TemporaryDirectory(prefix="cbr-tempus-second-")
     base = Path(temporary.name)
     fixture_root = base / "fixture"
     run_dir = base / "weidu-run"
     shutil.copytree(previous.output, fixture_root)
+    if fixture_mutator is not None:
+        fixture_mutator(fixture_root)
     run_dir.mkdir()
+    if scratch_sentinel:
+        scratch_override = run_dir / "override"
+        scratch_override.mkdir(exist_ok=True)
+        (scratch_override / "FOREIGN.KEEP").write_bytes(SCRATCH_COLLISION_SENTINEL)
+    if scratch_mutator is not None:
+        scratch_override = run_dir / "override"
+        scratch_override.mkdir(exist_ok=True)
+        scratch_mutator(scratch_override)
     if absolute_process_override:
         output = run_dir / "override"
     else:
@@ -1229,6 +1329,7 @@ def _rerun_harness(
         divine_resref=previous.fixture.divine_resref,
         haste_resref=previous.fixture.haste_resref,
     )
+    source_snapshot = _raw_file_tree(fixture_root)
     command = [
         str(WEIDU), str(HARNESS), "--nogame", "--force-install-list", PHASE_COMPONENT[phase],
         "--args", str(PRODUCTION_TPA), "--args", str(fixture_root), "--args", str(output),
@@ -1251,6 +1352,7 @@ def _rerun_harness(
         mode=previous.mode,
         variant=previous.variant,
         process=process,
+        source_snapshot=source_snapshot,
     )
 
 
@@ -1385,10 +1487,9 @@ class FixtureFormatTests(unittest.TestCase):
                         target=5,
                         projectile=0,
                         effects=(
-                            SplEffect(opcode=321, target=1, resource=helper_resref),
-                            SplEffect(
-                                opcode=1,
-                                target=1,
+                            _helper_effect(321, parameter2=2, resource=helper_resref),
+                            _helper_effect(
+                                1,
                                 parameter1=6,
                                 parameter2=0,
                                 timing=0,
@@ -1402,11 +1503,13 @@ class FixtureFormatTests(unittest.TestCase):
             write_spl(root / f"{helper_resref}.SPL", helper)
             valid = EffV2(
                 opcode=326,
-                target=1,
+                target=2,
+                power=4,
                 parameter1=210,
                 parameter2=4,
                 timing=1,
                 resource=helper_resref,
+                flags=2,
             )
             (root / "VALID.EFF").write_bytes(valid.to_bytes())
             self.assertEqual(
@@ -1515,6 +1618,9 @@ class TempusHolyPowerTests(unittest.TestCase):
         absolute_process_override: bool = False,
         reserved_itm_resref: str | None = None,
         scratch_reserved_resref: str | None = None,
+        casting_sentinels: bool = False,
+        effect_partition_layout: str = "canonical",
+        dangling_apr_owner: str | None = None,
     ) -> HarnessResult:
         result = _run_harness(
             variant,
@@ -1530,6 +1636,9 @@ class TempusHolyPowerTests(unittest.TestCase):
             absolute_process_override=absolute_process_override,
             reserved_itm_resref=reserved_itm_resref,
             scratch_reserved_resref=scratch_reserved_resref,
+            casting_sentinels=casting_sentinels,
+            effect_partition_layout=effect_partition_layout,
+            dangling_apr_owner=dangling_apr_owner,
         )
         self._results.append(result)
         return result
@@ -1585,6 +1694,57 @@ class TempusHolyPowerTests(unittest.TestCase):
         self.assert_success(self.run_case("doubling", "force_double", phase="classify"))
         self.assert_rejected(self.run_case("doubling", "force_additive", phase="classify"))
 
+    def test_rejects_unsafe_additive_donor_delivery_metadata(self) -> None:
+        variants = (
+            "delayed_additive",
+            "save_conditioned_additive",
+            "metadata_additive",
+            "mr_resistible_additive",
+        )
+        for variant in variants:
+            for mode in ("auto", "force_additive"):
+                with self.subTest(variant=variant, mode=mode):
+                    result = self.run_case(variant, mode, phase="classify")
+                    self.assert_rejected(result)
+                    self.assertRegex(
+                        result.transcript,
+                        r"(?i)IMPROVED[ _-]?HASTE|ADDITIVE|DONOR|TIMING|SAVE|METADATA|RESIST",
+                    )
+
+    def test_rejects_nonpartitioned_parent_effect_tables_before_writes(self) -> None:
+        for layout in ("ih_orphan", "ih_overlap"):
+            with self.subTest(layout=layout):
+                result = self.run_case(
+                    "additive",
+                    phase="full",
+                    effect_partition_layout=layout,
+                )
+                self.assert_rejected(result)
+                self.assertRegex(result.transcript, r"(?i)EFFECT|TABLE|PARTITION|ORPHAN|OVERLAP|REFER")
+                self.assertEqual({}, _raw_file_tree(result.output))
+
+    def test_doubling_rejects_dangling_additive_bridge_artifacts(self) -> None:
+        for owner in ("holy", "ih"):
+            with self.subTest(owner=owner):
+                result = self.run_case(
+                    "doubling",
+                    phase="full",
+                    holy_layout="valid_30",
+                    dangling_apr_owner=owner,
+                )
+                self.assertFalse(result.succeeded, f"dangling {owner} APR bridge was accepted")
+                self.assertRegex(result.transcript, r"(?i)APR|BRIDGE|CBRAPR|DANGL|DOUBL")
+                self.assertEqual({}, _raw_file_tree(result.output))
+        private_states = self.run_case(
+            "doubling",
+            phase="full",
+            holy_layout="valid_30",
+            splstate_layout="reuse",
+        )
+        self.assertFalse(private_states.succeeded, "doubling accepted private APR bridge states")
+        self.assertRegex(private_states.transcript, r"(?i)SPLSTATE|PRIVATE|CBR_TEMPUS|DOUBL|BRIDGE")
+        self.assertEqual({}, _raw_file_tree(private_states.output))
+
     def test_state_and_splprot_allocation(self) -> None:
         result = self.run_case(phase="allocate")
         self.assert_success(result)
@@ -1638,6 +1798,40 @@ class TempusHolyPowerTests(unittest.TestCase):
             "unique preallocated private states must be reused without rewriting SPLSTATE.IDS",
         )
 
+    def test_splprot_reuses_lowest_duplicate_semantic_alias_without_rewrite(self) -> None:
+        result = self.run_case(
+            phase="allocate",
+            splprot_layout="duplicate_semantics",
+        )
+        self.assert_success(result)
+        before = result.fixture.root / "SPLPROT.2DA"
+        after = result.output / "SPLPROT.2DA"
+        self.assertEqual(
+            before.read_bytes(),
+            after.read_bytes(),
+            "existing duplicate semantic aliases must be reused without appending or rewriting",
+        )
+        table = read_2da(after)
+        semantics = [tuple(int(value, 0) for value in row) for _, row in table.rows]
+        self.assertEqual(
+            [1, 4],
+            [i for i, row in enumerate(semantics) if row == ACTIVE_SPLSTATE_SEMANTIC],
+        )
+        self.assertEqual(
+            [5, 6],
+            [i for i, row in enumerate(semantics) if row == STR_EQ_SEMANTIC],
+        )
+        self.assertEqual(1, _active_splstate_row(result.output))
+
+    def test_splprot_rejects_nonnumeric_predicate_rows(self) -> None:
+        result = self.run_case(
+            phase="allocate",
+            splprot_layout="malformed_numeric",
+        )
+        self.assertFalse(result.succeeded, result.transcript)
+        self.assertRegex(result.transcript, r"(?i)SPLPROT|NUMERIC|STAT|VALUE|RELATION|MALFORM")
+        self.assertEqual({}, _raw_file_tree(result.output))
+
     def test_doubling_allocation_skips_additive_bridge_states(self) -> None:
         result = self.run_case(
             "doubling",
@@ -1685,6 +1879,30 @@ class TempusHolyPowerTests(unittest.TestCase):
         new_symbols = (PRIVATE_STATE_SYMBOLS[1], PRIVATE_STATE_SYMBOLS[3])
         self.assertTrue(
             {after.value(symbol) for symbol in new_symbols}.isdisjoint(before.values())
+        )
+
+    def test_splstate_hex_rows_are_counted_for_collision_and_reuse(self) -> None:
+        collision = self.run_case(phase="allocate", splstate_layout="hex_collision")
+        self.assert_success(collision)
+        collision_ids = read_ids(collision.output / "SPLSTATE.IDS")
+        values = [value for value, _ in collision_ids.entries]
+        self.assertEqual(len(values), len(set(values)), "hex 0xFF row was numerically aliased")
+        self.assertNotIn(
+            255,
+            [collision_ids.value(symbol) for symbol in PRIVATE_STATE_SYMBOLS],
+        )
+
+        reuse = self.run_case(phase="allocate", splstate_layout="hex_reuse")
+        self.assert_success(reuse)
+        reuse_ids = read_ids(reuse.output / "SPLSTATE.IDS")
+        self.assertEqual(
+            [240, 241, 242, 243],
+            [reuse_ids.value(symbol) for symbol in PRIVATE_STATE_SYMBOLS],
+        )
+        self.assertEqual(
+            (reuse.fixture.root / "SPLSTATE.IDS").read_bytes(),
+            (reuse.output / "SPLSTATE.IDS").read_bytes(),
+            "hex/leading-whitespace private states were not reused byte-identically",
         )
 
     def test_rejects_stale_cloned_30_header_holy_power(self) -> None:
@@ -1893,6 +2111,23 @@ class TempusHolyPowerTests(unittest.TestCase):
             accepted,
             "reserved private resrefs accepted same-name ITM resources",
         )
+
+    def test_rejects_parent_buff_itm_cleanup_collisions(self) -> None:
+        divine_resref = spell_resref(1499, "CLERIC_HOLY_POWER")
+        for resref in (HOLY_RESREF, divine_resref):
+            with self.subTest(resref=resref):
+                result = self.run_case(
+                    phase="classify",
+                    reserved_itm_resref=resref,
+                )
+                self.assertFalse(
+                    result.succeeded,
+                    f"opcode-321 parent cleanup accepted collateral {resref}.ITM",
+                )
+                self.assertRegex(result.transcript.upper(), r"ITM|ITEM|PARENT|COLLIS|CLEANUP")
+        process = _run_key_collision_harness(HOLY_RESREF, "ITM")
+        self.assertNotEqual(0, process.returncode, process.stdout + process.stderr)
+        self.assertRegex((process.stdout + process.stderr).upper(), r"OHTMPS1|ITM|COLLIS|CLEANUP")
 
     def test_rejects_key_only_private_namespace_collisions_for_all_extensions(self) -> None:
         accepted: list[str] = []
@@ -2164,7 +2399,7 @@ class TempusHolyPowerTests(unittest.TestCase):
         for level, ability in enumerate(holy.abilities, start=1):
             floor = _strength_floor(level)
             expected_prefix = [
-                _helper_effect(321, resource=result.fixture.divine_resref),
+                _helper_effect(321, parameter2=2, resource=result.fixture.divine_resref),
                 _helper_effect(321, resource=HOLY_RESREF),
                 *(
                     _helper_effect(321, parameter2=2, resource=setter)
@@ -2424,17 +2659,40 @@ class TempusHolyPowerTests(unittest.TestCase):
         holy = read_spl(result.output / f"{HOLY_RESREF}.SPL")
         divine_before = read_spl(result.fixture.root / f"{divine_resref}.SPL")
         divine = read_spl(result.output / f"{divine_resref}.SPL")
+        self.assertEqual(
+            _nonstructural_spl_header(divine_before.header_raw),
+            _nonstructural_spl_header(divine.header_raw),
+        )
+        self.assertEqual(
+            tuple(effect.to_bytes() for effect in divine_before.casting_effects),
+            tuple(effect.to_bytes() for effect in divine.casting_effects),
+        )
         self.assertEqual(len(divine_before.abilities), len(divine.abilities))
         for ability in holy.abilities:
             self.assertEqual((321, divine_resref), (ability.effects[0].opcode, ability.effects[0].resource.upper()))
             self.assertEqual((321, HOLY_RESREF), (ability.effects[1].opcode, ability.effects[1].resource.upper()))
         for before_ability, ability in zip(divine_before.abilities, divine.abilities):
-            self.assertEqual((321, HOLY_RESREF), (ability.effects[0].opcode, ability.effects[0].resource.upper()))
-            self.assertEqual((321, divine_resref), (ability.effects[1].opcode, ability.effects[1].resource.upper()))
             self.assertEqual(
-                tuple(effect.canonical() for effect in before_ability.effects),
-                tuple(effect.canonical() for effect in ability.effects[1:]),
-                "reciprocal cleanup changed an existing Divine Power effect",
+                _nonstructural_ability_header(before_ability.raw),
+                _nonstructural_ability_header(ability.raw),
+            )
+            expected_cleanup = (
+                _helper_effect(321, parameter2=2, resource=HOLY_RESREF),
+                *(
+                    _helper_effect(321, parameter2=2, resource=setter)
+                    for setter in STRENGTH_SETTER_BY_FLOOR.values()
+                ),
+            )
+            cleanup = ability.effects[: len(expected_cleanup)]
+            self.assertEqual(
+                tuple(effect.canonical() for effect in expected_cleanup),
+                tuple(effect.canonical() for effect in cleanup),
+                "Divine Power lacks the exact early Holy/Strength cleanup prefix",
+            )
+            self.assertEqual(
+                tuple(effect.to_bytes() for effect in before_ability.effects),
+                tuple(effect.to_bytes() for effect in ability.effects[len(expected_cleanup) :]),
+                "reciprocal cleanup changed an existing Divine Power effect byte",
             )
 
     def test_additive_bridge_graph(self) -> None:
@@ -2480,6 +2738,14 @@ class TempusHolyPowerTests(unittest.TestCase):
 
         haste = read_spl(result.output / f"{result.fixture.haste_resref}.SPL")
         haste_before = read_spl(result.fixture.root / f"{result.fixture.haste_resref}.SPL")
+        self.assertEqual(
+            _nonstructural_spl_header(haste_before.header_raw),
+            _nonstructural_spl_header(haste.header_raw),
+        )
+        self.assertEqual(
+            tuple(effect.to_bytes() for effect in haste_before.casting_effects),
+            tuple(effect.to_bytes() for effect in haste.casting_effects),
+        )
         holy = read_spl(result.output / f"{HOLY_RESREF}.SPL")
         bridge_resources = helper_resrefs | set(conditions)
         bridge_states = {ih_state, *tier_state_by_key.values()}
@@ -2505,6 +2771,16 @@ class TempusHolyPowerTests(unittest.TestCase):
         ):
             with self.subTest(resource="Improved Haste", header=header_index):
                 self.assertEqual(before_ability.required_level, ability.required_level)
+                self.assertEqual(
+                    (before_ability.target, before_ability.projectile),
+                    (ability.target, ability.projectile),
+                    "bridge changed the Improved Haste header delivery",
+                )
+                self.assertEqual(
+                    _nonstructural_ability_header(before_ability.raw),
+                    _nonstructural_ability_header(ability.raw),
+                    "bridge changed an Improved Haste ability byte other than effect count/index",
+                )
                 donor_before = [
                     effect
                     for effect in before_ability.effects
@@ -2522,12 +2798,22 @@ class TempusHolyPowerTests(unittest.TestCase):
                 self.assertEqual(1, len(donor_before))
                 self.assertEqual(1, len(donor_after))
                 self.assertEqual(donor_before[0].canonical(), donor_after[0].canonical())
-                for effect in before_ability.effects:
-                    self.assertIn(
-                        effect.canonical(),
-                        [candidate.canonical() for candidate in ability.effects],
-                        "additive bridge replaced a foreign Improved Haste effect",
+                preserved_after = [
+                    effect
+                    for effect in ability.effects
+                    if not (
+                        (effect.opcode == 328 and effect.parameter2 == ih_state)
+                        or (
+                            effect.opcode == 326
+                            and effect.resource.upper() in helper_resrefs
+                        )
                     )
+                ]
+                self.assertEqual(
+                    tuple(effect.to_bytes() for effect in before_ability.effects),
+                    tuple(effect.to_bytes() for effect in preserved_after),
+                    "bridge changed or reordered an original Improved Haste effect",
+                )
                 self.assertFalse(
                     any(
                         effect.opcode in (16, 317) and effect.parameter2 == 1
@@ -2565,17 +2851,40 @@ class TempusHolyPowerTests(unittest.TestCase):
                     if effect.opcode == 326 and effect.resource.upper() in helper_resrefs
                 ]
                 self.assertEqual(3, len(kicks), "IH header must kick every active Holy APR tier")
+                donor_index = ability.effects.index(donor_after[0])
+                inserted = ability.effects[donor_index + 1 : donor_index + 5]
+                self.assertEqual(
+                    [marker, *[next(effect for effect in kicks if effect.parameter1 == tier_state_by_key[key]) for key in (6, 1, 7)]],
+                    list(inserted),
+                    "IH marker and tier kicks must immediately follow the APR donor before later immunities",
+                )
                 for key, tier_state in tier_state_by_key.items():
                     matched = [effect for effect in kicks if effect.parameter1 == tier_state]
                     self.assertEqual(1, len(matched), f"missing or duplicate IH kick for APR key {key}")
                     kick = matched[0]
                     self.assertEqual(
-                        (326, tier_state, active_row, 1, 100, 0, helper_by_key[key]),
+                        (
+                            326,
+                            donor_after[0].target,
+                            donor_after[0].power,
+                            tier_state,
+                            active_row,
+                            1,
+                            2,
+                            0,
+                            100,
+                            0,
+                            helper_by_key[key],
+                        ),
                         (
                             kick.opcode,
+                            kick.target,
+                            kick.power,
                             kick.parameter1,
                             kick.parameter2,
                             kick.timing,
+                            kick.resist_dispel,
+                            kick.duration,
                             kick.probability1,
                             kick.probability2,
                             kick.resource.upper(),
@@ -2630,12 +2939,28 @@ class TempusHolyPowerTests(unittest.TestCase):
                 self.assertEqual(1, len(immediate), "Holy header must have one immediate IH gate")
                 kick = immediate[0]
                 self.assertEqual(
-                    (326, ih_state, active_row, 1, 100, 0, helper_by_key[expected_key]),
+                    (
+                        326,
+                        1,
+                        4,
+                        ih_state,
+                        active_row,
+                        1,
+                        2,
+                        0,
+                        100,
+                        0,
+                        helper_by_key[expected_key],
+                    ),
                     (
                         kick.opcode,
+                        kick.target,
+                        kick.power,
                         kick.parameter1,
                         kick.parameter2,
                         kick.timing,
+                        kick.resist_dispel,
+                        kick.duration,
                         kick.probability1,
                         kick.probability2,
                         kick.resource.upper(),
@@ -2687,6 +3012,133 @@ class TempusHolyPowerTests(unittest.TestCase):
             "doubling mode allocated bridge states",
         )
 
+    def test_bridge_preserves_headers_casting_effects_and_task4_holy_bytes(self) -> None:
+        baseline = self.run_case(
+            "additive",
+            phase="progression",
+            casting_sentinels=True,
+        )
+        bridged = self.run_case(
+            "additive",
+            phase="bridge",
+            casting_sentinels=True,
+        )
+        self.assert_success(baseline)
+        self.assert_success(bridged)
+
+        state_values = set(_private_state_values(bridged.output).values())
+        bridge_resources = set(APR_HELPER_RESREFS + APR_CONDITION_RESREFS)
+        holy_before = read_spl(baseline.output / f"{HOLY_RESREF}.SPL")
+        holy_after = read_spl(bridged.output / f"{HOLY_RESREF}.SPL")
+        self.assertEqual(
+            _nonstructural_spl_header(holy_before.header_raw),
+            _nonstructural_spl_header(holy_after.header_raw),
+        )
+        self.assertEqual(
+            tuple(effect.to_bytes() for effect in holy_before.casting_effects),
+            tuple(effect.to_bytes() for effect in holy_after.casting_effects),
+        )
+        for before_ability, after_ability in zip(holy_before.abilities, holy_after.abilities):
+            self.assertEqual(
+                _nonstructural_ability_header(before_ability.raw),
+                _nonstructural_ability_header(after_ability.raw),
+            )
+            preserved = tuple(
+                effect.to_bytes()
+                for effect in after_ability.effects
+                if not (
+                    (effect.opcode == 328 and effect.parameter2 in state_values)
+                    or effect.resource.upper() in bridge_resources
+                )
+            )
+            self.assertEqual(
+                tuple(effect.to_bytes() for effect in before_ability.effects),
+                preserved,
+                "Task5 changed or reordered a Task4 Holy Power effect",
+            )
+
+        for resref in (bridged.fixture.haste_resref, bridged.fixture.divine_resref):
+            before = read_spl(bridged.fixture.root / f"{resref}.SPL")
+            after = read_spl(bridged.output / f"{resref}.SPL")
+            with self.subTest(resref=resref):
+                self.assertEqual(
+                    _nonstructural_spl_header(before.header_raw),
+                    _nonstructural_spl_header(after.header_raw),
+                )
+                self.assertEqual(
+                    tuple(effect.to_bytes() for effect in before.casting_effects),
+                    tuple(effect.to_bytes() for effect in after.casting_effects),
+                )
+                for before_ability, after_ability in zip(before.abilities, after.abilities):
+                    self.assertEqual(
+                        _nonstructural_ability_header(before_ability.raw),
+                        _nonstructural_ability_header(after_ability.raw),
+                    )
+
+    def test_full_bridge_reuses_lowest_duplicate_splprot_alias(self) -> None:
+        result = self.run_case(
+            "additive",
+            phase="bridge",
+            splprot_layout="duplicate_semantics",
+        )
+        self.assert_success(result)
+        self.assertEqual(
+            (result.fixture.root / "SPLPROT.2DA").read_bytes(),
+            (result.output / "SPLPROT.2DA").read_bytes(),
+        )
+        active_row = _active_splstate_row(result.output)
+        self.assertEqual(1, active_row)
+        helper_resrefs = set(APR_HELPER_RESREFS)
+        for resref in APR_CONDITION_RESREFS:
+            self.assertEqual(active_row, read_eff_v2(result.output / f"{resref}.EFF").parameter2)
+        for spell_resref in (HOLY_RESREF, result.fixture.haste_resref):
+            spell = read_spl(result.output / f"{spell_resref}.SPL")
+            for ability in spell.abilities:
+                for effect in ability.effects:
+                    if effect.opcode == 326 and effect.resource.upper() in helper_resrefs:
+                        self.assertEqual(active_row, effect.parameter2)
+
+    def test_full_forced_modes_and_opcode317_doubling(self) -> None:
+        cases = (
+            ("additive", "force_additive", True),
+            ("doubling", "force_double", False),
+            ("doubling317", "force_double", False),
+        )
+        for variant, mode, additive in cases:
+            with self.subTest(variant=variant, mode=mode):
+                result = self.run_case(variant, mode, phase="full")
+                self.assert_success(result)
+                produced = {path.name.upper() for path in result.output.iterdir()}
+                expected = {
+                    *(f"{resref}.SPL" for resref in APR_HELPER_RESREFS),
+                    *(f"{resref}.EFF" for resref in APR_CONDITION_RESREFS),
+                }
+                if additive:
+                    self.assertTrue(expected <= produced)
+                else:
+                    self.assertTrue(expected.isdisjoint(produced))
+
+    def test_apr_helper_timeline_accepts_slow_disease_refresh_gap(self) -> None:
+        # Opcode 272 normally ticks every 15 engine ticks. Slow or Disease doubles
+        # that cadence to 30; both together do not increase it further. The strict
+        # one-second APR helper lasts 15 ticks so stale APR expires promptly, at the
+        # accepted cost of a gap before the next slowed/diseased heartbeat.
+        helper_ticks = 15
+        cadence_by_status = {
+            "normal": 15,
+            "slow": 30,
+            "disease": 30,
+            "slow_and_disease": 30,
+        }
+        self.assertEqual(0, cadence_by_status["normal"] - helper_ticks)
+        for status in ("slow", "disease", "slow_and_disease"):
+            with self.subTest(status=status):
+                self.assertEqual(
+                    15,
+                    cadence_by_status[status] - helper_ticks,
+                    "portable APR bridge contract allows at most a one-second refresh gap",
+                )
+
     def test_idempotent_second_application(self) -> None:
         for variant in ("additive", "doubling"):
             with self.subTest(variant=variant):
@@ -2722,6 +3174,198 @@ class TempusHolyPowerTests(unittest.TestCase):
                 self.assertEqual(
                     canonical_resource_tree(first.output), canonical_resource_tree(second.output)
                 )
+
+    def test_malformed_owned_apr_helper_is_rejected_before_rerun_mutation(self) -> None:
+        first = self.run_case("additive")
+        self.assert_success(first)
+        helper_path = first.output / "CBRAPR1.SPL"
+        helper = read_spl(helper_path)
+        ability = helper.abilities[0]
+        malformed = tuple(
+            dataclasses.replace(effect, duration=2)
+            if effect.opcode == 1 and effect.parameter1 == 1 and effect.parameter2 == 0
+            else effect
+            for effect in ability.effects
+        )
+        write_spl(
+            helper_path,
+            dataclasses.replace(
+                helper,
+                abilities=(dataclasses.replace(ability, effects=malformed),),
+            ),
+        )
+        malformed_bytes = helper_path.read_bytes()
+
+        second = _rerun_harness(first)
+        self._results.append(second)
+        self.assertFalse(second.succeeded, "malformed reserved helper was silently replaced")
+        self.assertRegex(second.transcript, r"(?i)APR|HELPER|COLLISION|ONE[ _-]?SECOND")
+        self.assertEqual(
+            malformed_bytes,
+            (second.fixture.root / helper_path.name).read_bytes(),
+            "preflight mutated the malformed source fixture before rejecting it",
+        )
+        self.assertFalse(
+            (second.output / "CBR_TEST.OK").exists(),
+            "failed helper preflight reached the success marker",
+        )
+
+    def test_partial_bridge_corruptions_fail_atomically_before_rerun_writes(self) -> None:
+        first = self.run_case("additive")
+        self.assert_success(first)
+        states = _private_state_values(first.output)
+        ih_state = states[IH_STATE_SYMBOL]
+        tier_states = set(states[symbol] for symbol in APR_STATE_SYMBOL_BY_KEY.values())
+
+        def mutate_spl_effect(resref: str, header: int, predicate, replacement) -> object:
+            def mutate(root: Path) -> None:
+                path = root / f"{resref}.SPL"
+                spell = read_spl(path)
+                ability = spell.abilities[header]
+                effects = list(ability.effects)
+                matches = [index for index, effect in enumerate(effects) if predicate(effect)]
+                self.assertEqual(1, len(matches), f"mutation target {resref} matched {matches}")
+                index = matches[0]
+                effects[index] = replacement(effects[index])
+                abilities = list(spell.abilities)
+                abilities[header] = dataclasses.replace(ability, effects=tuple(effects))
+                write_spl(path, dataclasses.replace(spell, abilities=tuple(abilities)))
+            return mutate
+
+        def reorder_ih_kicks(root: Path) -> None:
+            path = root / f"{first.fixture.haste_resref}.SPL"
+            spell = read_spl(path)
+            ability = spell.abilities[0]
+            effects = list(ability.effects)
+            indices = [
+                index
+                for index, effect in enumerate(effects)
+                if effect.opcode == 326 and effect.resource.upper() in APR_HELPER_RESREFS
+            ]
+            self.assertEqual(3, len(indices))
+            effects[indices[0]], effects[indices[1]] = effects[indices[1]], effects[indices[0]]
+            write_spl(
+                path,
+                dataclasses.replace(
+                    spell,
+                    abilities=(dataclasses.replace(ability, effects=tuple(effects)),),
+                ),
+            )
+
+        corruptions: list[tuple[str, object]] = [
+            (
+                "ih_marker",
+                mutate_spl_effect(
+                    first.fixture.haste_resref,
+                    0,
+                    lambda effect: effect.opcode == 328 and effect.parameter2 == ih_state,
+                    lambda effect: dataclasses.replace(effect, special=0),
+                ),
+            ),
+            ("ih_kick_order", reorder_ih_kicks),
+            (
+                "holy_marker",
+                mutate_spl_effect(
+                    HOLY_RESREF,
+                    12,
+                    lambda effect: effect.opcode == 328 and effect.parameter2 in tier_states,
+                    lambda effect: dataclasses.replace(effect, special=0),
+                ),
+            ),
+            (
+                "holy_gate",
+                mutate_spl_effect(
+                    HOLY_RESREF,
+                    12,
+                    lambda effect: effect.opcode == 326 and effect.resource.upper() in APR_HELPER_RESREFS,
+                    lambda effect: dataclasses.replace(effect, parameter2=effect.parameter2 + 1),
+                ),
+            ),
+            (
+                "holy_pulse",
+                mutate_spl_effect(
+                    HOLY_RESREF,
+                    12,
+                    lambda effect: effect.opcode == 272 and effect.resource.upper() in APR_CONDITION_RESREFS,
+                    lambda effect: dataclasses.replace(effect, dice_number=1),
+                ),
+            ),
+            (
+                "divine_prefix",
+                mutate_spl_effect(
+                    first.fixture.divine_resref,
+                    0,
+                    lambda effect: effect.opcode == 321 and effect.resource.upper() == HOLY_RESREF,
+                    lambda effect: dataclasses.replace(effect, parameter2=0),
+                ),
+            ),
+        ]
+        for helper in APR_HELPER_RESREFS:
+            corruptions.append(
+                (
+                    f"helper_{helper}",
+                    mutate_spl_effect(
+                        helper,
+                        0,
+                        lambda effect: effect.opcode == 1,
+                        lambda effect: dataclasses.replace(effect, duration=2),
+                    ),
+                )
+            )
+        for condition in APR_CONDITION_RESREFS:
+            def mutate_condition(root: Path, resref: str = condition) -> None:
+                path = root / f"{resref}.EFF"
+                effect = read_eff_v2(path)
+                path.write_bytes(dataclasses.replace(effect, flags=0).to_bytes())
+            corruptions.append((f"condition_{condition}", mutate_condition))
+
+        for name, mutator in corruptions:
+            with self.subTest(corruption=name):
+                second = _rerun_harness(
+                    first,
+                    fixture_mutator=mutator,
+                    scratch_sentinel=True,
+                )
+                self._results.append(second)
+                self.assertFalse(second.succeeded, f"accepted partial bridge corruption {name}")
+                self.assertRegex(
+                    second.transcript,
+                    r"(?i)CBR|TEMPUS|BRIDGE|HELPER|CONDITION|DIVINE|HOLY|HASTE",
+                )
+                self.assertEqual(
+                    second.source_snapshot,
+                    _raw_file_tree(second.fixture.root),
+                    f"failed preflight mutated the in-place source tree for {name}",
+                )
+                self.assertEqual(
+                    SCRATCH_COLLISION_SENTINEL,
+                    (second.run_dir / "override" / "FOREIGN.KEEP").read_bytes(),
+                    f"failed preflight changed process-local scratch state for {name}",
+                )
+                self.assertEqual(
+                    {},
+                    _raw_file_tree(second.output),
+                    f"failed preflight published output artifacts for {name}",
+                )
+                self.assertFalse((second.output / "CBR_TEST.OK").exists())
+
+    def test_rerun_rejects_foreign_apr_scratch_alias(self) -> None:
+        first = self.run_case("additive")
+        self.assert_success(first)
+
+        def seed_foreign_scratch(override: Path) -> None:
+            (override / "CBRAPR1.spl").write_bytes(SCRATCH_COLLISION_SENTINEL)
+
+        second = _rerun_harness(first, scratch_mutator=seed_foreign_scratch)
+        self._results.append(second)
+        self.assertFalse(second.succeeded, "canonical explicit graph accepted a foreign scratch alias")
+        self.assertRegex(second.transcript, r"(?i)APR|HELPER|SCRATCH|MISSING|COLLISION")
+        self.assertEqual(second.source_snapshot, _raw_file_tree(second.fixture.root))
+        self.assertEqual({}, _raw_file_tree(second.output))
+        self.assertEqual(
+            SCRATCH_COLLISION_SENTINEL,
+            (second.run_dir / "override" / "CBRAPR1.spl").read_bytes(),
+        )
 
     def test_no_tlk_operations_in_components_401_403(self) -> None:
         setup_source = _strip_weidu_comments(SETUP_TP2.read_text(encoding="utf-8"))
@@ -2805,11 +3449,9 @@ def _semantic_splprot_row(root: Path, semantic: tuple[int, int, int]) -> int:
         for index, (_, values) in enumerate(table.rows)
         if tuple(int(value, 0) for value in values) == semantic
     ]
-    if len(matches) != 1:
-        raise AssertionError(
-            f"SPLPROT semantic {semantic} matched {len(matches)} rows, expected one: {matches}"
-        )
-    return matches[0]
+    if not matches:
+        raise AssertionError(f"SPLPROT semantic {semantic} is absent")
+    return min(matches)
 
 
 def _assert_helper_spl(
@@ -2963,7 +3605,7 @@ def _assert_strength_helper_graph(root: Path, divine_resref: str) -> None:
                 )
             )
         expected_cleanups = (
-            _helper_effect(321, resource=divine_resref),
+            _helper_effect(321, parameter2=2, resource=divine_resref),
             _helper_effect(321, resource=HOLY_RESREF),
             *(
                 _helper_effect(321, parameter2=2, resource=setter)
@@ -3037,11 +3679,9 @@ def _active_splstate_row(root: Path) -> int:
         for index, (_, values) in enumerate(table.rows)
         if tuple(int(value, 0) for value in values) == ACTIVE_SPLSTATE_SEMANTIC
     ]
-    if len(rows) != 1:
-        raise AssertionError(
-            f"active-SPLSTATE semantic row matched {len(rows)} rows, expected one: {rows}"
-        )
-    return rows[0]
+    if not rows:
+        raise AssertionError("active-SPLSTATE semantic row is absent")
+    return min(rows)
 
 
 def _read_apr_helper(root: Path, resource: str) -> int:
@@ -3052,19 +3692,37 @@ def _read_apr_helper(root: Path, resource: str) -> int:
     spell = read_spl(path)
     if len(spell.abilities) != 1:
         raise AssertionError(f"APR helper {resource} has {len(spell.abilities)} headers")
-    effects = spell.abilities[0].effects
-    if not effects or (effects[0].opcode, effects[0].resource.upper()) != (321, resource):
-        raise AssertionError(f"APR helper {resource} does not begin with reciprocal self cleanup")
+    if spell.casting_effects:
+        raise AssertionError(f"APR helper {resource} unexpectedly has casting effects")
+    ability = spell.abilities[0]
+    if (ability.required_level, ability.target, ability.projectile) != (1, 5, 0):
+        raise AssertionError(
+            f"APR helper {resource} has a noncanonical self header: "
+            f"{(ability.required_level, ability.target, ability.projectile)}"
+        )
+    effects = ability.effects
     apr = [effect for effect in effects if effect.opcode == 1 and effect.parameter2 == 0]
     if len(apr) != 1:
         raise AssertionError(f"APR helper {resource} has {len(apr)} cumulative APR effects")
     mechanic = apr[0]
-    if (mechanic.timing, mechanic.duration) != (0, 1):
+    expected = (
+        _helper_effect(321, parameter2=2, resource=resource),
+        _helper_effect(
+            1,
+            parameter1=mechanic.parameter1,
+            parameter2=0,
+            timing=0,
+            resist_dispel=2,
+            duration=1,
+        ),
+    )
+    if tuple(effect.canonical() for effect in effects) != tuple(
+        effect.canonical() for effect in expected
+    ):
         raise AssertionError(
-            f"APR helper {resource} timing/duration is {(mechanic.timing, mechanic.duration)}, expected (0, 1)"
+            f"APR helper {resource} must contain exactly the timed-only self cleanup "
+            "followed by one one-second cumulative APR effect"
         )
-    if mechanic.resist_dispel & 2 != 2:
-        raise AssertionError(f"APR helper {resource} does not bypass magic resistance")
     return mechanic.parameter1
 
 
@@ -3107,16 +3765,20 @@ def _read_conditional_apr_edge(
             f"heartbeat {resource} must be a standalone conditional EFF, not a direct or missing helper"
         )
     effect = read_eff_v2(path)
-    actual = (
-        effect.opcode,
-        effect.parameter1,
-        effect.parameter2,
-        effect.timing,
-        effect.probability1,
-        effect.probability2,
-        effect.resource.upper(),
-    )
-    expected = (326, expected_state, active_row, 1, 100, 0, expected_helper)
+    actual = effect.canonical()
+    expected = EffV2(
+        opcode=326,
+        target=2,
+        power=4,
+        parameter1=expected_state,
+        parameter2=active_row,
+        timing=1,
+        duration=0,
+        probability1=100,
+        probability2=0,
+        resource=expected_helper,
+        flags=2,
+    ).canonical()
     if actual != expected:
         raise AssertionError(
             f"conditional EFF {resource} has {actual}, expected active-SPLSTATE edge {expected}"
@@ -3164,6 +3826,18 @@ def _raw_file_tree(root: Path) -> dict[str, bytes]:
             key=lambda candidate: candidate.relative_to(root).as_posix().upper(),
         )
     }
+
+
+def _nonstructural_spl_header(raw: bytes) -> bytes:
+    normalized = bytearray(raw)
+    normalized[0x64:0x72] = b"\0" * 0x0E
+    return bytes(normalized)
+
+
+def _nonstructural_ability_header(raw: bytes) -> bytes:
+    normalized = bytearray(raw)
+    normalized[0x1E:0x22] = b"\0" * 4
+    return bytes(normalized)
 
 
 if __name__ == "__main__":

@@ -96,7 +96,7 @@ The harness must copy a fixture into an isolated output directory and call produ
 
 Cover at least:
 
-1. additive Improved Haste: one timed cumulative opcode 1 with APR key 1, and no true-Haste effect;
+1. additive Improved Haste: one directly applied timing-mode-0 cumulative opcode 1 with APR key 1, deterministic 100/0 probability, magic-resistance bypass, no resource/dice/save/special delivery metadata, and no true-Haste effect;
 2. doubling Improved Haste: timed opcode 16 or 317, type 1, and no additive signature;
 3. mixed, missing, probabilistic, conditional, and header-inconsistent Improved Haste rejection;
 4. auto versus forced compatibility modes;
@@ -109,8 +109,9 @@ Cover at least:
 11. reciprocal first-effect opcode 321 cleanup between `OHTMPS1` and the dynamically resolved `CLERIC_HOLY_POWER` resource;
 12. collision-free/reusable private SPLSTATE allocation and append-only semantic SPLPROT reuse/allocation;
 13. immediate conditional kicks for both casting orders plus one-second non-stacking heartbeat refresh at the resource-graph level;
-14. binary/semantic equality after a second application; and
-15. no `SAY`, `STRING_SET`, `RESOLVE_STR_REF`, `dialog.tlk`, or TLK-writing operation in components 401-403.
+14. the accepted portable APR timeline: normal opcode-272 cadence is continuous, while Slow, Disease, or both may create up to a one-second duplicate-APR gap; the helper remains exactly one second so stale APR expires within one second;
+15. binary/semantic equality after a second application; and
+16. no `SAY`, `STRING_SET`, `RESOLVE_STR_REF`, `dialog.tlk`, or TLK-writing operation in components 401-403.
 
 ### Step 3: Run the red test suite
 
@@ -155,7 +156,7 @@ Vendor only the minimum algorithms needed, with inline attribution to the SCS/SR
 Classification must inspect all reachable caster-level headers and accept only a consistent shape:
 
 - `double`: timed opcode 16/317 with parameter 2 equal to 1, no recognized additive signature;
-- `additive`: exactly one reachable timed cumulative opcode 1 with parameter 1 equal to 1 and parameter 2 equal to 0 per applicable header, no true-Haste signature;
+- `additive`: exactly one reachable directly applied timing-mode-0 cumulative opcode 1 with parameter 1 equal to 1 and parameter 2 equal to 0 per applicable header, deterministic 100/0 probability, magic-resistance bypass, no resource/dice/save/special delivery metadata, and no true-Haste signature;
 - anything else: fail with the resref, header index, opcode counts, and selected mode.
 
 Forced mode chooses the compatibility branch but still validates the minimum patchable structure. It must not rewrite Improved Haste mechanics.
@@ -250,7 +251,7 @@ git commit -m "Implement Tempus Holy Power progression"
 
 ### Step 1: Add the additive Improved Haste marker
 
-Only in the additive branch, clone the final recognized timed `opcode 1, parameter1=1, parameter2=0` effect to opcode 328 with `special=1` and the dynamically allocated private Improved Haste state. Preserve target, power, timing, duration, probability, dispel, resistance, caster-level, and header placement. Delete an identical prior private marker before adding it so reinstall is idempotent.
+Only in the additive branch, clone the final recognized timing-mode-0 `opcode 1, parameter1=1, parameter2=0` effect to opcode 328 with `special=1` and the dynamically allocated private Improved Haste state. Before any write, prove the donor is deterministic (100/0 probability), bypasses magic resistance, and carries no resource, dice, save, or special delivery metadata; delayed, probabilistic, resistible, save-conditioned, or otherwise metadata-bearing donors are unsupported. Preserve target, power, timing, duration, probability, dispel/resistance, caster-level, and header placement. Delete an identical prior private marker before adding it so reinstall is idempotent.
 
 ### Step 2: Mark Holy APR tiers
 
@@ -271,7 +272,7 @@ Do not lengthen the helper to two seconds without separate user approval; the ap
 ### Step 4: Make both casting orders immediate
 
 - Holy cast second: add an immediate opcode 326 check in each Holy APR tier that applies its helper when the Improved Haste state is already active.
-- Improved Haste cast second: add one immediate opcode 326 kick per Holy tier to the same header as the matched +1 APR effect. Each kick checks its Holy tier state and applies the corresponding helper.
+- Improved Haste cast second: add one immediate opcode 326 kick per Holy tier to the same header as the matched +1 APR effect. Each kick checks its Holy tier state and applies the corresponding helper, using administrative `resist_dispel=2` rather than inheriting the donor's dispel bit.
 
 The heartbeat is continuity/cleanup insurance, not the sole casting-order trigger.
 

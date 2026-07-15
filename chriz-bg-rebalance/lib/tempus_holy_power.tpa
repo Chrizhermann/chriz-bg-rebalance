@@ -60,6 +60,29 @@ BEGIN
       PATCH_FAIL ~CBR SPL V1 validation failed for %resource_name%: header %cbr_header% opcode slice is out of bounds.~
     END
   END
+
+  // Every rebuilder below copies casting and ability slices into a fresh table.
+  // Require those slices to form an exact partition so no orphan record can be
+  // dropped and no overlapping record can be duplicated during that rebuild.
+  FOR (cbr_partition_effect = 0; cbr_partition_effect < effect_count; ++cbr_partition_effect) BEGIN
+    SET cbr_partition_references = 0
+    PATCH_IF (cbr_partition_effect >= cbr_casting_first
+           && cbr_partition_effect < (cbr_casting_first + cbr_casting_count)) BEGIN
+      ++cbr_partition_references
+    END
+    FOR (cbr_partition_header = 0; cbr_partition_header < ability_count; ++cbr_partition_header) BEGIN
+      SET cbr_partition_header_offset = ability_offset + (cbr_partition_header * 0x28)
+      READ_SHORT (cbr_partition_header_offset + 0x1e) cbr_partition_header_count
+      READ_SHORT (cbr_partition_header_offset + 0x20) cbr_partition_header_first
+      PATCH_IF (cbr_partition_effect >= cbr_partition_header_first
+             && cbr_partition_effect < (cbr_partition_header_first + cbr_partition_header_count)) BEGIN
+        ++cbr_partition_references
+      END
+    END
+    PATCH_IF (cbr_partition_references != 1) BEGIN
+      PATCH_FAIL ~CBR SPL V1 validation failed for %resource_name%: effect-table record %cbr_partition_effect% has %cbr_partition_references% references; casting and ability slices must form an exact nonoverlapping partition.~
+    END
+  END
 END
 
 DEFINE_PATCH_FUNCTION cbr_classify_improved_haste
@@ -110,13 +133,30 @@ BEGIN
       READ_LONG  (cbr_effect_offset + 0x04) cbr_parameter1
       READ_LONG  (cbr_effect_offset + 0x08) cbr_parameter2
       READ_BYTE  (cbr_effect_offset + 0x0c) cbr_timing
+      READ_BYTE  (cbr_effect_offset + 0x0d) cbr_resist_dispel
       READ_LONG  (cbr_effect_offset + 0x0e) cbr_duration
       READ_BYTE  (cbr_effect_offset + 0x12) cbr_probability1
       READ_BYTE  (cbr_effect_offset + 0x13) cbr_probability2
+      READ_ASCII (cbr_effect_offset + 0x14) cbr_resource (8) NULL
+      READ_LONG  (cbr_effect_offset + 0x1c) cbr_dice_number
+      READ_LONG  (cbr_effect_offset + 0x20) cbr_dice_size
+      READ_LONG  (cbr_effect_offset + 0x24) cbr_save_type
+      READ_LONG  (cbr_effect_offset + 0x28) cbr_save_bonus
+      READ_LONG  (cbr_effect_offset + 0x2c) cbr_special
 
       PATCH_IF (cbr_opcode = 1 && cbr_parameter1 = 1 && cbr_parameter2 = 0) BEGIN
         ++cbr_additive_count
-        PATCH_IF ((cbr_timing = 0 || cbr_timing = 3) && cbr_duration > 0 && cbr_probability1 = 100 && cbr_probability2 = 0) BEGIN
+        PATCH_IF (cbr_timing = 0
+               && cbr_duration > 0
+               && cbr_probability1 = 100
+               && cbr_probability2 = 0
+               && ((cbr_resist_dispel BAND 2) = 2)
+               && ~%cbr_resource%~ STR_EQ ~~
+               && cbr_dice_number = 0
+               && cbr_dice_size = 0
+               && cbr_save_type = 0
+               && cbr_save_bonus = 0
+               && cbr_special = 0) BEGIN
           ++cbr_additive_deterministic
         END
       END
@@ -708,14 +748,16 @@ BEGIN
       PATCH_IF (cbr_holy_opcode = 321 && ~%cbr_holy_resource%~ STR_EQ ~%divine_power_resref%~) BEGIN
         ++cbr_divine_cleanup
         SET cbr_expected_divine_cleanup_index = 1
+        SET cbr_expected_divine_cleanup_p2 = 0
         PATCH_IF (cbr_holy_ability_count = 30) BEGIN
           SET cbr_expected_divine_cleanup_index = 0
+          SET cbr_expected_divine_cleanup_p2 = 2
         END
         PATCH_IF (cbr_effect != cbr_expected_divine_cleanup_index
                 || cbr_holy_effect_target != 1
                 || cbr_holy_power != 4
                 || cbr_holy_parameter1 != 0
-                || cbr_holy_parameter2 != 0
+                || cbr_holy_parameter2 != cbr_expected_divine_cleanup_p2
                 || cbr_holy_timing != 1
                 || cbr_holy_resist_dispel != cbr_expected_cleanup_dr
                 || cbr_holy_duration != 0
@@ -1072,7 +1114,7 @@ BEGIN
     // safety, then the immediate floor graph. Validator ordering makes rerun
     // recognition exact.
     LPF cbr_append_spl_effect_record
-      INT_VAR opcode = 321 target = 1 power = 4 timing = 1 resist_dispel = 2
+      INT_VAR opcode = 321 target = 1 power = 4 parameter2 = 2 timing = 1 resist_dispel = 2
       STR_VAR resource = EVAL ~%divine_power_resref%~
     END
     ++cbr_new_effect_index
@@ -1294,32 +1336,34 @@ BEGIN
   READ_ASCII 0 cbr_ids_contents (cbr_ids_length)
   INNER_PATCH ~%cbr_ids_contents%~ BEGIN
     REPLACE_EVALUATE CASE_INSENSITIVE
-      ~^\([0-9][0-9]*\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
+      ~^[ %TAB%]*\([^ %TAB%%WNL%%MNL%%LNL%]+\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
     BEGIN
-      PATCH_IF !(IS_AN_INT ~%MATCH1%~) BEGIN
-        PATCH_FAIL ~CBR SPLSTATE.IDS spell-state value %MATCH1% is not numeric.~
-      END
-      SET cbr_value = MATCH1
-      PATCH_IF (cbr_value < 0 || cbr_value > 255) BEGIN
-        PATCH_FAIL ~CBR SPLSTATE.IDS spell-state value %cbr_value% is outside the collision-safe 0..255 range.~
-      END
-      SPRINT cbr_symbol ~%MATCH2%~
-      TO_UPPER cbr_symbol
-      SET $cbr_splstate_value_count(~%cbr_value%~) += 1
-      ++cbr_ids_entry_count
+      // IDS headers and comments may also have two tokens.  Only numeric first
+      // tokens are spell-state rows; IS_AN_INT accepts decimal and 0x-prefixed
+      // WeiDU integers, so both forms participate in collision accounting.
+      PATCH_IF (IS_AN_INT ~%MATCH1%~) BEGIN
+        SET cbr_value = MATCH1
+        PATCH_IF (cbr_value < 0 || cbr_value > 255) BEGIN
+          PATCH_FAIL ~CBR SPLSTATE.IDS spell-state value %cbr_value% is outside the collision-safe 0..255 range.~
+        END
+        SPRINT cbr_symbol ~%MATCH2%~
+        TO_UPPER cbr_symbol
+        SET $cbr_splstate_value_count(~%cbr_value%~) += 1
+        ++cbr_ids_entry_count
 
-      PATCH_IF (~%cbr_symbol%~ STR_EQ ~CBR_TEMPUS_IH~) BEGIN
-        ++cbr_ih_count
-        SET ih_state = cbr_value
-      END ELSE PATCH_IF (~%cbr_symbol%~ STR_EQ ~CBR_TEMPUS_APR_HALF~) BEGIN
-        ++cbr_apr_half_count
-        SET apr_half_state = cbr_value
-      END ELSE PATCH_IF (~%cbr_symbol%~ STR_EQ ~CBR_TEMPUS_APR_ONE~) BEGIN
-        ++cbr_apr_one_count
-        SET apr_one_state = cbr_value
-      END ELSE PATCH_IF (~%cbr_symbol%~ STR_EQ ~CBR_TEMPUS_APR_ONE_HALF~) BEGIN
-        ++cbr_apr_one_half_count
-        SET apr_one_half_state = cbr_value
+        PATCH_IF (~%cbr_symbol%~ STR_EQ ~CBR_TEMPUS_IH~) BEGIN
+          ++cbr_ih_count
+          SET ih_state = cbr_value
+        END ELSE PATCH_IF (~%cbr_symbol%~ STR_EQ ~CBR_TEMPUS_APR_HALF~) BEGIN
+          ++cbr_apr_half_count
+          SET apr_half_state = cbr_value
+        END ELSE PATCH_IF (~%cbr_symbol%~ STR_EQ ~CBR_TEMPUS_APR_ONE~) BEGIN
+          ++cbr_apr_one_count
+          SET apr_one_state = cbr_value
+        END ELSE PATCH_IF (~%cbr_symbol%~ STR_EQ ~CBR_TEMPUS_APR_ONE_HALF~) BEGIN
+          ++cbr_apr_one_half_count
+          SET apr_one_half_state = cbr_value
+        END
       END
     END
       ~~
@@ -1391,17 +1435,19 @@ BEGIN
     READ_ASCII 0 cbr_ids_contents (cbr_ids_length)
     INNER_PATCH ~%cbr_ids_contents%~ BEGIN
       REPLACE_EVALUATE CASE_INSENSITIVE
-        ~^\([0-9][0-9]*\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
+        ~^[ %TAB%]*\([^ %TAB%%WNL%%MNL%%LNL%]+\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
       BEGIN
-        SET cbr_current_value = MATCH1
-        SPRINT cbr_current_symbol ~%MATCH2%~
-        TO_UPPER cbr_current_symbol
-        PATCH_IF (cbr_current_value = planned_value) BEGIN
-          ++cbr_value_count
-        END
-        PATCH_IF (~%cbr_current_symbol%~ STR_EQ ~%symbol_upper%~) BEGIN
-          ++cbr_symbol_count
-          SET cbr_found_value = cbr_current_value
+        PATCH_IF (IS_AN_INT ~%MATCH1%~) BEGIN
+          SET cbr_current_value = MATCH1
+          SPRINT cbr_current_symbol ~%MATCH2%~
+          TO_UPPER cbr_current_symbol
+          PATCH_IF (cbr_current_value = planned_value) BEGIN
+            ++cbr_value_count
+          END
+          PATCH_IF (~%cbr_current_symbol%~ STR_EQ ~%symbol_upper%~) BEGIN
+            ++cbr_symbol_count
+            SET cbr_found_value = cbr_current_value
+          END
         END
       END
         ~~
@@ -1465,16 +1511,20 @@ BEGIN
     READ_2DA_ENTRY_FORMER cbr_splprot_rows cbr_row 2 cbr_current_value
     READ_2DA_ENTRY_FORMER cbr_splprot_rows cbr_row 3 cbr_current_relation
     SET cbr_current_numeric = (IS_AN_INT ~%cbr_current_stat%~) && (IS_AN_INT ~%cbr_current_value%~) && (IS_AN_INT ~%cbr_current_relation%~)
+    PATCH_IF (!cbr_current_numeric) BEGIN
+      PATCH_FAIL ~CBR SPLPROT.2DA validation failed: row %cbr_row% STAT VALUE RELATION cells must all be numeric.~
+    END
     PATCH_IF (cbr_current_numeric && cbr_current_stat = stat && cbr_current_value = value && cbr_current_relation = relation) BEGIN
       ++cbr_semantic_matches
-      SET row_index = cbr_row
+      PATCH_IF (row_index < 0) BEGIN
+        // SPLPROT is an ordered predicate table. Multiple foreign labels may
+        // legitimately alias one tuple, so consistently reuse the first row.
+        SET row_index = cbr_row
+      END
     END
     PATCH_IF (~%cbr_current_label%~ STR_EQ ~%row_label%~ && !(cbr_current_numeric && cbr_current_stat = stat && cbr_current_value = value && cbr_current_relation = relation)) BEGIN
       PATCH_FAIL ~CBR SPLPROT.2DA collision: reserved row label %row_label% already has different semantics.~
     END
-  END
-  PATCH_IF (cbr_semantic_matches > 1) BEGIN
-    PATCH_FAIL ~CBR SPLPROT.2DA collision: semantic tuple %stat% %value% %relation% occurs more than once.~
   END
   PATCH_IF (cbr_semantic_matches = 0 && append = 1) BEGIN
     SET row_index = cbr_splprot_rows
@@ -1821,6 +1871,110 @@ BEGIN
   END
 END
 
+// Task 5 APR helpers are deliberately stricter than the long-lived Strength
+// setters: each refresh removes only prior timed instances of itself, then
+// applies one cumulative APR effect for exactly one second.
+DEFINE_PATCH_FUNCTION cbr_validate_tempus_apr_helper_spl
+  INT_VAR
+    apr_key = 0
+  STR_VAR
+    helper_name = ~~
+BEGIN
+  SPRINT cbr_apr_helper_resref ~%helper_name%~
+  LPF cbr_validate_basic_strength_helper_spl
+    INT_VAR expected_effect_count = 2
+    STR_VAR helper_name = EVAL ~%cbr_apr_helper_resref% APR~
+    RET cbr_apr_effect_offset = helper_effect_offset
+  END
+  LPF cbr_validate_exact_spl_effect
+    INT_VAR
+      effect_offset          = cbr_apr_effect_offset
+      expected_opcode        = 321
+      expected_target        = 1
+      expected_power         = 4
+      expected_parameter2    = 2
+      expected_timing        = 1
+      expected_resist_dispel = 2
+    STR_VAR helper_name = EVAL ~%cbr_apr_helper_resref% timed-only cleanup~ expected_resource = EVAL ~%cbr_apr_helper_resref%~
+  END
+  LPF cbr_validate_exact_spl_effect
+    INT_VAR
+      effect_offset          = cbr_apr_effect_offset + 0x30
+      expected_opcode        = 1
+      expected_target        = 1
+      expected_power         = 4
+      expected_parameter1    = apr_key
+      expected_parameter2    = 0
+      expected_timing        = 0
+      expected_resist_dispel = 2
+      expected_duration      = 1
+    STR_VAR helper_name = EVAL ~%cbr_apr_helper_resref% one-second APR~
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_validate_tempus_apr_condition_eff
+  INT_VAR
+    ih_state         = "-1"
+    active_state_row = "-1"
+  STR_VAR
+    helper_name   = ~~
+    helper_resref = ~~
+BEGIN
+  PATCH_IF (BUFFER_LENGTH != 0x110) BEGIN
+    PATCH_FAIL ~CBR Tempus APR condition %helper_name%.EFF must be exactly one EFF V2 record.~
+  END
+  READ_ASCII 0x00 cbr_apr_eff_signature_1 (8)
+  READ_ASCII 0x08 cbr_apr_eff_signature_2 (8)
+  READ_LONG  0x10 cbr_apr_eff_opcode
+  READ_LONG  0x14 cbr_apr_eff_target
+  READ_LONG  0x18 cbr_apr_eff_power
+  READ_LONG  0x1c cbr_apr_eff_parameter1
+  READ_LONG  0x20 cbr_apr_eff_parameter2
+  READ_LONG  0x24 cbr_apr_eff_timing
+  READ_LONG  0x28 cbr_apr_eff_duration
+  READ_SHORT 0x2c cbr_apr_eff_probability1
+  READ_SHORT 0x2e cbr_apr_eff_probability2
+  READ_ASCII 0x30 cbr_apr_eff_resource (8) NULL
+  READ_LONG  0x38 cbr_apr_eff_dice_number
+  READ_LONG  0x3c cbr_apr_eff_dice_size
+  READ_LONG  0x40 cbr_apr_eff_save_type
+  READ_LONG  0x44 cbr_apr_eff_save_bonus
+  READ_LONG  0x48 cbr_apr_eff_special
+  READ_LONG  0x5c cbr_apr_eff_flags
+  PATCH_IF (!(~%cbr_apr_eff_signature_1%~ STR_EQ ~EFF V2.0~)
+         || !(~%cbr_apr_eff_signature_2%~ STR_EQ ~EFF V2.0~)
+         || cbr_apr_eff_opcode != 326
+         || cbr_apr_eff_target != 2
+         || cbr_apr_eff_power != 4
+         || cbr_apr_eff_parameter1 != ih_state
+         || cbr_apr_eff_parameter2 != active_state_row
+         || cbr_apr_eff_timing != 1
+         || cbr_apr_eff_duration != 0
+         || cbr_apr_eff_probability1 != 100
+         || cbr_apr_eff_probability2 != 0
+         || !(~%cbr_apr_eff_resource%~ STR_EQ ~%helper_resref%~)
+         || cbr_apr_eff_dice_number != 0
+         || cbr_apr_eff_dice_size != 0
+         || cbr_apr_eff_save_type != 0
+         || cbr_apr_eff_save_bonus != 0
+         || cbr_apr_eff_special != 0
+         || cbr_apr_eff_flags != 2) BEGIN
+    PATCH_FAIL ~CBR Tempus APR condition %helper_name%.EFF has a noncanonical active-Improved-Haste opcode-326 layout.~
+  END
+  FOR (cbr_apr_eff_byte = 0x4c; cbr_apr_eff_byte < 0x5c; ++cbr_apr_eff_byte) BEGIN
+    READ_BYTE cbr_apr_eff_byte cbr_apr_eff_value
+    PATCH_IF (cbr_apr_eff_value != 0) BEGIN
+      PATCH_FAIL ~CBR Tempus APR condition %helper_name%.EFF has noncanonical metadata at byte %cbr_apr_eff_byte%.~
+    END
+  END
+  FOR (cbr_apr_eff_byte = 0x60; cbr_apr_eff_byte < 0x110; ++cbr_apr_eff_byte) BEGIN
+    READ_BYTE cbr_apr_eff_byte cbr_apr_eff_value
+    PATCH_IF (cbr_apr_eff_value != 0) BEGIN
+      PATCH_FAIL ~CBR Tempus APR condition %helper_name%.EFF has noncanonical extended data at byte %cbr_apr_eff_byte%.~
+    END
+  END
+END
+
 // Central private-resref registry shared by the progression and bridge phases.
 // During Task 3 any existing reserved file is foreign and therefore a hard
 // collision. Later phases must relax that rule only for an exact, semantically
@@ -1868,6 +2022,64 @@ BEGIN
   OUTER_SPRINT cbr_strength_exception_18 ~CBRSX18~
 END
 
+DEFINE_ACTION_FUNCTION cbr_validate_tempus_apr_helpers
+  INT_VAR
+    ih_state          = "-1"
+    active_state_row = "-1"
+  STR_VAR
+    resource_dir = ~~
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  LAF cbr_define_tempus_private_resrefs
+    RET
+      cbr_apr_helper_6
+      cbr_apr_helper_1
+      cbr_apr_helper_7
+      cbr_apr_condition_6
+      cbr_apr_condition_1
+      cbr_apr_condition_7
+  END
+  ACTION_IF (ih_state < 0 || active_state_row < 0) BEGIN
+    FAIL ~CBR Tempus APR helper validation requires allocated private state and active-SPLSTATE predicate row.~
+  END
+  ACTION_FOR_EACH cbr_apr_spl IN ~%cbr_apr_helper_6%~ ~%cbr_apr_helper_1%~ ~%cbr_apr_helper_7%~ BEGIN
+    ACTION_IF !(FILE_EXISTS ~%resource_dir%/%cbr_apr_spl%.spl~ || FILE_EXISTS ~%resource_dir%/%cbr_apr_spl%.SPL~) BEGIN
+      FAIL ~CBR Tempus APR helper %cbr_apr_spl%.SPL is missing from a bridged resource tree.~
+    END
+    ACTION_IF (FILE_EXISTS ~%resource_dir%/%cbr_apr_spl%.eff~ || FILE_EXISTS ~%resource_dir%/%cbr_apr_spl%.EFF~) BEGIN
+      FAIL ~CBR Tempus APR helper collision: %cbr_apr_spl% exists with both SPL and EFF extensions.~
+    END
+  END
+  ACTION_FOR_EACH cbr_apr_eff IN ~%cbr_apr_condition_6%~ ~%cbr_apr_condition_1%~ ~%cbr_apr_condition_7%~ BEGIN
+    ACTION_IF !(FILE_EXISTS ~%resource_dir%/%cbr_apr_eff%.eff~ || FILE_EXISTS ~%resource_dir%/%cbr_apr_eff%.EFF~) BEGIN
+      FAIL ~CBR Tempus APR condition %cbr_apr_eff%.EFF is missing from a bridged resource tree.~
+    END
+    ACTION_IF (FILE_EXISTS ~%resource_dir%/%cbr_apr_eff%.spl~ || FILE_EXISTS ~%resource_dir%/%cbr_apr_eff%.SPL~) BEGIN
+      FAIL ~CBR Tempus APR condition collision: %cbr_apr_eff% exists with both EFF and SPL extensions.~
+    END
+  END
+
+  COPY ~%resource_dir%/%cbr_apr_helper_6%.spl~ ~%resource_dir%/%cbr_apr_helper_6%.spl~
+    LPF cbr_validate_tempus_apr_helper_spl INT_VAR apr_key = 6 STR_VAR helper_name = EVAL ~%cbr_apr_helper_6%~ END
+  BUT_ONLY
+  COPY ~%resource_dir%/%cbr_apr_helper_1%.spl~ ~%resource_dir%/%cbr_apr_helper_1%.spl~
+    LPF cbr_validate_tempus_apr_helper_spl INT_VAR apr_key = 1 STR_VAR helper_name = EVAL ~%cbr_apr_helper_1%~ END
+  BUT_ONLY
+  COPY ~%resource_dir%/%cbr_apr_helper_7%.spl~ ~%resource_dir%/%cbr_apr_helper_7%.spl~
+    LPF cbr_validate_tempus_apr_helper_spl INT_VAR apr_key = 7 STR_VAR helper_name = EVAL ~%cbr_apr_helper_7%~ END
+  BUT_ONLY
+
+  COPY ~%resource_dir%/%cbr_apr_condition_6%.eff~ ~%resource_dir%/%cbr_apr_condition_6%.eff~
+    LPF cbr_validate_tempus_apr_condition_eff INT_VAR ih_state = ih_state active_state_row = active_state_row STR_VAR helper_name = EVAL ~%cbr_apr_condition_6%~ helper_resref = EVAL ~%cbr_apr_helper_6%~ END
+  BUT_ONLY
+  COPY ~%resource_dir%/%cbr_apr_condition_1%.eff~ ~%resource_dir%/%cbr_apr_condition_1%.eff~
+    LPF cbr_validate_tempus_apr_condition_eff INT_VAR ih_state = ih_state active_state_row = active_state_row STR_VAR helper_name = EVAL ~%cbr_apr_condition_1%~ helper_resref = EVAL ~%cbr_apr_helper_1%~ END
+  BUT_ONLY
+  COPY ~%resource_dir%/%cbr_apr_condition_7%.eff~ ~%resource_dir%/%cbr_apr_condition_7%.eff~
+    LPF cbr_validate_tempus_apr_condition_eff INT_VAR ih_state = ih_state active_state_row = active_state_row STR_VAR helper_name = EVAL ~%cbr_apr_condition_7%~ helper_resref = EVAL ~%cbr_apr_helper_7%~ END
+  BUT_ONLY
+END
+
 // Reject private-resource names supplied by the installed game rather than by
 // the explicit resource tree being validated.  FILE_EXISTS alone cannot see
 // BIFF-backed resources, so the chitin.key path must probe every extension
@@ -1903,6 +2115,9 @@ BEGIN
   END
 
   ACTION_IF (FILE_EXISTS ~chitin.key~) BEGIN
+    ACTION_IF (FILE_EXISTS_IN_GAME ~OHTMPS1.ITM~) BEGIN
+      FAIL ~CBR Tempus Holy Power reserved-resource namespace collision: OHTMPS1.ITM is visible through the game KEY and could be affected by opcode 321 cleanup.~
+    END
     ACTION_FOR_EACH cbr_key_reserved IN
       ~%cbr_apr_helper_6%~ ~%cbr_apr_helper_1%~ ~%cbr_apr_helper_7%~
       ~%cbr_apr_condition_6%~ ~%cbr_apr_condition_1%~ ~%cbr_apr_condition_7%~
@@ -2230,6 +2445,918 @@ BEGIN
   END
 END
 
+DEFINE_PATCH_FUNCTION cbr_validate_tempus_divine_cleanup_graph
+  STR_VAR
+    divine_power_resref = ~~
+    strength_set_18 = ~CBRST18~
+    strength_set_19 = ~CBRST19~
+    strength_set_20 = ~CBRST20~
+    strength_set_21 = ~CBRST21~
+  RET
+    cleanup_status
+BEGIN
+  SET cleanup_status = "-1"
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = EVAL ~resolved Divine Power %divine_power_resref%~
+    RET
+      cbr_divine_ability_offset = ability_offset
+      cbr_divine_ability_count  = ability_count
+      cbr_divine_effect_offset  = effect_offset
+  END
+  PATCH_IF (cbr_divine_ability_count < 1) BEGIN
+    PATCH_FAIL ~CBR Divine Power %divine_power_resref% has no ability headers to protect with reciprocal cleanup.~
+  END
+  FOR (cbr_divine_header = 0; cbr_divine_header < cbr_divine_ability_count; ++cbr_divine_header) BEGIN
+    SET cbr_divine_header_offset = cbr_divine_ability_offset + (cbr_divine_header * 0x28)
+    READ_SHORT (cbr_divine_header_offset + 0x1e) cbr_divine_header_count
+    READ_SHORT (cbr_divine_header_offset + 0x20) cbr_divine_header_first
+    SET cbr_divine_owned_count = 0
+    SET cbr_divine_owned_invalid = 0
+    FOR (cbr_divine_effect = 0; cbr_divine_effect < cbr_divine_header_count; ++cbr_divine_effect) BEGIN
+      SET cbr_divine_fx = cbr_divine_effect_offset + ((cbr_divine_header_first + cbr_divine_effect) * 0x30)
+      READ_SHORT cbr_divine_fx cbr_divine_opcode
+      READ_BYTE  (cbr_divine_fx + 0x02) cbr_divine_target
+      READ_BYTE  (cbr_divine_fx + 0x03) cbr_divine_power
+      READ_LONG  (cbr_divine_fx + 0x04) cbr_divine_parameter1
+      READ_LONG  (cbr_divine_fx + 0x08) cbr_divine_parameter2
+      READ_BYTE  (cbr_divine_fx + 0x0c) cbr_divine_timing
+      READ_BYTE  (cbr_divine_fx + 0x0d) cbr_divine_dr
+      READ_LONG  (cbr_divine_fx + 0x0e) cbr_divine_duration
+      READ_BYTE  (cbr_divine_fx + 0x12) cbr_divine_probability1
+      READ_BYTE  (cbr_divine_fx + 0x13) cbr_divine_probability2
+      READ_ASCII (cbr_divine_fx + 0x14) cbr_divine_resource (8) NULL
+      READ_LONG  (cbr_divine_fx + 0x1c) cbr_divine_dice_number
+      READ_LONG  (cbr_divine_fx + 0x20) cbr_divine_dice_size
+      READ_LONG  (cbr_divine_fx + 0x24) cbr_divine_save_type
+      READ_LONG  (cbr_divine_fx + 0x28) cbr_divine_save_bonus
+      READ_LONG  (cbr_divine_fx + 0x2c) cbr_divine_special
+      SET cbr_divine_slot = "-1"
+      SET cbr_divine_expected_p2 = 2
+      PATCH_IF (~%cbr_divine_resource%~ STR_EQ ~OHTMPS1~) BEGIN
+        SET cbr_divine_slot = 0
+        SET cbr_divine_expected_p2 = 2
+      END ELSE PATCH_IF (~%cbr_divine_resource%~ STR_EQ ~%strength_set_18%~) BEGIN
+        SET cbr_divine_slot = 1
+      END ELSE PATCH_IF (~%cbr_divine_resource%~ STR_EQ ~%strength_set_19%~) BEGIN
+        SET cbr_divine_slot = 2
+      END ELSE PATCH_IF (~%cbr_divine_resource%~ STR_EQ ~%strength_set_20%~) BEGIN
+        SET cbr_divine_slot = 3
+      END ELSE PATCH_IF (~%cbr_divine_resource%~ STR_EQ ~%strength_set_21%~) BEGIN
+        SET cbr_divine_slot = 4
+      END
+      PATCH_IF (cbr_divine_opcode = 321 && cbr_divine_slot >= 0) BEGIN
+        ++cbr_divine_owned_count
+        PATCH_IF (cbr_divine_effect != cbr_divine_slot
+               || cbr_divine_target != 1
+               || cbr_divine_power != 4
+               || cbr_divine_parameter1 != 0
+               || cbr_divine_parameter2 != cbr_divine_expected_p2
+               || cbr_divine_timing != 1
+               || cbr_divine_dr != 2
+               || cbr_divine_duration != 0
+               || cbr_divine_probability1 != 100
+               || cbr_divine_probability2 != 0
+               || cbr_divine_dice_number != 0
+               || cbr_divine_dice_size != 0
+               || cbr_divine_save_type != 0
+               || cbr_divine_save_bonus != 0
+               || cbr_divine_special != 0) BEGIN
+          SET cbr_divine_owned_invalid = 1
+        END
+      END
+    END
+    SET cbr_divine_header_status = 0
+    PATCH_IF (cbr_divine_owned_count = 5 && !cbr_divine_owned_invalid) BEGIN
+      SET cbr_divine_header_status = 1
+    END ELSE PATCH_IF (cbr_divine_owned_count != 0 || cbr_divine_owned_invalid) BEGIN
+      PATCH_FAIL ~CBR Divine Power %divine_power_resref% header %cbr_divine_header% has a partial, duplicated, or misordered Tempus cleanup prefix.~
+    END
+    PATCH_IF (cleanup_status < 0) BEGIN
+      SET cleanup_status = cbr_divine_header_status
+    END ELSE PATCH_IF (cleanup_status != cbr_divine_header_status) BEGIN
+      PATCH_FAIL ~CBR Divine Power %divine_power_resref% mixes pristine and Tempus-cleanup headers.~
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_validate_tempus_ih_bridge_graph
+  INT_VAR
+    ih_state            = "-1"
+    apr_half_state      = "-1"
+    apr_one_state       = "-1"
+    apr_one_half_state  = "-1"
+    active_state_row    = "-1"
+  STR_VAR
+    improved_haste_resref = ~~
+    apr_helper_6 = ~CBRAPR6~
+    apr_helper_1 = ~CBRAPR1~
+    apr_helper_7 = ~CBRAPR7~
+    apr_condition_6 = ~CBRAPC6~
+    apr_condition_1 = ~CBRAPC1~
+    apr_condition_7 = ~CBRAPC7~
+  RET
+    bridge_status
+BEGIN
+  SET bridge_status = "-1"
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = EVAL ~Improved Haste %improved_haste_resref% bridge graph~
+    RET
+      cbr_ih_graph_ability_offset = ability_offset
+      cbr_ih_graph_ability_count  = ability_count
+      cbr_ih_graph_effect_offset  = effect_offset
+  END
+  FOR (cbr_ih_graph_header = 0; cbr_ih_graph_header < cbr_ih_graph_ability_count; ++cbr_ih_graph_header) BEGIN
+    SET cbr_ih_graph_header_offset = cbr_ih_graph_ability_offset + (cbr_ih_graph_header * 0x28)
+    READ_SHORT (cbr_ih_graph_header_offset + 0x1e) cbr_ih_graph_count
+    READ_SHORT (cbr_ih_graph_header_offset + 0x20) cbr_ih_graph_first
+    SET cbr_ih_donor_count = 0
+    SET cbr_ih_owned_count = 0
+    SET cbr_ih_owned_invalid = 0
+    FOR (cbr_ih_graph_effect = 0; cbr_ih_graph_effect < cbr_ih_graph_count; ++cbr_ih_graph_effect) BEGIN
+      SET cbr_ih_fx = cbr_ih_graph_effect_offset + ((cbr_ih_graph_first + cbr_ih_graph_effect) * 0x30)
+      READ_SHORT cbr_ih_fx cbr_ih_opcode
+      READ_BYTE  (cbr_ih_fx + 0x02) cbr_ih_target
+      READ_BYTE  (cbr_ih_fx + 0x03) cbr_ih_power
+      READ_LONG  (cbr_ih_fx + 0x04) cbr_ih_parameter1
+      READ_LONG  (cbr_ih_fx + 0x08) cbr_ih_parameter2
+      READ_BYTE  (cbr_ih_fx + 0x0c) cbr_ih_timing
+      READ_BYTE  (cbr_ih_fx + 0x0d) cbr_ih_dr
+      READ_LONG  (cbr_ih_fx + 0x0e) cbr_ih_duration
+      READ_BYTE  (cbr_ih_fx + 0x12) cbr_ih_probability1
+      READ_BYTE  (cbr_ih_fx + 0x13) cbr_ih_probability2
+      READ_ASCII (cbr_ih_fx + 0x14) cbr_ih_resource (8) NULL
+      READ_LONG  (cbr_ih_fx + 0x1c) cbr_ih_dice_number
+      READ_LONG  (cbr_ih_fx + 0x20) cbr_ih_dice_size
+      READ_LONG  (cbr_ih_fx + 0x24) cbr_ih_save_type
+      READ_LONG  (cbr_ih_fx + 0x28) cbr_ih_save_bonus
+      READ_LONG  (cbr_ih_fx + 0x2c) cbr_ih_special
+      PATCH_IF (cbr_ih_opcode = 1 && cbr_ih_parameter1 = 1 && cbr_ih_parameter2 = 0) BEGIN
+        ++cbr_ih_donor_count
+        SET cbr_ih_donor_index = cbr_ih_graph_effect
+        SET cbr_ih_donor_target = cbr_ih_target
+        SET cbr_ih_donor_power = cbr_ih_power
+        SET cbr_ih_donor_timing = cbr_ih_timing
+        SET cbr_ih_donor_dr = cbr_ih_dr
+        SET cbr_ih_donor_duration = cbr_ih_duration
+        SET cbr_ih_donor_probability1 = cbr_ih_probability1
+        SET cbr_ih_donor_probability2 = cbr_ih_probability2
+      END
+    END
+    PATCH_IF (cbr_ih_donor_count != 1) BEGIN
+      PATCH_FAIL ~CBR Improved Haste %improved_haste_resref% header %cbr_ih_graph_header% bridge validation found %cbr_ih_donor_count% additive APR donors.~
+    END
+    FOR (cbr_ih_graph_effect = 0; cbr_ih_graph_effect < cbr_ih_graph_count; ++cbr_ih_graph_effect) BEGIN
+      SET cbr_ih_fx = cbr_ih_graph_effect_offset + ((cbr_ih_graph_first + cbr_ih_graph_effect) * 0x30)
+      READ_SHORT cbr_ih_fx cbr_ih_opcode
+      READ_BYTE  (cbr_ih_fx + 0x02) cbr_ih_target
+      READ_BYTE  (cbr_ih_fx + 0x03) cbr_ih_power
+      READ_LONG  (cbr_ih_fx + 0x04) cbr_ih_parameter1
+      READ_LONG  (cbr_ih_fx + 0x08) cbr_ih_parameter2
+      READ_BYTE  (cbr_ih_fx + 0x0c) cbr_ih_timing
+      READ_BYTE  (cbr_ih_fx + 0x0d) cbr_ih_dr
+      READ_LONG  (cbr_ih_fx + 0x0e) cbr_ih_duration
+      READ_BYTE  (cbr_ih_fx + 0x12) cbr_ih_probability1
+      READ_BYTE  (cbr_ih_fx + 0x13) cbr_ih_probability2
+      READ_ASCII (cbr_ih_fx + 0x14) cbr_ih_resource (8) NULL
+      READ_LONG  (cbr_ih_fx + 0x1c) cbr_ih_dice_number
+      READ_LONG  (cbr_ih_fx + 0x20) cbr_ih_dice_size
+      READ_LONG  (cbr_ih_fx + 0x24) cbr_ih_save_type
+      READ_LONG  (cbr_ih_fx + 0x28) cbr_ih_save_bonus
+      READ_LONG  (cbr_ih_fx + 0x2c) cbr_ih_special
+      SET cbr_ih_owned = 0
+      SET cbr_ih_expected_index = "-1"
+      SET cbr_ih_expected_state = "-1"
+      SPRINT cbr_ih_expected_resource ~~
+      PATCH_IF (cbr_ih_opcode = 328
+             && (cbr_ih_parameter2 = ih_state
+              || cbr_ih_parameter2 = apr_half_state
+              || cbr_ih_parameter2 = apr_one_state
+              || cbr_ih_parameter2 = apr_one_half_state)) BEGIN
+        SET cbr_ih_owned = 1
+        SET cbr_ih_expected_index = cbr_ih_donor_index + 1
+      END ELSE PATCH_IF (~%cbr_ih_resource%~ STR_EQ ~%apr_helper_6%~
+                      || ~%cbr_ih_resource%~ STR_EQ ~%apr_helper_1%~
+                      || ~%cbr_ih_resource%~ STR_EQ ~%apr_helper_7%~
+                      || ~%cbr_ih_resource%~ STR_EQ ~%apr_condition_6%~
+                      || ~%cbr_ih_resource%~ STR_EQ ~%apr_condition_1%~
+                      || ~%cbr_ih_resource%~ STR_EQ ~%apr_condition_7%~) BEGIN
+        SET cbr_ih_owned = 1
+        PATCH_IF (cbr_ih_opcode = 326 && ~%cbr_ih_resource%~ STR_EQ ~%apr_helper_6%~) BEGIN
+          SET cbr_ih_expected_index = cbr_ih_donor_index + 2
+          SET cbr_ih_expected_state = apr_half_state
+          SPRINT cbr_ih_expected_resource ~%apr_helper_6%~
+        END ELSE PATCH_IF (cbr_ih_opcode = 326 && ~%cbr_ih_resource%~ STR_EQ ~%apr_helper_1%~) BEGIN
+          SET cbr_ih_expected_index = cbr_ih_donor_index + 3
+          SET cbr_ih_expected_state = apr_one_state
+          SPRINT cbr_ih_expected_resource ~%apr_helper_1%~
+        END ELSE PATCH_IF (cbr_ih_opcode = 326 && ~%cbr_ih_resource%~ STR_EQ ~%apr_helper_7%~) BEGIN
+          SET cbr_ih_expected_index = cbr_ih_donor_index + 4
+          SET cbr_ih_expected_state = apr_one_half_state
+          SPRINT cbr_ih_expected_resource ~%apr_helper_7%~
+        END
+      END
+      PATCH_IF (cbr_ih_owned) BEGIN
+        ++cbr_ih_owned_count
+        SET cbr_ih_common_invalid = (cbr_ih_graph_effect != cbr_ih_expected_index
+                                  || cbr_ih_target != cbr_ih_donor_target
+                                  || cbr_ih_power != cbr_ih_donor_power
+                                  || cbr_ih_dice_number != 0
+                                  || cbr_ih_dice_size != 0
+                                  || cbr_ih_save_type != 0
+                                  || cbr_ih_save_bonus != 0)
+        PATCH_IF (cbr_ih_opcode = 328) BEGIN
+          PATCH_IF (cbr_ih_common_invalid
+                 || cbr_ih_parameter1 != 0
+                 || cbr_ih_parameter2 != ih_state
+                 || cbr_ih_timing != cbr_ih_donor_timing
+                 || cbr_ih_dr != cbr_ih_donor_dr
+                 || cbr_ih_duration != cbr_ih_donor_duration
+                 || cbr_ih_probability1 != cbr_ih_donor_probability1
+                 || cbr_ih_probability2 != cbr_ih_donor_probability2
+                 || !(~%cbr_ih_resource%~ STR_EQ ~~)
+                 || cbr_ih_special != 1) BEGIN
+            SET cbr_ih_owned_invalid = 1
+          END
+        END ELSE BEGIN
+          PATCH_IF (cbr_ih_common_invalid
+                 || cbr_ih_expected_state < 0
+                 || cbr_ih_parameter1 != cbr_ih_expected_state
+                 || cbr_ih_parameter2 != active_state_row
+                 || cbr_ih_timing != 1
+                 || cbr_ih_dr != 2
+                 || cbr_ih_duration != 0
+                 || cbr_ih_probability1 != 100
+                 || cbr_ih_probability2 != 0
+                 || !(~%cbr_ih_resource%~ STR_EQ ~%cbr_ih_expected_resource%~)
+                 || cbr_ih_special != 0) BEGIN
+            SET cbr_ih_owned_invalid = 1
+          END
+        END
+      END
+    END
+    SET cbr_ih_header_status = 0
+    PATCH_IF (cbr_ih_owned_count = 4 && !cbr_ih_owned_invalid) BEGIN
+      SET cbr_ih_header_status = 1
+    END ELSE PATCH_IF (cbr_ih_owned_count != 0 || cbr_ih_owned_invalid) BEGIN
+      PATCH_FAIL ~CBR Improved Haste %improved_haste_resref% header %cbr_ih_graph_header% has a partial, malformed, or misplaced Tempus APR bridge.~
+    END
+    PATCH_IF (bridge_status < 0) BEGIN
+      SET bridge_status = cbr_ih_header_status
+    END ELSE PATCH_IF (bridge_status != cbr_ih_header_status) BEGIN
+      PATCH_FAIL ~CBR Improved Haste %improved_haste_resref% mixes pristine and bridged headers.~
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_validate_tempus_holy_bridge_graph
+  INT_VAR
+    ih_state            = "-1"
+    apr_half_state      = "-1"
+    apr_one_state       = "-1"
+    apr_one_half_state  = "-1"
+    active_state_row    = "-1"
+  STR_VAR
+    apr_helper_6 = ~CBRAPR6~
+    apr_helper_1 = ~CBRAPR1~
+    apr_helper_7 = ~CBRAPR7~
+    apr_condition_6 = ~CBRAPC6~
+    apr_condition_1 = ~CBRAPC1~
+    apr_condition_7 = ~CBRAPC7~
+  RET
+    bridge_status
+BEGIN
+  SET bridge_status = 0
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = ~OHTMPS1 Holy APR bridge graph~
+    RET
+      cbr_holy_graph_ability_offset = ability_offset
+      cbr_holy_graph_ability_count  = ability_count
+      cbr_holy_graph_effect_offset  = effect_offset
+  END
+  SET cbr_holy_tier_status = "-1"
+  FOR (cbr_holy_graph_header = 0; cbr_holy_graph_header < cbr_holy_graph_ability_count; ++cbr_holy_graph_header) BEGIN
+    SET cbr_holy_level = cbr_holy_graph_header + 1
+    SET cbr_holy_graph_header_offset = cbr_holy_graph_ability_offset + (cbr_holy_graph_header * 0x28)
+    READ_SHORT (cbr_holy_graph_header_offset + 0x1e) cbr_holy_graph_count
+    READ_SHORT (cbr_holy_graph_header_offset + 0x20) cbr_holy_graph_first
+    PATCH_IF (cbr_holy_level <= 6) BEGIN
+      SET cbr_holy_expected_state = "-1"
+      SPRINT cbr_holy_expected_helper ~~
+      SPRINT cbr_holy_expected_condition ~~
+      SET cbr_holy_duration = 18
+    END ELSE PATCH_IF (cbr_holy_level <= 12) BEGIN
+      SET cbr_holy_expected_state = apr_half_state
+      SPRINT cbr_holy_expected_helper ~%apr_helper_6%~
+      SPRINT cbr_holy_expected_condition ~%apr_condition_6%~
+      SET cbr_holy_duration = 24
+    END ELSE PATCH_IF (cbr_holy_level <= 24) BEGIN
+      SET cbr_holy_expected_state = apr_one_state
+      SPRINT cbr_holy_expected_helper ~%apr_helper_1%~
+      SPRINT cbr_holy_expected_condition ~%apr_condition_1%~
+      SET cbr_holy_duration = 30
+    END ELSE BEGIN
+      SET cbr_holy_expected_state = apr_one_half_state
+      SPRINT cbr_holy_expected_helper ~%apr_helper_7%~
+      SPRINT cbr_holy_expected_condition ~%apr_condition_7%~
+      SET cbr_holy_duration = 30
+    END
+    SET cbr_holy_owned_count = 0
+    SET cbr_holy_owned_invalid = 0
+    FOR (cbr_holy_graph_effect = 0; cbr_holy_graph_effect < cbr_holy_graph_count; ++cbr_holy_graph_effect) BEGIN
+      SET cbr_holy_fx = cbr_holy_graph_effect_offset + ((cbr_holy_graph_first + cbr_holy_graph_effect) * 0x30)
+      READ_SHORT cbr_holy_fx cbr_holy_opcode
+      READ_BYTE  (cbr_holy_fx + 0x02) cbr_holy_target
+      READ_BYTE  (cbr_holy_fx + 0x03) cbr_holy_power
+      READ_LONG  (cbr_holy_fx + 0x04) cbr_holy_parameter1
+      READ_LONG  (cbr_holy_fx + 0x08) cbr_holy_parameter2
+      READ_BYTE  (cbr_holy_fx + 0x0c) cbr_holy_timing
+      READ_BYTE  (cbr_holy_fx + 0x0d) cbr_holy_dr
+      READ_LONG  (cbr_holy_fx + 0x0e) cbr_holy_effect_duration
+      READ_BYTE  (cbr_holy_fx + 0x12) cbr_holy_probability1
+      READ_BYTE  (cbr_holy_fx + 0x13) cbr_holy_probability2
+      READ_ASCII (cbr_holy_fx + 0x14) cbr_holy_resource (8) NULL
+      READ_LONG  (cbr_holy_fx + 0x1c) cbr_holy_dice_number
+      READ_LONG  (cbr_holy_fx + 0x20) cbr_holy_dice_size
+      READ_LONG  (cbr_holy_fx + 0x24) cbr_holy_save_type
+      READ_LONG  (cbr_holy_fx + 0x28) cbr_holy_save_bonus
+      READ_LONG  (cbr_holy_fx + 0x2c) cbr_holy_special
+      SET cbr_holy_owned = 0
+      PATCH_IF (cbr_holy_opcode = 328
+             && (cbr_holy_parameter2 = ih_state
+              || cbr_holy_parameter2 = apr_half_state
+              || cbr_holy_parameter2 = apr_one_state
+              || cbr_holy_parameter2 = apr_one_half_state)) BEGIN
+        SET cbr_holy_owned = 1
+      END ELSE PATCH_IF (~%cbr_holy_resource%~ STR_EQ ~%apr_helper_6%~
+                      || ~%cbr_holy_resource%~ STR_EQ ~%apr_helper_1%~
+                      || ~%cbr_holy_resource%~ STR_EQ ~%apr_helper_7%~
+                      || ~%cbr_holy_resource%~ STR_EQ ~%apr_condition_6%~
+                      || ~%cbr_holy_resource%~ STR_EQ ~%apr_condition_1%~
+                      || ~%cbr_holy_resource%~ STR_EQ ~%apr_condition_7%~) BEGIN
+        SET cbr_holy_owned = 1
+      END
+      PATCH_IF (cbr_holy_owned) BEGIN
+        ++cbr_holy_owned_count
+        SET cbr_holy_common_invalid = (cbr_holy_target != 1
+                                    || cbr_holy_power != 4
+                                    || cbr_holy_probability1 != 100
+                                    || cbr_holy_probability2 != 0
+                                    || cbr_holy_dice_number != 0
+                                    || cbr_holy_dice_size != 0
+                                    || cbr_holy_save_type != 0
+                                    || cbr_holy_save_bonus != 0)
+        PATCH_IF (cbr_holy_graph_effect = (cbr_holy_graph_count - 7)) BEGIN
+          PATCH_IF (cbr_holy_common_invalid
+                 || cbr_holy_opcode != 328
+                 || cbr_holy_parameter1 != 0
+                 || cbr_holy_parameter2 != cbr_holy_expected_state
+                 || cbr_holy_timing != 0
+                 || cbr_holy_dr != 3
+                 || cbr_holy_effect_duration != cbr_holy_duration
+                 || !(~%cbr_holy_resource%~ STR_EQ ~~)
+                 || cbr_holy_special != 1) BEGIN
+            SET cbr_holy_owned_invalid = 1
+          END
+        END ELSE PATCH_IF (cbr_holy_graph_effect = (cbr_holy_graph_count - 6)) BEGIN
+          PATCH_IF (cbr_holy_common_invalid
+                 || cbr_holy_opcode != 326
+                 || cbr_holy_parameter1 != ih_state
+                 || cbr_holy_parameter2 != active_state_row
+                 || cbr_holy_timing != 1
+                 || cbr_holy_dr != 2
+                 || cbr_holy_effect_duration != 0
+                 || !(~%cbr_holy_resource%~ STR_EQ ~%cbr_holy_expected_helper%~)
+                 || cbr_holy_special != 0) BEGIN
+            SET cbr_holy_owned_invalid = 1
+          END
+        END ELSE PATCH_IF (cbr_holy_graph_effect = (cbr_holy_graph_count - 5)) BEGIN
+          PATCH_IF (cbr_holy_common_invalid
+                 || cbr_holy_opcode != 272
+                 || cbr_holy_parameter1 != 1
+                 || cbr_holy_parameter2 != 3
+                 || cbr_holy_timing != 0
+                 || cbr_holy_dr != 3
+                 || cbr_holy_effect_duration != cbr_holy_duration
+                 || !(~%cbr_holy_resource%~ STR_EQ ~%cbr_holy_expected_condition%~)
+                 || cbr_holy_special != 0) BEGIN
+            SET cbr_holy_owned_invalid = 1
+          END
+        END ELSE BEGIN
+          SET cbr_holy_owned_invalid = 1
+        END
+      END
+    END
+    PATCH_IF (cbr_holy_expected_state < 0) BEGIN
+      PATCH_IF (cbr_holy_owned_count != 0 || cbr_holy_owned_invalid) BEGIN
+        PATCH_FAIL ~CBR OHTMPS1 level %cbr_holy_level% must not contain an APR bridge below level 7.~
+      END
+    END ELSE BEGIN
+      SET cbr_holy_header_status = 0
+      PATCH_IF (cbr_holy_owned_count = 3 && !cbr_holy_owned_invalid) BEGIN
+        SET cbr_holy_header_status = 1
+      END ELSE PATCH_IF (cbr_holy_owned_count != 0 || cbr_holy_owned_invalid) BEGIN
+        PATCH_FAIL ~CBR OHTMPS1 level %cbr_holy_level% has a partial, malformed, or misplaced APR bridge.~
+      END
+      PATCH_IF (cbr_holy_tier_status < 0) BEGIN
+        SET cbr_holy_tier_status = cbr_holy_header_status
+      END ELSE PATCH_IF (cbr_holy_tier_status != cbr_holy_header_status) BEGIN
+        PATCH_FAIL ~CBR OHTMPS1 mixes pristine and bridged APR-tier headers.~
+      END
+    END
+  END
+  PATCH_IF (cbr_holy_tier_status >= 0) BEGIN
+    SET bridge_status = cbr_holy_tier_status
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_reject_tempus_apr_artifacts
+  STR_VAR
+    resource_name = ~unknown SPL~
+    apr_helper_6 = ~CBRAPR6~
+    apr_helper_1 = ~CBRAPR1~
+    apr_helper_7 = ~CBRAPR7~
+    apr_condition_6 = ~CBRAPC6~
+    apr_condition_1 = ~CBRAPC1~
+    apr_condition_7 = ~CBRAPC7~
+BEGIN
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = EVAL ~%resource_name% no-bridge scan~
+    RET
+      cbr_no_bridge_effect_offset = effect_offset
+      cbr_no_bridge_effect_count = effect_count
+  END
+  FOR (cbr_no_bridge_effect = 0; cbr_no_bridge_effect < cbr_no_bridge_effect_count; ++cbr_no_bridge_effect) BEGIN
+    SET cbr_no_bridge_fx = cbr_no_bridge_effect_offset + (cbr_no_bridge_effect * 0x30)
+    READ_ASCII (cbr_no_bridge_fx + 0x14) cbr_no_bridge_resource (8) NULL
+    PATCH_IF (~%cbr_no_bridge_resource%~ STR_EQ ~%apr_helper_6%~
+           || ~%cbr_no_bridge_resource%~ STR_EQ ~%apr_helper_1%~
+           || ~%cbr_no_bridge_resource%~ STR_EQ ~%apr_helper_7%~
+           || ~%cbr_no_bridge_resource%~ STR_EQ ~%apr_condition_6%~
+           || ~%cbr_no_bridge_resource%~ STR_EQ ~%apr_condition_1%~
+           || ~%cbr_no_bridge_resource%~ STR_EQ ~%apr_condition_7%~) BEGIN
+      PATCH_FAIL ~CBR Tempus APR bridge collision: true-doubling resource %resource_name% retains dangling reserved bridge reference %cbr_no_bridge_resource% at effect %cbr_no_bridge_effect%.~
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_reject_tempus_private_splstates
+BEGIN
+  SET cbr_private_state_rows = 0
+  SET cbr_private_ids_length = BUFFER_LENGTH
+  READ_ASCII 0 cbr_private_ids_contents (cbr_private_ids_length)
+  INNER_PATCH ~%cbr_private_ids_contents%~ BEGIN
+    REPLACE_EVALUATE CASE_INSENSITIVE
+      ~^[ %TAB%]*\([^ %TAB%%WNL%%MNL%%LNL%]+\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
+    BEGIN
+      PATCH_IF (IS_AN_INT ~%MATCH1%~) BEGIN
+        SPRINT cbr_private_symbol ~%MATCH2%~
+        TO_UPPER cbr_private_symbol
+        PATCH_IF (~%cbr_private_symbol%~ STR_EQ ~CBR_TEMPUS_IH~
+               || ~%cbr_private_symbol%~ STR_EQ ~CBR_TEMPUS_APR_HALF~
+               || ~%cbr_private_symbol%~ STR_EQ ~CBR_TEMPUS_APR_ONE~
+               || ~%cbr_private_symbol%~ STR_EQ ~CBR_TEMPUS_APR_ONE_HALF~) BEGIN
+          ++cbr_private_state_rows
+        END
+      END
+    END
+      ~~
+  END
+  PATCH_IF (cbr_private_state_rows != 0) BEGIN
+    PATCH_FAIL ~CBR Tempus APR bridge collision: true-doubling mode found %cbr_private_state_rows% private CBR_TEMPUS spell-state rows.~
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_create_tempus_apr_helper
+  INT_VAR
+    apr_key = 0
+  STR_VAR
+    resource_dir = ~~
+    helper_resref = ~~
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  OUTER_SPRINT helper_resref EVALUATE_BUFFER ~%helper_resref%~
+  CREATE SPL ~%helper_resref%~
+    LPF cbr_add_basic_self_ability END
+    LPF cbr_append_spl_effect_record
+      INT_VAR opcode = 321 target = 1 power = 4 parameter2 = 2 timing = 1 resist_dispel = 2
+      STR_VAR resource = EVAL ~%helper_resref%~
+    END
+    LPF cbr_append_spl_effect_record
+      INT_VAR opcode = 1 target = 1 power = 4 parameter1 = apr_key parameter2 = 0 timing = 0 resist_dispel = 2 duration = 1
+    END
+    WRITE_SHORT 0x90 2
+  ACTION_IF !(~%resource_dir%~ STR_EQ ~override~) BEGIN
+    ACTION_IF !(FILE_EXISTS ~%resource_dir%/%helper_resref%.spl~) BEGIN
+      MOVE ~override/%helper_resref%.spl~ ~%resource_dir%/%helper_resref%.spl~
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_create_tempus_apr_condition
+  INT_VAR
+    ih_state          = "-1"
+    active_state_row = "-1"
+  STR_VAR
+    resource_dir    = ~~
+    condition_resref = ~~
+    helper_resref   = ~~
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  OUTER_SPRINT condition_resref EVALUATE_BUFFER ~%condition_resref%~
+  OUTER_SPRINT helper_resref EVALUATE_BUFFER ~%helper_resref%~
+  CREATE EFF ~%condition_resref%~
+    FOR (cbr_apr_create_byte = 0x10; cbr_apr_create_byte < 0x110; ++cbr_apr_create_byte) BEGIN
+      WRITE_BYTE cbr_apr_create_byte 0
+    END
+    WRITE_LONG 0x10 326
+    WRITE_LONG 0x14 2
+    WRITE_LONG 0x18 4
+    WRITE_LONG 0x1c ih_state
+    WRITE_LONG 0x20 active_state_row
+    WRITE_LONG 0x24 1
+    WRITE_LONG 0x28 0
+    WRITE_SHORT 0x2c 100
+    WRITE_SHORT 0x2e 0
+    WRITE_ASCIIE 0x30 ~%helper_resref%~ #8
+    WRITE_LONG 0x5c 2
+  ACTION_IF !(~%resource_dir%~ STR_EQ ~override~) BEGIN
+    ACTION_IF !(FILE_EXISTS ~%resource_dir%/%condition_resref%.eff~) BEGIN
+      MOVE ~override/%condition_resref%.eff~ ~%resource_dir%/%condition_resref%.eff~
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_create_tempus_apr_helpers
+  INT_VAR
+    ih_state          = "-1"
+    active_state_row = "-1"
+  STR_VAR
+    resource_dir = ~~
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  LAF cbr_define_tempus_private_resrefs
+    RET
+      cbr_apr_helper_6
+      cbr_apr_helper_1
+      cbr_apr_helper_7
+      cbr_apr_condition_6
+      cbr_apr_condition_1
+      cbr_apr_condition_7
+  END
+  LAF cbr_create_tempus_apr_helper INT_VAR apr_key = 6 STR_VAR resource_dir = EVAL ~%resource_dir%~ helper_resref = EVAL ~%cbr_apr_helper_6%~ END
+  LAF cbr_create_tempus_apr_helper INT_VAR apr_key = 1 STR_VAR resource_dir = EVAL ~%resource_dir%~ helper_resref = EVAL ~%cbr_apr_helper_1%~ END
+  LAF cbr_create_tempus_apr_helper INT_VAR apr_key = 7 STR_VAR resource_dir = EVAL ~%resource_dir%~ helper_resref = EVAL ~%cbr_apr_helper_7%~ END
+  LAF cbr_create_tempus_apr_condition INT_VAR ih_state = ih_state active_state_row = active_state_row STR_VAR resource_dir = EVAL ~%resource_dir%~ condition_resref = EVAL ~%cbr_apr_condition_6%~ helper_resref = EVAL ~%cbr_apr_helper_6%~ END
+  LAF cbr_create_tempus_apr_condition INT_VAR ih_state = ih_state active_state_row = active_state_row STR_VAR resource_dir = EVAL ~%resource_dir%~ condition_resref = EVAL ~%cbr_apr_condition_1%~ helper_resref = EVAL ~%cbr_apr_helper_1%~ END
+  LAF cbr_create_tempus_apr_condition INT_VAR ih_state = ih_state active_state_row = active_state_row STR_VAR resource_dir = EVAL ~%resource_dir%~ condition_resref = EVAL ~%cbr_apr_condition_7%~ helper_resref = EVAL ~%cbr_apr_helper_7%~ END
+  LAF cbr_validate_tempus_apr_helpers
+    INT_VAR ih_state = ih_state active_state_row = active_state_row
+    STR_VAR resource_dir = EVAL ~%resource_dir%~
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_build_tempus_ih_bridge
+  INT_VAR
+    ih_state            = "-1"
+    apr_half_state      = "-1"
+    apr_one_state       = "-1"
+    apr_one_half_state  = "-1"
+    active_state_row    = "-1"
+  STR_VAR
+    improved_haste_resref = ~~
+    apr_helper_6 = ~CBRAPR6~
+    apr_helper_1 = ~CBRAPR1~
+    apr_helper_7 = ~CBRAPR7~
+BEGIN
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = EVAL ~Improved Haste %improved_haste_resref% bridge source~
+    RET
+      cbr_ih_build_ability_offset = ability_offset
+      cbr_ih_build_ability_count  = ability_count
+      cbr_ih_build_effect_offset  = effect_offset
+      cbr_ih_build_effect_count   = effect_count
+  END
+  SET cbr_ih_build_old_bytes = cbr_ih_build_effect_count * 0x30
+  READ_SHORT 0x6e cbr_ih_build_casting_first
+  READ_SHORT 0x70 cbr_ih_build_casting_count
+  SET cbr_ih_build_new_index = 0
+  FOR (cbr_ih_build_casting = 0; cbr_ih_build_casting < cbr_ih_build_casting_count; ++cbr_ih_build_casting) BEGIN
+    SET cbr_ih_build_source = cbr_ih_build_effect_offset + ((cbr_ih_build_casting_first + cbr_ih_build_casting) * 0x30)
+    LPF cbr_append_raw_spl_effect_record INT_VAR source_offset = cbr_ih_build_source END
+    ++cbr_ih_build_new_index
+  END
+  WRITE_SHORT 0x6e 0
+  FOR (cbr_ih_build_header = 0; cbr_ih_build_header < cbr_ih_build_ability_count; ++cbr_ih_build_header) BEGIN
+    SET cbr_ih_build_header_offset = cbr_ih_build_ability_offset + (cbr_ih_build_header * 0x28)
+    READ_SHORT (cbr_ih_build_header_offset + 0x1e) cbr_ih_build_source_count
+    READ_SHORT (cbr_ih_build_header_offset + 0x20) cbr_ih_build_source_first
+    SET cbr_ih_build_new_first = cbr_ih_build_new_index
+    WRITE_SHORT (cbr_ih_build_header_offset + 0x20) cbr_ih_build_new_first
+    FOR (cbr_ih_build_effect = 0; cbr_ih_build_effect < cbr_ih_build_source_count; ++cbr_ih_build_effect) BEGIN
+      SET cbr_ih_build_source = cbr_ih_build_effect_offset + ((cbr_ih_build_source_first + cbr_ih_build_effect) * 0x30)
+      READ_SHORT cbr_ih_build_source cbr_ih_build_opcode
+      READ_BYTE  (cbr_ih_build_source + 0x02) cbr_ih_build_target
+      READ_BYTE  (cbr_ih_build_source + 0x03) cbr_ih_build_power
+      READ_LONG  (cbr_ih_build_source + 0x04) cbr_ih_build_parameter1
+      READ_LONG  (cbr_ih_build_source + 0x08) cbr_ih_build_parameter2
+      READ_BYTE  (cbr_ih_build_source + 0x0c) cbr_ih_build_timing
+      READ_BYTE  (cbr_ih_build_source + 0x0d) cbr_ih_build_dr
+      READ_LONG  (cbr_ih_build_source + 0x0e) cbr_ih_build_duration
+      READ_BYTE  (cbr_ih_build_source + 0x12) cbr_ih_build_probability1
+      READ_BYTE  (cbr_ih_build_source + 0x13) cbr_ih_build_probability2
+      LPF cbr_append_raw_spl_effect_record INT_VAR source_offset = cbr_ih_build_source END
+      ++cbr_ih_build_new_index
+      PATCH_IF (cbr_ih_build_opcode = 1 && cbr_ih_build_parameter1 = 1 && cbr_ih_build_parameter2 = 0) BEGIN
+        // Keep delivery identical to the matched APR donor and insert before
+        // later same-resource opcode-206 immunities in the live SR spell.
+        LPF cbr_append_spl_effect_record
+          INT_VAR opcode = 328 target = cbr_ih_build_target power = cbr_ih_build_power parameter1 = 0 parameter2 = ih_state timing = cbr_ih_build_timing resist_dispel = cbr_ih_build_dr duration = cbr_ih_build_duration probability1 = cbr_ih_build_probability1 probability2 = cbr_ih_build_probability2 special = 1
+        END
+        ++cbr_ih_build_new_index
+        LPF cbr_append_spl_effect_record
+          INT_VAR opcode = 326 target = cbr_ih_build_target power = cbr_ih_build_power parameter1 = apr_half_state parameter2 = active_state_row timing = 1 resist_dispel = 2
+          STR_VAR resource = EVAL ~%apr_helper_6%~
+        END
+        ++cbr_ih_build_new_index
+        LPF cbr_append_spl_effect_record
+          INT_VAR opcode = 326 target = cbr_ih_build_target power = cbr_ih_build_power parameter1 = apr_one_state parameter2 = active_state_row timing = 1 resist_dispel = 2
+          STR_VAR resource = EVAL ~%apr_helper_1%~
+        END
+        ++cbr_ih_build_new_index
+        LPF cbr_append_spl_effect_record
+          INT_VAR opcode = 326 target = cbr_ih_build_target power = cbr_ih_build_power parameter1 = apr_one_half_state parameter2 = active_state_row timing = 1 resist_dispel = 2
+          STR_VAR resource = EVAL ~%apr_helper_7%~
+        END
+        ++cbr_ih_build_new_index
+      END
+    END
+    SET cbr_ih_build_new_count = cbr_ih_build_new_index - cbr_ih_build_new_first
+    WRITE_SHORT (cbr_ih_build_header_offset + 0x1e) cbr_ih_build_new_count
+  END
+  DELETE_BYTES cbr_ih_build_effect_offset cbr_ih_build_old_bytes
+  WRITE_LONG 0x6a cbr_ih_build_effect_offset
+END
+
+DEFINE_PATCH_FUNCTION cbr_build_tempus_holy_bridge
+  INT_VAR
+    ih_state            = "-1"
+    apr_half_state      = "-1"
+    apr_one_state       = "-1"
+    apr_one_half_state  = "-1"
+    active_state_row    = "-1"
+  STR_VAR
+    apr_helper_6 = ~CBRAPR6~
+    apr_helper_1 = ~CBRAPR1~
+    apr_helper_7 = ~CBRAPR7~
+    apr_condition_6 = ~CBRAPC6~
+    apr_condition_1 = ~CBRAPC1~
+    apr_condition_7 = ~CBRAPC7~
+BEGIN
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = ~OHTMPS1 Holy APR bridge source~
+    RET
+      cbr_holy_build_ability_offset = ability_offset
+      cbr_holy_build_ability_count  = ability_count
+      cbr_holy_build_effect_offset  = effect_offset
+      cbr_holy_build_effect_count   = effect_count
+  END
+  PATCH_IF (cbr_holy_build_ability_count != 30) BEGIN
+    PATCH_FAIL ~CBR Holy APR bridge builder requires the canonical 30-header progression.~
+  END
+  SET cbr_holy_build_old_bytes = cbr_holy_build_effect_count * 0x30
+  READ_SHORT 0x6e cbr_holy_build_casting_first
+  READ_SHORT 0x70 cbr_holy_build_casting_count
+  SET cbr_holy_build_new_index = 0
+  FOR (cbr_holy_build_casting = 0; cbr_holy_build_casting < cbr_holy_build_casting_count; ++cbr_holy_build_casting) BEGIN
+    SET cbr_holy_build_source = cbr_holy_build_effect_offset + ((cbr_holy_build_casting_first + cbr_holy_build_casting) * 0x30)
+    LPF cbr_append_raw_spl_effect_record INT_VAR source_offset = cbr_holy_build_source END
+    ++cbr_holy_build_new_index
+  END
+  WRITE_SHORT 0x6e 0
+  FOR (cbr_holy_build_header = 0; cbr_holy_build_header < 30; ++cbr_holy_build_header) BEGIN
+    SET cbr_holy_build_level = cbr_holy_build_header + 1
+    SET cbr_holy_build_header_offset = cbr_holy_build_ability_offset + (cbr_holy_build_header * 0x28)
+    READ_SHORT (cbr_holy_build_header_offset + 0x1e) cbr_holy_build_source_count
+    READ_SHORT (cbr_holy_build_header_offset + 0x20) cbr_holy_build_source_first
+    SET cbr_holy_build_new_first = cbr_holy_build_new_index
+    WRITE_SHORT (cbr_holy_build_header_offset + 0x20) cbr_holy_build_new_first
+    PATCH_IF (cbr_holy_build_level <= 6) BEGIN
+      SET cbr_holy_build_state = "-1"
+      SET cbr_holy_build_duration = 18
+    END ELSE PATCH_IF (cbr_holy_build_level <= 12) BEGIN
+      SET cbr_holy_build_state = apr_half_state
+      SET cbr_holy_build_duration = 24
+      SPRINT cbr_holy_build_helper ~%apr_helper_6%~
+      SPRINT cbr_holy_build_condition ~%apr_condition_6%~
+    END ELSE PATCH_IF (cbr_holy_build_level <= 24) BEGIN
+      SET cbr_holy_build_state = apr_one_state
+      SET cbr_holy_build_duration = 30
+      SPRINT cbr_holy_build_helper ~%apr_helper_1%~
+      SPRINT cbr_holy_build_condition ~%apr_condition_1%~
+    END ELSE BEGIN
+      SET cbr_holy_build_state = apr_one_half_state
+      SET cbr_holy_build_duration = 30
+      SPRINT cbr_holy_build_helper ~%apr_helper_7%~
+      SPRINT cbr_holy_build_condition ~%apr_condition_7%~
+    END
+    FOR (cbr_holy_build_effect = 0; cbr_holy_build_effect < cbr_holy_build_source_count; ++cbr_holy_build_effect) BEGIN
+      PATCH_IF (cbr_holy_build_state >= 0 && cbr_holy_build_effect = (cbr_holy_build_source_count - 4)) BEGIN
+        LPF cbr_append_spl_effect_record
+          INT_VAR opcode = 328 target = 1 power = 4 parameter1 = 0 parameter2 = cbr_holy_build_state timing = 0 resist_dispel = 3 duration = cbr_holy_build_duration special = 1
+        END
+        ++cbr_holy_build_new_index
+        LPF cbr_append_spl_effect_record
+          INT_VAR opcode = 326 target = 1 power = 4 parameter1 = ih_state parameter2 = active_state_row timing = 1 resist_dispel = 2
+          STR_VAR resource = EVAL ~%cbr_holy_build_helper%~
+        END
+        ++cbr_holy_build_new_index
+        LPF cbr_append_spl_effect_record
+          INT_VAR opcode = 272 target = 1 power = 4 parameter1 = 1 parameter2 = 3 timing = 0 resist_dispel = 3 duration = cbr_holy_build_duration
+          STR_VAR resource = EVAL ~%cbr_holy_build_condition%~
+        END
+        ++cbr_holy_build_new_index
+      END
+      SET cbr_holy_build_source = cbr_holy_build_effect_offset + ((cbr_holy_build_source_first + cbr_holy_build_effect) * 0x30)
+      LPF cbr_append_raw_spl_effect_record INT_VAR source_offset = cbr_holy_build_source END
+      ++cbr_holy_build_new_index
+    END
+    SET cbr_holy_build_new_count = cbr_holy_build_new_index - cbr_holy_build_new_first
+    WRITE_SHORT (cbr_holy_build_header_offset + 0x1e) cbr_holy_build_new_count
+  END
+  DELETE_BYTES cbr_holy_build_effect_offset cbr_holy_build_old_bytes
+  WRITE_LONG 0x6a cbr_holy_build_effect_offset
+END
+
+DEFINE_PATCH_FUNCTION cbr_build_tempus_divine_cleanup
+  STR_VAR
+    divine_power_resref = ~~
+    strength_set_18 = ~CBRST18~
+    strength_set_19 = ~CBRST19~
+    strength_set_20 = ~CBRST20~
+    strength_set_21 = ~CBRST21~
+BEGIN
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = EVAL ~Divine Power %divine_power_resref% cleanup source~
+    RET
+      cbr_divine_build_ability_offset = ability_offset
+      cbr_divine_build_ability_count  = ability_count
+      cbr_divine_build_effect_offset  = effect_offset
+      cbr_divine_build_effect_count   = effect_count
+  END
+  SET cbr_divine_build_old_bytes = cbr_divine_build_effect_count * 0x30
+  READ_SHORT 0x6e cbr_divine_build_casting_first
+  READ_SHORT 0x70 cbr_divine_build_casting_count
+  SET cbr_divine_build_new_index = 0
+  FOR (cbr_divine_build_casting = 0; cbr_divine_build_casting < cbr_divine_build_casting_count; ++cbr_divine_build_casting) BEGIN
+    SET cbr_divine_build_source = cbr_divine_build_effect_offset + ((cbr_divine_build_casting_first + cbr_divine_build_casting) * 0x30)
+    LPF cbr_append_raw_spl_effect_record INT_VAR source_offset = cbr_divine_build_source END
+    ++cbr_divine_build_new_index
+  END
+  WRITE_SHORT 0x6e 0
+  FOR (cbr_divine_build_header = 0; cbr_divine_build_header < cbr_divine_build_ability_count; ++cbr_divine_build_header) BEGIN
+    SET cbr_divine_build_header_offset = cbr_divine_build_ability_offset + (cbr_divine_build_header * 0x28)
+    READ_SHORT (cbr_divine_build_header_offset + 0x1e) cbr_divine_build_source_count
+    READ_SHORT (cbr_divine_build_header_offset + 0x20) cbr_divine_build_source_first
+    SET cbr_divine_build_new_first = cbr_divine_build_new_index
+    WRITE_SHORT (cbr_divine_build_header_offset + 0x20) cbr_divine_build_new_first
+    LPF cbr_append_spl_effect_record INT_VAR opcode = 321 target = 1 power = 4 parameter2 = 2 timing = 1 resist_dispel = 2 STR_VAR resource = ~OHTMPS1~ END
+    ++cbr_divine_build_new_index
+    LPF cbr_append_spl_effect_record INT_VAR opcode = 321 target = 1 power = 4 parameter2 = 2 timing = 1 resist_dispel = 2 STR_VAR resource = EVAL ~%strength_set_18%~ END
+    ++cbr_divine_build_new_index
+    LPF cbr_append_spl_effect_record INT_VAR opcode = 321 target = 1 power = 4 parameter2 = 2 timing = 1 resist_dispel = 2 STR_VAR resource = EVAL ~%strength_set_19%~ END
+    ++cbr_divine_build_new_index
+    LPF cbr_append_spl_effect_record INT_VAR opcode = 321 target = 1 power = 4 parameter2 = 2 timing = 1 resist_dispel = 2 STR_VAR resource = EVAL ~%strength_set_20%~ END
+    ++cbr_divine_build_new_index
+    LPF cbr_append_spl_effect_record INT_VAR opcode = 321 target = 1 power = 4 parameter2 = 2 timing = 1 resist_dispel = 2 STR_VAR resource = EVAL ~%strength_set_21%~ END
+    ++cbr_divine_build_new_index
+    FOR (cbr_divine_build_effect = 0; cbr_divine_build_effect < cbr_divine_build_source_count; ++cbr_divine_build_effect) BEGIN
+      SET cbr_divine_build_source = cbr_divine_build_effect_offset + ((cbr_divine_build_source_first + cbr_divine_build_effect) * 0x30)
+      LPF cbr_append_raw_spl_effect_record INT_VAR source_offset = cbr_divine_build_source END
+      ++cbr_divine_build_new_index
+    END
+    SET cbr_divine_build_new_count = cbr_divine_build_new_index - cbr_divine_build_new_first
+    WRITE_SHORT (cbr_divine_build_header_offset + 0x1e) cbr_divine_build_new_count
+  END
+  DELETE_BYTES cbr_divine_build_effect_offset cbr_divine_build_old_bytes
+  WRITE_LONG 0x6a cbr_divine_build_effect_offset
+END
+
+DEFINE_ACTION_FUNCTION cbr_apply_tempus_bridge
+  INT_VAR
+    bridge_status        = 0
+    divine_cleanup_status = 0
+    ih_state            = "-1"
+    apr_half_state      = "-1"
+    apr_one_state       = "-1"
+    apr_one_half_state  = "-1"
+    active_state_row    = "-1"
+  STR_VAR
+    resource_dir             = ~~
+    improved_haste_semantics = ~~
+    improved_haste_resref    = ~~
+    divine_power_resref      = ~~
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  OUTER_SPRINT improved_haste_semantics EVALUATE_BUFFER ~%improved_haste_semantics%~
+  OUTER_SPRINT improved_haste_resref EVALUATE_BUFFER ~%improved_haste_resref%~
+  OUTER_SPRINT divine_power_resref EVALUATE_BUFFER ~%divine_power_resref%~
+  OUTER_SPRINT cbr_bridge_holy_path ~%resource_dir%/OHTMPS1.SPL~
+  OUTER_SPRINT cbr_bridge_ih_path ~%resource_dir%/%improved_haste_resref%.SPL~
+  OUTER_SPRINT cbr_bridge_divine_path ~%resource_dir%/%divine_power_resref%.SPL~
+  LAF cbr_define_tempus_private_resrefs
+    RET
+      cbr_apr_helper_6
+      cbr_apr_helper_1
+      cbr_apr_helper_7
+      cbr_apr_condition_6
+      cbr_apr_condition_1
+      cbr_apr_condition_7
+      cbr_strength_set_18
+      cbr_strength_set_19
+      cbr_strength_set_20
+      cbr_strength_set_21
+  END
+
+  ACTION_IF (~%improved_haste_semantics%~ STR_EQ ~additive~) BEGIN
+    ACTION_IF (ih_state < 0 || apr_half_state < 0 || apr_one_state < 0 || apr_one_half_state < 0 || active_state_row < 0) BEGIN
+      FAIL ~CBR Tempus APR bridge application is missing dynamic state or SPLPROT allocations.~
+    END
+    ACTION_IF (bridge_status = 0) BEGIN
+      LAF cbr_create_tempus_apr_helpers
+        INT_VAR ih_state = ih_state active_state_row = active_state_row
+        STR_VAR resource_dir = EVAL ~%resource_dir%~
+      END
+      COPY ~%cbr_bridge_holy_path%~ ~%cbr_bridge_holy_path%~
+        LPF cbr_build_tempus_holy_bridge
+          INT_VAR ih_state = ih_state apr_half_state = apr_half_state apr_one_state = apr_one_state apr_one_half_state = apr_one_half_state active_state_row = active_state_row
+          STR_VAR apr_helper_6 = EVAL ~%cbr_apr_helper_6%~ apr_helper_1 = EVAL ~%cbr_apr_helper_1%~ apr_helper_7 = EVAL ~%cbr_apr_helper_7%~ apr_condition_6 = EVAL ~%cbr_apr_condition_6%~ apr_condition_1 = EVAL ~%cbr_apr_condition_1%~ apr_condition_7 = EVAL ~%cbr_apr_condition_7%~
+        END
+      BUT_ONLY
+      COPY ~%cbr_bridge_ih_path%~ ~%cbr_bridge_ih_path%~
+        LPF cbr_build_tempus_ih_bridge
+          INT_VAR ih_state = ih_state apr_half_state = apr_half_state apr_one_state = apr_one_state apr_one_half_state = apr_one_half_state active_state_row = active_state_row
+          STR_VAR improved_haste_resref = EVAL ~%improved_haste_resref%~ apr_helper_6 = EVAL ~%cbr_apr_helper_6%~ apr_helper_1 = EVAL ~%cbr_apr_helper_1%~ apr_helper_7 = EVAL ~%cbr_apr_helper_7%~
+        END
+      BUT_ONLY
+    END ELSE ACTION_IF (bridge_status != 1) BEGIN
+      FAIL ~CBR Tempus APR bridge application received invalid graph status %bridge_status%.~
+    END
+  END ELSE ACTION_IF (bridge_status != 0) BEGIN
+    FAIL ~CBR true-doubling Improved Haste unexpectedly requested additive bridge status %bridge_status%.~
+  END
+
+  ACTION_IF (divine_cleanup_status = 0) BEGIN
+    COPY ~%cbr_bridge_divine_path%~ ~%cbr_bridge_divine_path%~
+      LPF cbr_build_tempus_divine_cleanup
+        STR_VAR
+          divine_power_resref = EVAL ~%divine_power_resref%~
+          strength_set_18 = EVAL ~%cbr_strength_set_18%~
+          strength_set_19 = EVAL ~%cbr_strength_set_19%~
+          strength_set_20 = EVAL ~%cbr_strength_set_20%~
+          strength_set_21 = EVAL ~%cbr_strength_set_21%~
+      END
+    BUT_ONLY
+  END ELSE ACTION_IF (divine_cleanup_status != 1) BEGIN
+    FAIL ~CBR Divine Power cleanup application received invalid graph status %divine_cleanup_status%.~
+  END
+
+  ACTION_IF (~%improved_haste_semantics%~ STR_EQ ~additive~) BEGIN
+    LAF cbr_validate_tempus_apr_helpers
+      INT_VAR ih_state = ih_state active_state_row = active_state_row
+      STR_VAR resource_dir = EVAL ~%resource_dir%~
+    END
+    COPY ~%cbr_bridge_holy_path%~ ~%cbr_bridge_holy_path%~
+      LPF cbr_validate_tempus_holy_bridge_graph
+        INT_VAR ih_state = ih_state apr_half_state = apr_half_state apr_one_state = apr_one_state apr_one_half_state = apr_one_half_state active_state_row = active_state_row
+        STR_VAR apr_helper_6 = EVAL ~%cbr_apr_helper_6%~ apr_helper_1 = EVAL ~%cbr_apr_helper_1%~ apr_helper_7 = EVAL ~%cbr_apr_helper_7%~ apr_condition_6 = EVAL ~%cbr_apr_condition_6%~ apr_condition_1 = EVAL ~%cbr_apr_condition_1%~ apr_condition_7 = EVAL ~%cbr_apr_condition_7%~
+        RET cbr_bridge_holy_verified = bridge_status
+      END
+      PATCH_IF (cbr_bridge_holy_verified != 1) BEGIN
+        PATCH_FAIL ~CBR Holy APR bridge post-validation did not find a canonical graph.~
+      END
+    BUT_ONLY
+    COPY ~%cbr_bridge_ih_path%~ ~%cbr_bridge_ih_path%~
+      LPF cbr_validate_tempus_ih_bridge_graph
+        INT_VAR ih_state = ih_state apr_half_state = apr_half_state apr_one_state = apr_one_state apr_one_half_state = apr_one_half_state active_state_row = active_state_row
+        STR_VAR improved_haste_resref = EVAL ~%improved_haste_resref%~ apr_helper_6 = EVAL ~%cbr_apr_helper_6%~ apr_helper_1 = EVAL ~%cbr_apr_helper_1%~ apr_helper_7 = EVAL ~%cbr_apr_helper_7%~ apr_condition_6 = EVAL ~%cbr_apr_condition_6%~ apr_condition_1 = EVAL ~%cbr_apr_condition_1%~ apr_condition_7 = EVAL ~%cbr_apr_condition_7%~
+        RET cbr_bridge_ih_verified = bridge_status
+      END
+      PATCH_IF (cbr_bridge_ih_verified != 1) BEGIN
+        PATCH_FAIL ~CBR Improved Haste APR bridge post-validation did not find a canonical graph.~
+      END
+    BUT_ONLY
+  END
+  COPY ~%cbr_bridge_divine_path%~ ~%cbr_bridge_divine_path%~
+    LPF cbr_validate_tempus_divine_cleanup_graph
+      STR_VAR divine_power_resref = EVAL ~%divine_power_resref%~ strength_set_18 = EVAL ~%cbr_strength_set_18%~ strength_set_19 = EVAL ~%cbr_strength_set_19%~ strength_set_20 = EVAL ~%cbr_strength_set_20%~ strength_set_21 = EVAL ~%cbr_strength_set_21%~
+      RET cbr_bridge_divine_verified = cleanup_status
+    END
+    PATCH_IF (cbr_bridge_divine_verified != 1) BEGIN
+      PATCH_FAIL ~CBR Divine Power reciprocal cleanup post-validation did not find a canonical prefix.~
+    END
+  BUT_ONLY
+END
+
 DEFINE_ACTION_FUNCTION cbr_preflight_tempus_holy_power
   STR_VAR
     resource_dir           = ~~
@@ -2239,6 +3366,8 @@ DEFINE_ACTION_FUNCTION cbr_preflight_tempus_holy_power
   RET
     holy_ability_count
     clab_capped_shape
+    bridge_status
+    divine_cleanup_status
 BEGIN
   OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
   OUTER_SPRINT divine_power_resref EVALUATE_BUFFER ~%divine_power_resref%~
@@ -2246,6 +3375,8 @@ BEGIN
   OUTER_SPRINT improved_haste_semantics EVALUATE_BUFFER ~%improved_haste_semantics%~
   OUTER_SET holy_ability_count = "-1"
   OUTER_SET clab_capped_shape = "-1"
+  OUTER_SET bridge_status = 0
+  OUTER_SET divine_cleanup_status = "-1"
   LAF cbr_define_tempus_private_resrefs
     RET
       cbr_apr_helper_6
@@ -2295,13 +3426,36 @@ BEGIN
     END
   END
 
+  // Reciprocal cleanup is timed-only opcode 321 (p2=2), but timed effects
+  // delivered by a same-name item still carry that item resref as their source.
+  // Guard parent ITMs even though the expected parents themselves are SPLs.
+  ACTION_IF (FILE_EXISTS ~chitin.key~) BEGIN
+    ACTION_IF (FILE_EXISTS_IN_GAME ~OHTMPS1.ITM~) BEGIN
+      FAIL ~CBR Tempus Holy Power collision: OHTMPS1.ITM is visible through the game KEY and could be removed by reciprocal cleanup.~
+    END
+    ACTION_IF (FILE_EXISTS_IN_GAME ~%divine_power_resref%.ITM~) BEGIN
+      FAIL ~CBR Tempus Holy Power collision: %divine_power_resref%.ITM is visible through the game KEY and could be removed by reciprocal cleanup.~
+    END
+  END
+  ACTION_IF (FILE_EXISTS ~%resource_dir%/OHTMPS1.itm~ || FILE_EXISTS ~%resource_dir%/OHTMPS1.ITM~
+          || FILE_EXISTS ~%resource_dir%/%divine_power_resref%.itm~ || FILE_EXISTS ~%resource_dir%/%divine_power_resref%.ITM~) BEGIN
+    FAIL ~CBR Tempus Holy Power collision: a parent-buff resref also exists as an ITM at the explicit resource path.~
+  END
+  ACTION_IF (!(~%resource_dir%~ STR_EQ ~override~)
+          && (FILE_EXISTS ~override/OHTMPS1.itm~ || FILE_EXISTS ~override/OHTMPS1.ITM~
+           || FILE_EXISTS ~override/%divine_power_resref%.itm~ || FILE_EXISTS ~override/%divine_power_resref%.ITM~)
+          && !(FILE_EXISTS ~%resource_dir%/OHTMPS1.itm~ || FILE_EXISTS ~%resource_dir%/OHTMPS1.ITM~
+            || FILE_EXISTS ~%resource_dir%/%divine_power_resref%.itm~ || FILE_EXISTS ~%resource_dir%/%divine_power_resref%.ITM~)) BEGIN
+    FAIL ~CBR Tempus Holy Power scratch collision: a parent-buff ITM exists under the process-local override directory.~
+  END
+
   LAF cbr_reject_key_private_collisions
     STR_VAR resource_dir = EVAL ~%resource_dir%~
   END
 
-  // Opcode 321 removes effects by source resref, regardless of whether those
-  // effects came from an SPL or an ITM.  A same-name item would therefore be
-  // collateral damage even when the expected private SPL/EFF is canonical.
+  // Timed-only opcode 321 still removes matching timed effects by source resref,
+  // regardless of whether an SPL or ITM delivered them.  A same-name item can
+  // therefore be collateral even when the expected private SPL/EFF is canonical.
   ACTION_FOR_EACH cbr_reserved_private IN
     ~%cbr_apr_helper_6%~ ~%cbr_apr_helper_1%~ ~%cbr_apr_helper_7%~
     ~%cbr_apr_condition_6%~ ~%cbr_apr_condition_1%~ ~%cbr_apr_condition_7%~
@@ -2352,13 +3506,63 @@ BEGIN
     END
   END
 
-  ACTION_FOR_EACH cbr_reserved_resref IN
-    ~%cbr_apr_helper_6%~ ~%cbr_apr_helper_1%~ ~%cbr_apr_helper_7%~
-    ~%cbr_apr_condition_6%~ ~%cbr_apr_condition_1%~ ~%cbr_apr_condition_7%~
-  BEGIN
-    ACTION_IF (FILE_EXISTS ~%resource_dir%/%cbr_reserved_resref%.spl~ || FILE_EXISTS ~%resource_dir%/%cbr_reserved_resref%.SPL~ || FILE_EXISTS ~%resource_dir%/%cbr_reserved_resref%.eff~ || FILE_EXISTS ~%resource_dir%/%cbr_reserved_resref%.EFF~) BEGIN
-      FAIL ~CBR Tempus Holy Power APR helper-resref collision: reserved Task 5 resource %cbr_reserved_resref% already exists.~
+  // The APR bridge is transactional at resource-graph granularity: either all
+  // six exact helpers exist on a canonical rerun, or none exist before first
+  // application. Wrong extensions and partial publication are always foreign.
+  OUTER_SET cbr_apr_resource_count = 0
+  ACTION_FOR_EACH cbr_reserved_apr_spl IN ~%cbr_apr_helper_6%~ ~%cbr_apr_helper_1%~ ~%cbr_apr_helper_7%~ BEGIN
+    ACTION_IF (FILE_EXISTS ~%resource_dir%/%cbr_reserved_apr_spl%.eff~ || FILE_EXISTS ~%resource_dir%/%cbr_reserved_apr_spl%.EFF~) BEGIN
+      FAIL ~CBR Tempus APR helper collision: reserved SPL %cbr_reserved_apr_spl% exists with EFF extension.~
     END
+    ACTION_IF (FILE_EXISTS ~%resource_dir%/%cbr_reserved_apr_spl%.spl~ || FILE_EXISTS ~%resource_dir%/%cbr_reserved_apr_spl%.SPL~) BEGIN
+      OUTER_SET cbr_apr_resource_count = cbr_apr_resource_count + 1
+    END
+  END
+  ACTION_FOR_EACH cbr_reserved_apr_eff IN ~%cbr_apr_condition_6%~ ~%cbr_apr_condition_1%~ ~%cbr_apr_condition_7%~ BEGIN
+    ACTION_IF (FILE_EXISTS ~%resource_dir%/%cbr_reserved_apr_eff%.spl~ || FILE_EXISTS ~%resource_dir%/%cbr_reserved_apr_eff%.SPL~) BEGIN
+      FAIL ~CBR Tempus APR condition collision: reserved EFF %cbr_reserved_apr_eff% exists with SPL extension.~
+    END
+    ACTION_IF (FILE_EXISTS ~%resource_dir%/%cbr_reserved_apr_eff%.eff~ || FILE_EXISTS ~%resource_dir%/%cbr_reserved_apr_eff%.EFF~) BEGIN
+      OUTER_SET cbr_apr_resource_count = cbr_apr_resource_count + 1
+    END
+  END
+  ACTION_IF (cbr_apr_resource_count != 0 && cbr_apr_resource_count != 6) BEGIN
+    FAIL ~CBR Tempus APR bridge collision: found a partial helper graph (%cbr_apr_resource_count% of 6 reserved resources).~
+  END
+  ACTION_IF (~%improved_haste_semantics%~ STR_EQ ~double~ && cbr_apr_resource_count != 0) BEGIN
+    FAIL ~CBR Tempus APR bridge collision: true-doubling Improved Haste must not own additive bridge helpers.~
+  END
+  ACTION_IF (~%improved_haste_semantics%~ STR_EQ ~double~) BEGIN
+    // A prior additive install can leave graph ownership in SPLSTATE.IDS or in
+    // either parent even if its six helper files were removed.  True doubling
+    // must therefore prove the entire additive namespace is absent.
+    COPY ~%cbr_splstate_path%~ ~%cbr_splstate_path%~
+      LPF cbr_reject_tempus_private_splstates END
+    BUT_ONLY
+    COPY ~%cbr_holy_path%~ ~%cbr_holy_path%~
+      LPF cbr_reject_tempus_apr_artifacts
+        STR_VAR
+          resource_name = ~OHTMPS1.SPL~
+          apr_helper_6 = EVAL ~%cbr_apr_helper_6%~
+          apr_helper_1 = EVAL ~%cbr_apr_helper_1%~
+          apr_helper_7 = EVAL ~%cbr_apr_helper_7%~
+          apr_condition_6 = EVAL ~%cbr_apr_condition_6%~
+          apr_condition_1 = EVAL ~%cbr_apr_condition_1%~
+          apr_condition_7 = EVAL ~%cbr_apr_condition_7%~
+      END
+    BUT_ONLY
+    COPY ~%cbr_improved_haste_path%~ ~%cbr_improved_haste_path%~
+      LPF cbr_reject_tempus_apr_artifacts
+        STR_VAR
+          resource_name = EVAL ~%improved_haste_resref%.SPL~
+          apr_helper_6 = EVAL ~%cbr_apr_helper_6%~
+          apr_helper_1 = EVAL ~%cbr_apr_helper_1%~
+          apr_helper_7 = EVAL ~%cbr_apr_helper_7%~
+          apr_condition_6 = EVAL ~%cbr_apr_condition_6%~
+          apr_condition_1 = EVAL ~%cbr_apr_condition_1%~
+          apr_condition_7 = EVAL ~%cbr_apr_condition_7%~
+      END
+    BUT_ONLY
   END
 
   COPY ~%cbr_spell_ids_path%~ ~%cbr_spell_ids_path%~
@@ -2371,9 +3575,15 @@ BEGIN
   OUTER_SET cbr_str_lt_row = "-1"
   OUTER_SET cbr_str_eq_row = "-1"
   OUTER_SET cbr_str_bonus_lt_row = "-1"
+  OUTER_SET cbr_active_state_row = "-1"
   COPY ~%cbr_splprot_path%~ ~%cbr_splprot_path%~
+    SET cbr_patch_active_state_row = "-1"
     PATCH_IF (~%improved_haste_semantics%~ STR_EQ ~additive~) BEGIN
-      LPF cbr_find_or_append_splprot INT_VAR stat = 0x112 value = "-1" relation = 1 append = 0 STR_VAR row_label = ~CBR_TEMPUS_STATE_ACTIVE~ END
+      LPF cbr_find_or_append_splprot
+        INT_VAR stat = 0x112 value = "-1" relation = 1 append = 0
+        STR_VAR row_label = ~CBR_TEMPUS_STATE_ACTIVE~
+        RET cbr_patch_active_state_row = row_index
+      END
     END
     LPF cbr_find_or_append_splprot
       INT_VAR stat = 36 value = "-1" relation = 2 append = 0
@@ -2391,6 +3601,7 @@ BEGIN
       RET cbr_patch_str_bonus_lt_row = row_index
     END
     INNER_ACTION BEGIN
+      OUTER_SET cbr_active_state_row = cbr_patch_active_state_row
       OUTER_SET cbr_str_lt_row = cbr_patch_str_lt_row
       OUTER_SET cbr_str_eq_row = cbr_patch_str_eq_row
       OUTER_SET cbr_str_bonus_lt_row = cbr_patch_str_bonus_lt_row
@@ -2470,7 +3681,18 @@ BEGIN
     FAIL ~CBR Tempus Holy Power preflight did not retain a supported 20/30-header layout result.~
   END
   COPY ~%cbr_divine_path%~ ~%cbr_divine_path%~
-    LPF cbr_validate_spl_v1 STR_VAR resource_name = ~resolved Divine Power %divine_power_resref%~ END
+    LPF cbr_validate_tempus_divine_cleanup_graph
+      STR_VAR
+        divine_power_resref = EVAL ~%divine_power_resref%~
+        strength_set_18 = EVAL ~%cbr_strength_set_18%~
+        strength_set_19 = EVAL ~%cbr_strength_set_19%~
+        strength_set_20 = EVAL ~%cbr_strength_set_20%~
+        strength_set_21 = EVAL ~%cbr_strength_set_21%~
+      RET cbr_patch_divine_cleanup_status = cleanup_status
+    END
+    INNER_ACTION BEGIN
+      OUTER_SET divine_cleanup_status = cbr_patch_divine_cleanup_status
+    END
   BUT_ONLY
   COPY ~%cbr_clab_path%~ ~%cbr_clab_path%~
     LPF cbr_validate_tempus_clab
@@ -2482,8 +3704,94 @@ BEGIN
   BUT_ONLY
   ACTION_IF (~%improved_haste_semantics%~ STR_EQ ~additive~) BEGIN
     COPY ~%cbr_splstate_path%~ ~%cbr_splstate_path%~
-      LPF cbr_plan_tempus_splstates END
+      LPF cbr_plan_tempus_splstates
+        RET
+          cbr_patch_ih_state = ih_state
+          cbr_patch_apr_half_state = apr_half_state
+          cbr_patch_apr_one_state = apr_one_state
+          cbr_patch_apr_one_half_state = apr_one_half_state
+      END
+      INNER_ACTION BEGIN
+        OUTER_SET cbr_preflight_ih_state = cbr_patch_ih_state
+        OUTER_SET cbr_preflight_apr_half_state = cbr_patch_apr_half_state
+        OUTER_SET cbr_preflight_apr_one_state = cbr_patch_apr_one_state
+        OUTER_SET cbr_preflight_apr_one_half_state = cbr_patch_apr_one_half_state
+      END
     BUT_ONLY
+    ACTION_IF (cbr_apr_resource_count = 6) BEGIN
+      ACTION_IF (cbr_holy_ability_count != 30 || cbr_active_state_row < 0) BEGIN
+        FAIL ~CBR Tempus APR bridge helpers exist without the allocated 30-header bridge prerequisites.~
+      END
+      LAF cbr_validate_tempus_apr_helpers
+        INT_VAR ih_state = cbr_preflight_ih_state active_state_row = cbr_active_state_row
+        STR_VAR resource_dir = EVAL ~%resource_dir%~
+      END
+      ACTION_IF (!(~%resource_dir%~ STR_EQ ~override~)
+              && (FILE_EXISTS ~override/%cbr_apr_helper_6%.spl~ || FILE_EXISTS ~override/%cbr_apr_helper_6%.SPL~
+               || FILE_EXISTS ~override/%cbr_apr_helper_1%.spl~ || FILE_EXISTS ~override/%cbr_apr_helper_1%.SPL~
+               || FILE_EXISTS ~override/%cbr_apr_helper_7%.spl~ || FILE_EXISTS ~override/%cbr_apr_helper_7%.SPL~
+               || FILE_EXISTS ~override/%cbr_apr_condition_6%.eff~ || FILE_EXISTS ~override/%cbr_apr_condition_6%.EFF~
+               || FILE_EXISTS ~override/%cbr_apr_condition_1%.eff~ || FILE_EXISTS ~override/%cbr_apr_condition_1%.EFF~
+               || FILE_EXISTS ~override/%cbr_apr_condition_7%.eff~ || FILE_EXISTS ~override/%cbr_apr_condition_7%.EFF~)) BEGIN
+        LAF cbr_validate_tempus_apr_helpers
+          INT_VAR ih_state = cbr_preflight_ih_state active_state_row = cbr_active_state_row
+          STR_VAR resource_dir = ~override~
+        END
+      END
+    END
+    OUTER_SET cbr_preflight_ih_bridge_status = "-1"
+    COPY ~%cbr_improved_haste_path%~ ~%cbr_improved_haste_path%~
+      LPF cbr_validate_tempus_ih_bridge_graph
+        INT_VAR
+          ih_state = cbr_preflight_ih_state
+          apr_half_state = cbr_preflight_apr_half_state
+          apr_one_state = cbr_preflight_apr_one_state
+          apr_one_half_state = cbr_preflight_apr_one_half_state
+          active_state_row = cbr_active_state_row
+        STR_VAR
+          improved_haste_resref = EVAL ~%improved_haste_resref%~
+          apr_helper_6 = EVAL ~%cbr_apr_helper_6%~
+          apr_helper_1 = EVAL ~%cbr_apr_helper_1%~
+          apr_helper_7 = EVAL ~%cbr_apr_helper_7%~
+          apr_condition_6 = EVAL ~%cbr_apr_condition_6%~
+          apr_condition_1 = EVAL ~%cbr_apr_condition_1%~
+          apr_condition_7 = EVAL ~%cbr_apr_condition_7%~
+        RET cbr_patch_ih_bridge_status = bridge_status
+      END
+      INNER_ACTION BEGIN
+        OUTER_SET cbr_preflight_ih_bridge_status = cbr_patch_ih_bridge_status
+      END
+    BUT_ONLY
+    OUTER_SET cbr_preflight_holy_bridge_status = "-1"
+    COPY ~%cbr_holy_path%~ ~%cbr_holy_path%~
+      LPF cbr_validate_tempus_holy_bridge_graph
+        INT_VAR
+          ih_state = cbr_preflight_ih_state
+          apr_half_state = cbr_preflight_apr_half_state
+          apr_one_state = cbr_preflight_apr_one_state
+          apr_one_half_state = cbr_preflight_apr_one_half_state
+          active_state_row = cbr_active_state_row
+        STR_VAR
+          apr_helper_6 = EVAL ~%cbr_apr_helper_6%~
+          apr_helper_1 = EVAL ~%cbr_apr_helper_1%~
+          apr_helper_7 = EVAL ~%cbr_apr_helper_7%~
+          apr_condition_6 = EVAL ~%cbr_apr_condition_6%~
+          apr_condition_1 = EVAL ~%cbr_apr_condition_1%~
+          apr_condition_7 = EVAL ~%cbr_apr_condition_7%~
+        RET cbr_patch_holy_bridge_status = bridge_status
+      END
+      INNER_ACTION BEGIN
+        OUTER_SET cbr_preflight_holy_bridge_status = cbr_patch_holy_bridge_status
+      END
+    BUT_ONLY
+    ACTION_IF (cbr_preflight_ih_bridge_status != cbr_preflight_holy_bridge_status) BEGIN
+      FAIL ~CBR Tempus APR bridge is partial: Improved Haste and Holy Power graph states differ.~
+    END
+    ACTION_IF ((cbr_apr_resource_count = 0 && cbr_preflight_ih_bridge_status != 0)
+            || (cbr_apr_resource_count = 6 && cbr_preflight_ih_bridge_status != 1)) BEGIN
+      FAIL ~CBR Tempus APR bridge helper publication and spell graph are not wholly pristine or wholly canonical.~
+    END
+    OUTER_SET bridge_status = cbr_preflight_ih_bridge_status
   END
 END
 
@@ -2495,6 +3803,11 @@ DEFINE_ACTION_FUNCTION cbr_allocate_tempus_tables
     str_lt_row
     str_eq_row
     str_bonus_lt_row
+    ih_state
+    apr_half_state
+    apr_one_state
+    apr_one_half_state
+    active_state_row
 BEGIN
   OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
   OUTER_SPRINT improved_haste_semantics EVALUATE_BUFFER ~%improved_haste_semantics%~
@@ -2503,6 +3816,11 @@ BEGIN
   OUTER_SET str_lt_row = "-1"
   OUTER_SET str_eq_row = "-1"
   OUTER_SET str_bonus_lt_row = "-1"
+  OUTER_SET ih_state = "-1"
+  OUTER_SET apr_half_state = "-1"
+  OUTER_SET apr_one_state = "-1"
+  OUTER_SET apr_one_half_state = "-1"
+  OUTER_SET active_state_row = "-1"
   ACTION_IF (~%improved_haste_semantics%~ STR_EQ ~additive~) BEGIN
     OUTER_SET cbr_append_states = 0
     COPY ~%cbr_splstate_path%~ ~%cbr_splstate_path%~
@@ -2519,6 +3837,10 @@ BEGIN
         OUTER_SET cbr_apr_half_state     = cbr_patch_apr_half_state
         OUTER_SET cbr_apr_one_state      = cbr_patch_apr_one_state
         OUTER_SET cbr_apr_one_half_state = cbr_patch_apr_one_half_state
+        OUTER_SET ih_state           = cbr_patch_ih_state
+        OUTER_SET apr_half_state     = cbr_patch_apr_half_state
+        OUTER_SET apr_one_state      = cbr_patch_apr_one_state
+        OUTER_SET apr_one_half_state = cbr_patch_apr_one_half_state
         OUTER_SET cbr_append_states      = cbr_patch_append_states
       END
     BUT_ONLY
@@ -2531,8 +3853,13 @@ BEGIN
     END
   END
   COPY ~%cbr_splprot_path%~ ~%cbr_splprot_path%~
+    SET cbr_allocate_active_state_row = "-1"
     PATCH_IF (~%improved_haste_semantics%~ STR_EQ ~additive~) BEGIN
-      LPF cbr_find_or_append_splprot INT_VAR stat = 0x112 value = "-1" relation = 1 STR_VAR row_label = ~CBR_TEMPUS_STATE_ACTIVE~ END
+      LPF cbr_find_or_append_splprot
+        INT_VAR stat = 0x112 value = "-1" relation = 1
+        STR_VAR row_label = ~CBR_TEMPUS_STATE_ACTIVE~
+        RET cbr_allocate_active_state_row = row_index
+      END
     END
     LPF cbr_find_or_append_splprot
       INT_VAR stat = 36 value = "-1" relation = 2
@@ -2550,6 +3877,7 @@ BEGIN
       RET cbr_allocate_str_bonus_lt_row = row_index
     END
     INNER_ACTION BEGIN
+      OUTER_SET active_state_row = cbr_allocate_active_state_row
       OUTER_SET str_lt_row = cbr_allocate_str_lt_row
       OUTER_SET str_eq_row = cbr_allocate_str_eq_row
       OUTER_SET str_bonus_lt_row = cbr_allocate_str_bonus_lt_row
@@ -2703,6 +4031,8 @@ BEGIN
     RET
       cbr_preflight_holy_ability_count = holy_ability_count
       cbr_preflight_clab_capped_shape  = clab_capped_shape
+      cbr_preflight_bridge_status = bridge_status
+      cbr_preflight_divine_cleanup_status = divine_cleanup_status
   END
 
   ACTION_IF (~%phase%~ STR_EQ ~classify~) BEGIN
@@ -2716,6 +4046,11 @@ BEGIN
         cbr_progression_str_lt_row       = str_lt_row
         cbr_progression_str_eq_row       = str_eq_row
         cbr_progression_str_bonus_lt_row = str_bonus_lt_row
+        cbr_bridge_ih_state = ih_state
+        cbr_bridge_apr_half_state = apr_half_state
+        cbr_bridge_apr_one_state = apr_one_state
+        cbr_bridge_apr_one_half_state = apr_one_half_state
+        cbr_bridge_active_state_row = active_state_row
     END
     ACTION_IF (~%phase%~ STR_EQ ~allocate~) BEGIN
       PRINT ~CBR allocated collision-safe Tempus SPLSTATE.IDS values and SPLPROT.2DA semantics.~
@@ -2734,7 +4069,22 @@ BEGIN
       ACTION_IF (~%phase%~ STR_EQ ~progression~) BEGIN
         PRINT ~CBR applied the 30-level Tempus Holy Power progression and five-use CLAB cap.~
       END ELSE BEGIN
-        FAIL ~CBR Tempus Holy Power phase %phase% is not yet implemented after Task 4 progression.~
+        LAF cbr_apply_tempus_bridge
+          INT_VAR
+            bridge_status = cbr_preflight_bridge_status
+            divine_cleanup_status = cbr_preflight_divine_cleanup_status
+            ih_state = cbr_bridge_ih_state
+            apr_half_state = cbr_bridge_apr_half_state
+            apr_one_state = cbr_bridge_apr_one_state
+            apr_one_half_state = cbr_bridge_apr_one_half_state
+            active_state_row = cbr_bridge_active_state_row
+          STR_VAR
+            resource_dir = EVAL ~%resource_dir%~
+            improved_haste_semantics = EVAL ~%cbr_improved_haste_semantics%~
+            improved_haste_resref = EVAL ~%improved_haste_resref%~
+            divine_power_resref = EVAL ~%divine_power_resref%~
+        END
+        PRINT ~CBR applied the Tempus Holy Power interaction bridge and reciprocal Divine Power cleanup.~
       END
     END
   END

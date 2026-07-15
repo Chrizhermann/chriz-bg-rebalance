@@ -104,11 +104,14 @@ the final resolved resource and classify all caster-level headers consistently:
 - **Doubling semantics:** a timed opcode 16 or 317 with type 1, with no additive-Haste
   signature. Native doubling already produces Holy totals of 2/3/4/4/5, so no bridge or
   global spell marker is installed.
-- **Additive semantics:** a timed cumulative opcode 1 granting exactly +1 APR, with no
-  opcode 16/317 type-1 signature. Install the private marker and bridge described below.
+- **Additive semantics:** exactly one directly applied timing-mode-0 cumulative opcode 1
+  granting +1 APR per applicable header, with deterministic 100/0 probability, magic
+  resistance bypass, and no resource, dice, save, or special delivery metadata. There is
+  no opcode 16/317 type-1 signature. Install the private marker and bridge described below.
 - **Unknown or mixed semantics:** missing resource, inconsistent headers, conditional or
-  probabilistic wrapper that cannot be resolved safely, both signatures, or neither
-  signature. Fail before mutation and print actionable diagnostics.
+  delayed delivery, a probabilistic or resistible donor, noncanonical delivery metadata,
+  both signatures, or neither signature. Fail before mutation and print actionable
+  diagnostics.
 
 The default component uses automatic semantic detection. Two advanced mutually exclusive
 subcomponents may force doubling or additive treatment for supported but unrecognized
@@ -123,17 +126,25 @@ numbers that may collide with SCS or another mod.
 
 1. Add an inert marker to the final Improved Haste resource. Its target, power, timing,
    duration, dispel/resistance, caster level, and probability must match the detected +1
-   APR effect.
+   APR effect; the donor has already been proven timing-mode-0, deterministic,
+   magic-resistance-bypassing, and free of resource/dice/save/special metadata.
 2. Mark the active Holy Power APR tier (`+1/2`, `+1`, or `+1.5`) with separate private
    states. The level-1 `+0` tier requires no bridge.
 3. When Holy Power is cast second, an immediate conditional check sees the Improved Haste
    marker and applies a second copy of Holy Power's own APR bonus.
 4. When Improved Haste is cast second, conditional kick effects see the active Holy tier
-   and apply the same bonus immediately.
+   and apply the same bonus immediately. These gates are administrative effects with
+   `resist_dispel=2`, so they cannot be dispelled or blocked by magic resistance even when
+   the donor's dispel bit is set.
 5. While Holy Power remains active, a tier-specific opcode 272 heartbeat checks the
    Improved Haste marker. Its helper removes its previous helper effect by resource before
    applying a one-second cumulative APR effect, preventing accelerated pulses or reloads
    from stacking copies.
+   Under Slow, Disease, or both, opcode 272 can tick every two seconds while this helper
+   must remain one second to bound stale APR after removal. The accepted portable behavior
+   is therefore up to a one-second duplicate-APR gap until the next heartbeat; normal
+   cadence remains continuous, and any stale bonus expires within one second. Avoiding
+   both the gap and stale tail would require EEex or a different explicit tradeoff.
 6. When either parent buff ends or is dispelled, the helper expires within at most one
    engine tick. Truly zero-lag expiry would require EEex and is not required for this
    portable component.
