@@ -1,0 +1,94 @@
+// Isolated --nogame harness for chriz-bg-rebalance/lib/tempus_holy_power.tpa.
+// argv[0] = production TPA, argv[1] = fixture root, argv[2] = output root,
+// argv[3] = auto|force_double|force_additive, argv[4] = Divine Power resref,
+// argv[5] = Improved Haste resref.  Python resolves both resrefs from the
+// fixture's SPELL.IDS because IDS_OF_SYMBOL requires a loaded game KEY.
+
+BACKUP ~backup~
+AUTHOR ~chriz-bg-rebalance test harness~
+
+BEGIN ~Tempus Holy Power harness: --nogame smoke~
+DESIGNATED 0
+
+COPY ~%argv[0]%~ ~%argv[1]%~
+
+// Each production phase is independently invocable so Tasks 3-5 can turn
+// green in sequence.  Phases are cumulative: allocate includes classify,
+// progression includes allocate, and bridge includes progression.  Every path
+// is explicit; this harness never asks WeiDU to resolve or mutate a resource
+// in an installed game.
+
+BEGIN ~Tempus Holy Power harness: full transformation~
+DESIGNATED 1
+
+COPY ~%argv[1]%~ ~%argv[2]%~
+INCLUDE ~%argv[0]%~
+LAF cbr_apply_tempus_holy_power
+  STR_VAR
+    resource_dir          = ~%argv[2]%~
+    compatibility_mode    = ~%argv[3]%~
+    divine_power_resref   = ~%argv[4]%~
+    improved_haste_resref = ~%argv[5]%~
+    phase                 = ~full~
+END
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[2]%/CBR_TEST.OK~
+
+BEGIN ~Tempus Holy Power harness: compatibility classification~
+DESIGNATED 2
+
+COPY ~%argv[1]%~ ~%argv[2]%~
+INCLUDE ~%argv[0]%~
+LAF cbr_apply_tempus_holy_power
+  STR_VAR
+    resource_dir          = ~%argv[2]%~
+    compatibility_mode    = ~%argv[3]%~
+    divine_power_resref   = ~%argv[4]%~
+    improved_haste_resref = ~%argv[5]%~
+    phase                 = ~classify~
+END
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[2]%/CBR_TEST.OK~
+
+BEGIN ~Tempus Holy Power harness: state and SPLPROT allocation~
+DESIGNATED 3
+
+COPY ~%argv[1]%~ ~%argv[2]%~
+INCLUDE ~%argv[0]%~
+LAF cbr_apply_tempus_holy_power
+  STR_VAR
+    resource_dir          = ~%argv[2]%~
+    compatibility_mode    = ~%argv[3]%~
+    divine_power_resref   = ~%argv[4]%~
+    improved_haste_resref = ~%argv[5]%~
+    phase                 = ~allocate~
+END
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[2]%/CBR_TEST.OK~
+
+BEGIN ~Tempus Holy Power harness: Holy progression and CLAB~
+DESIGNATED 4
+
+COPY ~%argv[1]%~ ~%argv[2]%~
+INCLUDE ~%argv[0]%~
+LAF cbr_apply_tempus_holy_power
+  STR_VAR
+    resource_dir          = ~%argv[2]%~
+    compatibility_mode    = ~%argv[3]%~
+    divine_power_resref   = ~%argv[4]%~
+    improved_haste_resref = ~%argv[5]%~
+    phase                 = ~progression~
+END
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[2]%/CBR_TEST.OK~
+
+BEGIN ~Tempus Holy Power harness: additive bridge and exclusion~
+DESIGNATED 5
+
+COPY ~%argv[1]%~ ~%argv[2]%~
+INCLUDE ~%argv[0]%~
+LAF cbr_apply_tempus_holy_power
+  STR_VAR
+    resource_dir          = ~%argv[2]%~
+    compatibility_mode    = ~%argv[3]%~
+    divine_power_resref   = ~%argv[4]%~
+    improved_haste_resref = ~%argv[5]%~
+    phase                 = ~bridge~
+END
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[2]%/CBR_TEST.OK~
