@@ -42,6 +42,27 @@ Holy Power also:
 Durations are fixed by tier rather than one round per level. This keeps the ability a
 deliberate burst throughout Shadows of Amn and Throne of Bhaal.
 
+### Strength-floor portability contract
+
+The portable engine has no parent-child lifetime link between `OHTMPS1` and a private
+Strength helper. Each header therefore applies the floor condition immediately, repeats
+it once per second, and uses a 31-engine-tick setter (about 2.07 seconds). Slow or Disease
+can stretch the heartbeat to 30 ticks, so the extra tick prevents a visible gap without
+letting an orphaned helper linger for a full round.
+
+Every cast removes all four possible tier setters before evaluating the new floor, which
+also covers down-tier recasts after level drain. Every header schedules removal of all
+four setters at its exact 18/24/30-second parent duration. Any mod-controlled path that
+removes Holy Power early, including the reciprocal Divine Power exclusion, must remove
+all four setters as well.
+
+This graph never lowers a higher current Strength. If Holy Power is cast while a stronger
+Strength effect is already active, its floor resumes on the first heartbeat after that
+effect expires: normally within one second, or within two seconds under Slow/Disease.
+Pure SPL/EFF mechanics cannot guarantee zero-lag restoration or parent-linked cleanup
+when an unrelated mod independently removes only `OHTMPS1`; in that uncoordinated case a
+setter can remain for at most 31 ticks. An absolute guarantee would require EEex.
+
 ## Uses per rest
 
 Grant one use at levels 1, 6, 11, 16, and 21, for a maximum of five uses per rest. Remove
@@ -131,7 +152,9 @@ Resolve the installed Divine Power spell symbolically. Holy Power must remove ti
 Power effects before applying itself, and Divine Power must reciprocally remove timed
 `OHTMPS1` effects before applying itself. Preserve every other effect, header, description,
 and mod-added behavior in Divine Power. This closes the current one-way stacking hole in
-which casting Divine Power after Holy Power can retain both APR progressions.
+which casting Divine Power after Holy Power can retain both APR progressions. Because this
+is a mod-controlled early Holy Power removal path, Divine Power must also remove all four
+private Strength setters before applying itself.
 
 If the final Divine Power resource cannot be resolved or patched in a recognized form,
 fail before changing either spell.

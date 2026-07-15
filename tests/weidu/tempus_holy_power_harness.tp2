@@ -92,3 +92,11 @@ LAF cbr_apply_tempus_holy_power
     phase                 = ~bridge~
 END
 COPY ~%argv[1]%/SPELL.IDS~ ~%argv[2]%/CBR_TEST.OK~
+
+BEGIN ~Tempus Holy Power harness: KEY namespace collision preflight~
+DESIGNATED 6
+
+INCLUDE ~%argv[0]%~
+LAF cbr_reject_key_private_collisions
+  STR_VAR resource_dir = ~%argv[1]%~
+END

@@ -102,7 +102,7 @@ Cover at least:
 4. auto versus forced compatibility modes;
 5. exactly 30 Holy Power headers with required levels 1-30, with the level-30 header serving all later levels;
 6. durations 18/24/30/30/30 seconds for levels 1/7/13/19/25;
-7. Strength floors 18/00, 18/00, 19, 20, 21 that never lower a higher current value and are restored after a stronger temporary Strength effect expires;
+7. Strength floors 18/00, 18/00, 19, 20, 21 that never lower a higher current value and are restored by the next heartbeat (within two seconds under Slow/Disease) after a stronger temporary Strength effect expires;
 8. fighter THAC0 `max(0, 21 - level)`, temporary HP `min(level, 30)`, and cumulative APR keys 6/1/7 for +1/2, +1, +1.5;
 9. preservation of installed state 9, state 68, opcode 282, visuals, icons, and unknown sentinel effects;
 10. removal of only `GA_OHTMPS1` cells 26/31/36/41/46 from `ABILITY1`, preserving levels 1/6/11/16/21, level-25 `AP_CDHLYSYM`, every other row, and sentinel columns;
@@ -213,7 +213,11 @@ For each header level 1-30, write:
 
 ### Step 3: Implement Strength as a real floor
 
-Create private strength helpers for 18/00, 19, 20, and 21. Use an immediate conditional application and a one-second Holy-duration heartbeat that removes the previous helper then reapplies it only when current Strength is below the tier floor. For 18/00, distinguish Strength below 18 from Strength exactly 18 with exceptional value below 100; use a nested conditional helper if necessary so a 19+ character with a zero exceptional-Strength stat can never match the latter case. This ensures Holy Power never lowers a stronger value and restores its own floor if a stronger external Strength buff expires first.
+Create private strength helpers for 18/00, 19, 20, and 21. Use an immediate conditional application and a one-second Holy-duration heartbeat that removes the previous helper then reapplies it only when current Strength is below the tier floor. The setter effects use timing mode 10 for 31 engine ticks: one tick beyond opcode 272's 30-tick cadence under Slow/Disease. For 18/00, distinguish Strength below 18 from Strength exactly 18 with exceptional value below 100; use a nested conditional helper if necessary so a 19+ character with a zero exceptional-Strength stat can never match the latter case.
+
+Every Holy header must begin by removing all four setter resrefs before its immediate condition, not only the selected tier. Append timing-mode-4 opcode 321 removals for all four setters at that header's exact 18/24/30-second duration. Every later mod-controlled path that removes `OHTMPS1` early, including Divine Power in Task 5, must also remove all four setters.
+
+Portable SPL/EFF mechanics cannot attach a child helper's lifetime to its parent. The tested guarantee is therefore: never lower stronger Strength; restore the floor on the next heartbeat (normally within one second, within two seconds under Slow/Disease); remove setters exactly at normal parent expiry and on every mod-controlled removal path; and bound residue after an unrelated direct early `OHTMPS1` removal or independently resolved dispel to 31 ticks. Zero-lag restoration and unconditional parent-linked cleanup would require EEex.
 
 All helper resrefs must use the `CBR` prefix and be at most eight characters.
 
@@ -273,7 +277,7 @@ The heartbeat is continuity/cleanup insurance, not the sole casting-order trigge
 
 ### Step 5: Close Divine Power stacking in both orders
 
-Resolve `CLERIC_HOLY_POWER` through `SPELL.IDS`. Ensure each Holy header begins with removal of the resolved spell and each header of that installed spell contains an early opcode 321 removal of `OHTMPS1`. Preserve all other Divine Power effects, including SR helper EFFs, Detectable Spells states, and later-mod compatibility additions.
+Resolve `CLERIC_HOLY_POWER` through `SPELL.IDS`. Ensure each Holy header begins with removal of the resolved spell and each header of that installed spell contains early opcode 321 removal of `OHTMPS1` followed by removal of all four private Strength setters. Preserve all other Divine Power effects, including SR helper EFFs, Detectable Spells states, and later-mod compatibility additions.
 
 ### Step 6: Run bridge/exclusion/idempotency tests and commit
 
