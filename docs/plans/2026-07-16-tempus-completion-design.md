@@ -217,3 +217,22 @@ cover them:
 4. (Nit, DONE) CBRCHT2E covered in the vanilla-donor magnitude matrix.
 5. (Nit) Add an install→uninstall→reinstall TLK test pinning WeiDU's identical-string reuse
    (the "+3 exactly" acceptance across reinstalls).
+
+
+## Addendum 2026-07-17 — Component 406: specialization APR (`cbr_cleric_tempus_spec_apr`)
+
+User feedback after live play: the kit feels underwhelming because 2 pips never
+yield the warrior half-attack. Root fact (verified on the live install):
+`CLSWPBON.2DA` supports **per-kit rows** — `OHTEMPUS  GETS_PROF_APR 0` — and
+Artisan's Kitpack already grants the flag to non-warrior kits (C0_NINJA,
+C0_BRAWLER, C0TBM), so the per-kit path is engine-supported. Component 406
+flips exactly that one cell (append a cleric-shaped `OHTEMPUS 1 0 3` row when
+missing), read-compare-guarded for byte-idempotence, two-pass verified, hard
+FAIL on any unrecognized shape. Engine reads CLSWPBON at attack-resolution
+time per wielded weapon — correct spec-APR semantics with zero save surgery;
+needs only a game restart. Harness component 3 + 5 pytest cases
+(flip/done/append/no-column/garbage).
+
+Design rationale: fixes the kit's PASSIVE baseline (1.5 APR with a
+specialized weapon) instead of further inflating the Holy Power burst;
+Fighter/Cleric duals remain ahead, as intended.

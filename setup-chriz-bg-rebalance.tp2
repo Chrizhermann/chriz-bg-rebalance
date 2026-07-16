@@ -13,6 +13,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/tempus_weapon_training.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/tempus_chaos_tides.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/tempus_divination_toll.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/tempus_spec_apr.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -316,5 +317,20 @@ COPY_EXISTING ~OHTEMPUS.2DA~ ~override/OHTEMPUS.2DA~
 
 LAF cbr_apply_tempus_divination_toll
   INT_VAR divination_count = cbr_divtoll_count
+  STR_VAR resource_dir = ~override~
+END
+
+BEGIN @406
+DESIGNATED 406
+GROUP @1400
+LABEL ~cbr_cleric_tempus_spec_apr~
+
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9440
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~CLSWPBON.2DA~) @9441
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9442
+
+COPY_EXISTING ~CLSWPBON.2DA~ ~override/CLSWPBON.2DA~
+
+LAF cbr_apply_tempus_spec_apr
   STR_VAR resource_dir = ~override~
 END

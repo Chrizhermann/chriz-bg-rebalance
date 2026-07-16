@@ -1,11 +1,12 @@
 // Isolated --nogame harness for the tempus-completion libraries
-// (components 400 / 404 / 405). Each component owns its argv layout:
+// (components 400 / 404 / 405 / 406). Each component owns its argv layout:
 //   argv[0] = tempus_holy_power.tpa (shared primitives)
 //   argv[1] = component production TPA
 //   argv[2] = fixture root, argv[3] = output root
 // Component 0 (weapon training): argv[4] = ls_perm_stat.
 // Component 1 (chaos tides):     argv[4..6] = announce strrefs.
 // Component 2 (divination toll): argv[4] = count, argv[5..12] = resrefs.
+// Component 3 (spec APR):        no extra args.
 BACKUP ~backup~
 AUTHOR ~chriz-bg-rebalance test harness~
 
@@ -76,3 +77,14 @@ LAF cbr_apply_tempus_divination_toll
   STR_VAR resource_dir = ~%argv[3]%~
 END
 COPY ~%argv[2]%/OHTEMPUS.2DA~ ~%argv[3]%/CBR_TEST.OK~
+
+BEGIN ~Tempus completion harness: spec APR~
+DESIGNATED 3
+
+COPY ~%argv[2]%~ ~%argv[3]%~
+INCLUDE ~%argv[0]%~
+INCLUDE ~%argv[1]%~
+LAF cbr_apply_tempus_spec_apr
+  STR_VAR resource_dir = ~%argv[3]%~
+END
+COPY ~%argv[2]%/CLSWPBON.2DA~ ~%argv[3]%/CBR_TEST.OK~

@@ -1,0 +1,148 @@
+// chriz-bg-rebalance — Cleric of Tempus specialization APR (component 406).
+//
+// CLSWPBON.2DA drives the engine's warrior-style extra half-attack from
+// weapon specialization, per CLASS and per KIT (GETS_PROF_APR column; the
+// per-kit path is engine-supported and already used by Artisan's Kitpack for
+// several non-warrior kits, e.g. C0_NINJA / C0_BRAWLER). The Battleguard of
+// Tempus trains to two pips everywhere (component 400) but ships
+// GETS_PROF_APR 0, so those pips never yield the half-attack. This library
+// flips exactly that one cell.
+//
+// Shapes handled:
+//   * OHTEMPUS row present with GETS_PROF_APR 1 — accepted unchanged (the
+//     read-compare guard takes zero writes, so the table stays byte-identical
+//     under BUT_ONLY).
+//   * OHTEMPUS row present with GETS_PROF_APR 0 — set to 1 (SET_2DA_ENTRY
+//     re-renders once; a second pass takes zero writes).
+//   * OHTEMPUS row absent — append a cleric-shaped row (GETS_PROF_APR 1,
+//     UNARMED_DIVISOR 0, ZERO_SKILL_THAC0 3, matching the vanilla CLERIC
+//     row), built column-by-column against the actual header order.
+//   * Anything else (no GETS_PROF_APR column, unexpected width, duplicate
+//     rows, non-boolean cell) — hard FAIL before any write.
+
+// Locate the GETS_PROF_APR header token. CLSWPBON's column-header row is one
+// token shorter than the data rows (no label column), so with the validated
+// width of 4 the header is row 0 of the 3-token view — the same two-set
+// idiom as the WEAPPROF locator in tempus_weapon_training.tpa.
+DEFINE_PATCH_FUNCTION cbr_sa_locate_prof_apr_column
+  RET
+    apr_header_index
+BEGIN
+  COUNT_2DA_COLS cbr_sa_loc_cols
+  PATCH_IF (cbr_sa_loc_cols != 4) BEGIN
+    PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: expected label plus 3 value columns, found %cbr_sa_loc_cols% total.~
+  END
+  SET apr_header_index = "-1"
+  READ_2DA_ENTRIES_NOW cbr_sa_hdr_rows 3
+  PATCH_IF (cbr_sa_hdr_rows < 1) BEGIN
+    PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: no header row.~
+  END
+  FOR (cbr_sa_loc_col = 0; cbr_sa_loc_col < 3; ++cbr_sa_loc_col) BEGIN
+    READ_2DA_ENTRY_FORMER cbr_sa_hdr_rows 0 cbr_sa_loc_col cbr_sa_header_token
+    PATCH_IF (~%cbr_sa_header_token%~ STRING_EQUAL_CASE ~GETS_PROF_APR~) BEGIN
+      PATCH_IF (apr_header_index >= 0) BEGIN
+        PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: duplicate GETS_PROF_APR header columns.~
+      END
+      SET apr_header_index = cbr_sa_loc_col
+    END
+  END
+  PATCH_IF (apr_header_index < 0) BEGIN
+    PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: no GETS_PROF_APR header column.~
+  END
+END
+
+// Validate shape and (when verify_only = 0) apply the transformation.
+DEFINE_PATCH_FUNCTION cbr_sa_transform_clswpbon
+  INT_VAR
+    verify_only = 0
+  RET
+    changed_cells
+    appended_row
+    found_value
+BEGIN
+  SET changed_cells = 0
+  SET appended_row = 0
+  LPF cbr_sa_locate_prof_apr_column RET cbr_sa_apr_hdr = apr_header_index END
+  READ_2DA_ENTRIES_NOW cbr_sa_rows 4
+  SET cbr_sa_target_row = "-1"
+  FOR (cbr_sa_row = 0; cbr_sa_row < cbr_sa_rows; ++cbr_sa_row) BEGIN
+    READ_2DA_ENTRY_FORMER cbr_sa_rows cbr_sa_row 0 cbr_sa_label
+    PATCH_IF (~%cbr_sa_label%~ STRING_EQUAL_CASE ~OHTEMPUS~) BEGIN
+      PATCH_IF (cbr_sa_target_row >= 0) BEGIN
+        PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: duplicate OHTEMPUS rows.~
+      END
+      SET cbr_sa_target_row = cbr_sa_row
+    END
+  END
+  SPRINT found_value ~absent~
+  PATCH_IF (cbr_sa_target_row >= 0) BEGIN
+    READ_2DA_ENTRY_FORMER cbr_sa_rows cbr_sa_target_row (cbr_sa_apr_hdr + 1) cbr_sa_value
+    SPRINT found_value ~%cbr_sa_value%~
+    PATCH_IF (~%cbr_sa_value%~ STR_EQ ~1~) BEGIN
+      // Already granted — nothing to do.
+    END ELSE PATCH_IF (~%cbr_sa_value%~ STR_EQ ~0~) BEGIN
+      PATCH_IF (verify_only) BEGIN
+        PATCH_FAIL ~CBR Tempus CLSWPBON.2DA verification failed: OHTEMPUS GETS_PROF_APR is still 0.~
+      END
+      SET_2DA_ENTRY cbr_sa_target_row (cbr_sa_apr_hdr + 1) 4 ~1~
+      ++changed_cells
+    END ELSE BEGIN
+      PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: OHTEMPUS GETS_PROF_APR holds %cbr_sa_value% (expected 0 or 1).~
+    END
+  END ELSE BEGIN
+    PATCH_IF (verify_only) BEGIN
+      PATCH_FAIL ~CBR Tempus CLSWPBON.2DA verification failed: OHTEMPUS row is still missing.~
+    END
+    // Build the new row against the actual header order so a reordered
+    // table gets the right value in each column.
+    READ_2DA_ENTRIES_NOW cbr_sa_hdr_rows 3
+    SPRINT cbr_sa_new_row ~OHTEMPUS~
+    FOR (cbr_sa_col = 0; cbr_sa_col < 3; ++cbr_sa_col) BEGIN
+      READ_2DA_ENTRY_FORMER cbr_sa_hdr_rows 0 cbr_sa_col cbr_sa_header_token
+      PATCH_IF (~%cbr_sa_header_token%~ STRING_EQUAL_CASE ~GETS_PROF_APR~) BEGIN
+        SPRINT cbr_sa_new_row ~%cbr_sa_new_row% 1~
+      END ELSE PATCH_IF (~%cbr_sa_header_token%~ STRING_EQUAL_CASE ~UNARMED_DIVISOR~) BEGIN
+        SPRINT cbr_sa_new_row ~%cbr_sa_new_row% 0~
+      END ELSE PATCH_IF (~%cbr_sa_header_token%~ STRING_EQUAL_CASE ~ZERO_SKILL_THAC0~) BEGIN
+        SPRINT cbr_sa_new_row ~%cbr_sa_new_row% 3~
+      END ELSE BEGIN
+        PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: unknown header column %cbr_sa_header_token%.~
+      END
+    END
+    INSERT_2DA_ROW cbr_sa_rows 4 ~%cbr_sa_new_row%~
+    SET appended_row = 1
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_apply_tempus_spec_apr
+  STR_VAR
+    resource_dir = ~~
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  ACTION_IF (~%resource_dir%~ STR_EQ ~~) BEGIN
+    FAIL ~CBR Tempus spec APR requires resource_dir.~
+  END
+  ACTION_IF !(FILE_EXISTS ~%resource_dir%/CLSWPBON.2DA~) BEGIN
+    FAIL ~CBR Tempus spec APR requires %resource_dir%/CLSWPBON.2DA.~
+  END
+
+  COPY ~%resource_dir%/CLSWPBON.2DA~ ~%resource_dir%/CLSWPBON.2DA~
+    LPF cbr_sa_transform_clswpbon
+      INT_VAR verify_only = 0
+      RET
+        cbr_sa_changed = changed_cells
+        cbr_sa_appended = appended_row
+        cbr_sa_before = found_value
+    END
+  BUT_ONLY
+
+  // Second pass re-validates the final state (and proves the write landed);
+  // on an already-transformed table both passes take zero writes.
+  COPY ~%resource_dir%/CLSWPBON.2DA~ ~%resource_dir%/CLSWPBON.2DA~
+    LPF cbr_sa_transform_clswpbon
+      INT_VAR verify_only = 1
+    END
+  BUT_ONLY
+
+  PRINT ~cbr 406: CLSWPBON OHTEMPUS GETS_PROF_APR was %cbr_sa_before%; cells changed: %cbr_sa_changed%; row appended: %cbr_sa_appended%.~
+END

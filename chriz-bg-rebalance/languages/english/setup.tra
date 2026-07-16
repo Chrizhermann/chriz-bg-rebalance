@@ -9,6 +9,7 @@
 @403 = ~Cleric of Tempus: Holy Power — force additive compatibility~
 @404 = ~Cleric of Tempus: Chaos of Battle — one announced battle tide per cast~
 @405 = ~Cleric of Tempus: Divination toll — Tempus grants no future sight~
+@406 = ~Cleric of Tempus: weapon specialization grants extra attacks~
 
 // Component groups
 @1100 = ~SCS adjustments~
@@ -49,3 +50,6 @@
 @9430 = ~The Cleric of Tempus Chaos of Battle component supports BG2:EE / EET only.~
 @9431 = ~OHTEMPUS.2DA is missing. Install the Cleric of Tempus kit before this component.~
 @9432 = ~OHTMPS2.SPL / OHTMPS2D.SPL / OHTMPS2E.SPL are missing. This component reworks the stock Chaos of Battle spells.~
+@9440 = ~The Cleric of Tempus specialization APR component supports BG2:EE / EET only.~
+@9441 = ~CLSWPBON.2DA is missing. This component requires the EE class weapon-bonus table.~
+@9442 = ~OHTEMPUS.2DA is missing. Install the Cleric of Tempus kit before this component.~

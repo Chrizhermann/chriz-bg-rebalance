@@ -33,10 +33,16 @@ HOLY_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_holy_power.tpa"
 TRAINING_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_weapon_training.tpa"
 TIDES_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_chaos_tides.tpa"
 TOLL_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_divination_toll.tpa"
+SPEC_APR_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_spec_apr.tpa"
 ORIGINALS = ROOT / "research" / "originals"
 
-COMPONENT = {"training": "0", "tides": "1", "toll": "2"}
-COMPONENT_TPA = {"training": TRAINING_TPA, "tides": TIDES_TPA, "toll": TOLL_TPA}
+COMPONENT = {"training": "0", "tides": "1", "toll": "2", "specapr": "3"}
+COMPONENT_TPA = {
+    "training": TRAINING_TPA,
+    "tides": TIDES_TPA,
+    "toll": TOLL_TPA,
+    "specapr": SPEC_APR_TPA,
+}
 
 LS_PERM_STAT = 204
 TIDE_STRREFS = ("111111", "222222", "333333")
@@ -151,6 +157,39 @@ def build_tides_fixture(root: Path, *, shape: str = "vanilla") -> None:
     shutil.copy2(ORIGINALS / "OHTMPS2.spl.orig", root / "OHTMPS2.SPL")
     for name in ("OHTMPS2D", "OHTMPS2E"):
         shutil.copy2(ORIGINALS / f"{name}{suffix}", root / f"{name}.SPL")
+
+
+# Live-shaped CLSWPBON slice: base classes, the EET-merged OH kits, and an
+# Artisan kit that already holds the per-kit APR grant (the engine-supported
+# precedent component 406 relies on).
+CLSWPBON_ROWS_LIVE = (
+    ("MAGE", "0", "0", "5"),
+    ("FIGHTER", "1", "0", "2"),
+    ("CLERIC", "0", "0", "3"),
+    ("FIGHTER_CLERIC", "1", "0", "2"),
+    ("OHTYR", "0", "0", "3"),
+    ("OHTEMPUS", "0", "0", "3"),
+    ("C0_NINJA", "1", "0", "2"),
+)
+
+
+def build_specapr_fixture(root: Path, *, shape: str = "live") -> None:
+    root.mkdir(parents=True)
+    header = "GETS_PROF_APR\tUNARMED_DIVISOR\tZERO_SKILL_THAC0"
+    if shape == "no_column":
+        header = "GETS_PROF_APRX\tUNARMED_DIVISOR\tZERO_SKILL_THAC0"
+    rows = []
+    for name, apr, divisor, thac0 in CLSWPBON_ROWS_LIVE:
+        if name == "OHTEMPUS":
+            if shape == "missing_row":
+                continue
+            if shape == "done":
+                apr = "1"
+            elif shape == "garbage":
+                apr = "yes"
+        rows.append(f"{name}\t{apr}\t{divisor}\t{thac0}")
+    lines = ["2DA V1.0", "0", header, *rows]
+    (root / "CLSWPBON.2DA").write_text("\n".join(lines) + "\n", encoding="ascii", newline="\n")
 
 
 def build_toll_fixture(root: Path, *, conflicting_row: bool = False) -> None:
@@ -584,6 +623,80 @@ class DivinationTollTests(TempusCompletionTestCase):
             expect_success=False,
         )
         self.assertIn("is not a valid resref", run.transcript)
+
+
+# ---------------------------------------------------------------------------
+# Component 406 — specialization APR (CLSWPBON)
+# ---------------------------------------------------------------------------
+
+
+class SpecAprTests(TempusCompletionTestCase):
+    @staticmethod
+    def _rows(path: Path) -> dict[str, tuple[str, ...]]:
+        table: dict[str, tuple[str, ...]] = {}
+        for line in path.read_text(encoding="ascii").splitlines()[3:]:
+            tokens = line.split()
+            if len(tokens) == 4:
+                table[tokens[0]] = tuple(tokens[1:])
+        return table
+
+    def test_flip_live_shape(self) -> None:
+        run = self.run_component(
+            "specapr",
+            lambda root: build_specapr_fixture(root),
+            extra_args=(),
+            rerun_on_output=True,
+        )
+        rows = self._rows(run.output / "CLSWPBON.2DA")
+        self.assertEqual(rows["OHTEMPUS"], ("1", "0", "3"))
+        # Every other row is untouched (values, not formatting — the one
+        # legitimate SET_2DA_ENTRY re-render may change whitespace).
+        for name, apr, divisor, thac0 in CLSWPBON_ROWS_LIVE:
+            if name != "OHTEMPUS":
+                self.assertEqual(rows[name], (apr, divisor, thac0), name)
+        self.assertIn("was 0; cells changed: 1; row appended: 0", run.transcript)
+
+    def test_already_granted_is_byte_identical(self) -> None:
+        fixture_bytes: dict[str, bytes] = {}
+
+        def build(root: Path) -> None:
+            build_specapr_fixture(root, shape="done")
+            fixture_bytes["clswpbon"] = (root / "CLSWPBON.2DA").read_bytes()
+
+        run = self.run_component("specapr", build, extra_args=())
+        self.assertEqual(
+            (run.output / "CLSWPBON.2DA").read_bytes(), fixture_bytes["clswpbon"]
+        )
+        self.assertIn("was 1; cells changed: 0; row appended: 0", run.transcript)
+
+    def test_missing_row_appends_cleric_shaped_row(self) -> None:
+        run = self.run_component(
+            "specapr",
+            lambda root: build_specapr_fixture(root, shape="missing_row"),
+            extra_args=(),
+            rerun_on_output=True,
+        )
+        rows = self._rows(run.output / "CLSWPBON.2DA")
+        self.assertEqual(rows["OHTEMPUS"], ("1", "0", "3"))
+        self.assertIn("was absent; cells changed: 0; row appended: 1", run.transcript)
+
+    def test_missing_column_fails(self) -> None:
+        run = self.run_component(
+            "specapr",
+            lambda root: build_specapr_fixture(root, shape="no_column"),
+            extra_args=(),
+            expect_success=False,
+        )
+        self.assertIn("no GETS_PROF_APR header column", run.transcript)
+
+    def test_non_boolean_value_fails(self) -> None:
+        run = self.run_component(
+            "specapr",
+            lambda root: build_specapr_fixture(root, shape="garbage"),
+            extra_args=(),
+            expect_success=False,
+        )
+        self.assertIn("holds yes (expected 0 or 1)", run.transcript)
 
 
 if __name__ == "__main__":
