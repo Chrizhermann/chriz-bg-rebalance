@@ -193,3 +193,22 @@ first. Additional acceptance items:
 - 400: CBRTMG2 console cast grants LS permission + LS/xbow pips once; recast
   changes nothing; optional manual cleanup of the dead `CBRTMIG.SPL` override
   orphan (user sign-off).
+
+## Review outcome (2026-07-16) and tracked follow-ups
+
+Single review pass: **APPROVED WITH NITS** (95/95 tests, parse-checks clean, byte-surgery and
+spec conformance verified against the captured live fixtures). Finding 4 (CBRCHT2E magnitude
+assertion) was applied immediately. The rest are hardening for FRESH installs — none affects
+the authorized live run, where the manual reserved-resref sweep and recognized live shapes
+cover them:
+
+1. (Minor) 404 preflight should recognize the dispatcher shape verify-only before the tide
+   spells are created — today a foreign dispatcher fails only at rebuild time (WeiDU rollback
+   contains it; proven by test).
+2. (Minor) The three libs CREATE/COPY their reserved resources without an ownership preflight;
+   mirror 401's absent-or-recognized-own-shape-else-FAIL pattern before public/fresh use.
+3. (Nit) Fixture-mode `FILE_EXISTS → skip MOVE` guards keep a stale destination; fail-on-foreign
+   (finding 2) subsumes this.
+4. (Nit, DONE) CBRCHT2E covered in the vanilla-donor magnitude matrix.
+5. (Nit) Add an install→uninstall→reinstall TLK test pinning WeiDU's identical-string reuse
+   (the "+3 exactly" acceptance across reinstalls).

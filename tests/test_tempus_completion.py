@@ -452,6 +452,9 @@ class ChaosTidesTests(TempusCompletionTestCase):
             run.output / "CBRCHT2D.SPL", BULWARK_OPS, MAGNITUDES, 1, TIDE_ALLY
         )
         self._assert_tide_magnitudes(
+            run.output / "CBRCHT2E.SPL", BULWARK_OPS, MAGNITUDES, -1, TIDE_ENEMY
+        )
+        self._assert_tide_magnitudes(
             run.output / "CBRCHT3D.SPL", (22,), LUCK_MAGNITUDES, 1, TIDE_ALLY
         )
         self._assert_tide_magnitudes(
