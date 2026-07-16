@@ -1,0 +1,78 @@
+// Isolated --nogame harness for the tempus-completion libraries
+// (components 400 / 404 / 405). Each component owns its argv layout:
+//   argv[0] = tempus_holy_power.tpa (shared primitives)
+//   argv[1] = component production TPA
+//   argv[2] = fixture root, argv[3] = output root
+// Component 0 (weapon training): argv[4] = ls_perm_stat.
+// Component 1 (chaos tides):     argv[4..6] = announce strrefs.
+// Component 2 (divination toll): argv[4] = count, argv[5..12] = resrefs.
+BACKUP ~backup~
+AUTHOR ~chriz-bg-rebalance test harness~
+
+BEGIN ~Tempus completion harness: weapon training~
+DESIGNATED 0
+
+COPY ~%argv[2]%~ ~%argv[3]%~
+INCLUDE ~%argv[0]%~
+INCLUDE ~%argv[1]%~
+OUTER_SET cbr_harness_ls_perm_stat = %argv[4]%
+LAF cbr_apply_tempus_weapon_training
+  INT_VAR ls_perm_stat = cbr_harness_ls_perm_stat
+  STR_VAR resource_dir = ~%argv[3]%~
+END
+COPY ~%argv[2]%/WEAPPROF.2DA~ ~%argv[3]%/CBR_TEST.OK~
+
+BEGIN ~Tempus completion harness: chaos tides~
+DESIGNATED 1
+
+COPY ~%argv[2]%~ ~%argv[3]%~
+INCLUDE ~%argv[0]%~
+INCLUDE ~%argv[1]%~
+OUTER_SET cbr_harness_onslaught = %argv[4]%
+OUTER_SET cbr_harness_bulwark = %argv[5]%
+OUTER_SET cbr_harness_fortune = %argv[6]%
+LAF cbr_apply_tempus_chaos_tides
+  INT_VAR
+    strref_onslaught = cbr_harness_onslaught
+    strref_bulwark   = cbr_harness_bulwark
+    strref_fortune   = cbr_harness_fortune
+  STR_VAR resource_dir = ~%argv[3]%~
+END
+COPY ~%argv[2]%/OHTMPS2.SPL~ ~%argv[3]%/CBR_TEST.OK~
+
+BEGIN ~Tempus completion harness: divination toll~
+DESIGNATED 2
+
+COPY ~%argv[2]%~ ~%argv[3]%~
+INCLUDE ~%argv[0]%~
+INCLUDE ~%argv[1]%~
+OUTER_SET cbr_harness_count = %argv[4]%
+ACTION_IF (cbr_harness_count > 0) BEGIN
+  OUTER_SPRINT $cbr_divtoll_res(~0~) ~%argv[5]%~
+END
+ACTION_IF (cbr_harness_count > 1) BEGIN
+  OUTER_SPRINT $cbr_divtoll_res(~1~) ~%argv[6]%~
+END
+ACTION_IF (cbr_harness_count > 2) BEGIN
+  OUTER_SPRINT $cbr_divtoll_res(~2~) ~%argv[7]%~
+END
+ACTION_IF (cbr_harness_count > 3) BEGIN
+  OUTER_SPRINT $cbr_divtoll_res(~3~) ~%argv[8]%~
+END
+ACTION_IF (cbr_harness_count > 4) BEGIN
+  OUTER_SPRINT $cbr_divtoll_res(~4~) ~%argv[9]%~
+END
+ACTION_IF (cbr_harness_count > 5) BEGIN
+  OUTER_SPRINT $cbr_divtoll_res(~5~) ~%argv[10]%~
+END
+ACTION_IF (cbr_harness_count > 6) BEGIN
+  OUTER_SPRINT $cbr_divtoll_res(~6~) ~%argv[11]%~
+END
+ACTION_IF (cbr_harness_count > 7) BEGIN
+  OUTER_SPRINT $cbr_divtoll_res(~7~) ~%argv[12]%~
+END
+LAF cbr_apply_tempus_divination_toll
+  INT_VAR divination_count = cbr_harness_count
+  STR_VAR resource_dir = ~%argv[3]%~
+END
+COPY ~%argv[2]%/OHTEMPUS.2DA~ ~%argv[3]%/CBR_TEST.OK~
