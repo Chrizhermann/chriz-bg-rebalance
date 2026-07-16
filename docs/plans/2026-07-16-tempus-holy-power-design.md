@@ -114,10 +114,11 @@ the final resolved resource and classify all caster-level headers consistently:
   diagnostics.
 
 The default component uses automatic semantic detection. Two advanced mutually exclusive
-subcomponents may force doubling or additive treatment for supported but unrecognized
-layouts. Force mode selects compatibility behavior; it must not replace or rebalance the
-user's Improved Haste spell, and it still fails if the minimum resource structure required
-for safe patching is absent.
+subcomponents pin the expected semantics instead of detecting them: they accept exactly the
+layouts automatic detection accepts and additionally fail atomically when the classified
+semantics contradict the forced choice. Force mode selects compatibility behavior; it must
+not replace or rebalance the user's Improved Haste spell, and it still fails if the minimum
+resource structure required for safe patching is absent.
 
 ### Additive-Haste bridge
 
@@ -145,9 +146,9 @@ numbers that may collide with SCS or another mod.
    is therefore up to a one-second duplicate-APR gap until the next heartbeat; normal
    cadence remains continuous, and any stale bonus expires within one second. Avoiding
    both the gap and stale tail would require EEex or a different explicit tradeoff.
-6. When either parent buff ends or is dispelled, the helper expires within at most one
-   engine tick. Truly zero-lag expiry would require EEex and is not required for this
-   portable component.
+6. When either parent buff ends or is dispelled, the one-second helper is not renewed and
+   any remaining duplicate APR expires within at most one second, matching step 5. Truly
+   zero-lag expiry would require EEex and is not required for this portable component.
 
 For the normal one-APR cleric baseline, steady-state overlap is:
 

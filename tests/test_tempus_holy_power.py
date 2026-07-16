@@ -106,8 +106,8 @@ RESERVED_PRIVATE_RESREFS = (
 KEY_RESOURCE_TYPE_BY_EXTENSION = {"ITM": 1005, "SPL": 1006, "EFF": 1016}
 SCRATCH_COLLISION_SENTINEL = b"FOREIGN-STAGING-SENTINEL"
 FIXTURE_STR_LT_ROW = 2
-FIXTURE_STR_EQ_ROW = 4
-FIXTURE_STR_BONUS_LT_ROW = 5
+FIXTURE_STR_EQ_ROW = 7
+FIXTURE_STR_BONUS_LT_ROW = 8
 
 
 @dataclasses.dataclass
@@ -1065,6 +1065,14 @@ def build_fixture(
         ("1_STATE_N", ("0x112", "-1", "1")),
         ("2_STR_LT_N", ("36", "-1", "2")),
         ("3_SENTINEL", ("999", "123", "5")),
+        # Vanilla BG2:EE SPLPROT.2DA ships predicate rows whose VALUE and
+        # RELATION cells are the literal token `*` (43_SOURCE, 44_!SOURCE,
+        # 63_EVASIONCHECK), and live games keep them.  The default fixture
+        # models them so every phase proves non-numeric rows are skipped for
+        # semantic matching but still counted for engine row numbering.
+        ("4_SOURCE", ("0x100", "*", "*")),
+        ("5_!SOURCE", ("0x101", "*", "*")),
+        ("6_EVASIONCHECK", ("0x109", "*", "*")),
     )
     if splprot_layout == "no_active_state":
         splprot_rows = tuple(
@@ -1072,21 +1080,23 @@ def build_fixture(
         )
     elif splprot_layout == "duplicate_semantics":
         splprot_rows += (
-            ("4_ACTIVE_ALIAS", ("0x112", "-1", "1")),
-            ("5_STR_EQ_N", ("36", "-1", "1")),
-            ("6_STR_EQ_ALIAS", ("36", "-1", "1")),
-            ("7_STR_BONUS_LT_N", ("37", "-1", "2")),
+            ("7_ACTIVE_ALIAS", ("0x112", "-1", "1")),
+            ("8_STR_EQ_N", ("36", "-1", "1")),
+            ("9_STR_EQ_ALIAS", ("36", "-1", "1")),
+            ("10_STR_BONUS_LT_N", ("37", "-1", "2")),
         )
-    elif splprot_layout == "malformed_numeric":
-        splprot_rows += (("4_MALFORMED", ("NOT_A_STAT", "-1", "1")),)
+    elif splprot_layout == "foreign_nonnumeric":
+        splprot_rows += (("7_FOREIGN", ("NOT_A_STAT", "-1", "1")),)
+    elif splprot_layout == "label_collision":
+        splprot_rows += (("CBR_TEMPUS_STR_LT", ("999", "123", "5")),)
     elif splprot_layout != "default":
         raise ValueError(f"unknown SPLPROT fixture layout: {splprot_layout}")
     if strength_helpers_layout != "absent":
         if splprot_layout != "default":
             raise ValueError("Strength-helper fixtures require the default SPLPROT layout")
         splprot_rows += (
-            ("4_STR_EQ_N", ("36", "-1", "1")),
-            ("5_STR_BONUS_LT_N", ("37", "-1", "2")),
+            ("7_STR_EQ_N", ("36", "-1", "1")),
+            ("8_STR_BONUS_LT_N", ("37", "-1", "2")),
         )
     write_2da(
         root / "SPLPROT.2DA",
@@ -1768,7 +1778,12 @@ class TempusHolyPowerTests(unittest.TestCase):
         before = read_2da(result.fixture.root / "SPLPROT.2DA")
         after = read_2da(result.output / "SPLPROT.2DA")
         self.assertEqual(before.rows, after.rows[: len(before.rows)], "SPLPROT must be append-only")
-        semantics = [tuple(int(value, 0) for value in row) for _, row in after.rows]
+        semantics = _splprot_semantics_rows(after)
+        self.assertEqual(
+            3,
+            sum(1 for row in semantics if row is None),
+            "vanilla-style non-numeric rows must be preserved untouched",
+        )
         for required in ((0x112, -1, 1), (36, -1, 2), (36, -1, 1), (37, -1, 2)):
             with self.subTest(required=required):
                 self.assertEqual(1, semantics.count(required))
@@ -1816,24 +1831,53 @@ class TempusHolyPowerTests(unittest.TestCase):
             "existing duplicate semantic aliases must be reused without appending or rewriting",
         )
         table = read_2da(after)
-        semantics = [tuple(int(value, 0) for value in row) for _, row in table.rows]
+        semantics = _splprot_semantics_rows(table)
         self.assertEqual(
-            [1, 4],
+            [1, 7],
             [i for i, row in enumerate(semantics) if row == ACTIVE_SPLSTATE_SEMANTIC],
         )
         self.assertEqual(
-            [5, 6],
+            [8, 9],
             [i for i, row in enumerate(semantics) if row == STR_EQ_SEMANTIC],
         )
         self.assertEqual(1, _active_splstate_row(result.output))
 
-    def test_splprot_rejects_nonnumeric_predicate_rows(self) -> None:
+    def test_splprot_tolerates_foreign_nonnumeric_rows(self) -> None:
+        # The default fixture already carries the three vanilla `*` rows; this
+        # layout adds a word-valued foreign row on top.  Allocation must treat
+        # every non-numeric row as unmatchable-but-counted, never as an error.
         result = self.run_case(
             phase="allocate",
-            splprot_layout="malformed_numeric",
+            splprot_layout="foreign_nonnumeric",
+        )
+        self.assert_success(result)
+        before = read_2da(result.fixture.root / "SPLPROT.2DA")
+        after = read_2da(result.output / "SPLPROT.2DA")
+        self.assertEqual(
+            before.rows,
+            after.rows[: len(before.rows)],
+            "non-numeric foreign rows must be preserved in place",
+        )
+        semantics = _splprot_semantics_rows(after)
+        self.assertEqual(4, sum(1 for row in semantics if row is None))
+        for index, row in enumerate(semantics[len(before.rows) :], start=len(before.rows)):
+            self.assertIsNotNone(row, f"appended CBR row {index} must be numeric")
+        for required in (
+            ACTIVE_SPLSTATE_SEMANTIC,
+            STR_LT_SEMANTIC,
+            STR_EQ_SEMANTIC,
+            STR_BONUS_LT_SEMANTIC,
+        ):
+            with self.subTest(required=required):
+                self.assertEqual(1, semantics.count(required))
+
+    def test_splprot_rejects_reserved_label_squatter(self) -> None:
+        result = self.run_case(
+            phase="allocate",
+            splprot_layout="label_collision",
         )
         self.assertFalse(result.succeeded, result.transcript)
-        self.assertRegex(result.transcript, r"(?i)SPLPROT|NUMERIC|STAT|VALUE|RELATION|MALFORM")
+        self.assertRegex(result.transcript, r"(?i)collision.*reserved row label")
         self.assertEqual({}, _raw_file_tree(result.output))
 
     def test_doubling_allocation_skips_additive_bridge_states(self) -> None:
@@ -1851,14 +1895,12 @@ class TempusHolyPowerTests(unittest.TestCase):
             set(PRIVATE_STATE_SYMBOLS).isdisjoint(after_symbols),
             "true-doubling Improved Haste must not allocate additive bridge states",
         )
-        before_semantics = [
-            tuple(int(value, 0) for value in row)
-            for _, row in read_2da(result.fixture.root / "SPLPROT.2DA").rows
-        ]
-        after_semantics = [
-            tuple(int(value, 0) for value in row)
-            for _, row in read_2da(result.output / "SPLPROT.2DA").rows
-        ]
+        before_semantics = _splprot_semantics_rows(
+            read_2da(result.fixture.root / "SPLPROT.2DA")
+        )
+        after_semantics = _splprot_semantics_rows(
+            read_2da(result.output / "SPLPROT.2DA")
+        )
         self.assertEqual(
             before_semantics.count(ACTIVE_SPLSTATE_SEMANTIC),
             after_semantics.count(ACTIVE_SPLSTATE_SEMANTIC),
@@ -3450,13 +3492,17 @@ class TempusHolyPowerTests(unittest.TestCase):
         self.assertGreater(wrapper_end, wrapper_start, "missing shared wrapper end marker")
         body = _strip_weidu_comments(setup_raw[wrapper_start:wrapper_end])
         for guard in (
-            r"ACTION_IF\s+\(cbr_tempus_divine_id\s+<\s+1001\s+OR\s+cbr_tempus_divine_id\s+>\s+1999\)",
-            r"ACTION_IF\s+\(cbr_tempus_haste_id\s+<\s+2001\s+OR\s+cbr_tempus_haste_id\s+>\s+2999\)",
+            r"ACTION_IF\s+\(cbr_tempus_divine_id\s+<\s+1100\s+OR\s+cbr_tempus_divine_id\s+>\s+1999\)",
+            r"ACTION_IF\s+\(cbr_tempus_haste_id\s+<\s+2100\s+OR\s+cbr_tempus_haste_id\s+>\s+2999\)",
             r"ACTION_IF\s+!\(FILE_EXISTS_IN_GAME\s+~%cbr_tempus_divine_resref%\.SPL~\)",
             r"ACTION_IF\s+!\(FILE_EXISTS_IN_GAME\s+~%cbr_tempus_haste_resref%\.SPL~\)",
         ):
             self.assertRegex(body, guard)
         self.assertNotRegex(body, r"\bSPPR412\b|\bSPWI613\b")
+        # The floors match cbr_validate_spell_ids' require-mode contract, so
+        # every derivable slot is three digits and no zero-padding branch may
+        # reappear in the wrapper.
+        self.assertNotRegex(body, r"SPPR00%|SPPR0%|SPWI00%|SPWI0%")
 
         staged = (
             "OHTEMPUS.2DA",
@@ -3572,8 +3618,12 @@ class _ConditionGraph:
         self.protection = read_2da(root / "SPLPROT.2DA")
 
     def _row(self, index: int) -> tuple[int, int, int]:
-        _, values = self.protection.rows[index]
-        return tuple(int(value, 0) for value in values)  # type: ignore[return-value]
+        row = _splprot_semantics_rows(self.protection)[index]
+        if row is None:
+            raise AssertionError(
+                f"opcode 326 must not reference non-numeric SPLPROT row {index}"
+            )
+        return row
 
     def _matches(self, effect: SplEffect | EffV2, strength: int, exceptional: int) -> bool:
         stat, table_value, relation = self._row(effect.parameter2)
@@ -3620,12 +3670,29 @@ class _ConditionGraph:
         return self._apply(pulses, strength, exceptional)
 
 
+def _splprot_semantics_rows(table: TwoDA) -> list[tuple[int, int, int] | None]:
+    """Parse SPLPROT rows positionally; vanilla `*` cells become None entries.
+
+    Vanilla SPLPROT.2DA contains rows whose VALUE/RELATION cells are the
+    literal token `*` (43_SOURCE, 44_!SOURCE, 63_EVASIONCHECK).  They can never
+    match a semantic tuple, but they occupy engine row numbers, so positional
+    indices must include them.
+    """
+    semantics: list[tuple[int, int, int] | None] = []
+    for _, values in table.rows:
+        try:
+            semantics.append(tuple(int(value, 0) for value in values))
+        except ValueError:
+            semantics.append(None)
+    return semantics
+
+
 def _semantic_splprot_row(root: Path, semantic: tuple[int, int, int]) -> int:
     table = read_2da(root / "SPLPROT.2DA")
     matches = [
         index
-        for index, (_, values) in enumerate(table.rows)
-        if tuple(int(value, 0) for value in values) == semantic
+        for index, row in enumerate(_splprot_semantics_rows(table))
+        if row == semantic
     ]
     if not matches:
         raise AssertionError(f"SPLPROT semantic {semantic} is absent")
@@ -3854,8 +3921,8 @@ def _active_splstate_row(root: Path) -> int:
     table = read_2da(root / "SPLPROT.2DA")
     rows = [
         index
-        for index, (_, values) in enumerate(table.rows)
-        if tuple(int(value, 0) for value in values) == ACTIVE_SPLSTATE_SEMANTIC
+        for index, row in enumerate(_splprot_semantics_rows(table))
+        if row == ACTIVE_SPLSTATE_SEMANTIC
     ]
     if not rows:
         raise AssertionError("active-SPLSTATE semantic row is absent")

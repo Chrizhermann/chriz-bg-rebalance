@@ -5,7 +5,7 @@ VERSION ~v0.1.0~
 // Load the tested transformation library and define one installer wrapper for
 // all Tempus Holy Power compatibility choices. WeiDU's backup namespace is
 // basename-flat, so staging and later publishing the same resource basename
-// would make exact uninstall unsafe. Instead, materialize the seven file-backed
+// would make exact uninstall unsafe. Instead, materialize the six file-backed
 // inputs at their canonical override paths inside the component transaction,
 // then let the shared preflight-first transformation operate there directly.
 ALWAYS
@@ -13,31 +13,23 @@ ALWAYS
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
+    // Both floors match cbr_validate_spell_ids' require-mode contract:
+    // symbolic ids below 1100/2100 would denote a level-0 spell no EE game
+    // defines, so the slot arithmetic below always yields the engine's
+    // three-digit SPPR###/SPWI### form and needs no zero padding.
     OUTER_SET cbr_tempus_divine_id = IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~)
-    ACTION_IF (cbr_tempus_divine_id < 1001 OR cbr_tempus_divine_id > 1999) BEGIN
+    ACTION_IF (cbr_tempus_divine_id < 1100 OR cbr_tempus_divine_id > 1999) BEGIN
       FAIL @9403
     END
     OUTER_SET cbr_tempus_divine_slot = cbr_tempus_divine_id - 1000
-    ACTION_IF (cbr_tempus_divine_slot < 10) BEGIN
-      OUTER_SPRINT cbr_tempus_divine_resref ~SPPR00%cbr_tempus_divine_slot%~
-    END ELSE ACTION_IF (cbr_tempus_divine_slot < 100) BEGIN
-      OUTER_SPRINT cbr_tempus_divine_resref ~SPPR0%cbr_tempus_divine_slot%~
-    END ELSE BEGIN
-      OUTER_SPRINT cbr_tempus_divine_resref ~SPPR%cbr_tempus_divine_slot%~
-    END
+    OUTER_SPRINT cbr_tempus_divine_resref ~SPPR%cbr_tempus_divine_slot%~
 
     OUTER_SET cbr_tempus_haste_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~)
-    ACTION_IF (cbr_tempus_haste_id < 2001 OR cbr_tempus_haste_id > 2999) BEGIN
+    ACTION_IF (cbr_tempus_haste_id < 2100 OR cbr_tempus_haste_id > 2999) BEGIN
       FAIL @9404
     END
     OUTER_SET cbr_tempus_haste_slot = cbr_tempus_haste_id - 2000
-    ACTION_IF (cbr_tempus_haste_slot < 10) BEGIN
-      OUTER_SPRINT cbr_tempus_haste_resref ~SPWI00%cbr_tempus_haste_slot%~
-    END ELSE ACTION_IF (cbr_tempus_haste_slot < 100) BEGIN
-      OUTER_SPRINT cbr_tempus_haste_resref ~SPWI0%cbr_tempus_haste_slot%~
-    END ELSE BEGIN
-      OUTER_SPRINT cbr_tempus_haste_resref ~SPWI%cbr_tempus_haste_slot%~
-    END
+    OUTER_SPRINT cbr_tempus_haste_resref ~SPWI%cbr_tempus_haste_slot%~
 
     ACTION_IF !(FILE_EXISTS_IN_GAME ~%cbr_tempus_divine_resref%.SPL~) BEGIN
       FAIL @9405
@@ -190,8 +182,8 @@ REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9400
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9401
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTMPS1.SPL~) @9402
 REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPELL.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9407
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) >= 1001) AND (IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) <= 1999)) @9403
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) >= 2001) AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) <= 2999)) @9404
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) >= 1100) AND (IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) <= 1999)) @9403
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) >= 2100) AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) <= 2999)) @9404
 
 OUTER_SPRINT cbr_tempus_compatibility_mode ~auto~
 LAM cbr_install_tempus_holy_power_component
@@ -206,8 +198,8 @@ REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9400
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9401
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTMPS1.SPL~) @9402
 REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPELL.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9407
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) >= 1001) AND (IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) <= 1999)) @9403
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) >= 2001) AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) <= 2999)) @9404
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) >= 1100) AND (IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) <= 1999)) @9403
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) >= 2100) AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) <= 2999)) @9404
 
 OUTER_SPRINT cbr_tempus_compatibility_mode ~force_double~
 LAM cbr_install_tempus_holy_power_component
@@ -222,8 +214,8 @@ REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9400
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9401
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTMPS1.SPL~) @9402
 REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPELL.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9407
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) >= 1001) AND (IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) <= 1999)) @9403
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) >= 2001) AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) <= 2999)) @9404
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) >= 1100) AND (IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) <= 1999)) @9403
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) >= 2100) AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) <= 2999)) @9404
 
 OUTER_SPRINT cbr_tempus_compatibility_mode ~force_additive~
 LAM cbr_install_tempus_holy_power_component

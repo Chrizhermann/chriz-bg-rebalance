@@ -1463,17 +1463,17 @@ BEGIN
       PATCH_IF (cbr_value_count != 0) BEGIN
         PATCH_FAIL ~CBR SPLSTATE.IDS collision: planned spell-state value %planned_value% for %symbol% is already occupied.~
       END
-    SET cbr_ids_end = BUFFER_LENGTH
-    SPRINT cbr_ids_prefix ~~
-    PATCH_IF (cbr_ids_end > 0) BEGIN
-      READ_BYTE (cbr_ids_end - 1) cbr_ids_last_byte
-      PATCH_IF (cbr_ids_last_byte != 10 && cbr_ids_last_byte != 13) BEGIN
-        SPRINT cbr_ids_prefix ~%WNL%~
+      SET cbr_ids_end = BUFFER_LENGTH
+      SPRINT cbr_ids_prefix ~~
+      PATCH_IF (cbr_ids_end > 0) BEGIN
+        READ_BYTE (cbr_ids_end - 1) cbr_ids_last_byte
+        PATCH_IF (cbr_ids_last_byte != 10 && cbr_ids_last_byte != 13) BEGIN
+          SPRINT cbr_ids_prefix ~%WNL%~
+        END
       END
-    END
-    SPRINT cbr_ids_line ~%cbr_ids_prefix%%planned_value% %symbol%%WNL%~
-    INSERT_BYTES cbr_ids_end (STRING_LENGTH ~%cbr_ids_line%~)
-    WRITE_ASCIIE cbr_ids_end ~%cbr_ids_line%~
+      SPRINT cbr_ids_line ~%cbr_ids_prefix%%planned_value% %symbol%%WNL%~
+      INSERT_BYTES cbr_ids_end (STRING_LENGTH ~%cbr_ids_line%~)
+      WRITE_ASCIIE cbr_ids_end ~%cbr_ids_line%~
       SET cbr_did_append = 1
       INNER_ACTION BEGIN
         OUTER_SET appended = cbr_did_append
@@ -1511,9 +1511,13 @@ BEGIN
     READ_2DA_ENTRY_FORMER cbr_splprot_rows cbr_row 2 cbr_current_value
     READ_2DA_ENTRY_FORMER cbr_splprot_rows cbr_row 3 cbr_current_relation
     SET cbr_current_numeric = (IS_AN_INT ~%cbr_current_stat%~) && (IS_AN_INT ~%cbr_current_value%~) && (IS_AN_INT ~%cbr_current_relation%~)
-    PATCH_IF (!cbr_current_numeric) BEGIN
-      PATCH_FAIL ~CBR SPLPROT.2DA validation failed: row %cbr_row% STAT VALUE RELATION cells must all be numeric.~
-    END
+    // Vanilla BG2:EE SPLPROT.2DA ships predicate rows whose VALUE/RELATION
+    // cells are the literal token `*` (43_SOURCE, 44_!SOURCE, 63_EVASIONCHECK),
+    // and live games keep them. A non-numeric row can never match a semantic
+    // (STAT, VALUE, RELATION) tuple, but it still occupies an engine row
+    // number: skip it for matching while counting it, so reused and appended
+    // row indices stay engine-faithful. Only a reserved-label squatter below
+    // remains a hard failure.
     PATCH_IF (cbr_current_numeric && cbr_current_stat = stat && cbr_current_value = value && cbr_current_relation = relation) BEGIN
       ++cbr_semantic_matches
       PATCH_IF (row_index < 0) BEGIN
