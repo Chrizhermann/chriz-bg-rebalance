@@ -1,0 +1,636 @@
+// chriz-bg-rebalance — Cleric of Tempus Chaos of Battle tides (component 404).
+//
+// Rework of the vanilla per-target stat lottery into one coherent, announced,
+// party-wide tide per cast:
+//   * OHTMPS2 (same resref, so existing innate charges keep working) becomes
+//     a three-window dispatcher. The engine rolls ONE d100 per effect-list
+//     application and tests every effect's [prob2..prob1] window against that
+//     single roll (the mechanism vanilla itself uses to partition the D/E
+//     stat lottery), so grouping announce+ally+enemy casts under one window
+//     yields exactly one coherent tide per cast:
+//       [ 0..33 ] Onslaught — attack:  ±N to hit, ±N melee & missile damage
+//       [34..66 ] Bulwark   — defense: ±N AC, ±N to all five save types
+//       [67..100] Fortune   — luck:    ±N Luck
+//   * CBRCHT{1,2,3}{D,E} are byte-level clones of the installed OHTMPS2D/E
+//     (ally projectile 162 / enemy projectile 171, five tiers at levels
+//     1/7/13/19/25, visuals/icon/color chrome inherited from the donor —
+//     including whatever EE Fixpack did to it) with the stat lottery replaced
+//     by the tide's fixed stat set at 100 % probability, 30 s duration.
+//     Every tide spell opens with op321 removals of all three same-side tide
+//     resrefs: a new tide replaces any active tide, no stacking.
+//   * Magnitude N by tier: Onslaught/Bulwark 2/2/3/3/4, Fortune 1/1/1/2/2
+//     (allies +N, enemies -N).
+//
+// TLK: the three announce strrefs are INT_VAR inputs; the installer wrapper
+// resolves them from TRA references (this library never touches a TLK).
+//
+// Requires chriz-bg-rebalance/lib/tempus_holy_power.tpa to be INCLUDEd first
+// (cbr_validate_spl_v1, cbr_append_spl_effect_record,
+// cbr_append_raw_spl_effect_record).
+
+DEFINE_ACTION_FUNCTION cbr_define_tempus_tide_resrefs
+  RET
+    cbr_tide_1_ally
+    cbr_tide_1_enemy
+    cbr_tide_2_ally
+    cbr_tide_2_enemy
+    cbr_tide_3_ally
+    cbr_tide_3_enemy
+BEGIN
+  OUTER_SPRINT cbr_tide_1_ally  ~CBRCHT1D~
+  OUTER_SPRINT cbr_tide_1_enemy ~CBRCHT1E~
+  OUTER_SPRINT cbr_tide_2_ally  ~CBRCHT2D~
+  OUTER_SPRINT cbr_tide_2_enemy ~CBRCHT2E~
+  OUTER_SPRINT cbr_tide_3_ally  ~CBRCHT3D~
+  OUTER_SPRINT cbr_tide_3_enemy ~CBRCHT3E~
+END
+
+// Tide magnitude table. tide: 1 = Onslaught, 2 = Bulwark, 3 = Fortune;
+// tier: 0..4 (ability headers at minimum levels 1/7/13/19/25).
+DEFINE_PATCH_FUNCTION cbr_tide_magnitude
+  INT_VAR
+    tide = 0
+    tier = 0
+  RET
+    magnitude
+BEGIN
+  PATCH_IF (tide < 1 || tide > 3 || tier < 0 || tier > 4) BEGIN
+    PATCH_FAIL ~CBR tide magnitude request out of range (tide %tide%, tier %tier%).~
+  END
+  PATCH_IF (tide = 3) BEGIN
+    SET magnitude = (tier >= 3) ? 2 : 1
+  END ELSE BEGIN
+    PATCH_IF (tier >= 4) BEGIN
+      SET magnitude = 4
+    END ELSE PATCH_IF (tier >= 2) BEGIN
+      SET magnitude = 3
+    END ELSE BEGIN
+      SET magnitude = 2
+    END
+  END
+END
+
+// ---------------------------------------------------------------------------
+// Donor (OHTMPS2D / OHTMPS2E) recognition
+// ---------------------------------------------------------------------------
+
+// Validate the five-tier donor shape without modifying it. Recognized per
+// tier: record 0 is op321, chrome is 1-2 op215 visuals, exactly one op142
+// icon and one op9 color pulse, an optional per-target op139 string, and a
+// stat lottery drawn only from op0/18/22/33..37/54. Anything else is a
+// foreign layout and a hard failure — this library rebuilds only what it
+// fully recognizes. (EE Fixpack drops the duplicate tier-1 op215; both the
+// 14- and 15-record tiers are recognized.) A casting-feature slice is
+// accepted as an opaque block and preserved verbatim by the rebuild: on the
+// live game SCS instruments OHTMPS2E with its hostile-AoE casting hooks
+// (op146 dw#blhda + op321 dw#hdani), and the tide clones must keep firing
+// them so SCS AI reacts to a tide exactly as it reacts to the stock spell.
+DEFINE_PATCH_FUNCTION cbr_tide_scan_donor
+  STR_VAR
+    resource_name = ~unknown donor~
+  RET
+    template_power
+    template_resist
+BEGIN
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = EVAL ~%resource_name%~
+    RET
+      cbr_td_ability_offset = ability_offset
+      cbr_td_ability_count  = ability_count
+      cbr_td_effect_offset  = effect_offset
+  END
+  PATCH_IF (cbr_td_ability_count != 5) BEGIN
+    PATCH_FAIL ~CBR tide donor %resource_name% must have exactly five ability tiers, found %cbr_td_ability_count%.~
+  END
+  SET template_power = "-1"
+  SET template_resist = "-1"
+  FOR (cbr_td_tier = 0; cbr_td_tier < 5; ++cbr_td_tier) BEGIN
+    SET cbr_td_header = cbr_td_ability_offset + (cbr_td_tier * 0x28)
+    READ_SHORT (cbr_td_header + 0x10) cbr_td_minlvl
+    SET cbr_td_expected_minlvl = 1 + (cbr_td_tier * 6)
+    PATCH_IF (cbr_td_minlvl != cbr_td_expected_minlvl) BEGIN
+      PATCH_FAIL ~CBR tide donor %resource_name% tier %cbr_td_tier% has minimum level %cbr_td_minlvl%, expected %cbr_td_expected_minlvl%.~
+    END
+    READ_SHORT (cbr_td_header + 0x1e) cbr_td_count
+    READ_SHORT (cbr_td_header + 0x20) cbr_td_first
+    PATCH_IF (cbr_td_count < 5) BEGIN
+      PATCH_FAIL ~CBR tide donor %resource_name% tier %cbr_td_tier% has too few effects (%cbr_td_count%).~
+    END
+    SET cbr_td_icons = 0
+    SET cbr_td_pulses = 0
+    SET cbr_td_visuals = 0
+    FOR (cbr_td_fx = 0; cbr_td_fx < cbr_td_count; ++cbr_td_fx) BEGIN
+      SET cbr_td_fx_offset = cbr_td_effect_offset + ((cbr_td_first + cbr_td_fx) * 0x30)
+      READ_SHORT cbr_td_fx_offset cbr_td_opcode
+      PATCH_IF (cbr_td_fx = 0) BEGIN
+        PATCH_IF (cbr_td_opcode != 321) BEGIN
+          PATCH_FAIL ~CBR tide donor %resource_name% tier %cbr_td_tier% must open with an opcode 321 stacking reset, found %cbr_td_opcode%.~
+        END
+      END ELSE PATCH_IF (cbr_td_opcode = 215) BEGIN
+        ++cbr_td_visuals
+      END ELSE PATCH_IF (cbr_td_opcode = 142) BEGIN
+        ++cbr_td_icons
+      END ELSE PATCH_IF (cbr_td_opcode = 9) BEGIN
+        ++cbr_td_pulses
+      END ELSE PATCH_IF (cbr_td_opcode = 139) BEGIN
+      END ELSE PATCH_IF (cbr_td_opcode = 54) BEGIN
+        // The THAC0 record is the field template every rebuilt stat effect
+        // mirrors (target/power/resist bytes uniform across the lottery).
+        READ_BYTE (cbr_td_fx_offset + 0x03) template_power
+        READ_BYTE (cbr_td_fx_offset + 0x0d) template_resist
+      END ELSE PATCH_IF (cbr_td_opcode = 0 || cbr_td_opcode = 18 || cbr_td_opcode = 22
+                      || (cbr_td_opcode >= 33 && cbr_td_opcode <= 37)) BEGIN
+      END ELSE BEGIN
+        PATCH_FAIL ~CBR tide donor %resource_name% tier %cbr_td_tier% carries unrecognized opcode %cbr_td_opcode%.~
+      END
+    END
+    PATCH_IF (cbr_td_icons != 1 || cbr_td_pulses != 1 || cbr_td_visuals < 1 || cbr_td_visuals > 2) BEGIN
+      PATCH_FAIL ~CBR tide donor %resource_name% tier %cbr_td_tier% chrome mismatch (icons %cbr_td_icons%, pulses %cbr_td_pulses%, visuals %cbr_td_visuals%).~
+    END
+  END
+  PATCH_IF (template_power < 0 || template_resist < 0) BEGIN
+    PATCH_FAIL ~CBR tide donor %resource_name% carries no opcode 54 template record.~
+  END
+END
+
+// ---------------------------------------------------------------------------
+// Tide spell construction (patched onto a COPY of the donor)
+// ---------------------------------------------------------------------------
+
+// Rebuild the copied donor's effect table: keep the op321 opener (cloned to
+// the three same-side tide resrefs) and the visual chrome (icon/pulse
+// durations re-anchored to the 30 s tide), drop the per-target op139 and the
+// probability-window stat lottery, and append the tide's own stat set at
+// 100 % probability.
+DEFINE_PATCH_FUNCTION cbr_tide_build_spell
+  INT_VAR
+    tide = 0
+    side_sign = 0
+  STR_VAR
+    resource_name = ~unknown tide~
+    reset_a = ~~
+    reset_b = ~~
+    reset_c = ~~
+BEGIN
+  PATCH_IF (side_sign != 1 && side_sign != 0 - 1) BEGIN
+    PATCH_FAIL ~CBR tide build for %resource_name%: side_sign must be +1 or -1.~
+  END
+  LPF cbr_tide_scan_donor
+    STR_VAR resource_name = EVAL ~%resource_name%~
+    RET
+      cbr_tb_power  = template_power
+      cbr_tb_resist = template_resist
+  END
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = EVAL ~%resource_name%~
+    RET
+      cbr_tb_ability_offset = ability_offset
+      cbr_tb_effect_offset  = effect_offset
+      cbr_tb_effect_count   = effect_count
+  END
+
+  // Phase 1: append the new effect runs after the old table — first the
+  // donor's casting-feature slice verbatim (see the scan note on SCS's
+  // hostile-AoE hooks), then the rebuilt per-tier runs.
+  READ_SHORT 0x6e cbr_tb_cast_first
+  READ_SHORT 0x70 cbr_tb_cast_count
+  SET cbr_tb_new_total = 0
+  FOR (cbr_tb_cast = 0; cbr_tb_cast < cbr_tb_cast_count; ++cbr_tb_cast) BEGIN
+    LPF cbr_append_raw_spl_effect_record
+      INT_VAR source_offset = cbr_tb_effect_offset + ((cbr_tb_cast_first + cbr_tb_cast) * 0x30)
+    END
+    ++cbr_tb_new_total
+  END
+  FOR (cbr_tb_tier = 0; cbr_tb_tier < 5; ++cbr_tb_tier) BEGIN
+    SET cbr_tb_header = cbr_tb_ability_offset + (cbr_tb_tier * 0x28)
+    READ_SHORT (cbr_tb_header + 0x1e) cbr_tb_old_count
+    READ_SHORT (cbr_tb_header + 0x20) cbr_tb_old_first
+    SET $cbr_tide_new_first(~%cbr_tb_tier%~) = cbr_tb_new_total
+
+    // Stacking reset trio, cloned from the donor's own op321 record.
+    SET cbr_tb_reset_source = cbr_tb_effect_offset + (cbr_tb_old_first * 0x30)
+    PATCH_FOR_EACH cbr_tb_reset_target IN ~%reset_a%~ ~%reset_b%~ ~%reset_c%~ BEGIN
+      LPF cbr_append_raw_spl_effect_record
+        INT_VAR source_offset = cbr_tb_reset_source
+        RET cbr_tb_appended = appended_offset
+      END
+      WRITE_ASCIIE (cbr_tb_appended + 0x14) ~%cbr_tb_reset_target%~ #8
+      ++cbr_tb_new_total
+    END
+
+    // Chrome, in donor order. Icon and color pulse follow the tide's 30 s
+    // lifetime; the op215 casting visual keeps its own short duration.
+    FOR (cbr_tb_fx = 1; cbr_tb_fx < cbr_tb_old_count; ++cbr_tb_fx) BEGIN
+      SET cbr_tb_fx_offset = cbr_tb_effect_offset + ((cbr_tb_old_first + cbr_tb_fx) * 0x30)
+      READ_SHORT cbr_tb_fx_offset cbr_tb_opcode
+      PATCH_IF (cbr_tb_opcode = 215) BEGIN
+        LPF cbr_append_raw_spl_effect_record
+          INT_VAR source_offset = cbr_tb_fx_offset
+        END
+        ++cbr_tb_new_total
+      END ELSE PATCH_IF (cbr_tb_opcode = 142 || cbr_tb_opcode = 9) BEGIN
+        LPF cbr_append_raw_spl_effect_record
+          INT_VAR source_offset = cbr_tb_fx_offset duration_override = 30
+        END
+        ++cbr_tb_new_total
+      END
+    END
+
+    // The tide's stat set, replacing the donor lottery.
+    LPF cbr_tide_magnitude
+      INT_VAR tide = tide tier = cbr_tb_tier
+      RET cbr_tb_magnitude = magnitude
+    END
+    SET cbr_tb_signed = cbr_tb_magnitude * side_sign
+    PATCH_IF (tide = 1) BEGIN
+      PATCH_FOR_EACH cbr_tb_stat_opcode IN ~54~ ~285~ ~286~ BEGIN
+        // PATCH_FOR_EACH binds a string; bridge it into the integer table
+        // before the INT_VAR argument evaluates it.
+        SET cbr_tb_op = %cbr_tb_stat_opcode%
+        LPF cbr_append_spl_effect_record
+          INT_VAR opcode = cbr_tb_op target = 2 power = cbr_tb_power
+                  parameter1 = cbr_tb_signed parameter2 = 0 timing = 0 duration = 30
+                  resist_dispel = cbr_tb_resist
+        END
+        ++cbr_tb_new_total
+      END
+    END ELSE PATCH_IF (tide = 2) BEGIN
+      PATCH_FOR_EACH cbr_tb_stat_opcode IN ~0~ ~33~ ~34~ ~35~ ~36~ ~37~ BEGIN
+        SET cbr_tb_op = %cbr_tb_stat_opcode%
+        LPF cbr_append_spl_effect_record
+          INT_VAR opcode = cbr_tb_op target = 2 power = cbr_tb_power
+                  parameter1 = cbr_tb_signed parameter2 = 0 timing = 0 duration = 30
+                  resist_dispel = cbr_tb_resist
+        END
+        ++cbr_tb_new_total
+      END
+    END ELSE BEGIN
+      LPF cbr_append_spl_effect_record
+        INT_VAR opcode = 22 target = 2 power = cbr_tb_power
+                parameter1 = cbr_tb_signed parameter2 = 0 timing = 0 duration = 30
+                resist_dispel = cbr_tb_resist
+      END
+      ++cbr_tb_new_total
+    END
+    SET $cbr_tide_new_count(~%cbr_tb_tier%~) = cbr_tb_new_total - $cbr_tide_new_first(~%cbr_tb_tier%~)
+  END
+
+  // Phase 2: drop the old table; the appended run slides into its place.
+  DELETE_BYTES cbr_tb_effect_offset (cbr_tb_effect_count * 0x30)
+  WRITE_SHORT 0x6e 0
+  WRITE_SHORT 0x70 cbr_tb_cast_count
+  FOR (cbr_tb_tier = 0; cbr_tb_tier < 5; ++cbr_tb_tier) BEGIN
+    SET cbr_tb_header = cbr_tb_ability_offset + (cbr_tb_tier * 0x28)
+    WRITE_SHORT (cbr_tb_header + 0x1e) $cbr_tide_new_count(~%cbr_tb_tier%~)
+    WRITE_SHORT (cbr_tb_header + 0x20) $cbr_tide_new_first(~%cbr_tb_tier%~)
+  END
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = EVAL ~%resource_name%~
+  END
+END
+
+// Post-build acceptance: the named tide spell must carry the op321 trio at
+// the head of every tier and exactly the tide's signed magnitudes.
+DEFINE_PATCH_FUNCTION cbr_tide_verify_spell
+  INT_VAR
+    tide = 0
+    side_sign = 0
+  STR_VAR
+    resource_name = ~unknown tide~
+    reset_a = ~~
+    reset_b = ~~
+    reset_c = ~~
+BEGIN
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = EVAL ~%resource_name%~
+    RET
+      cbr_tv_ability_offset = ability_offset
+      cbr_tv_ability_count  = ability_count
+      cbr_tv_effect_offset  = effect_offset
+  END
+  PATCH_IF (cbr_tv_ability_count != 5) BEGIN
+    PATCH_FAIL ~CBR tide verify %resource_name%: expected five tiers.~
+  END
+  FOR (cbr_tv_tier = 0; cbr_tv_tier < 5; ++cbr_tv_tier) BEGIN
+    SET cbr_tv_header = cbr_tv_ability_offset + (cbr_tv_tier * 0x28)
+    READ_SHORT (cbr_tv_header + 0x1e) cbr_tv_count
+    READ_SHORT (cbr_tv_header + 0x20) cbr_tv_first
+    LPF cbr_tide_magnitude
+      INT_VAR tide = tide tier = cbr_tv_tier
+      RET cbr_tv_magnitude = magnitude
+    END
+    SET cbr_tv_expected = cbr_tv_magnitude * side_sign
+    SET cbr_tv_reset_hits = 0
+    SET cbr_tv_stat_hits = 0
+    SET cbr_tv_stat_expected = (tide = 1) ? 3 : ((tide = 2) ? 6 : 1)
+    FOR (cbr_tv_fx = 0; cbr_tv_fx < cbr_tv_count; ++cbr_tv_fx) BEGIN
+      SET cbr_tv_fx_offset = cbr_tv_effect_offset + ((cbr_tv_first + cbr_tv_fx) * 0x30)
+      READ_SHORT cbr_tv_fx_offset cbr_tv_opcode
+      READ_LONG (cbr_tv_fx_offset + 0x04) cbr_tv_parameter1
+      READ_ASCII (cbr_tv_fx_offset + 0x14) cbr_tv_resource (8) NULL
+      PATCH_IF (cbr_tv_fx < 3) BEGIN
+        PATCH_IF (cbr_tv_opcode != 321) BEGIN
+          PATCH_FAIL ~CBR tide verify %resource_name% tier %cbr_tv_tier%: record %cbr_tv_fx% is not the op321 trio.~
+        END
+        SPRINT cbr_tv_expected_reset ~%reset_a%~
+        PATCH_IF (cbr_tv_fx = 1) BEGIN
+          SPRINT cbr_tv_expected_reset ~%reset_b%~
+        END ELSE PATCH_IF (cbr_tv_fx = 2) BEGIN
+          SPRINT cbr_tv_expected_reset ~%reset_c%~
+        END
+        PATCH_IF !(~%cbr_tv_resource%~ STRING_EQUAL_CASE ~%cbr_tv_expected_reset%~) BEGIN
+          PATCH_FAIL ~CBR tide verify %resource_name% tier %cbr_tv_tier%: reset %cbr_tv_fx% removes %cbr_tv_resource% instead of %cbr_tv_expected_reset%.~
+        END
+        ++cbr_tv_reset_hits
+      END ELSE PATCH_IF (cbr_tv_opcode = 54 || cbr_tv_opcode = 285 || cbr_tv_opcode = 286
+                      || cbr_tv_opcode = 0 || (cbr_tv_opcode >= 33 && cbr_tv_opcode <= 37)
+                      || cbr_tv_opcode = 22) BEGIN
+        PATCH_IF (cbr_tv_parameter1 != cbr_tv_expected) BEGIN
+          // READ_LONG yields the unsigned dword; renormalize for -N checks.
+          PATCH_IF ((cbr_tv_parameter1 - 0x100000000) != cbr_tv_expected) BEGIN
+            PATCH_FAIL ~CBR tide verify %resource_name% tier %cbr_tv_tier%: opcode %cbr_tv_opcode% magnitude %cbr_tv_parameter1% != %cbr_tv_expected%.~
+          END
+        END
+        READ_LONG (cbr_tv_fx_offset + 0x0e) cbr_tv_duration
+        PATCH_IF (cbr_tv_duration != 30) BEGIN
+          PATCH_FAIL ~CBR tide verify %resource_name% tier %cbr_tv_tier%: stat duration %cbr_tv_duration% != 30.~
+        END
+        ++cbr_tv_stat_hits
+      END
+    END
+    PATCH_IF (cbr_tv_reset_hits != 3 || cbr_tv_stat_hits != cbr_tv_stat_expected) BEGIN
+      PATCH_FAIL ~CBR tide verify %resource_name% tier %cbr_tv_tier%: resets %cbr_tv_reset_hits%/3, stats %cbr_tv_stat_hits%/%cbr_tv_stat_expected%.~
+    END
+  END
+END
+
+// ---------------------------------------------------------------------------
+// Dispatcher (OHTMPS2)
+// ---------------------------------------------------------------------------
+
+// Recognize either the vanilla two-cast dispatcher (rebuild it) or exactly
+// our nine-effect window dispatcher (accept it unchanged); anything else
+// fails hard. Windows are inclusive [prob2..prob1] thirds of the 0..100 roll.
+DEFINE_PATCH_FUNCTION cbr_tide_rebuild_dispatcher
+  INT_VAR
+    strref_onslaught = "-1"
+    strref_bulwark   = "-1"
+    strref_fortune   = "-1"
+  STR_VAR
+    tide_1_ally  = ~~
+    tide_1_enemy = ~~
+    tide_2_ally  = ~~
+    tide_2_enemy = ~~
+    tide_3_ally  = ~~
+    tide_3_enemy = ~~
+  RET
+    rebuilt
+BEGIN
+  SET rebuilt = 0
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = ~OHTMPS2.SPL~
+    RET
+      cbr_dp_ability_offset = ability_offset
+      cbr_dp_ability_count  = ability_count
+      cbr_dp_effect_offset  = effect_offset
+      cbr_dp_effect_count   = effect_count
+  END
+  PATCH_IF (cbr_dp_ability_count != 1) BEGIN
+    PATCH_FAIL ~CBR Chaos of Battle dispatcher must have exactly one ability header, found %cbr_dp_ability_count%.~
+  END
+  READ_SHORT 0x70 cbr_dp_casting_count
+  PATCH_IF (cbr_dp_casting_count != 0) BEGIN
+    PATCH_FAIL ~CBR Chaos of Battle dispatcher must not carry casting features.~
+  END
+
+  PATCH_IF (cbr_dp_effect_count = 2) BEGIN
+    // Vanilla shape: two op146 casts of OHTMPS2D then OHTMPS2E.
+    SET cbr_dp_template = cbr_dp_effect_offset
+    READ_SHORT cbr_dp_template cbr_dp_opcode_a
+    READ_ASCII (cbr_dp_template + 0x14) cbr_dp_resource_a (8) NULL
+    READ_SHORT (cbr_dp_template + 0x30) cbr_dp_opcode_b
+    READ_ASCII (cbr_dp_template + 0x30 + 0x14) cbr_dp_resource_b (8) NULL
+    PATCH_IF (cbr_dp_opcode_a != 146 || cbr_dp_opcode_b != 146
+           || !(~%cbr_dp_resource_a%~ STRING_EQUAL_CASE ~OHTMPS2D~)
+           || !(~%cbr_dp_resource_b%~ STRING_EQUAL_CASE ~OHTMPS2E~)) BEGIN
+      PATCH_FAIL ~CBR Chaos of Battle dispatcher is not the recognized vanilla OHTMPS2D/OHTMPS2E cast pair.~
+    END
+
+    FOR (cbr_dp_window = 0; cbr_dp_window < 3; ++cbr_dp_window) BEGIN
+      SET cbr_dp_low  = (cbr_dp_window = 0) ? 0 : ((cbr_dp_window = 1) ? 34 : 67)
+      SET cbr_dp_high = (cbr_dp_window = 0) ? 33 : ((cbr_dp_window = 1) ? 66 : 100)
+      SET cbr_dp_strref = (cbr_dp_window = 0) ? strref_onslaught : ((cbr_dp_window = 1) ? strref_bulwark : strref_fortune)
+      SPRINT cbr_dp_ally  ~%tide_1_ally%~
+      SPRINT cbr_dp_enemy ~%tide_1_enemy%~
+      PATCH_IF (cbr_dp_window = 1) BEGIN
+        SPRINT cbr_dp_ally  ~%tide_2_ally%~
+        SPRINT cbr_dp_enemy ~%tide_2_enemy%~
+      END ELSE PATCH_IF (cbr_dp_window = 2) BEGIN
+        SPRINT cbr_dp_ally  ~%tide_3_ally%~
+        SPRINT cbr_dp_enemy ~%tide_3_enemy%~
+      END
+      // Announce line for this window, on the caster only.
+      LPF cbr_append_spl_effect_record
+        INT_VAR opcode = 139 target = 1 power = 0 parameter1 = cbr_dp_strref timing = 1
+                probability1 = cbr_dp_high probability2 = cbr_dp_low
+      END
+      // Ally and enemy casts, cloned from the vanilla op146 record so the
+      // cast-at-level semantics (parameter2 = 1) are inherited exactly.
+      PATCH_FOR_EACH cbr_dp_cast IN ~ally~ ~enemy~ BEGIN
+        LPF cbr_append_raw_spl_effect_record
+          INT_VAR source_offset = cbr_dp_template
+          RET cbr_dp_appended = appended_offset
+        END
+        PATCH_IF (~%cbr_dp_cast%~ STR_EQ ~ally~) BEGIN
+          WRITE_ASCIIE (cbr_dp_appended + 0x14) ~%cbr_dp_ally%~ #8
+        END ELSE BEGIN
+          WRITE_ASCIIE (cbr_dp_appended + 0x14) ~%cbr_dp_enemy%~ #8
+        END
+        WRITE_BYTE (cbr_dp_appended + 0x12) cbr_dp_high
+        WRITE_BYTE (cbr_dp_appended + 0x13) cbr_dp_low
+      END
+    END
+    DELETE_BYTES cbr_dp_effect_offset (cbr_dp_effect_count * 0x30)
+    WRITE_SHORT (cbr_dp_ability_offset + 0x1e) 9
+    WRITE_SHORT (cbr_dp_ability_offset + 0x20) 0
+    SET rebuilt = 1
+    LPF cbr_validate_spl_v1
+      STR_VAR resource_name = ~OHTMPS2.SPL~
+    END
+  END ELSE PATCH_IF (cbr_dp_effect_count = 9) BEGIN
+    // Already-rebuilt shape: accept only an exact match.
+    FOR (cbr_dp_window = 0; cbr_dp_window < 3; ++cbr_dp_window) BEGIN
+      SET cbr_dp_low  = (cbr_dp_window = 0) ? 0 : ((cbr_dp_window = 1) ? 34 : 67)
+      SET cbr_dp_high = (cbr_dp_window = 0) ? 33 : ((cbr_dp_window = 1) ? 66 : 100)
+      SET cbr_dp_strref = (cbr_dp_window = 0) ? strref_onslaught : ((cbr_dp_window = 1) ? strref_bulwark : strref_fortune)
+      SPRINT cbr_dp_ally  ~%tide_1_ally%~
+      SPRINT cbr_dp_enemy ~%tide_1_enemy%~
+      PATCH_IF (cbr_dp_window = 1) BEGIN
+        SPRINT cbr_dp_ally  ~%tide_2_ally%~
+        SPRINT cbr_dp_enemy ~%tide_2_enemy%~
+      END ELSE PATCH_IF (cbr_dp_window = 2) BEGIN
+        SPRINT cbr_dp_ally  ~%tide_3_ally%~
+        SPRINT cbr_dp_enemy ~%tide_3_enemy%~
+      END
+      FOR (cbr_dp_slot = 0; cbr_dp_slot < 3; ++cbr_dp_slot) BEGIN
+        SET cbr_dp_fx_offset = cbr_dp_effect_offset + (((cbr_dp_window * 3) + cbr_dp_slot) * 0x30)
+        READ_SHORT cbr_dp_fx_offset cbr_dp_opcode
+        READ_LONG (cbr_dp_fx_offset + 0x04) cbr_dp_parameter1
+        READ_BYTE (cbr_dp_fx_offset + 0x12) cbr_dp_have_high
+        READ_BYTE (cbr_dp_fx_offset + 0x13) cbr_dp_have_low
+        READ_ASCII (cbr_dp_fx_offset + 0x14) cbr_dp_resource (8) NULL
+        PATCH_IF (cbr_dp_have_high != cbr_dp_high || cbr_dp_have_low != cbr_dp_low) BEGIN
+          PATCH_FAIL ~CBR Chaos of Battle dispatcher: window %cbr_dp_window% probability bytes do not match.~
+        END
+        PATCH_IF (cbr_dp_slot = 0) BEGIN
+          PATCH_IF (cbr_dp_opcode != 139 || cbr_dp_parameter1 != cbr_dp_strref) BEGIN
+            PATCH_FAIL ~CBR Chaos of Battle dispatcher: window %cbr_dp_window% announce record does not match.~
+          END
+        END ELSE BEGIN
+          SPRINT cbr_dp_expected ~%cbr_dp_ally%~
+          PATCH_IF (cbr_dp_slot = 2) BEGIN
+            SPRINT cbr_dp_expected ~%cbr_dp_enemy%~
+          END
+          PATCH_IF (cbr_dp_opcode != 146 || !(~%cbr_dp_resource%~ STRING_EQUAL_CASE ~%cbr_dp_expected%~)) BEGIN
+            PATCH_FAIL ~CBR Chaos of Battle dispatcher: window %cbr_dp_window% cast record does not match.~
+          END
+        END
+      END
+    END
+  END ELSE BEGIN
+    PATCH_FAIL ~CBR Chaos of Battle dispatcher has %cbr_dp_effect_count% effects; expected the vanilla pair or the rebuilt nine.~
+  END
+END
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+DEFINE_ACTION_FUNCTION cbr_apply_tempus_chaos_tides
+  INT_VAR
+    strref_onslaught = "-1"
+    strref_bulwark   = "-1"
+    strref_fortune   = "-1"
+  STR_VAR
+    resource_dir = ~~
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  ACTION_IF (~%resource_dir%~ STR_EQ ~~) BEGIN
+    FAIL ~CBR Tempus chaos tides requires resource_dir.~
+  END
+  ACTION_IF (strref_onslaught < 0 || strref_bulwark < 0 || strref_fortune < 0) BEGIN
+    FAIL ~CBR Tempus chaos tides requires three resolved announce strrefs.~
+  END
+  ACTION_FOR_EACH cbr_ct_input IN ~OHTMPS2.SPL~ ~OHTMPS2D.SPL~ ~OHTMPS2E.SPL~ BEGIN
+    ACTION_IF !(FILE_EXISTS ~%resource_dir%/%cbr_ct_input%~) BEGIN
+      FAIL ~CBR Tempus chaos tides requires %resource_dir%/%cbr_ct_input%.~
+    END
+  END
+  LAF cbr_define_tempus_tide_resrefs
+    RET
+      cbr_ct_1d = cbr_tide_1_ally
+      cbr_ct_1e = cbr_tide_1_enemy
+      cbr_ct_2d = cbr_tide_2_ally
+      cbr_ct_2e = cbr_tide_2_enemy
+      cbr_ct_3d = cbr_tide_3_ally
+      cbr_ct_3e = cbr_tide_3_enemy
+  END
+
+  // Preflight all three inputs before creating or mutating anything.
+  COPY ~%resource_dir%/OHTMPS2D.SPL~ ~%resource_dir%/OHTMPS2D.SPL~
+    LPF cbr_tide_scan_donor STR_VAR resource_name = ~OHTMPS2D.SPL~ END
+  BUT_ONLY
+  COPY ~%resource_dir%/OHTMPS2E.SPL~ ~%resource_dir%/OHTMPS2E.SPL~
+    LPF cbr_tide_scan_donor STR_VAR resource_name = ~OHTMPS2E.SPL~ END
+  BUT_ONLY
+  COPY ~%resource_dir%/OHTMPS2.SPL~ ~%resource_dir%/OHTMPS2.SPL~
+    LPF cbr_validate_spl_v1 STR_VAR resource_name = ~OHTMPS2.SPL~ END
+  BUT_ONLY
+
+  // Six tide spells, each rebuilt from its side's donor. The tide loop is
+  // deliberately unrolled: WeiDU has no safe computed-variable-name
+  // dereference in STR_VAR position, and three explicit pairs read better
+  // than a nested-percent workaround.
+  OUTER_FOR (cbr_ct_tide = 1; cbr_ct_tide <= 3; ++cbr_ct_tide) BEGIN
+    ACTION_IF (cbr_ct_tide = 1) BEGIN
+      OUTER_SPRINT cbr_ct_ally ~%cbr_ct_1d%~
+      OUTER_SPRINT cbr_ct_enemy ~%cbr_ct_1e%~
+    END ELSE ACTION_IF (cbr_ct_tide = 2) BEGIN
+      OUTER_SPRINT cbr_ct_ally ~%cbr_ct_2d%~
+      OUTER_SPRINT cbr_ct_enemy ~%cbr_ct_2e%~
+    END ELSE BEGIN
+      OUTER_SPRINT cbr_ct_ally ~%cbr_ct_3d%~
+      OUTER_SPRINT cbr_ct_enemy ~%cbr_ct_3e%~
+    END
+    COPY ~%resource_dir%/OHTMPS2D.SPL~ ~%resource_dir%/%cbr_ct_ally%.SPL~
+      LPF cbr_tide_build_spell
+        INT_VAR tide = cbr_ct_tide side_sign = 1
+        STR_VAR
+          resource_name = EVAL ~%cbr_ct_ally%.SPL~
+          reset_a = EVAL ~%cbr_ct_1d%~
+          reset_b = EVAL ~%cbr_ct_2d%~
+          reset_c = EVAL ~%cbr_ct_3d%~
+      END
+    COPY ~%resource_dir%/OHTMPS2E.SPL~ ~%resource_dir%/%cbr_ct_enemy%.SPL~
+      LPF cbr_tide_build_spell
+        INT_VAR tide = cbr_ct_tide side_sign = 0 - 1
+        STR_VAR
+          resource_name = EVAL ~%cbr_ct_enemy%.SPL~
+          reset_a = EVAL ~%cbr_ct_1e%~
+          reset_b = EVAL ~%cbr_ct_2e%~
+          reset_c = EVAL ~%cbr_ct_3e%~
+      END
+  END
+
+  COPY ~%resource_dir%/OHTMPS2.SPL~ ~%resource_dir%/OHTMPS2.SPL~
+    LPF cbr_tide_rebuild_dispatcher
+      INT_VAR
+        strref_onslaught = strref_onslaught
+        strref_bulwark   = strref_bulwark
+        strref_fortune   = strref_fortune
+      STR_VAR
+        tide_1_ally  = EVAL ~%cbr_ct_1d%~
+        tide_1_enemy = EVAL ~%cbr_ct_1e%~
+        tide_2_ally  = EVAL ~%cbr_ct_2d%~
+        tide_2_enemy = EVAL ~%cbr_ct_2e%~
+        tide_3_ally  = EVAL ~%cbr_ct_3d%~
+        tide_3_enemy = EVAL ~%cbr_ct_3e%~
+      RET cbr_ct_rebuilt = rebuilt
+    END
+  BUT_ONLY
+
+  // Acceptance pass over everything this component owns.
+  OUTER_FOR (cbr_ct_tide = 1; cbr_ct_tide <= 3; ++cbr_ct_tide) BEGIN
+    ACTION_IF (cbr_ct_tide = 1) BEGIN
+      OUTER_SPRINT cbr_ct_ally ~%cbr_ct_1d%~
+      OUTER_SPRINT cbr_ct_enemy ~%cbr_ct_1e%~
+    END ELSE ACTION_IF (cbr_ct_tide = 2) BEGIN
+      OUTER_SPRINT cbr_ct_ally ~%cbr_ct_2d%~
+      OUTER_SPRINT cbr_ct_enemy ~%cbr_ct_2e%~
+    END ELSE BEGIN
+      OUTER_SPRINT cbr_ct_ally ~%cbr_ct_3d%~
+      OUTER_SPRINT cbr_ct_enemy ~%cbr_ct_3e%~
+    END
+    COPY ~%resource_dir%/%cbr_ct_ally%.SPL~ ~%resource_dir%/%cbr_ct_ally%.SPL~
+      LPF cbr_tide_verify_spell
+        INT_VAR tide = cbr_ct_tide side_sign = 1
+        STR_VAR
+          resource_name = EVAL ~%cbr_ct_ally%.SPL~
+          reset_a = EVAL ~%cbr_ct_1d%~
+          reset_b = EVAL ~%cbr_ct_2d%~
+          reset_c = EVAL ~%cbr_ct_3d%~
+      END
+    BUT_ONLY
+    COPY ~%resource_dir%/%cbr_ct_enemy%.SPL~ ~%resource_dir%/%cbr_ct_enemy%.SPL~
+      LPF cbr_tide_verify_spell
+        INT_VAR tide = cbr_ct_tide side_sign = 0 - 1
+        STR_VAR
+          resource_name = EVAL ~%cbr_ct_enemy%.SPL~
+          reset_a = EVAL ~%cbr_ct_1e%~
+          reset_b = EVAL ~%cbr_ct_2e%~
+          reset_c = EVAL ~%cbr_ct_3e%~
+      END
+    BUT_ONLY
+  END
+  PRINT ~cbr 404: Chaos of Battle tides installed (dispatcher rebuilt: %cbr_ct_rebuilt%).~
+END

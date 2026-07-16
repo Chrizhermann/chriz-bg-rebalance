@@ -3,9 +3,12 @@
 // Component names (match DESIGNATED numbers)
 @100 = ~SCS: Telekinetic Storm — restore save vs. spell for half damage (+ bypass Mirror Image)~
 @101 = ~SCS: Adventurer's Mart — restore the five Freedom scrolls (spell tweak orphaned in v35)~
+@400 = ~Cleric of Tempus: weapon training — axe, longsword, crossbow, and two-pip mastery~
 @401 = ~Cleric of Tempus: Holy Power — automatic semantic detection (recommended)~
 @402 = ~Cleric of Tempus: Holy Power — force true-doubling compatibility~
 @403 = ~Cleric of Tempus: Holy Power — force additive compatibility~
+@404 = ~Cleric of Tempus: Chaos of Battle — one announced battle tide per cast~
+@405 = ~Cleric of Tempus: Divination toll — Tempus grants no future sight~
 
 // Component groups
 @1100 = ~SCS adjustments~
@@ -13,6 +16,12 @@
 @1300 = ~Cross-cutting audits~
 @1400 = ~Class and kit revisions~
 @1401 = ~Cleric of Tempus: Holy Power compatibility~
+
+// Game-facing strings (component 404 announce lines; the only TLK additions
+// this mod makes)
+@4041 = ~Tide of Battle: Onslaught!~
+@4042 = ~Tide of Battle: Bulwark!~
+@4043 = ~Tide of Battle: Fortune!~
 
 // Predicate / failure messages
 @9100 = ~SCS's "extra arcane spells" (Telekinetic Storm) is not installed — nothing to fix.~
@@ -27,3 +36,16 @@
 @9405 = ~The SPL resource resolved from CLERIC_HOLY_POWER is missing. Install or repair the final Divine Power spell first.~
 @9406 = ~The SPL resource resolved from WIZARD_IMPROVED_HASTE is missing. Install or repair the final Improved Haste spell first.~
 @9407 = ~SPELL.IDS, SPLSTATE.IDS, or SPLPROT.2DA is missing. This component requires the final BG2:EE / EET spell infrastructure.~
+@9410 = ~The Cleric of Tempus weapon training component supports BG2:EE / EET only.~
+@9411 = ~WEAPPROF.2DA is missing.~
+@9412 = ~OHTEMPUS.2DA is missing. Install the Cleric of Tempus kit before this component.~
+@9413 = ~C0PR#C4.SPL is missing. This component completes Artisan's Kitpack Tempus grant and requires Artisan's EEex proficiency system.~
+@9414 = ~C0PR#90.SPL, C0PR#92.SPL, or C0PR#103.SPL is missing. This component requires Artisan's Kitpack proficiency permission spells.~
+@9415 = ~SPLPROT.2DA is missing. This component requires the final BG2:EE / EET spell infrastructure.~
+@9416 = ~STATS.IDS does not define C0_PROFICIENCYLONGSWORD. This component requires Artisan's Kitpack EEex proficiency stats.~
+@9420 = ~The Cleric of Tempus Divination toll component supports BG2:EE / EET only.~
+@9421 = ~OHTEMPUS.2DA is missing. Install the Cleric of Tempus kit before this component.~
+@9422 = ~No Divination priest spells (school 3) were found in this game — nothing to toll.~
+@9430 = ~The Cleric of Tempus Chaos of Battle component supports BG2:EE / EET only.~
+@9431 = ~OHTEMPUS.2DA is missing. Install the Cleric of Tempus kit before this component.~
+@9432 = ~OHTMPS2.SPL / OHTMPS2D.SPL / OHTMPS2E.SPL are missing. This component reworks the stock Chaos of Battle spells.~

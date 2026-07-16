@@ -1,0 +1,206 @@
+// chriz-bg-rebalance — Cleric of Tempus Divination toll (component 405).
+//
+// The kit's downside: Clerics of Tempus lose access to the installed
+// Divination priest spells. Fully engine-native (no EEex dependency):
+//   * CBRTMDV.SPL — op321 self-reset, then one instant op172 (remove spell)
+//     per Divination spell, then one permanent op272 heartbeat per spell,
+//     each firing a CBRTMD<i>.EFF op172. The pulse strips a Divination spell
+//     within about a second of it ever appearing, so priest auto-learn
+//     ordering at level-up is irrelevant.
+//   * OHTEMPUS.2DA — a CBR_DIVTOLL row applies AP_CBRTMDV at every level;
+//     the leading op321 makes the repeated application self-replacing, so
+//     exactly one pulse set is live no matter how often the CLAB fires.
+//
+// The Divination spell list is discovered by the installer wrapper against
+// the real game (school byte 0x25 == 3 across SPPR[1-7]xx, override and BIF)
+// and passed in through the documented global-array contract below; this
+// library never scans a game.
+//
+// Contract: the caller sets
+//   $cbr_divtoll_res(~0~) .. $cbr_divtoll_res(~<divination_count - 1>~)
+// to the SPL resrefs (no extension) that the toll removes.
+//
+// Requires chriz-bg-rebalance/lib/tempus_holy_power.tpa to be INCLUDEd first
+// (cbr_add_basic_self_ability, cbr_append_spl_effect_record).
+
+DEFINE_ACTION_FUNCTION cbr_define_tempus_toll_resrefs
+  RET
+    cbr_toll_spell
+    cbr_toll_eff_prefix
+BEGIN
+  OUTER_SPRINT cbr_toll_spell      ~CBRTMDV~
+  OUTER_SPRINT cbr_toll_eff_prefix ~CBRTMD~
+END
+
+// One standalone EFF V2 carrying the op172 removal for a single spell.
+// Field layout mirrors the shipped 401 pulse EFFs (normalize everything
+// after the signatures, then write only owned fields).
+DEFINE_ACTION_FUNCTION cbr_toll_create_removal_eff
+  STR_VAR
+    resource_dir = ~~
+    eff_resref = ~~
+    removed_resref = ~~
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  OUTER_SPRINT eff_resref EVALUATE_BUFFER ~%eff_resref%~
+  OUTER_SPRINT removed_resref EVALUATE_BUFFER ~%removed_resref%~
+  CREATE EFF ~%eff_resref%~
+    FOR (cbr_toll_byte = 0x10; cbr_toll_byte < 0x110; ++cbr_toll_byte) BEGIN
+      WRITE_BYTE cbr_toll_byte 0
+    END
+    WRITE_LONG 0x10 172
+    WRITE_LONG 0x14 2
+    WRITE_LONG 0x18 0
+    WRITE_LONG 0x1c 0
+    WRITE_LONG 0x20 0
+    WRITE_LONG 0x24 1
+    WRITE_LONG 0x28 0
+    WRITE_SHORT 0x2c 100
+    WRITE_SHORT 0x2e 0
+    WRITE_ASCIIE 0x30 ~%removed_resref%~ #8
+    WRITE_LONG 0x5c 2
+  ACTION_IF !(~%resource_dir%~ STR_EQ ~override~) BEGIN
+    ACTION_IF !(FILE_EXISTS ~%resource_dir%/%eff_resref%.eff~) BEGIN
+      MOVE ~override/%eff_resref%.eff~ ~%resource_dir%/%eff_resref%.eff~
+    END
+  END
+END
+
+// Append the CBR_DIVTOLL row (AP_CBRTMDV at every level 1..50). An existing
+// identical row is accepted unchanged; an existing different row is a hard
+// failure — this library completes exactly one recognized shape.
+DEFINE_PATCH_FUNCTION cbr_toll_ensure_clab_row
+  STR_VAR
+    toll_spell = ~~
+  RET
+    appended_row
+BEGIN
+  SET appended_row = 0
+  COUNT_2DA_COLS cbr_toll_clab_cols
+  PATCH_IF (cbr_toll_clab_cols != 51) BEGIN
+    PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: expected row label plus levels 1 through 50.~
+  END
+  READ_2DA_ENTRIES_NOW cbr_toll_clab_rows 51
+  SET cbr_toll_existing_row = "-1"
+  FOR (cbr_toll_row = 0; cbr_toll_row < cbr_toll_clab_rows; ++cbr_toll_row) BEGIN
+    READ_2DA_ENTRY_FORMER cbr_toll_clab_rows cbr_toll_row 0 cbr_toll_label
+    PATCH_IF (~%cbr_toll_label%~ STR_EQ ~CBR_DIVTOLL~) BEGIN
+      PATCH_IF (cbr_toll_existing_row >= 0) BEGIN
+        PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: duplicate CBR_DIVTOLL rows.~
+      END
+      SET cbr_toll_existing_row = cbr_toll_row
+    END
+  END
+  PATCH_IF (cbr_toll_existing_row >= 0) BEGIN
+    FOR (cbr_toll_level = 1; cbr_toll_level <= 50; ++cbr_toll_level) BEGIN
+      READ_2DA_ENTRY_FORMER cbr_toll_clab_rows cbr_toll_existing_row cbr_toll_level cbr_toll_cell
+      PATCH_IF !(~%cbr_toll_cell%~ STR_EQ ~AP_%toll_spell%~) BEGIN
+        PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: CBR_DIVTOLL level %cbr_toll_level% holds %cbr_toll_cell% instead of AP_%toll_spell%.~
+      END
+    END
+  END ELSE BEGIN
+    SPRINT cbr_toll_new_row ~CBR_DIVTOLL~
+    FOR (cbr_toll_level = 1; cbr_toll_level <= 50; ++cbr_toll_level) BEGIN
+      SPRINT cbr_toll_new_row ~%cbr_toll_new_row% AP_%toll_spell%~
+    END
+    INSERT_2DA_ROW cbr_toll_clab_rows 51 ~%cbr_toll_new_row%~
+    SET appended_row = 1
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_apply_tempus_divination_toll
+  INT_VAR
+    divination_count = 0
+  STR_VAR
+    resource_dir = ~~
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  ACTION_IF (~%resource_dir%~ STR_EQ ~~) BEGIN
+    FAIL ~CBR Tempus Divination toll requires resource_dir.~
+  END
+  // CBRTMD0..CBRTMD99 all fit the 8-character resref limit; a three-digit
+  // count would not, and a game with zero Divination priest spells has
+  // nothing to toll — the wrapper refuses to install the component then.
+  ACTION_IF (divination_count < 1 || divination_count > 99) BEGIN
+    FAIL ~CBR Tempus Divination toll requires between 1 and 99 discovered Divination spells, got %divination_count%.~
+  END
+  ACTION_IF !(FILE_EXISTS ~%resource_dir%/OHTEMPUS.2DA~) BEGIN
+    FAIL ~CBR Tempus Divination toll requires %resource_dir%/OHTEMPUS.2DA.~
+  END
+  LAF cbr_define_tempus_toll_resrefs
+    RET
+      cbr_toll_spell_resref = cbr_toll_spell
+      cbr_toll_prefix       = cbr_toll_eff_prefix
+  END
+  OUTER_FOR (cbr_toll_index = 0; cbr_toll_index < divination_count; ++cbr_toll_index) BEGIN
+    // $cbr_divtoll_res(~N~) mangles to the variable cbr_divtoll_res_N; read
+    // it through the canonical nested-percent double evaluation.
+    OUTER_SPRINT cbr_toll_slot ~cbr_divtoll_res_%cbr_toll_index%~
+    OUTER_SPRINT cbr_toll_target EVAL ~%%cbr_toll_slot%%~
+    OUTER_SET cbr_toll_target_length = STRING_LENGTH ~%cbr_toll_target%~
+    ACTION_IF (cbr_toll_target_length < 1 || cbr_toll_target_length > 8) BEGIN
+      FAIL ~CBR Tempus Divination toll: list entry %cbr_toll_index% (%cbr_toll_target%) is not a valid resref.~
+    END
+  END
+
+  // The CLAB pass validates shape (51 columns, no conflicting CBR_DIVTOLL
+  // row) before its own INSERT_2DA_ROW, so a malformed table fails before
+  // any write. A second pass re-validates that the row now exists in
+  // exactly the recognized shape (appended_row returns 0).
+  COPY ~%resource_dir%/OHTEMPUS.2DA~ ~%resource_dir%/OHTEMPUS.2DA~
+    LPF cbr_toll_ensure_clab_row
+      STR_VAR toll_spell = EVAL ~%cbr_toll_spell_resref%~
+    END
+  BUT_ONLY
+
+  COPY ~%resource_dir%/OHTEMPUS.2DA~ ~%resource_dir%/OHTEMPUS.2DA~
+    LPF cbr_toll_ensure_clab_row
+      STR_VAR toll_spell = EVAL ~%cbr_toll_spell_resref%~
+      RET cbr_toll_second_pass = appended_row
+    END
+    PATCH_IF (cbr_toll_second_pass != 0) BEGIN
+      PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA verification failed: CBR_DIVTOLL row still missing after append.~
+    END
+  BUT_ONLY
+
+  OUTER_FOR (cbr_toll_index = 0; cbr_toll_index < divination_count; ++cbr_toll_index) BEGIN
+    OUTER_SPRINT cbr_toll_slot ~cbr_divtoll_res_%cbr_toll_index%~
+    OUTER_SPRINT cbr_toll_target EVAL ~%%cbr_toll_slot%%~
+    LAF cbr_toll_create_removal_eff
+      STR_VAR
+        resource_dir = EVAL ~%resource_dir%~
+        eff_resref = EVAL ~%cbr_toll_prefix%%cbr_toll_index%~
+        removed_resref = EVAL ~%cbr_toll_target%~
+    END
+  END
+
+  CREATE SPL ~%cbr_toll_spell_resref%~
+    LPF cbr_add_basic_self_ability END
+    // Self-reset first: a repeated CLAB application (every level-up) replaces
+    // the previous permanent pulse set instead of stacking a new one.
+    LPF cbr_append_spl_effect_record
+      INT_VAR opcode = 321 target = 1 power = 0 parameter1 = 0 parameter2 = 0 timing = 1
+      STR_VAR resource = EVAL ~%cbr_toll_spell_resref%~
+    END
+    FOR (cbr_toll_index = 0; cbr_toll_index < divination_count; ++cbr_toll_index) BEGIN
+      SPRINT cbr_toll_slot ~cbr_divtoll_res_%cbr_toll_index%~
+      SPRINT cbr_toll_target EVAL ~%%cbr_toll_slot%%~
+      LPF cbr_append_spl_effect_record
+        INT_VAR opcode = 172 target = 1 power = 0 timing = 1
+        STR_VAR resource = EVAL ~%cbr_toll_target%~
+      END
+    END
+    FOR (cbr_toll_index = 0; cbr_toll_index < divination_count; ++cbr_toll_index) BEGIN
+      LPF cbr_append_spl_effect_record
+        INT_VAR opcode = 272 target = 1 power = 0 parameter1 = 1 parameter2 = 3 timing = 9
+        STR_VAR resource = EVAL ~%cbr_toll_prefix%%cbr_toll_index%~
+      END
+    END
+    WRITE_SHORT 0x90 (1 + (2 * divination_count))
+  ACTION_IF !(~%resource_dir%~ STR_EQ ~override~) BEGIN
+    ACTION_IF !(FILE_EXISTS ~%resource_dir%/%cbr_toll_spell_resref%.spl~) BEGIN
+      MOVE ~override/%cbr_toll_spell_resref%.spl~ ~%resource_dir%/%cbr_toll_spell_resref%.spl~
+    END
+  END
+  PRINT ~cbr 405: Divination toll covers %divination_count% priest spells.~
+END

@@ -10,6 +10,9 @@ VERSION ~v0.1.0~
 // then let the shared preflight-first transformation operate there directly.
 ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/tempus_holy_power.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/tempus_weapon_training.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/tempus_chaos_tides.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/tempus_divination_toll.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -172,6 +175,37 @@ COPY_EXISTING ~ribald.sto~ ~override~
 // Class and kit revisions (400-499)
 // ============================================================
 
+BEGIN @400
+DESIGNATED 400
+GROUP @1400
+LABEL ~cbr_cleric_tempus_weapon_training~
+
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9410
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~WEAPPROF.2DA~) @9411
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9412
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~C0PR#C4.SPL~) @9413
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~C0PR#90.SPL~)
+               AND (FILE_EXISTS_IN_GAME ~C0PR#92.SPL~)
+               AND (FILE_EXISTS_IN_GAME ~C0PR#103.SPL~)) @9414
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~) @9415
+// Artisan's custom permission stat for longswords must exist in the live
+// STATS.IDS; the resolved value parameterizes the migration helper's gate.
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~stats~ ~C0_PROFICIENCYLONGSWORD~) > 0)
+               AND (IDS_OF_SYMBOL (~stats~ ~C0_PROFICIENCYLONGSWORD~) < 65536)) @9416
+
+OUTER_SET cbr_wt_resolved_ls_perm_stat = IDS_OF_SYMBOL (~stats~ ~C0_PROFICIENCYLONGSWORD~)
+
+// Materialize the three file-backed inputs at their canonical override
+// paths (same transactional pattern as the Holy Power components).
+COPY_EXISTING ~WEAPPROF.2DA~ ~override/WEAPPROF.2DA~
+COPY_EXISTING ~C0PR#C4.SPL~ ~override/C0PR#C4.SPL~
+COPY_EXISTING ~SPLPROT.2DA~ ~override/SPLPROT.2DA~
+
+LAF cbr_apply_tempus_weapon_training
+  INT_VAR ls_perm_stat = cbr_wt_resolved_ls_perm_stat
+  STR_VAR resource_dir = ~override~
+END
+
 BEGIN @401
 DESIGNATED 401
 SUBCOMPONENT @1401
@@ -219,3 +253,68 @@ REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) >= 2100) AND
 
 OUTER_SPRINT cbr_tempus_compatibility_mode ~force_additive~
 LAM cbr_install_tempus_holy_power_component
+
+BEGIN @404
+DESIGNATED 404
+GROUP @1400
+LABEL ~cbr_cleric_tempus_chaos_tides~
+
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9430
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9431
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~OHTMPS2.SPL~)
+               AND (FILE_EXISTS_IN_GAME ~OHTMPS2D.SPL~)
+               AND (FILE_EXISTS_IN_GAME ~OHTMPS2E.SPL~)) @9432
+
+// The three announce lines are this mod's only game-facing strings:
+// dialog.tlk grows append-only by at most three entries (WeiDU reuses an
+// existing identical string, so a reinstall resolves to the same strrefs).
+OUTER_SET cbr_ct_resolved_onslaught = RESOLVE_STR_REF (@4041)
+OUTER_SET cbr_ct_resolved_bulwark   = RESOLVE_STR_REF (@4042)
+OUTER_SET cbr_ct_resolved_fortune   = RESOLVE_STR_REF (@4043)
+
+COPY_EXISTING ~OHTMPS2.SPL~ ~override/OHTMPS2.SPL~
+COPY_EXISTING ~OHTMPS2D.SPL~ ~override/OHTMPS2D.SPL~
+COPY_EXISTING ~OHTMPS2E.SPL~ ~override/OHTMPS2E.SPL~
+
+LAF cbr_apply_tempus_chaos_tides
+  INT_VAR
+    strref_onslaught = cbr_ct_resolved_onslaught
+    strref_bulwark   = cbr_ct_resolved_bulwark
+    strref_fortune   = cbr_ct_resolved_fortune
+  STR_VAR resource_dir = ~override~
+END
+
+BEGIN @405
+DESIGNATED 405
+GROUP @1400
+LABEL ~cbr_cleric_tempus_divination_toll~
+
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9420
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9421
+
+// Discover the installed Divination priest spells (school byte 0x25 == 3)
+// across override and BIFs. Reads only: BUT_ONLY writes nothing back.
+OUTER_SET cbr_divtoll_count = 0
+COPY_EXISTING_REGEXP GLOB ~^sppr[1-7][0-9][0-9]\.spl$~ ~override~
+  PATCH_IF (BUFFER_LENGTH > 0x37) BEGIN
+    READ_ASCII 0x00 cbr_dt_signature (8)
+    PATCH_IF (~%cbr_dt_signature%~ STR_EQ ~SPL V1  ~) BEGIN
+      READ_BYTE 0x25 cbr_dt_school
+      PATCH_IF (cbr_dt_school = 3) BEGIN
+        SPRINT $cbr_divtoll_res(~%cbr_divtoll_count%~) ~%SOURCE_RES%~
+        SET cbr_divtoll_count += 1
+      END
+    END
+  END
+  BUT_ONLY
+
+ACTION_IF (cbr_divtoll_count = 0) BEGIN
+  FAIL @9422
+END
+
+COPY_EXISTING ~OHTEMPUS.2DA~ ~override/OHTEMPUS.2DA~
+
+LAF cbr_apply_tempus_divination_toll
+  INT_VAR divination_count = cbr_divtoll_count
+  STR_VAR resource_dir = ~override~
+END

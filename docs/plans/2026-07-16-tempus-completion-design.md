@@ -133,18 +133,26 @@ clerics unaffected.
 0x25 == 3 → removal list (on this install: the 5 spells above; recorded into the
 generated resources, never hardcoded).
 
-**`CBRTMDV.SPL`** (CREATE): one op172 (remove spell) per discovered resref,
-timing=1, self-target.
+**`CBRTMDV.SPL`** (CREATE): fully engine-native, no EEex dependency —
+
+1. op321 self-reset (resource `CBRTMDV`, timing=1): re-application replaces any
+   prior instance, so the every-column CLAB grant never stacks duplicates.
+2. one op172 (remove spell, timing=1) per discovered resref — instant strip at
+   apply time.
+3. one op272 (apply EFF on condition, timing=9 permanent, param1=1 param2=3 —
+   the verified 401 heartbeat) per discovered resref, each firing
+   `CBRTMD<i>.EFF` (EFF V2, op172 for that spell). The pulse strips a
+   Divination spell within ~1 second of it ever appearing (level-up auto-learn
+   ordering becomes irrelevant).
 
 **`OHTEMPUS.2DA`**: append row `CBR_DIVTOLL` with `AP_CBRTMDV` in every level column
-(1..50). Removal re-fires on every level-up, so spells auto-learned when a new spell
-level unlocks are stripped no later than the next level-up.
+(1..50) — both a level-up strip and a self-replacing refresh of the pulse set.
 
-**`M_CBR405.lua`** (CREATE, only when `EEex.dll` exists): EEex load listener in the
-`M_CBMprs.lua` pattern — on every load/area transition, for party sprites with kit
-OHTEMPUS, applyEffect op172 for each baked resref (op172 on an unknown spell is a
-harmless no-op → no dedup needed). This closes the level-up ordering gap entirely
-and migrates the live Branwen with zero console commands.
+Live migration for the already-leveled Branwen: one console cast at the install
+checkpoint — `C:Eval('ReallyForceSpellRES("CBRTMDV",Branwen)')` — after which the
+permanent pulses keep her book clean forever (uninstalling 405 leaves saved pulse
+effects pointing at deleted EFFs; the engine treats a missing EFF resource as a
+no-op, same residue class as any CLAB-applied mod effect).
 
 TLK-neutral (helper SPL unnamed). Kit-description text updates for 404/405 are
 deferred polish — recorded here, not smuggled in.
@@ -162,10 +170,9 @@ new surfaces:
 - 404: dispatcher rebuilt with exact windows/strrefs; 6 tide spells with tier
   magnitudes and op321 reset sets; TLK grows by exactly 3 strings (installer test);
   uninstall restores byte-exactly (OHTMPS2 override copy removed, CBRCHT* removed).
-- 405: fake game with mixed-school SPPR samples → CBRTMDV op172 list matches
-  school-3 set exactly; CLAB row appended across all columns and only that row
-  changed; M_CBR405.lua created iff EEex.dll marker present; lua content contains
-  baked resrefs + kit filter.
+- 405: fake game with mixed-school SPPR samples → CBRTMDV op172/op272 lists match
+  school-3 set exactly; CBRTMD<i>.EFF per discovered spell; CLAB row appended
+  across all columns and only that row changed.
 - Wrapper/installer: components 400/404/405 in the tp2 as independent components;
   `--parse-check` clean; full suite green.
 
@@ -179,9 +186,10 @@ first. Additional acceptance items:
   before/after entry count and tail bytes).
 - Branwen: casts Chaos of Battle → exactly one announce line, coherent party-wide
   tide, recast replaces tide; magnitudes tier-3 (N=3 / Luck 1).
-- 405: on first load Branwen's book has no Detect Alignment/Find Traps/Know
-  Opponent/Farsight/True Seeing (Lua migration); verify memorized instances are
-  also gone after re-memorization pass; other clerics (e.g. Viconia) keep them.
+- 405: after the one-shot `CBRTMDV` console cast, Branwen's book has no Detect
+  Alignment/Find Traps/Know Opponent/Farsight/True Seeing; verify memorized
+  instances are also gone (or clear after rest); other clerics (e.g. Viconia)
+  keep them.
 - 400: CBRTMG2 console cast grants LS permission + LS/xbow pips once; recast
   changes nothing; optional manual cleanup of the dead `CBRTMIG.SPL` override
   orphan (user sign-off).
