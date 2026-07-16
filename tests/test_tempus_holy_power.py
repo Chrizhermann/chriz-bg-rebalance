@@ -35,6 +35,10 @@ WEIDU = ROOT / "weidu.exe"
 HARNESS = ROOT / "tests" / "weidu" / "tempus_holy_power_harness.tp2"
 PRODUCTION_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_holy_power.tpa"
 SETUP_TP2 = ROOT / "setup-chriz-bg-rebalance.tp2"
+SETUP_TRA = ROOT / "chriz-bg-rebalance" / "languages" / "english" / "setup.tra"
+README = ROOT / "README.md"
+PROJECT_SCOPE = ROOT / "docs" / "00-project-scope.md"
+RESEARCH = ROOT / "research" / "04-tempus-holy-power.md"
 ORIGINALS = ROOT / "research" / "originals"
 
 HOLY_RESREF = "OHTMPS1"
@@ -3372,7 +3376,7 @@ class TempusHolyPowerTests(unittest.TestCase):
         blocks = []
         for component in (401, 402, 403):
             match = re.search(
-                rf"(?ms)^BEGIN\b.*?^DESIGNATED\s+{component}\b.*?(?=^BEGIN\b|\Z)",
+                rf"(?ms)^BEGIN\s+@{component}\s*\nDESIGNATED\s+{component}\b.*?(?=^BEGIN\b|\Z)",
                 setup_source,
             )
             self.assertIsNotNone(match, f"component {component} does not exist")
@@ -3384,6 +3388,180 @@ class TempusHolyPowerTests(unittest.TestCase):
         self.assertEqual([], _tlk_writes(harness_source), "harness contains TLK writers")
         for banned in (r"\bCOPY_EXISTING\b", r"\bFILE_EXISTS_IN_GAME\b"):
             self.assertIsNone(re.search(banned, harness_source, re.IGNORECASE))
+
+    def test_public_component_family_uses_one_mode_only_wrapper(self) -> None:
+        setup_raw = SETUP_TP2.read_text(encoding="utf-8")
+        setup_source = _strip_weidu_comments(setup_raw)
+        self.assertRegex(setup_raw, r"400-499:\s*class and kit revisions")
+        expected = {
+            401: ("cbr_cleric_tempus_holy_power_auto", "auto"),
+            402: ("cbr_cleric_tempus_holy_power_force_double", "force_double"),
+            403: ("cbr_cleric_tempus_holy_power_force_additive", "force_additive"),
+        }
+        family_tokens: set[str] = set()
+        for component, (label, mode) in expected.items():
+            match = re.search(
+                rf"(?ms)^BEGIN\s+@{component}\s*\nDESIGNATED\s+{component}\b.*?(?=^BEGIN\b|\Z)",
+                setup_source,
+            )
+            self.assertIsNotNone(match, f"component {component} does not exist")
+            block = match.group(0)
+            family = re.search(r"\bSUBCOMPONENT\s+(@\d+|~[^~]+~)", block)
+            self.assertIsNotNone(family, f"component {component} is not a subcomponent")
+            family_tokens.add(family.group(1))
+            self.assertRegex(block, rf"\bLABEL\s+~{re.escape(label)}~")
+            self.assertRegex(
+                block,
+                rf"\bOUTER_SPRINT\s+cbr_tempus_compatibility_mode\s+~{mode}~",
+            )
+            self.assertEqual(
+                1,
+                len(re.findall(r"\bLAM\s+cbr_install_tempus_holy_power_component\b", block)),
+            )
+            lam_position = block.find("LAM cbr_install_tempus_holy_power_component")
+            for predicate in (
+                r"GAME_IS\s+~bg2ee eet~",
+                r"FILE_EXISTS_IN_GAME\s+~OHTEMPUS\.2DA~",
+                r"FILE_EXISTS_IN_GAME\s+~OHTMPS1\.SPL~",
+                r"IDS_OF_SYMBOL\s*\(\s*~spell~\s+~CLERIC_HOLY_POWER~\s*\)",
+                r"IDS_OF_SYMBOL\s*\(\s*~spell~\s+~WIZARD_IMPROVED_HASTE~\s*\)",
+                r"FILE_EXISTS_IN_GAME\s+~SPLSTATE\.IDS~",
+                r"FILE_EXISTS_IN_GAME\s+~SPLPROT\.2DA~",
+            ):
+                predicate_match = re.search(rf"REQUIRE_PREDICATE.*?{predicate}", block)
+                self.assertIsNotNone(predicate_match, f"component {component}: missing {predicate}")
+                self.assertLess(predicate_match.start(), lam_position)
+            infrastructure = block.find("@9407")
+            self.assertGreaterEqual(infrastructure, 0)
+            self.assertLess(infrastructure, block.find("@9403"))
+            self.assertLess(infrastructure, block.find("@9404"))
+            self.assertNotRegex(block, r"\b(?:COPY|COPY_EXISTING|INCLUDE|LAF)\b")
+        self.assertEqual(1, len(family_tokens), "components 401-403 must share one family")
+
+    def test_public_wrapper_resolves_and_stages_final_game_resources(self) -> None:
+        setup_raw = SETUP_TP2.read_text(encoding="utf-8")
+        wrapper_start = setup_raw.find(
+            "DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component"
+        )
+        wrapper_end = setup_raw.find(
+            "END // cbr_install_tempus_holy_power_component", wrapper_start
+        )
+        self.assertGreaterEqual(wrapper_start, 0, "missing shared Tempus component wrapper")
+        self.assertGreater(wrapper_end, wrapper_start, "missing shared wrapper end marker")
+        body = _strip_weidu_comments(setup_raw[wrapper_start:wrapper_end])
+        for guard in (
+            r"ACTION_IF\s+\(cbr_tempus_divine_id\s+<\s+1001\s+OR\s+cbr_tempus_divine_id\s+>\s+1999\)",
+            r"ACTION_IF\s+\(cbr_tempus_haste_id\s+<\s+2001\s+OR\s+cbr_tempus_haste_id\s+>\s+2999\)",
+            r"ACTION_IF\s+!\(FILE_EXISTS_IN_GAME\s+~%cbr_tempus_divine_resref%\.SPL~\)",
+            r"ACTION_IF\s+!\(FILE_EXISTS_IN_GAME\s+~%cbr_tempus_haste_resref%\.SPL~\)",
+        ):
+            self.assertRegex(body, guard)
+        self.assertNotRegex(body, r"\bSPPR412\b|\bSPWI613\b")
+
+        staged = (
+            "OHTEMPUS.2DA",
+            "OHTMPS1.SPL",
+            "%cbr_tempus_divine_resref%.SPL",
+            "%cbr_tempus_haste_resref%.SPL",
+            "SPLSTATE.IDS",
+            "SPLPROT.2DA",
+        )
+        apply_position = body.find("LAF cbr_apply_tempus_holy_power")
+        self.assertGreater(apply_position, 0)
+        for resource in staged:
+            copy = re.search(
+                rf"COPY_EXISTING\s+~{re.escape(resource)}~\s+~override/{re.escape(resource)}~",
+                body,
+                re.IGNORECASE,
+            )
+            self.assertIsNotNone(
+                copy, f"{resource} is not materialized at its canonical override path"
+            )
+            self.assertLess(
+                copy.start(), apply_position, f"{resource} is staged after mutation starts"
+            )
+        self.assertEqual(
+            len(staged),
+            len(re.findall(r"\bCOPY_EXISTING\b", body)),
+            "the wrapper must materialize exactly the six file-backed inputs",
+        )
+        self.assertNotRegex(body, r"COPY_EXISTING\s+~SPELL\.IDS~")
+        self.assertRegex(body, r"resource_dir\s*=\s*~override~")
+        self.assertRegex(
+            body,
+            r"compatibility_mode\s*=\s*EVAL\s+~%cbr_tempus_compatibility_mode%~",
+        )
+        self.assertRegex(body, r"spell_ids\s*=\s*~skip~")
+        self.assertRegex(body, r"phase\s*=\s*~full~")
+
+    def test_public_wrapper_has_no_scratch_or_destructive_staging(self) -> None:
+        setup_raw = SETUP_TP2.read_text(encoding="utf-8")
+        setup_source = _strip_weidu_comments(setup_raw)
+        wrapper_start = setup_raw.find(
+            "DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component"
+        )
+        wrapper_end = setup_raw.find(
+            "END // cbr_install_tempus_holy_power_component", wrapper_start
+        )
+        self.assertGreaterEqual(wrapper_start, 0)
+        self.assertGreater(wrapper_end, wrapper_start)
+        body = _strip_weidu_comments(setup_raw[wrapper_start:wrapper_end])
+        # The retired scratch-staging design collided with WeiDU's
+        # basename-flat backup records, making exact uninstall unsafe.  The
+        # shipped wrapper is a plain transactional override patch: WeiDU backs
+        # up, rolls back, and uninstalls every touched override path itself.
+        self.assertNotIn("weidu_external/chriz-bg-rebalance/tempus-", setup_source)
+        self.assertNotIn("cbr_clean_tempus_scratch", setup_source)
+        self.assertNotIn("cbr_tempus_scratch", setup_source)
+        for action in ("MKDIR", "GET_FILE_ARRAY", "GET_DIRECTORY_ARRAY"):
+            self.assertNotIn(action, setup_source)
+        for action in ("DELETE", "MOVE", "ACTION_FOR_EACH"):
+            self.assertNotRegex(body, rf"\b{action}\b")
+        self.assertEqual(
+            1, len(re.findall(r"\bLAF\s+cbr_apply_tempus_holy_power\b", body))
+        )
+
+    def test_tempus_component_installer_text_is_translated_but_not_game_facing(self) -> None:
+        tra = SETUP_TRA.read_text(encoding="utf-8")
+        for key in (401, 402, 403, 1400, 1401, 9400, 9401, 9402, 9403, 9404, 9405, 9406, 9407):
+            self.assertRegex(tra, rf"(?m)^@{key}\s*=")
+        self.assertNotRegex(tra, r"(?m)^@9408\s*=", "retired scratch diagnostic must stay deleted")
+        for phrase in (
+            "automatic semantic detection",
+            "force true-doubling",
+            "force additive",
+            "BG2:EE / EET",
+            "OHTEMPUS.2DA",
+            "OHTMPS1.SPL",
+            "CLERIC_HOLY_POWER",
+            "WIZARD_IMPROVED_HASTE",
+        ):
+            self.assertIn(phrase.casefold(), tra.casefold())
+        self.assertEqual([], _tlk_writes(tra))
+
+    def test_tempus_component_documentation_records_install_and_save_contract(self) -> None:
+        readme = README.read_text(encoding="utf-8").casefold()
+        scope = PROJECT_SCOPE.read_text(encoding="utf-8").casefold()
+        research = RESEARCH.read_text(encoding="utf-8").casefold()
+        combined = "\n".join((readme, scope, research))
+        for dependency in ("spell revisions", "scs", "artisan's kitpack"):
+            self.assertIn(dependency, combined)
+        for phrase in (
+            "component 401",
+            "recommended",
+            "existing characters",
+            "automatically",
+            "level 13",
+            "three uses",
+            "above level 25",
+            "save repair",
+            "chaos of battle",
+            "divination",
+            "weapon-training",
+            "eeex apr-cap",
+        ):
+            self.assertIn(phrase, combined)
+        self.assertRegex(combined, r"install(?:ed)?\s+after[^\n]*(?:spell revisions|sr)")
 
 
 class _ConditionGraph:

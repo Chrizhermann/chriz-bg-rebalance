@@ -2,6 +2,79 @@ BACKUP ~weidu_external/backup/chriz-bg-rebalance~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
 VERSION ~v0.1.0~
 
+// Load the tested transformation library and define one installer wrapper for
+// all Tempus Holy Power compatibility choices. WeiDU's backup namespace is
+// basename-flat, so staging and later publishing the same resource basename
+// would make exact uninstall unsafe. Instead, materialize the seven file-backed
+// inputs at their canonical override paths inside the component transaction,
+// then let the shared preflight-first transformation operate there directly.
+ALWAYS
+  INCLUDE ~chriz-bg-rebalance/lib/tempus_holy_power.tpa~
+
+  DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
+  BEGIN
+    OUTER_SET cbr_tempus_divine_id = IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~)
+    ACTION_IF (cbr_tempus_divine_id < 1001 OR cbr_tempus_divine_id > 1999) BEGIN
+      FAIL @9403
+    END
+    OUTER_SET cbr_tempus_divine_slot = cbr_tempus_divine_id - 1000
+    ACTION_IF (cbr_tempus_divine_slot < 10) BEGIN
+      OUTER_SPRINT cbr_tempus_divine_resref ~SPPR00%cbr_tempus_divine_slot%~
+    END ELSE ACTION_IF (cbr_tempus_divine_slot < 100) BEGIN
+      OUTER_SPRINT cbr_tempus_divine_resref ~SPPR0%cbr_tempus_divine_slot%~
+    END ELSE BEGIN
+      OUTER_SPRINT cbr_tempus_divine_resref ~SPPR%cbr_tempus_divine_slot%~
+    END
+
+    OUTER_SET cbr_tempus_haste_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~)
+    ACTION_IF (cbr_tempus_haste_id < 2001 OR cbr_tempus_haste_id > 2999) BEGIN
+      FAIL @9404
+    END
+    OUTER_SET cbr_tempus_haste_slot = cbr_tempus_haste_id - 2000
+    ACTION_IF (cbr_tempus_haste_slot < 10) BEGIN
+      OUTER_SPRINT cbr_tempus_haste_resref ~SPWI00%cbr_tempus_haste_slot%~
+    END ELSE ACTION_IF (cbr_tempus_haste_slot < 100) BEGIN
+      OUTER_SPRINT cbr_tempus_haste_resref ~SPWI0%cbr_tempus_haste_slot%~
+    END ELSE BEGIN
+      OUTER_SPRINT cbr_tempus_haste_resref ~SPWI%cbr_tempus_haste_slot%~
+    END
+
+    ACTION_IF !(FILE_EXISTS_IN_GAME ~%cbr_tempus_divine_resref%.SPL~) BEGIN
+      FAIL @9405
+    END
+    ACTION_IF !(FILE_EXISTS_IN_GAME ~%cbr_tempus_haste_resref%.SPL~) BEGIN
+      FAIL @9406
+    END
+
+    // Materialize the six file-backed inputs at their canonical override
+    // paths. Do not add BUT_ONLY: an unchanged BIFF-only input still has to
+    // exist in override for the file-based production transformer. WeiDU owns
+    // every write below transactionally, including rollback on a later FAIL
+    // and exact removal/restoration on uninstall.
+    // SPELL.IDS stays unstaged: both symbolic resrefs were already resolved
+    // against the live game through IDS_OF_SYMBOL above, and copying
+    // SPELL.IDS into override would trigger WeiDU's IDS-tracking side file
+    // (SPELL.IDS.INSTALLED); the library skips only that one re-validation
+    // via spell_ids=skip.
+    COPY_EXISTING ~OHTEMPUS.2DA~ ~override/OHTEMPUS.2DA~
+    COPY_EXISTING ~OHTMPS1.SPL~ ~override/OHTMPS1.SPL~
+    COPY_EXISTING ~%cbr_tempus_divine_resref%.SPL~ ~override/%cbr_tempus_divine_resref%.SPL~
+    COPY_EXISTING ~%cbr_tempus_haste_resref%.SPL~ ~override/%cbr_tempus_haste_resref%.SPL~
+    COPY_EXISTING ~SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
+    COPY_EXISTING ~SPLPROT.2DA~ ~override/SPLPROT.2DA~
+
+    LAF cbr_apply_tempus_holy_power
+      STR_VAR
+        resource_dir          = ~override~
+        compatibility_mode    = EVAL ~%cbr_tempus_compatibility_mode%~
+        divine_power_resref   = EVAL ~%cbr_tempus_divine_resref%~
+        improved_haste_resref = EVAL ~%cbr_tempus_haste_resref%~
+        spell_ids             = ~skip~
+        phase                 = ~full~
+    END
+  END // cbr_install_tempus_holy_power_component
+END // ALWAYS
+
 AUTO_TRA ~chriz-bg-rebalance/languages/%s~
 LANGUAGE ~English~ ~english~ ~chriz-bg-rebalance/languages/english/setup.tra~
 
@@ -11,6 +84,7 @@ LANGUAGE ~English~ ~english~ ~chriz-bg-rebalance/languages/english/setup.tra~
 // 100-199: SCS adjustments
 // 200-299: SR adjustments
 // 300-399: cross-cutting audits/fixes
+// 400-499: class and kit revisions
 // ============================================================
 
 // ============================================================
@@ -101,3 +175,55 @@ COPY_EXISTING ~ribald.sto~ ~override~
     PATCH_PRINT ~cbr 101: Adventurer's Mart already sells scrl9z - nothing to do.~
   END
   BUT_ONLY
+
+// ============================================================
+// Class and kit revisions (400-499)
+// ============================================================
+
+BEGIN @401
+DESIGNATED 401
+SUBCOMPONENT @1401
+GROUP @1400
+LABEL ~cbr_cleric_tempus_holy_power_auto~
+
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9400
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9401
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTMPS1.SPL~) @9402
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPELL.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9407
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) >= 1001) AND (IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) <= 1999)) @9403
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) >= 2001) AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) <= 2999)) @9404
+
+OUTER_SPRINT cbr_tempus_compatibility_mode ~auto~
+LAM cbr_install_tempus_holy_power_component
+
+BEGIN @402
+DESIGNATED 402
+SUBCOMPONENT @1401
+GROUP @1400
+LABEL ~cbr_cleric_tempus_holy_power_force_double~
+
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9400
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9401
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTMPS1.SPL~) @9402
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPELL.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9407
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) >= 1001) AND (IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) <= 1999)) @9403
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) >= 2001) AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) <= 2999)) @9404
+
+OUTER_SPRINT cbr_tempus_compatibility_mode ~force_double~
+LAM cbr_install_tempus_holy_power_component
+
+BEGIN @403
+DESIGNATED 403
+SUBCOMPONENT @1401
+GROUP @1400
+LABEL ~cbr_cleric_tempus_holy_power_force_additive~
+
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9400
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9401
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTMPS1.SPL~) @9402
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPELL.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9407
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) >= 1001) AND (IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) <= 1999)) @9403
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) >= 2001) AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) <= 2999)) @9404
+
+OUTER_SPRINT cbr_tempus_compatibility_mode ~force_additive~
+LAM cbr_install_tempus_holy_power_component

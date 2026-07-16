@@ -6,10 +6,10 @@
     {"id": 3, "subject": "Implement namespaced preflight, semantic classification, and allocation utilities", "status": "completed", "blockedBy": [2]},
     {"id": 4, "subject": "Implement the Holy Power progression and five-use CLAB cap", "status": "completed", "blockedBy": [3]},
     {"id": 5, "subject": "Implement Improved Haste bridging and Divine Power exclusion", "status": "completed", "blockedBy": [4]},
-    {"id": 6, "subject": "Wire components 401-403 and user-facing documentation", "status": "pending", "blockedBy": [5]},
+    {"id": 6, "subject": "Wire components 401-403 and user-facing documentation", "status": "completed", "blockedBy": [5]},
     {"id": 7, "subject": "Record the deferred EEex APR-cap experiment", "status": "completed", "blockedBy": [1]},
     {"id": 8, "subject": "Run independent specification and code-quality review", "status": "pending", "blockedBy": [6, 7]},
     {"id": 9, "subject": "Prepare but do not perform the live deployment checkpoint", "status": "pending", "blockedBy": [8]}
   ],
-  "lastUpdated": "2026-07-16T08:26:03+09:00"
+  "lastUpdated": "2026-07-16T15:45:50+09:00"
 }

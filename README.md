@@ -5,7 +5,7 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Status:** planning phase + first shipped component. See `docs/00-project-scope.md`.
+**Status:** active component development. See `docs/00-project-scope.md`.
 
 ## Credits — stand on the shoulders of giants
 
@@ -27,8 +27,10 @@ reported upstream first (see `research/02-upstream-scs-report-draft.md`).
 | # | Group | Component | Status |
 |---|-------|-----------|--------|
 | 100 | SCS adjustments | Telekinetic Storm: restore save vs. spell for half damage (+ bypass Mirror Image) | ✅ implemented |
+| 101 | SCS adjustments | Restore five Freedom scrolls to the Adventurer's Mart | ✅ implemented |
 | 2xx | SR adjustments | Cherry-picked Spell Revisions tweaks | 📋 planning (`docs/00-project-scope.md`) |
 | 3xx | Cross-cutting audits | e.g. generalized save-for-half audit | 📋 planning |
+| 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 
 ### Component 100 — Telekinetic Storm save fix
 
@@ -46,14 +48,40 @@ save-for-half damage effect, across all level-scaled ability headers. Idempotent
 
 Full diagnosis: `research/01-telekinetic-storm-save-bug.md`.
 
+### Components 401–403 — Cleric of Tempus Holy Power
+
+These mutually exclusive choices install the same five-tier Holy Power redesign. Component 401
+uses automatic semantic detection and is the recommended choice. Components 402 and 403 are
+advanced overrides that force true-doubling or additive Improved Haste compatibility; they still
+validate the final spell before changing it.
+
+Install after Spell Revisions, SCS, The Artisan's Kitpack, and any other mod that changes spells
+or cleric kits. The installer resolves Divine Power and Improved Haste through `SPELL.IDS`,
+materializes the six effective input resources at their canonical `override` paths inside the
+WeiDU transaction, and then runs the same preflight-first transformation the fixture harness
+tests. WeiDU itself backs up, rolls back on failure, and exactly removes or restores every
+touched file on uninstall. It adds no game-facing strings and performs no `dialog.tlk` write.
+
+Existing characters automatically use the patched `OHTMPS1` resource. Branwen at level 13
+already has the intended three uses, so this component needs no save edit for her. Characters
+already above level 25 may retain excess uses granted by the old CLAB in their saved creature;
+removing those requires a separately controlled save repair.
+
+This component intentionally does not include weapon-training changes, Chaos of Battle,
+Divination-school removal, or an EEex APR-cap experiment. Those are separate Tempus design
+components.
+
 ## Install
 
 Copy `chriz-bg-rebalance/` + `setup-chriz-bg-rebalance.tp2` into the game dir, then (per the
 target install's conventions) copy the WeiDU template as `Setup-chriz-bg-rebalance.exe` and run:
 
 ```
-./Setup-chriz-bg-rebalance.exe --force-install-list 100 --language 0 --no-exit-pause
+./Setup-chriz-bg-rebalance.exe --force-install-list 401 --language 0 --no-exit-pause
 ```
+
+Use `100`, `101`, or exactly one of `401`/`402`/`403` as appropriate; the example selects the
+recommended Tempus mode.
 
 Always tail-install: append after the current last WeiDU.log entry. Never uninstall.
 

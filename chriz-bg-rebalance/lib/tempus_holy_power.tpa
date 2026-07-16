@@ -3363,6 +3363,7 @@ DEFINE_ACTION_FUNCTION cbr_preflight_tempus_holy_power
     divine_power_resref    = ~~
     improved_haste_resref  = ~~
     improved_haste_semantics = ~~
+    spell_ids              = ~require~
   RET
     holy_ability_count
     clab_capped_shape
@@ -3373,6 +3374,7 @@ BEGIN
   OUTER_SPRINT divine_power_resref EVALUATE_BUFFER ~%divine_power_resref%~
   OUTER_SPRINT improved_haste_resref EVALUATE_BUFFER ~%improved_haste_resref%~
   OUTER_SPRINT improved_haste_semantics EVALUATE_BUFFER ~%improved_haste_semantics%~
+  OUTER_SPRINT spell_ids EVALUATE_BUFFER ~%spell_ids%~
   OUTER_SET holy_ability_count = "-1"
   OUTER_SET clab_capped_shape = "-1"
   OUTER_SET bridge_status = 0
@@ -3404,6 +3406,10 @@ BEGIN
     FAIL ~CBR Tempus Holy Power supports only BG2:EE or EET.~
   END
 
+  ACTION_IF !(~%spell_ids%~ STR_EQ ~require~ || ~%spell_ids%~ STR_EQ ~skip~) BEGIN
+    FAIL ~CBR Tempus Holy Power: invalid spell_ids handling %spell_ids%; expected require or skip.~
+  END
+
   OUTER_SPRINT cbr_spell_ids_path ~%resource_dir%/SPELL.IDS~
   OUTER_SPRINT cbr_holy_path ~%resource_dir%/OHTMPS1.SPL~
   OUTER_SPRINT cbr_divine_path ~%resource_dir%/%divine_power_resref%.SPL~
@@ -3412,8 +3418,18 @@ BEGIN
   OUTER_SPRINT cbr_splstate_path ~%resource_dir%/SPLSTATE.IDS~
   OUTER_SPRINT cbr_splprot_path ~%resource_dir%/SPLPROT.2DA~
 
+  // spell_ids=skip serves the public in-game installer: it resolves both
+  // symbolic resrefs from the live SPELL.IDS via IDS_OF_SYMBOL immediately
+  // before calling this library, and materializing SPELL.IDS into override
+  // only to re-validate the same mapping would trigger WeiDU's IDS-tracking
+  // side file (SPELL.IDS.INSTALLED). The isolated harness keeps the default
+  // require so fixture symbol tables stay part of the tested contract.
+  ACTION_IF (~%spell_ids%~ STR_EQ ~require~) BEGIN
+    ACTION_IF !(FILE_EXISTS ~%cbr_spell_ids_path%~) BEGIN
+      FAIL ~CBR Tempus Holy Power preflight is missing required explicit resource %cbr_spell_ids_path%.~
+    END
+  END
   ACTION_FOR_EACH cbr_required_path IN
-    ~%cbr_spell_ids_path%~
     ~%cbr_holy_path%~
     ~%cbr_divine_path%~
     ~%cbr_improved_haste_path%~
@@ -3565,13 +3581,15 @@ BEGIN
     BUT_ONLY
   END
 
-  COPY ~%cbr_spell_ids_path%~ ~%cbr_spell_ids_path%~
-    LPF cbr_validate_spell_ids
-      STR_VAR
-        divine_power_resref   = EVAL ~%divine_power_resref%~
-        improved_haste_resref = EVAL ~%improved_haste_resref%~
-    END
-  BUT_ONLY
+  ACTION_IF (~%spell_ids%~ STR_EQ ~require~) BEGIN
+    COPY ~%cbr_spell_ids_path%~ ~%cbr_spell_ids_path%~
+      LPF cbr_validate_spell_ids
+        STR_VAR
+          divine_power_resref   = EVAL ~%divine_power_resref%~
+          improved_haste_resref = EVAL ~%improved_haste_resref%~
+      END
+    BUT_ONLY
+  END
   OUTER_SET cbr_str_lt_row = "-1"
   OUTER_SET cbr_str_eq_row = "-1"
   OUTER_SET cbr_str_bonus_lt_row = "-1"
@@ -3983,6 +4001,7 @@ DEFINE_ACTION_FUNCTION cbr_apply_tempus_holy_power
     divine_power_resref    = ~~
     improved_haste_resref  = ~~
     phase                  = ~full~
+    spell_ids              = ~require~
 BEGIN
   // WeiDU does not EVALUATE_BUFFER STR_VAR arguments passed through LAF.
   // The isolated harness intentionally passes %argv[n]% placeholders, so
@@ -3992,12 +4011,16 @@ BEGIN
   OUTER_SPRINT divine_power_resref   EVALUATE_BUFFER ~%divine_power_resref%~
   OUTER_SPRINT improved_haste_resref EVALUATE_BUFFER ~%improved_haste_resref%~
   OUTER_SPRINT phase                 EVALUATE_BUFFER ~%phase%~
+  OUTER_SPRINT spell_ids             EVALUATE_BUFFER ~%spell_ids%~
 
   ACTION_IF !(~%compatibility_mode%~ STR_EQ ~auto~ || ~%compatibility_mode%~ STR_EQ ~force_double~ || ~%compatibility_mode%~ STR_EQ ~force_additive~) BEGIN
     FAIL ~CBR Tempus Holy Power: invalid compatibility mode %compatibility_mode%; expected auto, force_double, or force_additive.~
   END
   ACTION_IF !(~%phase%~ STR_EQ ~classify~ || ~%phase%~ STR_EQ ~allocate~ || ~%phase%~ STR_EQ ~progression~ || ~%phase%~ STR_EQ ~bridge~ || ~%phase%~ STR_EQ ~full~) BEGIN
     FAIL ~CBR Tempus Holy Power: invalid phase %phase%.~
+  END
+  ACTION_IF !(~%spell_ids%~ STR_EQ ~require~ || ~%spell_ids%~ STR_EQ ~skip~) BEGIN
+    FAIL ~CBR Tempus Holy Power: invalid spell_ids handling %spell_ids%; expected require or skip.~
   END
   ACTION_IF (~%resource_dir%~ STR_EQ ~~) BEGIN
     FAIL ~CBR Tempus Holy Power: explicit resource_dir is required.~
@@ -4028,6 +4051,7 @@ BEGIN
       divine_power_resref         = EVAL ~%divine_power_resref%~
       improved_haste_resref       = EVAL ~%improved_haste_resref%~
       improved_haste_semantics    = EVAL ~%cbr_improved_haste_semantics%~
+      spell_ids                   = EVAL ~%spell_ids%~
     RET
       cbr_preflight_holy_ability_count = holy_ability_count
       cbr_preflight_clab_capped_shape  = clab_capped_shape

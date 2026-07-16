@@ -40,6 +40,22 @@ collect concrete gripes with numbers, then design per-spell adjustments.
   `Aura_BG1_BG2_EET-Chriz-Balance-Patch` (user: low priority). A WeiDU-native generalized
   audit component is possible later but YAGNI until new offenders appear.
 
+## Part 4 — Class and kit revisions (components 400–499)
+
+- **401–403 — Cleric of Tempus Holy Power** ✅ IMPLEMENTED, pending independent review and live
+  deployment approval. The three entries are one mutually exclusive compatibility family:
+  automatic semantic detection (401, recommended), forced true-doubling (402), or forced
+  additive Improved Haste treatment (403).
+- Install after Spell Revisions, SCS, The Artisan's Kitpack, and other spell/kit changes. The
+  component patches final resources, caps future Holy Power grants at five, and closes Divine
+  Power stacking in both casting orders.
+- Existing characters automatically receive the revised behavior through `OHTMPS1`. Branwen is
+  level 13 with three uses and needs no save edit. A character already above level 25 can retain
+  old excess charges in the save and needs a separately approved save repair if they are to be
+  removed.
+- Out of scope here: weapon-training, Chaos of Battle, the Divination drawback, and any EEex
+  APR-cap change. Each remains a separate design/component decision.
+
 ## Method
 
 Research → design (numbers + rationale) → user sign-off → tail-install WeiDU component →
@@ -65,3 +81,5 @@ symbols; components idempotent + predicate-guarded. Follow CLAUDE.md.
 - [ ] SCS component catalog / touchpoint research (solo-able — see `docs/handover.md`)
 - [ ] SR wishlist session with user
 - [ ] Comp 100 formal tail-install into the live game (pending user sign-off)
+- [ ] Components 401–403 independent review and controlled live deployment (no active-game write
+      has occurred during implementation)

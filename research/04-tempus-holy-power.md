@@ -158,3 +158,27 @@ for this install is `en_US`, so that is the `dialog.tlk` checked here.
 | `override/SPWI613.spl` | `67443841399a7e67020cc5e02fb87d198caa582ea88dc23dca6f60fe2e07e028` | `67443841399a7e67020cc5e02fb87d198caa582ea88dc23dca6f60fe2e07e028` | yes |
 
 No live save, override file, KEY/BIF, TLK, or WeiDU state was changed during capture.
+
+## Component 401–403 installation contract
+
+The implementation consumes the final installed resources rather than the preserved binaries in
+this directory. Install after Spell Revisions, SCS, The Artisan's Kitpack, and other spell or kit
+changes. Component 401 performs automatic semantic detection and is recommended; 402 and 403
+force the supported true-doubling or additive branch without replacing Improved Haste mechanics.
+
+The installer resolves `CLERIC_HOLY_POWER` and `WIZARD_IMPROVED_HASTE` through the live
+`SPELL.IDS`, materializes the six file-backed inputs (`OHTMPS1.SPL`, `OHTEMPUS.2DA`, the resolved
+Divine Power and Improved Haste spells, `SPLSTATE.IDS`, `SPLPROT.2DA`) at their canonical
+`override` paths inside the WeiDU transaction, and runs the same preflight-first transformation
+the fixture harness tests. A scratch workspace is deliberately not used: WeiDU's backup records
+are basename-flat, so staging and publishing the same resource basename from two directories
+would corrupt exact uninstall. `SPELL.IDS` itself is never copied into `override` — WeiDU would
+create a `SPELL.IDS.INSTALLED` tracking file — and the library skips only that one re-validation
+(`spell_ids=skip`) because the wrapper already proved both symbol mappings in-game. No component
+uses `SAY`, `STRING_SET`, or another TLK writer.
+
+Existing characters automatically use the revised `OHTMPS1`. The current Branwen is level 13 and
+already has the intended three uses. Characters already above level 25 may retain old excess uses
+in their saved creature and need a separately controlled save repair; this component does not
+alter saves. It also does not implement weapon-training, Chaos of Battle, Divination removal, or
+the deferred EEex APR-cap experiment.

@@ -3,14 +3,27 @@
 // Component names (match DESIGNATED numbers)
 @100 = ~SCS: Telekinetic Storm — restore save vs. spell for half damage (+ bypass Mirror Image)~
 @101 = ~SCS: Adventurer's Mart — restore the five Freedom scrolls (spell tweak orphaned in v35)~
+@401 = ~Cleric of Tempus: Holy Power — automatic semantic detection (recommended)~
+@402 = ~Cleric of Tempus: Holy Power — force true-doubling compatibility~
+@403 = ~Cleric of Tempus: Holy Power — force additive compatibility~
 
 // Component groups
 @1100 = ~SCS adjustments~
 @1200 = ~Spell Revisions adjustments~
 @1300 = ~Cross-cutting audits~
+@1400 = ~Class and kit revisions~
+@1401 = ~Cleric of Tempus: Holy Power compatibility~
 
 // Predicate / failure messages
 @9100 = ~SCS's "extra arcane spells" (Telekinetic Storm) is not installed — nothing to fix.~
 @9101 = ~This component is for BG2:EE / EET games.~
 @9102 = ~Sword Coast Stratagems (spell tweaks or AI components) is not installed — nothing to restore.~
 @9103 = ~ribald.sto / scrl9z.itm not found in this game.~
+@9400 = ~The Cleric of Tempus Holy Power component supports BG2:EE / EET only.~
+@9401 = ~OHTEMPUS.2DA is missing. Install the Cleric of Tempus kit before this component.~
+@9402 = ~OHTMPS1.SPL is missing. Install the Cleric of Tempus kit before this component.~
+@9403 = ~SPELL.IDS does not contain a valid priest-spell mapping for CLERIC_HOLY_POWER. Install or repair the final Divine Power spell first.~
+@9404 = ~SPELL.IDS does not contain a valid wizard-spell mapping for WIZARD_IMPROVED_HASTE. Install or repair the final Improved Haste spell first.~
+@9405 = ~The SPL resource resolved from CLERIC_HOLY_POWER is missing. Install or repair the final Divine Power spell first.~
+@9406 = ~The SPL resource resolved from WIZARD_IMPROVED_HASTE is missing. Install or repair the final Improved Haste spell first.~
+@9407 = ~SPELL.IDS, SPLSTATE.IDS, or SPLPROT.2DA is missing. This component requires the final BG2:EE / EET spell infrastructure.~
