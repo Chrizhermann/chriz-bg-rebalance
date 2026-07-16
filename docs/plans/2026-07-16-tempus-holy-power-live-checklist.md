@@ -155,11 +155,15 @@ rollback condition.
   Seeing — verify the actual list in the install transcript).
 
 **In-game migration (once, after install, game restarted, save loaded):**
-- 405 book strip: `C:Eval('ReallyForceSpellRES("CBRTMDV",Branwen)')` — quoted NPC names work.
-- 400 pips: `C:Eval('ReallyForceSpellRES("CBRTMG2",Branwen)')` — grants longsword permission
+- Target = Branwen's QUOTED death variable **`"O#Bran"`** (Kulyok O# prefix; verified from
+  save 443's GAM). Unquoted `Branwen` errors ("Special Case: Not found" — OBJECT.IDS
+  lookup); quoted `"Branwen"` is a SILENT no-op (wrong DV) — the likely real cause of the
+  07-14 CBRTMIG miss.
+- 405 book strip: `C:Eval('ReallyForceSpellRES("CBRTMDV","O#Bran")')`
+- 400 pips: `C:Eval('ReallyForceSpellRES("CBRTMG2","O#Bran")')` — grants longsword permission
   + longsword/crossbow starter pips only where missing; recasting is harmless.
 - 404 needs no migration (same `OHTMPS2` resref; her existing innate charges use the new
-  behavior; at level 13 she has 2 casts/day and tier-3 magnitudes N=3 / Luck 1).
+  behavior; at level 15 in save 443 she is tier 3: magnitudes N=3 / Luck 1).
 
 **Acceptance additions (section 4):**
 - [ ] Chaos of Battle cast → exactly ONE announce line in the log; every party member gets the

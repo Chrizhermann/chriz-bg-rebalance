@@ -83,7 +83,11 @@ hypotheses. Structure — `CBRTMG2.SPL`, 3 gated effects, all self-target:
 
 Axe is deliberately absent (Branwen already has permission + 1 pip; fresh characters
 get it from AK). All gates make the helper idempotent — recasting is harmless.
-Console (quoted NPC names work): `C:Eval('ReallyForceSpellRES("CBRTMG2",Branwen)')`.
+Console: `C:Eval('ReallyForceSpellRES("CBRTMG2","O#Bran")')` — the object must be her
+QUOTED death variable, and this install's Branwen (Kulyok's BG2 mod) is `O#Bran`, not
+"Branwen" (verified from save 443's GAM, CRE+0x280). Unquoted names are OBJECT.IDS
+special-case lookups ("Special Case: Not found" error); a quoted-but-wrong DV is a
+SILENT no-op — which is the likely true cause of the 2026-07-14 CBRTMIG "miss".
 
 TLK-neutral. New resources: CBRTMG2/CBRTMG2L/CBRTMG2X.SPL; ≤3 SPLPROT appends.
 
@@ -149,7 +153,8 @@ generated resources, never hardcoded).
 (1..50) — both a level-up strip and a self-replacing refresh of the pulse set.
 
 Live migration for the already-leveled Branwen: one console cast at the install
-checkpoint — `C:Eval('ReallyForceSpellRES("CBRTMDV",Branwen)')` — after which the
+checkpoint — `C:Eval('ReallyForceSpellRES("CBRTMDV","O#Bran")')` (quoted DV; see
+component 400 note) — after which the
 permanent pulses keep her book clean forever (uninstalling 405 leaves saved pulse
 effects pointing at deleted EFFs; the engine treats a missing EFF resource as a
 no-op, same residue class as any CLAB-applied mod effect).
