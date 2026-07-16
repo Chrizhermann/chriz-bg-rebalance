@@ -236,3 +236,14 @@ needs only a game restart. Harness component 3 + 5 pytest cases
 Design rationale: fixes the kit's PASSIVE baseline (1.5 APR with a
 specialized weapon) instead of further inflating the Holy Power burst;
 Fighter/Cleric duals remain ahead, as intended.
+
+**v2 (same day):** live testing disproved the kit-row path — with the OHTEMPUS row
+at 1 in the loaded table, an equipped 2-pip flail, and pips confirmed via stat 100,
+Branwen's APR stat (8) still read exactly 1 while a Berserker-16 control read 3.5
+(encoding 9). The engine consults the CLASS row only; CLSWPBON kit rows (incl. all
+of Artisan's) are decorative for this mechanic. v2 flips CLERIC as well (row must
+exist; kit row kept at 1 as future-proof data). Scope: a KITLIST(CLASS=3)×WEAPPROF
+scan of the reference install found OHTEMPUS to be the ONLY pure-cleric kit with
+any weapon cap >= 2 — no other pure cleric can ever reach specialization, so the
+class flip is de-facto kit-scoped. Follow-up (fresh installs): informational
+install-time scan listing other >=2-cap cleric kits.

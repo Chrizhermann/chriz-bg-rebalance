@@ -1,24 +1,23 @@
 // chriz-bg-rebalance — Cleric of Tempus specialization APR (component 406).
 //
-// CLSWPBON.2DA drives the engine's warrior-style extra half-attack from
-// weapon specialization, per CLASS and per KIT (GETS_PROF_APR column; the
-// per-kit path is engine-supported and already used by Artisan's Kitpack for
-// several non-warrior kits, e.g. C0_NINJA / C0_BRAWLER). The Battleguard of
-// Tempus trains to two pips everywhere (component 400) but ships
-// GETS_PROF_APR 0, so those pips never yield the half-attack. This library
-// flips exactly that one cell.
+// CLSWPBON.2DA's GETS_PROF_APR column drives the engine's warrior-style
+// extra half-attack from weapon specialization. The table carries both class
+// and kit rows, but live testing (2026-07-17, BG2:EE 2.6.6/EET: Battleguard
+// with an equipped 2-pip flail, OHTEMPUS row = 1 in the loaded table, APR
+// stat 8 still exactly 1) shows the engine consults the CLASS row only — the
+// kit rows are decorative for this mechanic. So this component flips BOTH:
+//   * OHTEMPUS (kit) — correct data, future-proof, and appended
+//     cleric-shaped (`1 0 3`) when a game ships without the row;
+//   * CLERIC (class) — the operative cell on current engines.
 //
-// Shapes handled:
-//   * OHTEMPUS row present with GETS_PROF_APR 1 — accepted unchanged (the
-//     read-compare guard takes zero writes, so the table stays byte-identical
-//     under BUT_ONLY).
-//   * OHTEMPUS row present with GETS_PROF_APR 0 — set to 1 (SET_2DA_ENTRY
-//     re-renders once; a second pass takes zero writes).
-//   * OHTEMPUS row absent — append a cleric-shaped row (GETS_PROF_APR 1,
-//     UNARMED_DIVISOR 0, ZERO_SKILL_THAC0 3, matching the vanilla CLERIC
-//     row), built column-by-column against the actual header order.
-//   * Anything else (no GETS_PROF_APR column, unexpected width, duplicate
-//     rows, non-boolean cell) — hard FAIL before any write.
+// Scope of the class flip: specialization APR only materializes for
+// characters who can reach 2+ pips, and pure clerics cap at 1 everywhere
+// except kit columns a mod raised. On the reference install a full
+// KITLIST×WEAPPROF scan found exactly one pure-cleric kit with any cap >= 2:
+// OHTEMPUS itself. Fresh-install scope scan is a tracked follow-up.
+//
+// All writes are read-compare guarded (byte-idempotent under BUT_ONLY),
+// two-pass verified, hard FAIL on any unrecognized shape.
 
 // Locate the GETS_PROF_APR header token. CLSWPBON's column-header row is one
 // token shorter than the data rows (no label column), so with the validated
@@ -51,10 +50,15 @@ BEGIN
   END
 END
 
-// Validate shape and (when verify_only = 0) apply the transformation.
+// Ensure one row's GETS_PROF_APR is 1. allow_append: 0 = the row must exist
+// (class rows), 1 = append a cleric-shaped row when absent (the OHTEMPUS kit
+// row on games that ship without it).
 DEFINE_PATCH_FUNCTION cbr_sa_transform_clswpbon
   INT_VAR
     verify_only = 0
+    allow_append = 0
+  STR_VAR
+    row_label = ~~
   RET
     changed_cells
     appended_row
@@ -67,9 +71,9 @@ BEGIN
   SET cbr_sa_target_row = "-1"
   FOR (cbr_sa_row = 0; cbr_sa_row < cbr_sa_rows; ++cbr_sa_row) BEGIN
     READ_2DA_ENTRY_FORMER cbr_sa_rows cbr_sa_row 0 cbr_sa_label
-    PATCH_IF (~%cbr_sa_label%~ STRING_EQUAL_CASE ~OHTEMPUS~) BEGIN
+    PATCH_IF (~%cbr_sa_label%~ STRING_EQUAL_CASE ~%row_label%~) BEGIN
       PATCH_IF (cbr_sa_target_row >= 0) BEGIN
-        PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: duplicate OHTEMPUS rows.~
+        PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: duplicate %row_label% rows.~
       END
       SET cbr_sa_target_row = cbr_sa_row
     END
@@ -82,21 +86,23 @@ BEGIN
       // Already granted — nothing to do.
     END ELSE PATCH_IF (~%cbr_sa_value%~ STR_EQ ~0~) BEGIN
       PATCH_IF (verify_only) BEGIN
-        PATCH_FAIL ~CBR Tempus CLSWPBON.2DA verification failed: OHTEMPUS GETS_PROF_APR is still 0.~
+        PATCH_FAIL ~CBR Tempus CLSWPBON.2DA verification failed: %row_label% GETS_PROF_APR is still 0.~
       END
       SET_2DA_ENTRY cbr_sa_target_row (cbr_sa_apr_hdr + 1) 4 ~1~
       ++changed_cells
     END ELSE BEGIN
-      PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: OHTEMPUS GETS_PROF_APR holds %cbr_sa_value% (expected 0 or 1).~
+      PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: %row_label% GETS_PROF_APR holds %cbr_sa_value% (expected 0 or 1).~
     END
+  END ELSE PATCH_IF (allow_append = 0) BEGIN
+    PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: no %row_label% row.~
   END ELSE BEGIN
     PATCH_IF (verify_only) BEGIN
-      PATCH_FAIL ~CBR Tempus CLSWPBON.2DA verification failed: OHTEMPUS row is still missing.~
+      PATCH_FAIL ~CBR Tempus CLSWPBON.2DA verification failed: %row_label% row is still missing.~
     END
     // Build the new row against the actual header order so a reordered
     // table gets the right value in each column.
     READ_2DA_ENTRIES_NOW cbr_sa_hdr_rows 3
-    SPRINT cbr_sa_new_row ~OHTEMPUS~
+    SPRINT cbr_sa_new_row ~%row_label%~
     FOR (cbr_sa_col = 0; cbr_sa_col < 3; ++cbr_sa_col) BEGIN
       READ_2DA_ENTRY_FORMER cbr_sa_hdr_rows 0 cbr_sa_col cbr_sa_header_token
       PATCH_IF (~%cbr_sa_header_token%~ STRING_EQUAL_CASE ~GETS_PROF_APR~) BEGIN
@@ -126,23 +132,37 @@ BEGIN
     FAIL ~CBR Tempus spec APR requires %resource_dir%/CLSWPBON.2DA.~
   END
 
+  // Kit row first (append-capable), then the operative class row.
   COPY ~%resource_dir%/CLSWPBON.2DA~ ~%resource_dir%/CLSWPBON.2DA~
     LPF cbr_sa_transform_clswpbon
-      INT_VAR verify_only = 0
+      INT_VAR verify_only = 0 allow_append = 1
+      STR_VAR row_label = ~OHTEMPUS~
       RET
-        cbr_sa_changed = changed_cells
-        cbr_sa_appended = appended_row
-        cbr_sa_before = found_value
+        cbr_sa_kit_changed = changed_cells
+        cbr_sa_kit_appended = appended_row
+        cbr_sa_kit_before = found_value
+    END
+    LPF cbr_sa_transform_clswpbon
+      INT_VAR verify_only = 0 allow_append = 0
+      STR_VAR row_label = ~CLERIC~
+      RET
+        cbr_sa_class_changed = changed_cells
+        cbr_sa_class_before = found_value
     END
   BUT_ONLY
 
-  // Second pass re-validates the final state (and proves the write landed);
+  // Second pass re-validates the final state (and proves the writes landed);
   // on an already-transformed table both passes take zero writes.
   COPY ~%resource_dir%/CLSWPBON.2DA~ ~%resource_dir%/CLSWPBON.2DA~
     LPF cbr_sa_transform_clswpbon
-      INT_VAR verify_only = 1
+      INT_VAR verify_only = 1 allow_append = 1
+      STR_VAR row_label = ~OHTEMPUS~
+    END
+    LPF cbr_sa_transform_clswpbon
+      INT_VAR verify_only = 1 allow_append = 0
+      STR_VAR row_label = ~CLERIC~
     END
   BUT_ONLY
 
-  PRINT ~cbr 406: CLSWPBON OHTEMPUS GETS_PROF_APR was %cbr_sa_before%; cells changed: %cbr_sa_changed%; row appended: %cbr_sa_appended%.~
+  PRINT ~cbr 406: CLSWPBON OHTEMPUS GETS_PROF_APR was %cbr_sa_kit_before% (cells changed: %cbr_sa_kit_changed%; row appended: %cbr_sa_kit_appended%); CLERIC was %cbr_sa_class_before% (cells changed: %cbr_sa_class_changed%).~
 END

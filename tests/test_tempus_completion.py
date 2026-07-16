@@ -187,6 +187,11 @@ def build_specapr_fixture(root: Path, *, shape: str = "live") -> None:
                 apr = "1"
             elif shape == "garbage":
                 apr = "yes"
+        elif name == "CLERIC":
+            if shape == "missing_cleric":
+                continue
+            if shape == "done":
+                apr = "1"
         rows.append(f"{name}\t{apr}\t{divisor}\t{thac0}")
     lines = ["2DA V1.0", "0", header, *rows]
     (root / "CLSWPBON.2DA").write_text("\n".join(lines) + "\n", encoding="ascii", newline="\n")
@@ -649,12 +654,17 @@ class SpecAprTests(TempusCompletionTestCase):
         )
         rows = self._rows(run.output / "CLSWPBON.2DA")
         self.assertEqual(rows["OHTEMPUS"], ("1", "0", "3"))
-        # Every other row is untouched (values, not formatting — the one
+        self.assertEqual(rows["CLERIC"], ("1", "0", "3"))
+        # Every other row is untouched (values, not formatting — the
         # legitimate SET_2DA_ENTRY re-render may change whitespace).
         for name, apr, divisor, thac0 in CLSWPBON_ROWS_LIVE:
-            if name != "OHTEMPUS":
+            if name not in ("OHTEMPUS", "CLERIC"):
                 self.assertEqual(rows[name], (apr, divisor, thac0), name)
-        self.assertIn("was 0; cells changed: 1; row appended: 0", run.transcript)
+        self.assertIn(
+            "OHTEMPUS GETS_PROF_APR was 0 (cells changed: 1; row appended: 0); "
+            "CLERIC was 0 (cells changed: 1)",
+            run.transcript,
+        )
 
     def test_already_granted_is_byte_identical(self) -> None:
         fixture_bytes: dict[str, bytes] = {}
@@ -667,7 +677,11 @@ class SpecAprTests(TempusCompletionTestCase):
         self.assertEqual(
             (run.output / "CLSWPBON.2DA").read_bytes(), fixture_bytes["clswpbon"]
         )
-        self.assertIn("was 1; cells changed: 0; row appended: 0", run.transcript)
+        self.assertIn(
+            "OHTEMPUS GETS_PROF_APR was 1 (cells changed: 0; row appended: 0); "
+            "CLERIC was 1 (cells changed: 0)",
+            run.transcript,
+        )
 
     def test_missing_row_appends_cleric_shaped_row(self) -> None:
         run = self.run_component(
@@ -678,7 +692,21 @@ class SpecAprTests(TempusCompletionTestCase):
         )
         rows = self._rows(run.output / "CLSWPBON.2DA")
         self.assertEqual(rows["OHTEMPUS"], ("1", "0", "3"))
-        self.assertIn("was absent; cells changed: 0; row appended: 1", run.transcript)
+        self.assertEqual(rows["CLERIC"], ("1", "0", "3"))
+        self.assertIn(
+            "OHTEMPUS GETS_PROF_APR was absent (cells changed: 0; row appended: 1); "
+            "CLERIC was 0 (cells changed: 1)",
+            run.transcript,
+        )
+
+    def test_missing_cleric_row_fails(self) -> None:
+        run = self.run_component(
+            "specapr",
+            lambda root: build_specapr_fixture(root, shape="missing_cleric"),
+            extra_args=(),
+            expect_success=False,
+        )
+        self.assertIn("no CLERIC row", run.transcript)
 
     def test_missing_column_fails(self) -> None:
         run = self.run_component(
