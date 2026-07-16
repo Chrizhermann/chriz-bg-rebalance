@@ -118,3 +118,57 @@ created `CBR*` helper files, restore `WeiDU.log`, and re-verify hashes. Never ru
 
 Executing sections 2–4 requires the user's explicit go-ahead in a session where the game is
 confirmed closed. This document's preparation (Task 9) deliberately stops here.
+
+## 6. Addendum (2026-07-16): combined install with components 400 / 404 / 405
+
+The completion pass (see `2026-07-16-tempus-completion-design.md`) turns the single-component
+deployment above into ONE combined tail run. Everything in sections 1–5 still applies, with
+these deltas:
+
+**Install command (one run, ascending order):**
+`./Setup-chriz-bg-rebalance.exe --force-install-list 400 401 404 405 --language 0 --no-exit-pause`
+
+**Rollback bundle additions (section 1):** also copy+hash the effective `WEAPPROF.2DA`,
+`C0PR#C4.SPL`, `OHTMPS2.SPL` (BIF-extract; no override copy exists), `OHTMPS2D.SPL`,
+`OHTMPS2E.SPL` (override copies — EE Fixpack + SCS shaped), and `STATS.IDS`. Confirm none of
+the additional reserved resrefs exist in override: `CBRTMG2/CBRTMG2L/CBRTMG2X`,
+`CBRCHT1D/1E/2D/2E/3D/3E`, `CBRTMDV`, `CBRTMD0`–`CBRTMD9` (any extension). The dead 2026-07-14
+`CBRTMIG.SPL` override orphan MAY exist — it is expected, unrelated, and must not be deleted
+without explicit user sign-off (optional cleanup, section 4).
+
+**dialog.tlk rule change (404 only):** the tlk is NO LONGER byte-identical — component 404
+appends exactly three strings ("Tide of Battle: Onslaught!/Bulwark!/Fortune!"). Record entry
+count before/after: +3 exactly, all preexisting entries byte-identical (WeiDU appends only).
+Components 400/401/405 remain TLK-neutral; a tlk delta other than those three strings is a
+rollback condition.
+
+**Expected resource delta (section 3 additions):**
+- 400: `WEAPPROF.2DA` + `C0PR#C4.SPL` byte-identical (already live-hotfixed); SPLPROT gains
+  up to 3 rows (`CBR_TEMPUS_C0LS_LE0 204 0 0`, `CBR_TEMPUS_PROFLS_LE0 90 0 0`,
+  `CBR_TEMPUS_PROFXB_LE0 103 0 0` — semantic reuse may reduce the count); new
+  `CBRTMG2/CBRTMG2L/CBRTMG2X.spl`.
+- 404: `OHTMPS2.SPL` materialized to override (window dispatcher, 9 effects); new 6
+  `CBRCHT*.spl`; `OHTMPS2D/E.SPL` staged but byte-identical.
+- 405: `OHTEMPUS.2DA` gains the `CBR_DIVTOLL` row (all 50 levels `AP_CBRTMDV`); new
+  `CBRTMDV.spl` + `CBRTMD0..4.eff` (expected discovery on this install: SPPR104 Detect
+  Alignment, SPPR205 Find Traps, SPPR209 Know Opponent, SPPR415 Farsight, SPPR505 True
+  Seeing — verify the actual list in the install transcript).
+
+**In-game migration (once, after install, game restarted, save loaded):**
+- 405 book strip: `C:Eval('ReallyForceSpellRES("CBRTMDV",Branwen)')` — quoted NPC names work.
+- 400 pips: `C:Eval('ReallyForceSpellRES("CBRTMG2",Branwen)')` — grants longsword permission
+  + longsword/crossbow starter pips only where missing; recasting is harmless.
+- 404 needs no migration (same `OHTMPS2` resref; her existing innate charges use the new
+  behavior; at level 13 she has 2 casts/day and tier-3 magnitudes N=3 / Luck 1).
+
+**Acceptance additions (section 4):**
+- [ ] Chaos of Battle cast → exactly ONE announce line in the log; every party member gets the
+      SAME tide buff; enemies get the mirrored debuff; recast replaces the previous tide.
+- [ ] Fortune tide shows Luck ±1 (tier 3).
+- [ ] Branwen's priest book after CBRTMDV: no Detect Alignment / Find Traps / Know Opponent /
+      Farsight / True Seeing (memorized instances gone or cleared after rest); Viconia (or any
+      other cleric) still has them.
+- [ ] CBRTMG2 after-cast: longsword + crossbow show 1 pip and are equippable per Artisan's
+      gates; recast changes nothing; axe stays at its current pips.
+- [ ] Level-up smoke (console XP scratch save): newly unlocked Divination spells vanish within
+      ~1 second (op272 pulse) or at latest on the next CLAB application.
