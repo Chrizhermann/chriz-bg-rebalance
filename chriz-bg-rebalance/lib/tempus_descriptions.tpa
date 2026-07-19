@@ -1,0 +1,168 @@
+// chriz-bg-rebalance - Cleric of Tempus updated descriptions (component 408).
+//
+// The kit rework (400/401-403/404/405/407) changed what the kit actually does;
+// this component makes the player-facing text match. Strategy: append three
+// NEW dialog.tlk strings and repoint the consumers, never edit an existing
+// string in place. That matters because OHTMPS1's description strref (6088 on
+// live BG2:EE/EET) is SHARED with the standard priest spell Holy Power -
+// a STRING_SET there would rewrite every priest's spell description. The
+// kit-owned SoD strrefs (103223/103225) could be edited in place, but the
+// append+repoint route is collision-proof for all three and WeiDU's
+// identical-string reuse keeps reinstalls append-stable (404 precedent).
+//
+// Repoint targets:
+//   * KITLIST.2DA - OHTEMPUS row, HELP column (the kit description);
+//   * OHTMPS1.SPL - header 0x50 (Holy Power innate description);
+//   * OHTMPS2.SPL - header 0x50 (Chaos of Battle innate description).
+// Names (kit LOWER/MIXED, spell names) stay untouched. The identified-
+// description dword at 0x54 stays untouched (unused/junk on both spells).
+//
+// Uninstall restores KITLIST/SPL bytes from backup; the appended TLK strings
+// remain (accepted append-only residue, same class as 404's announce lines).
+
+// Locate the OHTEMPUS row and the HELP data column in KITLIST.2DA.
+// KITLIST's header row (9 tokens) is one shorter than data rows (10 tokens):
+// the same two-set idiom as the CLSWPBON/WEAPPROF locators.
+DEFINE_PATCH_FUNCTION cbr_ds_locate_kitlist_cell
+  STR_VAR
+    row_name = ~~
+  RET
+    target_row
+    target_col
+    found_value
+BEGIN
+  COUNT_2DA_COLS cbr_ds_loc_cols
+  PATCH_IF (cbr_ds_loc_cols != 10) BEGIN
+    PATCH_FAIL ~CBR Tempus descriptions KITLIST.2DA validation failed: expected label plus 9 value columns, found %cbr_ds_loc_cols% total.~
+  END
+  SET cbr_ds_help_hdr = "-1"
+  READ_2DA_ENTRIES_NOW cbr_ds_hdr_rows 9
+  PATCH_IF (cbr_ds_hdr_rows < 1) BEGIN
+    PATCH_FAIL ~CBR Tempus descriptions KITLIST.2DA validation failed: no header row.~
+  END
+  FOR (cbr_ds_loc_col = 0; cbr_ds_loc_col < 9; ++cbr_ds_loc_col) BEGIN
+    READ_2DA_ENTRY_FORMER cbr_ds_hdr_rows 0 cbr_ds_loc_col cbr_ds_header_token
+    PATCH_IF (~%cbr_ds_header_token%~ STRING_EQUAL_CASE ~HELP~) BEGIN
+      PATCH_IF (cbr_ds_help_hdr >= 0) BEGIN
+        PATCH_FAIL ~CBR Tempus descriptions KITLIST.2DA validation failed: duplicate HELP header columns.~
+      END
+      SET cbr_ds_help_hdr = cbr_ds_loc_col
+    END
+  END
+  PATCH_IF (cbr_ds_help_hdr < 0) BEGIN
+    PATCH_FAIL ~CBR Tempus descriptions KITLIST.2DA validation failed: no HELP header column.~
+  END
+  SET target_col = cbr_ds_help_hdr + 1
+
+  READ_2DA_ENTRIES_NOW cbr_ds_rows 10
+  SET target_row = "-1"
+  FOR (cbr_ds_row = 0; cbr_ds_row < cbr_ds_rows; ++cbr_ds_row) BEGIN
+    READ_2DA_ENTRY_FORMER cbr_ds_rows cbr_ds_row 1 cbr_ds_rowname
+    PATCH_IF (~%cbr_ds_rowname%~ STRING_EQUAL_CASE ~%row_name%~) BEGIN
+      PATCH_IF (target_row >= 0) BEGIN
+        PATCH_FAIL ~CBR Tempus descriptions KITLIST.2DA validation failed: duplicate %row_name% rows.~
+      END
+      SET target_row = cbr_ds_row
+    END
+  END
+  PATCH_IF (target_row < 0) BEGIN
+    PATCH_FAIL ~CBR Tempus descriptions KITLIST.2DA validation failed: no %row_name% row.~
+  END
+  READ_2DA_ENTRY_FORMER cbr_ds_rows target_row target_col found_value
+END
+
+// Repoint one SPL's description strref (header 0x50), read-compare guarded.
+DEFINE_PATCH_FUNCTION cbr_ds_set_spl_desc
+  INT_VAR
+    new_strref = "-1"
+    verify_only = 0
+  RET
+    old_strref
+    changed
+BEGIN
+  SET changed = 0
+  READ_ASCII 0x00 cbr_ds_signature (8)
+  PATCH_IF !(~%cbr_ds_signature%~ STR_EQ ~SPL V1  ~) BEGIN
+    PATCH_FAIL ~CBR Tempus descriptions validation failed: %SOURCE_FILE% is not a SPL V1 resource.~
+  END
+  READ_LONG 0x50 old_strref
+  PATCH_IF (old_strref = new_strref) BEGIN
+    // Already repointed - nothing to do.
+  END ELSE PATCH_IF (verify_only) BEGIN
+    PATCH_FAIL ~CBR Tempus descriptions verification failed: %SOURCE_FILE% description strref is %old_strref%, expected %new_strref%.~
+  END ELSE BEGIN
+    WRITE_LONG 0x50 new_strref
+    SET changed = 1
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_apply_tempus_descriptions
+  INT_VAR
+    kit_help_strref = "-1"
+    hp_desc_strref = "-1"
+    cob_desc_strref = "-1"
+  STR_VAR
+    resource_dir = ~~
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  ACTION_IF (~%resource_dir%~ STR_EQ ~~) BEGIN
+    FAIL ~CBR Tempus descriptions requires resource_dir.~
+  END
+  ACTION_IF (kit_help_strref <= 0) OR (hp_desc_strref <= 0) OR (cob_desc_strref <= 0) BEGIN
+    FAIL ~CBR Tempus descriptions validation failed: all three strrefs must be positive resolved TLK indices (got %kit_help_strref% / %hp_desc_strref% / %cob_desc_strref%).~
+  END
+  ACTION_FOR_EACH cbr_ds_input IN ~KITLIST.2DA~ ~OHTMPS1.SPL~ ~OHTMPS2.SPL~ BEGIN
+    ACTION_IF !(FILE_EXISTS ~%resource_dir%/%cbr_ds_input%~) BEGIN
+      FAIL ~CBR Tempus descriptions requires %resource_dir%/%cbr_ds_input%.~
+    END
+  END
+
+  COPY ~%resource_dir%/KITLIST.2DA~ ~%resource_dir%/KITLIST.2DA~
+    LPF cbr_ds_locate_kitlist_cell
+      STR_VAR row_name = ~OHTEMPUS~
+      RET cbr_ds_kit_row = target_row
+          cbr_ds_kit_col = target_col
+          cbr_ds_kit_before = found_value
+    END
+    PATCH_IF !(~%cbr_ds_kit_before%~ STR_EQ ~%kit_help_strref%~) BEGIN
+      SET_2DA_ENTRY cbr_ds_kit_row cbr_ds_kit_col 10 ~%kit_help_strref%~
+    END
+  BUT_ONLY
+
+  COPY ~%resource_dir%/OHTMPS1.SPL~ ~%resource_dir%/OHTMPS1.SPL~
+    LPF cbr_ds_set_spl_desc
+      INT_VAR new_strref = hp_desc_strref
+      RET cbr_ds_hp_before = old_strref
+    END
+  BUT_ONLY
+
+  COPY ~%resource_dir%/OHTMPS2.SPL~ ~%resource_dir%/OHTMPS2.SPL~
+    LPF cbr_ds_set_spl_desc
+      INT_VAR new_strref = cob_desc_strref
+      RET cbr_ds_cob_before = old_strref
+    END
+  BUT_ONLY
+
+  // Second pass re-validates the final state; zero writes on success.
+  COPY ~%resource_dir%/KITLIST.2DA~ ~%resource_dir%/KITLIST.2DA~
+    LPF cbr_ds_locate_kitlist_cell
+      STR_VAR row_name = ~OHTEMPUS~
+      RET cbr_ds_verify_value = found_value
+    END
+    PATCH_IF !(~%cbr_ds_verify_value%~ STR_EQ ~%kit_help_strref%~) BEGIN
+      PATCH_FAIL ~CBR Tempus descriptions verification failed: KITLIST OHTEMPUS HELP is %cbr_ds_verify_value%, expected %kit_help_strref%.~
+    END
+  BUT_ONLY
+  COPY ~%resource_dir%/OHTMPS1.SPL~ ~%resource_dir%/OHTMPS1.SPL~
+    LPF cbr_ds_set_spl_desc
+      INT_VAR new_strref = hp_desc_strref verify_only = 1
+    END
+  BUT_ONLY
+  COPY ~%resource_dir%/OHTMPS2.SPL~ ~%resource_dir%/OHTMPS2.SPL~
+    LPF cbr_ds_set_spl_desc
+      INT_VAR new_strref = cob_desc_strref verify_only = 1
+    END
+  BUT_ONLY
+
+  PRINT ~cbr 408: kit HELP %cbr_ds_kit_before% -> %kit_help_strref%; Holy Power desc %cbr_ds_hp_before% -> %hp_desc_strref%; Chaos of Battle desc %cbr_ds_cob_before% -> %cob_desc_strref%.~
+END

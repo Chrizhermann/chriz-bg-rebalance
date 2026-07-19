@@ -10,6 +10,7 @@
 // Component 4 (spec APR EEex):   argv[4] = kit id, argv[5] = template path.
 //   Its only file input is the template (argv[5]); the fixture root is
 //   unused, and the library's own COPY creates the output root.
+// Component 5 (descriptions):    argv[4..6] = kit/HolyPower/Chaos strrefs.
 BACKUP ~backup~
 AUTHOR ~chriz-bg-rebalance test harness~
 
@@ -105,3 +106,21 @@ LAF cbr_apply_tempus_spec_apr_eeex
     template_file = ~%argv[5]%~
 END
 COPY ~%argv[3]%/M_CBRAPR.lua~ ~%argv[3]%/CBR_TEST.OK~
+
+BEGIN ~Tempus completion harness: descriptions~
+DESIGNATED 5
+
+COPY ~%argv[2]%~ ~%argv[3]%~
+INCLUDE ~%argv[0]%~
+INCLUDE ~%argv[1]%~
+OUTER_SET cbr_harness_kit_help = %argv[4]%
+OUTER_SET cbr_harness_hp_desc = %argv[5]%
+OUTER_SET cbr_harness_cob_desc = %argv[6]%
+LAF cbr_apply_tempus_descriptions
+  INT_VAR
+    kit_help_strref = cbr_harness_kit_help
+    hp_desc_strref  = cbr_harness_hp_desc
+    cob_desc_strref = cbr_harness_cob_desc
+  STR_VAR resource_dir = ~%argv[3]%~
+END
+COPY ~%argv[2]%/KITLIST.2DA~ ~%argv[3]%/CBR_TEST.OK~

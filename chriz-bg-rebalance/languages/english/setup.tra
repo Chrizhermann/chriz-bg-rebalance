@@ -11,6 +11,7 @@
 @405 = ~Cleric of Tempus: Divination toll — Tempus grants no future sight~
 @406 = ~Engine-table variant: full warrior attack progression (CLSWPBON, stronger than advertised)~
 @407 = ~EEex variant: exactly +1/2 attack while wielding a specialized weapon (recommended)~
+@408 = ~Cleric of Tempus: updated kit and ability descriptions~
 
 // Component groups
 @1100 = ~SCS adjustments~
@@ -25,6 +26,53 @@
 @4041 = ~Tide of Battle: Onslaught!~
 @4042 = ~Tide of Battle: Bulwark!~
 @4043 = ~Tide of Battle: Fortune!~
+
+// Component 408 - the three replacement descriptions (kit, Holy Power,
+// Chaos of Battle). The kit's flavor paragraph is SoD's, verbatim.
+@4081 = ~PRIEST OF TEMPUS: Tempus, also known as the Lord of Battles or the Foehammer, is random in his favors, yet his chaotic nature favors all sides equally. Lord Tempus may be on an army's side one day and against them the next; such is the nature of war. Tempuran clergy can be found on both sides of a conflict, as none can ever truly know whom the war god will favor.
+
+Advantages:
+– May place up to two proficiency slots in Axes, Clubs, Crossbows, Flails/Morningstars, Long Swords, Maces, Quarterstaffs, Slings, and War Hammers, as well as in every weapon style.
+– Gains an extra half attack per round while wielding a weapon in which two proficiency slots have been placed.
+– May cast Holy Power once per day. Gains one use at level 1 and an additional use every 5 levels thereafter, up to a maximum of five uses at level 21.
+– May cast Chaos of Battle once per day. Gains one use at level 1 and an additional use every 10 levels thereafter.
+
+HOLY POWER: For a short time, the caster fights with the strength and skill of a hardened warrior: Strength is raised to at least 18/00 (level 13: 19, level 19: 20, level 25: 21), THAC0 becomes that of a Fighter of the same level, and the caster gains 1 temporary Hit Point per level (up to 30) as well as extra attacks at higher levels (level 7: +1/2, level 13: +1, level 25: +1 1/2). The prayer lasts 3 rounds (level 7: 4 rounds, level 13: 5 rounds). Holy Power and Divine Power cannot be active at the same time.
+
+CHAOS OF BATTLE: Each casting unleashes one random tide of battle in a 30-ft. radius, announced to all combatants: Onslaught (attack rolls and damage), Bulwark (Armor Class and Saving Throws), or Fortune (luck). Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 rounds. The magnitude starts at 2 and rises with the caster's level (level 13: 3, level 25: 4; Fortune: 1, level 19: 2). A new tide replaces the one before it.
+
+Disadvantages:
+– Alignment restricted to chaotic good, chaotic neutral, chaotic evil, or true neutral.
+– Tempus grants no future sight: may never learn or cast Divination spells (including Find Traps and True Seeing).~
+
+@4082 = ~Holy Power
+(Evocation)
+
+Range: 0
+Duration: 3-5 rounds
+Casting Time: 1
+Area of Effect: The caster
+Saving Throw: None
+
+A battle prayer to the Foehammer: for a short time, the caster fights with the strength and skill of a hardened warrior.
+
+– Strength: raised to at least 18/00; the floor rises to 19 at level 13, 20 at level 19, and 21 at level 25. A higher Strength is never lowered.
+– THAC0: that of a Fighter of the caster's level.
+– Hit Points: 1 temporary Hit Point per level, up to 30.
+– Extra attacks: +1/2 from level 7, +1 from level 13, +1 1/2 from level 25.
+– Duration: 3 rounds; 4 from level 7, 5 from level 13.
+
+Holy Power and Divine Power cannot be active at the same time: casting one removes the other.~
+
+@4083 = ~Chaos of Battle
+
+Each casting unleashes one random tide of battle in a 30-ft. radius around the caster, announced to all combatants:
+
+– Onslaught: attack rolls and damage
+– Bulwark: Armor Class and all Saving Throws
+– Fortune: luck
+
+Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 rounds. The magnitude starts at 2 and rises to 3 at caster level 13 and 4 at level 25 (Fortune: 1, rising to 2 at level 19). Casting Chaos of Battle again replaces the active tide with the new one.~
 
 // Predicate / failure messages
 @9100 = ~SCS's "extra arcane spells" (Telekinetic Storm) is not installed — nothing to fix.~
@@ -57,3 +105,9 @@
 @9442 = ~OHTEMPUS.2DA is missing. Install the Cleric of Tempus kit before this component.~
 @9450 = ~EEex is not installed (M___EEex.lua not found). This variant requires EEex.~
 @9451 = ~KIT.IDS does not define OHTEMPUS — the Cleric of Tempus kit id cannot be resolved.~
+@9460 = ~The Cleric of Tempus descriptions component supports BG2:EE / EET only.~
+@9461 = ~KITLIST.2DA, OHTMPS1.SPL, or OHTMPS2.SPL is missing. Install the Cleric of Tempus kit before this component.~
+@9462 = ~CBRTMG2.SPL not found — install the weapon training component (400) first; the text describes its changes.~
+@9463 = ~CBRCHT1D.SPL not found — install the Chaos of Battle component (404) first; the text describes its changes.~
+@9464 = ~CBRTMDV.SPL not found — install the Divination toll component (405) first; the text describes its changes.~
+@9465 = ~M_CBRAPR.lua not found — install the EEex specialization APR component (407) first; the text describes its changes.~

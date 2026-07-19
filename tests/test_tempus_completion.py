@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import struct
 import subprocess
 import tempfile
 import unittest
@@ -37,15 +38,24 @@ TOLL_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_divination_toll.tpa"
 SPEC_APR_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_spec_apr.tpa"
 SPEC_APR_EEEX_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_spec_apr_eeex.tpa"
 LUA_TEMPLATE = ROOT / "chriz-bg-rebalance" / "lua" / "M_CBRAPR.lua"
+DESCRIPTIONS_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_descriptions.tpa"
 ORIGINALS = ROOT / "research" / "originals"
 
-COMPONENT = {"training": "0", "tides": "1", "toll": "2", "specapr": "3", "specapr_eeex": "4"}
+COMPONENT = {
+    "training": "0",
+    "tides": "1",
+    "toll": "2",
+    "specapr": "3",
+    "specapr_eeex": "4",
+    "descriptions": "5",
+}
 COMPONENT_TPA = {
     "training": TRAINING_TPA,
     "tides": TIDES_TPA,
     "toll": TOLL_TPA,
     "specapr": SPEC_APR_TPA,
     "specapr_eeex": SPEC_APR_EEEX_TPA,
+    "descriptions": DESCRIPTIONS_TPA,
 }
 
 LS_PERM_STAT = 204
@@ -216,6 +226,52 @@ def build_toll_fixture(root: Path, *, conflicting_row: bool = False) -> None:
     if conflicting_row:
         lines.append("CBR_DIVTOLL\t" + "\t".join(["AP_SOMETHN"] * 50))
     (root / "OHTEMPUS.2DA").write_text("\n".join(lines) + "\n", encoding="ascii", newline="\n")
+
+
+# Live strrefs of the texts component 408 repoints away from: KITLIST HELP
+# (kit description), OHTMPS1 desc (SHARED with the standard Holy Power priest
+# spell - the reason 408 appends + repoints instead of editing in place), and
+# OHTMPS2 desc (kit-owned).
+KITLIST_HELP_LIVE = "103223"
+OHTMPS1_DESC_LIVE = 6088
+OHTMPS2_DESC_LIVE = 103225
+
+KITLIST_HEADER = "ROWNAME\tLOWER\tMIXED\tHELP\tABILITIES\tPROFICIENCY\tUNUSABLE\tCLASS\tKITIDS"
+
+
+def _spl_with_desc(desc: int) -> bytes:
+    data = bytearray(make_spl([]).to_bytes())
+    struct.pack_into("<i", data, 0x50, desc)
+    return bytes(data)
+
+
+def build_descriptions_fixture(
+    root: Path,
+    *,
+    shape: str = "live",
+    help_value: str = KITLIST_HELP_LIVE,
+    hp_desc: int = OHTMPS1_DESC_LIVE,
+    cob_desc: int = OHTMPS2_DESC_LIVE,
+) -> None:
+    root.mkdir(parents=True)
+    header = KITLIST_HEADER
+    if shape == "no_help_column":
+        header = header.replace("HELP", "HLPX")
+    rows = ["0\tTRUECLASS\t1\t2\t3\t****\t0\t0x00000000\t0\t0x00004000"]
+    ohtempus = f"41\tOHTEMPUS\t103221\t103222\t{help_value}\tOHTEMPUS\t62\t0x00004000\t3\t0x00004029"
+    if shape != "missing_row":
+        rows.append(ohtempus)
+    if shape == "dup_row":
+        rows.append(ohtempus)
+    rows.append("58\tC0_NINJA\t500\t501\t502\tC0NINJA\t20\t0x00004000\t4\t0x0000402E")
+    (root / "KITLIST.2DA").write_text(
+        "\n".join(["2DA V1.0", "0", header, *rows]) + "\n", encoding="ascii", newline="\n"
+    )
+    spl1 = _spl_with_desc(hp_desc)
+    if shape == "bad_spl":
+        spl1 = b"ITM V1  " + spl1[8:]
+    (root / "OHTMPS1.SPL").write_bytes(spl1)
+    (root / "OHTMPS2.SPL").write_bytes(_spl_with_desc(cob_desc))
 
 
 # ---------------------------------------------------------------------------
@@ -848,6 +904,113 @@ class SpecAprEeexTests(TempusCompletionTestCase):
     def test_nonpositive_kit_id_fails(self) -> None:
         run = self._run_eeex("0", LUA_TEMPLATE, expect_success=False)
         self.assertIn("kit_id must be a positive KIT.IDS value", run.transcript)
+
+
+# ---------------------------------------------------------------------------
+# Component 408 — updated descriptions (KITLIST HELP + SPL desc repoints)
+# ---------------------------------------------------------------------------
+
+NEW_REFS = ("700001", "700002", "700003")
+
+
+class DescriptionsTests(TempusCompletionTestCase):
+    @staticmethod
+    def _kitlist_help(path: Path) -> dict[str, str]:
+        cells: dict[str, str] = {}
+        for line in path.read_text(encoding="ascii").splitlines()[3:]:
+            tokens = line.split()
+            if len(tokens) == 10:
+                cells[tokens[1]] = tokens[4]
+        return cells
+
+    @staticmethod
+    def _spl_desc(path: Path) -> int:
+        return struct.unpack_from("<i", path.read_bytes(), 0x50)[0]
+
+    def test_repoint_live_shape(self) -> None:
+        run = self.run_component(
+            "descriptions",
+            lambda root: build_descriptions_fixture(root),
+            extra_args=NEW_REFS,
+            rerun_on_output=True,
+        )
+        helps = self._kitlist_help(run.output / "KITLIST.2DA")
+        self.assertEqual(helps["OHTEMPUS"], NEW_REFS[0])
+        self.assertEqual(helps["TRUECLASS"], "3", "foreign rows untouched")
+        self.assertEqual(helps["C0_NINJA"], "502", "foreign rows untouched")
+        self.assertEqual(self._spl_desc(run.output / "OHTMPS1.SPL"), int(NEW_REFS[1]))
+        self.assertEqual(self._spl_desc(run.output / "OHTMPS2.SPL"), int(NEW_REFS[2]))
+        self.assertIn(
+            f"cbr 408: kit HELP {KITLIST_HELP_LIVE} -> {NEW_REFS[0]}; "
+            f"Holy Power desc {OHTMPS1_DESC_LIVE} -> {NEW_REFS[1]}; "
+            f"Chaos of Battle desc {OHTMPS2_DESC_LIVE} -> {NEW_REFS[2]}.",
+            run.transcript,
+        )
+
+    def test_already_repointed_is_byte_identical(self) -> None:
+        fixture_bytes: dict[str, bytes] = {}
+
+        def build(root: Path) -> None:
+            build_descriptions_fixture(
+                root,
+                help_value=NEW_REFS[0],
+                hp_desc=int(NEW_REFS[1]),
+                cob_desc=int(NEW_REFS[2]),
+            )
+            for name in ("KITLIST.2DA", "OHTMPS1.SPL", "OHTMPS2.SPL"):
+                fixture_bytes[name] = (root / name).read_bytes()
+
+        run = self.run_component("descriptions", build, extra_args=NEW_REFS)
+        for name, data in fixture_bytes.items():
+            self.assertEqual(
+                (run.output / name).read_bytes(), data,
+                f"{name} must stay byte-identical when already repointed",
+            )
+
+    def test_missing_ohtempus_row_fails(self) -> None:
+        run = self.run_component(
+            "descriptions",
+            lambda root: build_descriptions_fixture(root, shape="missing_row"),
+            extra_args=NEW_REFS,
+            expect_success=False,
+        )
+        self.assertIn("no OHTEMPUS row", run.transcript)
+
+    def test_duplicate_ohtempus_row_fails(self) -> None:
+        run = self.run_component(
+            "descriptions",
+            lambda root: build_descriptions_fixture(root, shape="dup_row"),
+            extra_args=NEW_REFS,
+            expect_success=False,
+        )
+        self.assertIn("duplicate OHTEMPUS rows", run.transcript)
+
+    def test_missing_help_column_fails(self) -> None:
+        run = self.run_component(
+            "descriptions",
+            lambda root: build_descriptions_fixture(root, shape="no_help_column"),
+            extra_args=NEW_REFS,
+            expect_success=False,
+        )
+        self.assertIn("no HELP header column", run.transcript)
+
+    def test_bad_spl_signature_fails(self) -> None:
+        run = self.run_component(
+            "descriptions",
+            lambda root: build_descriptions_fixture(root, shape="bad_spl"),
+            extra_args=NEW_REFS,
+            expect_success=False,
+        )
+        self.assertIn("is not a SPL V1 resource", run.transcript)
+
+    def test_nonpositive_strref_fails(self) -> None:
+        run = self.run_component(
+            "descriptions",
+            lambda root: build_descriptions_fixture(root),
+            extra_args=("0", NEW_REFS[1], NEW_REFS[2]),
+            expect_success=False,
+        )
+        self.assertIn("must be positive resolved TLK indices", run.transcript)
 
 
 if __name__ == "__main__":

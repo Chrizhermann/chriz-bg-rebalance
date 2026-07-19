@@ -20,7 +20,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.ie_formats import make_spl, read_2da, read_eff_v2, read_spl
+from tests.ie_formats import SplAbility, make_spl, read_2da, read_eff_v2, read_spl
 from tests.test_tempus_completion import (
     EEEX_KIT_ID,
     ORIGINALS,
@@ -121,6 +121,27 @@ class CompletionGame:
             encoding="ascii",
             newline="\n",
         )
+        # Component 408 prerequisites: KITLIST with the OHTEMPUS row (HELP
+        # points at TLK entry 0 — the synthetic TLK's single empty string)
+        # and an OHTMPS1 shaped like the 401 rework (per-tier abilities).
+        (self.override / "KITLIST.2DA").write_text(
+            "2DA V1.0\n0\n"
+            "ROWNAME\tLOWER\tMIXED\tHELP\tABILITIES\tPROFICIENCY\tUNUSABLE\tCLASS\tKITIDS\n"
+            "0\tTRUECLASS\t0\t0\t0\t****\t0\t0x00000000\t0\t0x00004000\n"
+            f"41\tOHTEMPUS\t0\t0\t0\tOHTEMPUS\t62\t0x00004000\t3\t0x{int(EEEX_KIT_ID):08x}\n",
+            encoding="ascii",
+            newline="\n",
+        )
+        ohtmps1 = bytearray(
+            make_spl(
+                [
+                    SplAbility(required_level=level, target=1, projectile=1, effects=())
+                    for level in (1, 7, 13, 19, 25)
+                ]
+            ).to_bytes()
+        )
+        struct.pack_into("<i", ohtmps1, 0x50, 0)
+        (self.override / "OHTMPS1.SPL").write_bytes(bytes(ohtmps1))
         if with_artisan_permissions:
             for name in ("C0PR#90", "C0PR#92", "C0PR#103"):
                 (self.override / f"{name}.SPL").write_bytes(_artisan_permission_spl())
@@ -372,6 +393,64 @@ class TempusCompletionInstallerTests(unittest.TestCase):
         installed = [line for line in weidu_log.splitlines() if line.startswith("~")]
         self.assertEqual(len(installed), 1, weidu_log)
         self.assertIn("#407", installed[0])
+
+    def test_component_408_chain_updates_texts_then_uninstalls(self) -> None:
+        """408 on top of its four sibling artifacts: three appended TLK
+        strings, three repoints, and an uninstall that restores the
+        pre-408 override exactly (the appended strings legitimately stay)."""
+        game = self._game()
+        for component in (400, 404, 405, 407):
+            self._install(game, component)
+        pre_408 = _raw_file_tree(game.override)
+        tlk_pre = _read_tlk_strings(game.lang_tlk)
+
+        self._install(game, 408)
+        strings = _read_tlk_strings(game.lang_tlk)
+        self.assertEqual(len(strings), len(tlk_pre) + 3, "exactly three appended strings")
+        kit_ref, hp_ref, cob_ref = len(tlk_pre), len(tlk_pre) + 1, len(tlk_pre) + 2
+        self.assertIn("PRIEST OF TEMPUS", strings[kit_ref])
+        self.assertIn("extra half attack per round", strings[kit_ref])
+        self.assertIn("Tempus grants no future sight", strings[kit_ref])
+        self.assertIn("A battle prayer to the Foehammer", strings[hp_ref])
+        self.assertIn("tide of battle", strings[cob_ref])
+
+        kitlist_rows = {
+            tokens[1]: tokens
+            for tokens in (
+                line.split()
+                for line in (game.override / "KITLIST.2DA")
+                .read_text(encoding="ascii")
+                .splitlines()
+            )
+            if len(tokens) == 10
+        }
+        self.assertEqual(kitlist_rows["OHTEMPUS"][4], str(kit_ref))
+        self.assertEqual(kitlist_rows["TRUECLASS"][4], "0", "foreign rows untouched")
+        for name, ref in (("OHTMPS1.SPL", hp_ref), ("OHTMPS2.SPL", cob_ref)):
+            data = (game.override / name).read_bytes()
+            self.assertEqual(struct.unpack_from("<i", data, 0x50)[0], ref, name)
+
+        process = game.run("--force-uninstall-list", 408)
+        transcript = game.transcript(process)
+        self.assertNotIn("NOT UNINSTALLED", transcript, transcript)
+        self.assertEqual(
+            pre_408,
+            _raw_file_tree(game.override),
+            "uninstalling 408 must restore the pre-408 override byte-exactly",
+        )
+        self.assertEqual(
+            len(_read_tlk_strings(game.lang_tlk)),
+            len(tlk_pre) + 3,
+            "appended TLK strings remain on uninstall (documented residue)",
+        )
+
+    def test_component_408_skips_without_sibling_artifacts(self) -> None:
+        game = self._game()
+        process = game.run("--force-install-list", 408)
+        transcript = game.transcript(process)
+        self.assertIn("SKIPPING", transcript, transcript)
+        self.assertIn("weapon training component (400)", transcript)
+        self.assertEqual(game.pre_override, _raw_file_tree(game.override))
 
 
 if __name__ == "__main__":

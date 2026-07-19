@@ -293,3 +293,44 @@ OPEN at ship time — the one unverified primitive: Lua *write* acceptance on
 setter). Decisive live check after the swap: Branwen, flail at 2 pips, no
 Holy Power → APR stat 8 must read 7 (= 1.5). Fallback if the write does not
 take: Lua-managed op1 (type 0, key 6) effect with op321/sourceRes dedup.
+
+## Addendum 2026-07-20 — Component 408: updated descriptions (`cbr_cleric_tempus_descriptions`)
+
+Resolves the "kit-description text updates are deferred polish" item: after
+400/401/404/405/407 the player-facing text was stale (kit description still
+SoD's, Holy Power showing the SHARED vanilla spell text, Chaos of Battle
+describing the per-target stat lottery).
+
+Mechanism — append + repoint, never edit in place: three new TLK strings
+(RESOLVE_STR_REF, append-stable across reinstalls via WeiDU's
+identical-string reuse), then repoint the three consumers: KITLIST.2DA
+OHTEMPUS HELP cell (header-located, SET_2DA_ENTRY read-compare-guarded),
+OHTMPS1.SPL header 0x50, OHTMPS2.SPL header 0x50. In-place editing is off
+the table because OHTMPS1's live desc strref (6088) is shared with the
+standard priest spell Holy Power — a STRING_SET there would rewrite every
+priest's spell description. Kit names (LOWER/MIXED) and both spell names
+stay untouched; 0x54 identified-desc dwords stay untouched.
+
+Text contents (verified against implementation, not memory): weapon caps
+from the live WEAPPROF target state (Axes/Clubs/Crossbows/Flails/Long
+Swords/Maces/Quarterstaffs/Slings/War Hammers + all styles at 2); +1/2
+attack with a 2-slot wielded weapon (407); Holy Power table from the
+approved 401 design (STR floors 18/00→19/20/21 at L13/19/25, fighter
+THAC0, +1 temp HP/level cap 30, +1/2 / +1 / +1 1/2 attacks at L7/13/25,
+3/4/5 rounds, five uses, Divine Power exclusion; Casting Time 1 read from
+the installed SPL); Chaos of Battle tides (three named tides, ally bonus =
+enemy penalty, 5 rounds, magnitude 2/3/4 at L1/13/25, Fortune 1→2 at L19,
+recast replaces); Divination toll disadvantage.
+
+Gating: sibling artifacts as predicates (CBRTMG2/CBRCHT1D/CBRTMDV SPLs +
+M_CBRAPR.lua). The 401 family has no unique artifact in auto/doubling mode;
+its presence is assumed and documented, not enforced. Uninstall restores
+KITLIST/SPLs from backup; the three appended strings remain (same accepted
+residue class as 404's announce lines).
+
+Verification: harness DESIGNATED 5; nogame — repoint matrix + byte-
+idempotence + already-repointed byte-identity + missing-row/dup-row/
+no-HELP-column/bad-SPL-signature/nonpositive-strref controlled-RED;
+installer — full-chain 400→404→405→407→408 (TLK +3 exactly, repoints land,
+408-only uninstall restores the pre-408 override byte-exactly, appended
+strings persist) + predicate-skip without siblings. Full suite 117 green.

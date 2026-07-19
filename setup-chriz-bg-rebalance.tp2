@@ -15,6 +15,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/tempus_divination_toll.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/tempus_spec_apr.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/tempus_spec_apr_eeex.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/tempus_descriptions.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -363,4 +364,39 @@ LAF cbr_apply_tempus_spec_apr_eeex
   STR_VAR
     resource_dir = ~override~
     template_file = ~chriz-bg-rebalance/lua/M_CBRAPR.lua~
+END
+
+BEGIN @408
+DESIGNATED 408
+GROUP @1400
+LABEL ~cbr_cleric_tempus_descriptions~
+
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9460
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~KITLIST.2DA~)
+               AND (FILE_EXISTS_IN_GAME ~OHTMPS1.SPL~)
+               AND (FILE_EXISTS_IN_GAME ~OHTMPS2.SPL~)) @9461
+// The text describes the full rework - gate on each sibling's artifact.
+// The 401-403 Holy Power family has no unique artifact in auto/doubling
+// mode; its presence is assumed and documented, not enforced.
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~CBRTMG2.SPL~) @9462
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~CBRCHT1D.SPL~) @9463
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~CBRTMDV.SPL~) @9464
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M_CBRAPR.lua~) @9465
+
+// Append the three new strings (WeiDU reuses identical strings on
+// reinstall, so dialog.tlk stays append-stable - the 404 precedent).
+OUTER_SET cbr_ds_resolved_kit_help = RESOLVE_STR_REF (@4081)
+OUTER_SET cbr_ds_resolved_hp_desc  = RESOLVE_STR_REF (@4082)
+OUTER_SET cbr_ds_resolved_cob_desc = RESOLVE_STR_REF (@4083)
+
+COPY_EXISTING ~KITLIST.2DA~ ~override/KITLIST.2DA~
+COPY_EXISTING ~OHTMPS1.SPL~ ~override/OHTMPS1.SPL~
+COPY_EXISTING ~OHTMPS2.SPL~ ~override/OHTMPS2.SPL~
+
+LAF cbr_apply_tempus_descriptions
+  INT_VAR
+    kit_help_strref = cbr_ds_resolved_kit_help
+    hp_desc_strref  = cbr_ds_resolved_hp_desc
+    cob_desc_strref = cbr_ds_resolved_cob_desc
+  STR_VAR resource_dir = ~override~
 END
