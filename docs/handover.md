@@ -9,6 +9,21 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-instal
 Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
 `docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `CLAUDE.md`.
 
+## Status (2026-07-20)
+
+- **Community-ideas triage: DONE** — Discord backlog (2026-07-12→20) triaged against the
+  live WeiDU.log in `docs/plans/2026-07-20-community-ideas-triage.md`. Proposed slots:
+  110 dragons (flagship), 310/311 unidentified-item disguise (EEex research required),
+  320 weapon dice, 410+ deity weapons per cleric kit; monks/kensai/companions parked.
+- **Component 110 (Apex Dragons): research DONE, design pending user levers** —
+  `research/05-dragons.md` has the verified installed baseline (new
+  `research/scripts/parse_cre.py`, self-checked vs. comp250's Morentherene numbers), the
+  full SCS #6540 anatomy (DMWW_dragon_difficulty gating, dw#drahp = 300% HP on Hard+,
+  dw#innat, Insane breath accelerator, 6s wing-buffet timer), and the proposal: offense
+  not sponge, comp250-style script-delivered tiers keyed to SCS's own difficulty
+  variable, optional 111 buffet-cadence relief. Key install fact: the user already plays
+  at DMWW_dragon_difficulty=5 (×3 HP active) and still finds dragons weak.
+
 ## Status (2026-07-11)
 
 - **Component 101 (Adventurer's Mart Freedom scrolls): SHIPPED + live-installed.** SCS v35
@@ -63,6 +78,10 @@ session — always `--exclude` them.
 
 ## Work queue
 
+0. **Component 110 dragons — design → build**: user lever answers (asked 2026-07-20) →
+   `docs/plans/*-dragons-design.md` → implement per `research/05-dragons.md` §5.
+   Then the rest of the triage order (310/311 EEex feasibility, 410+ deity weapons, 320
+   weapon dice) per `docs/plans/2026-07-20-community-ideas-triage.md`.
 1. **SR wishlist session** — *needs the user live*: walk Spell Revisions' changes, collect
    which to keep/revert/re-tune → `research/10-sr-wishlist.md` → design 200-series.
 2. **SCS component catalog** — solo-able: from the game install's WeiDU.log (414 entries;
