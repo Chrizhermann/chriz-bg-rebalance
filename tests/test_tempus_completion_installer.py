@@ -1,11 +1,14 @@
-"""End-to-end installer tests for components 400/404/405 on a synthetic game.
+"""End-to-end installer tests for components 400/404/405/406/407 on a
+synthetic game.
 
 Each test builds a minimal KEY V1/BIFF V1/TLK game (OH6000.ARE marker makes
 GAME_IS ~bg2ee~ true), installs a component through the real
 setup-chriz-bg-rebalance.tp2 — exercising the REQUIRE_PREDICATEs, the
-IDS_OF_SYMBOL stats resolution, the school-byte discovery sweep, and the
+IDS_OF_SYMBOL stats/kit resolution, the school-byte discovery sweep, and the
 RESOLVE_STR_REF TLK growth — and asserts the override delta and the
-byte-exact uninstall restore.
+byte-exact uninstall restore. The 406→407 swap test rehearses the live
+migration command (one run: --force-uninstall-list 406 --force-install-list
+407) including the subcomponent exclusivity of the two variants.
 """
 
 from __future__ import annotations
@@ -19,9 +22,11 @@ from pathlib import Path
 
 from tests.ie_formats import make_spl, read_2da, read_eff_v2, read_spl
 from tests.test_tempus_completion import (
+    EEEX_KIT_ID,
     ORIGINALS,
     ROOT,
     TOLL_SPELLS,
+    build_specapr_fixture,
     build_toll_fixture,
     build_training_fixture,
 )
@@ -63,7 +68,7 @@ def _read_tlk_strings(path: Path) -> list[str]:
 
 
 class CompletionGame:
-    """Synthetic game tailored to the 400/404/405 prerequisites."""
+    """Synthetic game tailored to the 400/404/405/406/407 prerequisites."""
 
     def __init__(
         self,
@@ -93,14 +98,26 @@ class CompletionGame:
             staging / "training", grant_shape=training_shape, weapprof_shape=weapprof_shape
         )
         build_toll_fixture(staging / "toll")
+        build_specapr_fixture(staging / "specapr")
         for name in ("WEAPPROF.2DA", "C0PR#C4.SPL", "SPLPROT.2DA"):
             shutil.copy2(staging / "training" / name, self.override / name)
         shutil.copy2(staging / "toll" / "OHTEMPUS.2DA", self.override / "OHTEMPUS.2DA")
+        shutil.copy2(staging / "specapr" / "CLSWPBON.2DA", self.override / "CLSWPBON.2DA")
         shutil.copy2(ORIGINALS / "OHTMPS2D.spl.orig", self.override / "OHTMPS2D.SPL")
         shutil.copy2(ORIGINALS / "OHTMPS2E.spl.orig", self.override / "OHTMPS2E.SPL")
         (self.override / "STATS.IDS").write_text(
             "IDS V1.0\n90 PROFICIENCYLONGSWORD\n92 PROFICIENCYAXE\n"
             "103 PROFICIENCYCROSSBOW\n204 C0_PROFICIENCYLONGSWORD\n",
+            encoding="ascii",
+            newline="\n",
+        )
+        # Component 407 prerequisites: the EEex marker (existence-checked
+        # only) and a KIT.IDS defining OHTEMPUS at the live install's value.
+        (self.override / "M___EEex.lua").write_text(
+            "-- synthetic EEex marker for installer tests\n", encoding="ascii"
+        )
+        (self.override / "KIT.IDS").write_text(
+            f"IDS V1.0\n0x{int(EEEX_KIT_ID):04x} OHTEMPUS\n",
             encoding="ascii",
             newline="\n",
         )
@@ -135,15 +152,14 @@ class CompletionGame:
     def setup_tp2(self) -> Path:
         return self.root / SETUP_TP2.name
 
-    def run(self, operation: str, component: int) -> subprocess.CompletedProcess[str]:
+    def run_raw(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
                 str(WEIDU),
                 str(self.setup_tp2),
                 "--game",
                 str(self.root),
-                operation,
-                str(component),
+                *args,
                 "--language",
                 "0",
                 "--use-lang",
@@ -157,6 +173,9 @@ class CompletionGame:
             timeout=120,
             check=False,
         )
+
+    def run(self, operation: str, component: int) -> subprocess.CompletedProcess[str]:
+        return self.run_raw(operation, str(component))
 
     def transcript(self, process: subprocess.CompletedProcess[str]) -> str:
         return f"{process.stdout}\n{process.stderr}".strip()
@@ -308,6 +327,51 @@ class TempusCompletionInstallerTests(unittest.TestCase):
         transcript = game.transcript(process)
         self.assertIn("NOT INSTALLED", transcript, transcript)
         self.assertEqual(game.pre_override, _raw_file_tree(game.override))
+
+    def test_component_407_ships_stamped_listener_then_uninstalls(self) -> None:
+        game = self._game()
+        self._install(game, 407)
+
+        new_files = {name.upper() for name in _raw_file_tree(game.override)} - {
+            name.upper() for name in game.pre_override
+        }
+        self.assertEqual(new_files, {"M_CBRAPR.LUA"})
+        shipped = (game.override / "M_CBRAPR.lua").read_text(encoding="ascii")
+        self.assertIn(f"local CBR_APR_TEMPUS_KIT = {EEEX_KIT_ID}", shipped)
+        self.assertNotIn("CBR_TEMPUS_KIT_ID", shipped)
+        self.assertEqual(
+            _read_tlk_strings(game.lang_tlk), [""], "component 407 must stay TLK-neutral"
+        )
+        self._uninstall_restores_override(game, 407)
+
+    def test_spec_apr_swap_406_to_407_in_one_run(self) -> None:
+        """Rehearses the live migration: one WeiDU run uninstalls the
+        CLSWPBON variant and installs the EEex variant."""
+        game = self._game()
+        clswpbon_pre = (game.override / "CLSWPBON.2DA").read_bytes()
+
+        self._install(game, 406)
+        self.assertNotEqual(
+            (game.override / "CLSWPBON.2DA").read_bytes(), clswpbon_pre,
+            "406 must actually change the table before the swap is meaningful",
+        )
+
+        process = game.run_raw(
+            "--force-uninstall-list", "406", "--force-install-list", "407"
+        )
+        transcript = game.transcript(process)
+        self.assertIn("SUCCESSFULLY INSTALLED", transcript, transcript)
+        self.assertEqual(
+            (game.override / "CLSWPBON.2DA").read_bytes(), clswpbon_pre,
+            "uninstalling 406 must restore CLSWPBON.2DA byte-exactly",
+        )
+        shipped = (game.override / "M_CBRAPR.lua").read_text(encoding="ascii")
+        self.assertIn(f"local CBR_APR_TEMPUS_KIT = {EEEX_KIT_ID}", shipped)
+
+        weidu_log = (game.root / "WeiDU.log").read_text(encoding="ascii", errors="replace")
+        installed = [line for line in weidu_log.splitlines() if line.startswith("~")]
+        self.assertEqual(len(installed), 1, weidu_log)
+        self.assertIn("#407", installed[0])
 
 
 if __name__ == "__main__":

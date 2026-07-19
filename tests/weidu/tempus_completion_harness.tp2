@@ -1,5 +1,5 @@
 // Isolated --nogame harness for the tempus-completion libraries
-// (components 400 / 404 / 405 / 406). Each component owns its argv layout:
+// (components 400 / 404 / 405 / 406 / 407). Each component owns its argv layout:
 //   argv[0] = tempus_holy_power.tpa (shared primitives)
 //   argv[1] = component production TPA
 //   argv[2] = fixture root, argv[3] = output root
@@ -7,6 +7,9 @@
 // Component 1 (chaos tides):     argv[4..6] = announce strrefs.
 // Component 2 (divination toll): argv[4] = count, argv[5..12] = resrefs.
 // Component 3 (spec APR):        no extra args.
+// Component 4 (spec APR EEex):   argv[4] = kit id, argv[5] = template path.
+//   Its only file input is the template (argv[5]); the fixture root is
+//   unused, and the library's own COPY creates the output root.
 BACKUP ~backup~
 AUTHOR ~chriz-bg-rebalance test harness~
 
@@ -88,3 +91,17 @@ LAF cbr_apply_tempus_spec_apr
   STR_VAR resource_dir = ~%argv[3]%~
 END
 COPY ~%argv[2]%/CLSWPBON.2DA~ ~%argv[3]%/CBR_TEST.OK~
+
+BEGIN ~Tempus completion harness: spec APR EEex~
+DESIGNATED 4
+
+INCLUDE ~%argv[0]%~
+INCLUDE ~%argv[1]%~
+OUTER_SET cbr_harness_kit_id = %argv[4]%
+LAF cbr_apply_tempus_spec_apr_eeex
+  INT_VAR kit_id = cbr_harness_kit_id
+  STR_VAR
+    resource_dir = ~%argv[3]%~
+    template_file = ~%argv[5]%~
+END
+COPY ~%argv[3]%/M_CBRAPR.lua~ ~%argv[3]%/CBR_TEST.OK~

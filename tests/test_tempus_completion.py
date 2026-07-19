@@ -1,4 +1,4 @@
-"""Hermetic --nogame tests for the tempus-completion libraries (400/404/405).
+"""Hermetic --nogame tests for the tempus-completion libraries (400-407).
 
 Fixture principle: live-shaped captures over hand-built models. The Chaos of
 Battle fixtures are the real vanilla BIF payloads (research/originals/*.orig)
@@ -9,6 +9,7 @@ the pristine Artisan state and the 2026-07-14 live-hotfixed state.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -34,14 +35,17 @@ TRAINING_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_weapon_training.tpa
 TIDES_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_chaos_tides.tpa"
 TOLL_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_divination_toll.tpa"
 SPEC_APR_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_spec_apr.tpa"
+SPEC_APR_EEEX_TPA = ROOT / "chriz-bg-rebalance" / "lib" / "tempus_spec_apr_eeex.tpa"
+LUA_TEMPLATE = ROOT / "chriz-bg-rebalance" / "lua" / "M_CBRAPR.lua"
 ORIGINALS = ROOT / "research" / "originals"
 
-COMPONENT = {"training": "0", "tides": "1", "toll": "2", "specapr": "3"}
+COMPONENT = {"training": "0", "tides": "1", "toll": "2", "specapr": "3", "specapr_eeex": "4"}
 COMPONENT_TPA = {
     "training": TRAINING_TPA,
     "tides": TIDES_TPA,
     "toll": TOLL_TPA,
     "specapr": SPEC_APR_TPA,
+    "specapr_eeex": SPEC_APR_EEEX_TPA,
 }
 
 LS_PERM_STAT = 204
@@ -725,6 +729,125 @@ class SpecAprTests(TempusCompletionTestCase):
             expect_success=False,
         )
         self.assertIn("holds yes (expected 0 or 1)", run.transcript)
+
+
+# ---------------------------------------------------------------------------
+# Component 407 — specialization APR (EEex listener)
+# ---------------------------------------------------------------------------
+
+# The live install's OHTEMPUS kit id (KIT.IDS 0x4029). Any positive value
+# works for the harness — the library stamps whatever it is handed.
+EEEX_KIT_ID = "16425"
+
+# Machine-local fallback: EET ships a standalone Lua 5.3 interpreter inside
+# the game directory (read-only use). CBR_LUA overrides; PATH is scanned too;
+# the compile test skips with a reason when no interpreter is available.
+GAME_LUA = Path(r"C:\Games\Baldur's Gate II Enhanced Edition modded\EET\bin\win32\x86_64\lua.exe")
+
+
+def _find_lua() -> str | None:
+    override = os.environ.get("CBR_LUA")
+    if override and Path(override).exists():
+        return override
+    if GAME_LUA.exists():
+        return str(GAME_LUA)
+    for name in ("lua", "lua5.3", "lua5.1", "luajit"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+class SpecAprEeexTests(TempusCompletionTestCase):
+    """Component 407 takes its file input via argv (the Lua template), not
+    from a fixture directory, so it runs HarnessRun directly instead of the
+    fixture-copying run_component path."""
+
+    def _run_eeex(
+        self,
+        kit_id: str,
+        template: Path,
+        *,
+        expect_success: bool = True,
+        rerun_on_output: bool = False,
+    ) -> HarnessRun:
+        fixture_holder = tempfile.TemporaryDirectory(prefix="cbr-completion-fixture-")
+        self.addCleanup(fixture_holder.cleanup)
+        fixture_dir = Path(fixture_holder.name) / "fixture"
+        fixture_dir.mkdir(parents=True)
+        extra = (kit_id, str(template))
+        run = HarnessRun("specapr_eeex", fixture_dir, extra)
+        self.addCleanup(run.cleanup)
+        if expect_success and not run.succeeded:
+            self.fail(f"harness run failed unexpectedly:\n{run.transcript}")
+        if not expect_success:
+            self.assertIn("NOT INSTALLED DUE TO ERRORS", run.transcript)
+            self.assertFalse((run.output / "CBR_TEST.OK").exists())
+        if rerun_on_output:
+            second = HarnessRun("specapr_eeex", run.output, extra)
+            self.addCleanup(second.cleanup)
+            if not second.succeeded:
+                self.fail(f"second pass failed:\n{second.transcript}")
+            self.assertEqual(
+                _raw_tree(run.output), _raw_tree(second.output),
+                "library is not byte-idempotent",
+            )
+        return run
+
+    def test_stamps_kit_id_and_is_idempotent(self) -> None:
+        template_text = LUA_TEMPLATE.read_text(encoding="ascii")
+        self.assertIn(
+            "local CBR_APR_TEMPUS_KIT = %CBR_TEMPUS_KIT_ID%", template_text,
+            "the committed template must keep the install-time placeholder",
+        )
+        run = self._run_eeex(EEEX_KIT_ID, LUA_TEMPLATE, rerun_on_output=True)
+        shipped = (run.output / "M_CBRAPR.lua").read_text(encoding="ascii")
+        self.assertIn(f"local CBR_APR_TEMPUS_KIT = {EEEX_KIT_ID}", shipped)
+        self.assertNotIn("CBR_TEMPUS_KIT_ID", shipped)
+        # The output path renders with platform separators — assert the
+        # stable pieces of the summary line instead of the full path.
+        self.assertIn("cbr 407: shipped", run.transcript)
+        self.assertIn(f"with OHTEMPUS kit id {EEEX_KIT_ID}", run.transcript)
+
+    def test_shipped_listener_compiles_and_guards_without_eeex(self) -> None:
+        lua = _find_lua()
+        if lua is None:
+            self.skipTest("no Lua interpreter found (set CBR_LUA to enable)")
+        run = self._run_eeex(EEEX_KIT_ID, LUA_TEMPLATE)
+        shipped = run.output / "M_CBRAPR.lua"
+        compile_check = subprocess.run(
+            [lua, "-e", f"assert(loadfile([[{shipped}]]))"],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        self.assertEqual(
+            compile_check.returncode, 0,
+            f"shipped listener does not compile:\n{compile_check.stderr}",
+        )
+        # Without EEex globals the file must bow out cleanly at load.
+        guard_run = subprocess.run(
+            [lua, str(shipped)], capture_output=True, text=True, timeout=30, check=False,
+        )
+        self.assertEqual(guard_run.returncode, 0, guard_run.stderr)
+        self.assertIn("EEex not detected", guard_run.stdout)
+
+    def test_template_without_placeholder_fails(self) -> None:
+        holder = tempfile.TemporaryDirectory(prefix="cbr-completion-template-")
+        self.addCleanup(holder.cleanup)
+        broken = Path(holder.name) / "BROKEN.lua"
+        broken.write_text("local x = 1\n", encoding="ascii")
+        run = self._run_eeex(EEEX_KIT_ID, broken, expect_success=False)
+        self.assertIn("carries no CBR_TEMPUS_KIT_ID placeholder", run.transcript)
+
+    def test_missing_template_fails(self) -> None:
+        holder = tempfile.TemporaryDirectory(prefix="cbr-completion-template-")
+        self.addCleanup(holder.cleanup)
+        missing = Path(holder.name) / "DOES_NOT_EXIST.lua"
+        run = self._run_eeex(EEEX_KIT_ID, missing, expect_success=False)
+        self.assertIn("requires the listener template", run.transcript)
+
+    def test_nonpositive_kit_id_fails(self) -> None:
+        run = self._run_eeex("0", LUA_TEMPLATE, expect_success=False)
+        self.assertIn("kit_id must be a positive KIT.IDS value", run.transcript)
 
 
 if __name__ == "__main__":

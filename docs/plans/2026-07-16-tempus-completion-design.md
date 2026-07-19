@@ -247,3 +247,49 @@ scan of the reference install found OHTEMPUS to be the ONLY pure-cleric kit with
 any weapon cap >= 2 — no other pure cleric can ever reach specialization, so the
 class flip is de-facto kit-scoped. Follow-up (fresh installs): informational
 install-time scan listing other >=2-cap cleric kits.
+
+## Addendum 2026-07-20 — Component 407: EEex spec-APR variant (`cbr_cleric_tempus_spec_apr_eeex`)
+
+Live play on 406 v2 gave 2.5 APR with a 2-pip flail — the CLERIC-row flip
+grants the FULL warrior WSPATCK progression (fighter-grade), stronger than the
+kit advertises. The research sweep (consolidated in the bg-modding skill,
+`ie-apr-proficiency.md`) found no data-only spec-cap knob anywhere:
+GETS_PROF_APR is a boolean class-row gate into the whole table, SPLPROT has no
+equipment sensor, op183 is category- (not proficiency-) granular. User chose
+Option A (2026-07-20): an EEex derived-stats listener.
+
+Mechanism: `override/M_CBRAPR.lua` registers
+`EEex_Opcode_AddListsResolvedListener`; every rebuild of a sprite's derived
+stats (equip, weapon switch, level-up, load — all funnel through
+`CGameSprite::ProcessEffectList`, which reloads `CDerivedStats` first) re-runs
+the hook, so the +1/2 write is self-healing, save-clean, and vanishes with the
+file. Listener gates, in order: kit stat 152 == OHTEMPUS id; selected-weapon
+slot from `m_equipment.m_selectedWeapon` (conjured weapons in fist slot 10
+COUNT on purpose — Spiritual Hammer is kit flavor; bare fists drop out at the
+proficiency-range check); ITM-header `proficiencyType` in 89..115 excluding
+styles 111-114; pips (stat == prof id) >= 2. Then
+`stats.m_nNumberOfAttacks = encode(decode(n) + 0.5)` with a hard clamp at 5.
+pcall-wrapped; self-disables after 10 body errors; guarded against loading
+without EEex (M_*.lua auto-load is a vanilla feature).
+
+Packaging: 406 and 407 are SUBCOMPONENTs of one group (@1406) — mutually
+exclusive by construction. 407 predicates: `GAME_IS bg2ee eet`,
+`OHTEMPUS.2DA`, `M___EEex.lua`, `IDS_OF_SYMBOL(kit OHTEMPUS) > 0`. The kit id
+is stamped into the Lua at install time via REPLACE_TEXTUALLY of
+`%CBR_TEMPUS_KIT_ID%` (kit ids are per-install ADD_KIT allocations — never
+hardcode). Numbers: 1.5 APR baseline with a specialized weapon, 2.5 during
+Holy Power tier-1 (vs 406's 2.5/3.5).
+
+Verification: harness DESIGNATED 4; pytest — stamp+byte-idempotence, shipped
+listener compiles under EET's Lua 5.3 AND bows out cleanly without EEex
+globals, no-placeholder/missing-template/kit_id<=0 controlled-RED; installer
+suite — fresh 407 install/uninstall byte-restore, plus a one-run
+`--force-uninstall-list 406 --force-install-list 407` swap rehearsal
+(CLSWPBON.2DA byte-exact revert + WeiDU.log ends with exactly one #407 line).
+Full suite 108 green.
+
+OPEN at ship time — the one unverified primitive: Lua *write* acceptance on
+`m_nNumberOfAttacks` (reads verified live; bindings may reject or chain the
+setter). Decisive live check after the swap: Branwen, flail at 2 pips, no
+Holy Power → APR stat 8 must read 7 (= 1.5). Fallback if the write does not
+take: Lua-managed op1 (type 0, key 6) effect with op321/sourceRes dedup.

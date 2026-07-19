@@ -1,0 +1,64 @@
+// chriz-bg-rebalance — Cleric of Tempus specialization APR, EEex variant
+// (component 407).
+//
+// Component 406 flips CLSWPBON.2DA's CLERIC row, which grants the FULL
+// warrior WSPATCK progression (live-verified 2026-07-17: a 2-pip flail put
+// APR stat 8 at 2.5 attacks — fighter-grade, stronger than the kit
+// advertises). The engine offers no spec-only knob: GETS_PROF_APR is a
+// boolean class-row gate into the whole table. This variant instead ships an
+// EEex listener (M_CBRAPR.lua) that adds exactly +1/2 attack while the
+// selected weapon is one the character holds 2+ pips in, scoped to the
+// Tempus kit. EEex_Opcode_AddListsResolvedListener fires after every
+// derived-stats rebuild, so the write is self-healing, save-clean, and
+// vanishes with the file.
+//
+// The kit id is stamped into the Lua at install time from KIT.IDS — kit ids
+// are allocated per-install and must never be hardcoded.
+
+DEFINE_ACTION_FUNCTION cbr_apply_tempus_spec_apr_eeex
+  INT_VAR
+    kit_id = 0
+  STR_VAR
+    resource_dir = ~~
+    template_file = ~~
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  OUTER_SPRINT template_file EVALUATE_BUFFER ~%template_file%~
+  ACTION_IF (~%resource_dir%~ STR_EQ ~~) BEGIN
+    FAIL ~CBR Tempus spec APR (EEex) requires resource_dir.~
+  END
+  ACTION_IF (~%template_file%~ STR_EQ ~~) BEGIN
+    FAIL ~CBR Tempus spec APR (EEex) requires template_file.~
+  END
+  ACTION_IF !(FILE_EXISTS ~%template_file%~) BEGIN
+    FAIL ~CBR Tempus spec APR (EEex) requires the listener template %template_file%.~
+  END
+  ACTION_IF (kit_id <= 0) BEGIN
+    FAIL ~CBR Tempus spec APR (EEex) validation failed: kit_id must be a positive KIT.IDS value, got %kit_id%.~
+  END
+
+  COPY ~%template_file%~ ~%resource_dir%/M_CBRAPR.lua~
+    PATCH_IF (INDEX_BUFFER (~CBR_TEMPUS_KIT_ID~) < 0) BEGIN
+      PATCH_FAIL ~CBR Tempus spec APR (EEex) validation failed: the listener template carries no CBR_TEMPUS_KIT_ID placeholder.~
+    END
+    REPLACE_TEXTUALLY ~%CBR_TEMPUS_KIT_ID%~ ~%kit_id%~
+    PATCH_IF (INDEX_BUFFER (~CBR_TEMPUS_KIT_ID~) >= 0) BEGIN
+      PATCH_FAIL ~CBR Tempus spec APR (EEex) validation failed: a CBR_TEMPUS_KIT_ID placeholder survived substitution.~
+    END
+    PATCH_IF (INDEX_BUFFER (~local CBR_APR_TEMPUS_KIT = %kit_id%~) < 0) BEGIN
+      PATCH_FAIL ~CBR Tempus spec APR (EEex) validation failed: the stamped kit-id assignment is missing.~
+    END
+
+  // Second pass re-validates the shipped file (and proves the write
+  // landed); BUT_ONLY takes zero writes on the unchanged buffer.
+  COPY ~%resource_dir%/M_CBRAPR.lua~ ~%resource_dir%/M_CBRAPR.lua~
+    PATCH_IF (INDEX_BUFFER (~CBR_TEMPUS_KIT_ID~) >= 0) BEGIN
+      PATCH_FAIL ~CBR Tempus spec APR (EEex) verification failed: placeholder present in the shipped listener.~
+    END
+    PATCH_IF (INDEX_BUFFER (~local CBR_APR_TEMPUS_KIT = %kit_id%~) < 0) BEGIN
+      PATCH_FAIL ~CBR Tempus spec APR (EEex) verification failed: kit-id assignment missing from the shipped listener.~
+    END
+    BUT_ONLY
+
+  PRINT ~cbr 407: shipped %resource_dir%/M_CBRAPR.lua with OHTEMPUS kit id %kit_id% (+1/2 attack while wielding a 2-pip weapon).~
+END

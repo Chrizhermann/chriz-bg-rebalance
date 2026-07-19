@@ -14,6 +14,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/tempus_chaos_tides.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/tempus_divination_toll.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/tempus_spec_apr.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/tempus_spec_apr_eeex.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -320,8 +321,15 @@ LAF cbr_apply_tempus_divination_toll
   STR_VAR resource_dir = ~override~
 END
 
+// The two specialization-APR variants are mutually exclusive subcomponents:
+// 406 flips CLSWPBON's CLERIC row (engine table — grants the FULL warrior
+// WSPATCK progression, live-verified stronger than the kit advertises),
+// 407 ships an EEex derived-stats listener that adds exactly +1/2 attack
+// while the selected weapon holds 2+ pips (the advertised behavior).
+
 BEGIN @406
 DESIGNATED 406
+SUBCOMPONENT @1406
 GROUP @1400
 LABEL ~cbr_cleric_tempus_spec_apr~
 
@@ -333,4 +341,26 @@ COPY_EXISTING ~CLSWPBON.2DA~ ~override/CLSWPBON.2DA~
 
 LAF cbr_apply_tempus_spec_apr
   STR_VAR resource_dir = ~override~
+END
+
+BEGIN @407
+DESIGNATED 407
+SUBCOMPONENT @1406
+GROUP @1400
+LABEL ~cbr_cleric_tempus_spec_apr_eeex~
+
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9440
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9442
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9450
+REQUIRE_PREDICATE (IDS_OF_SYMBOL (~kit~ ~OHTEMPUS~) > 0) @9451
+
+// Kit ids are allocated per-install by ADD_KIT order — resolve OHTEMPUS
+// from the live KIT.IDS and stamp it into the listener at install time.
+OUTER_SET cbr_sae_resolved_kit_id = IDS_OF_SYMBOL (~kit~ ~OHTEMPUS~)
+
+LAF cbr_apply_tempus_spec_apr_eeex
+  INT_VAR kit_id = cbr_sae_resolved_kit_id
+  STR_VAR
+    resource_dir = ~override~
+    template_file = ~chriz-bg-rebalance/lua/M_CBRAPR.lua~
 END
