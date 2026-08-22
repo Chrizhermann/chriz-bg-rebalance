@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/chriz-bg-rebalance~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.1.0~
+VERSION ~v0.2.0~
 
 // Load the tested transformation library and define one installer wrapper for
 // all Tempus Holy Power compatibility choices. WeiDU's backup namespace is
@@ -71,6 +71,32 @@ ALWAYS
         phase                 = ~full~
     END
   END // cbr_install_tempus_holy_power_component
+
+  // Shared body of components 407 (fresh install) and 409 (tail re-ship).
+  // Kit ids are allocated per-install by ADD_KIT order — resolve OHTEMPUS
+  // from the live KIT.IDS; the listener's idempotence marker is a private
+  // spell state allocated in the materialized SPLSTATE.IDS. Both values are
+  // stamped into the Lua at install time.
+  // Callers set cbr_sae_component_tag (~407~ / ~409~) for the summary line.
+  DEFINE_ACTION_MACRO cbr_install_tempus_spec_apr_eeex_component
+  BEGIN
+    OUTER_SET cbr_sae_resolved_kit_id = IDS_OF_SYMBOL (~kit~ ~OHTEMPUS~)
+    COPY_EXISTING ~SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
+    LAF cbr_allocate_tempus_spec_apr_state
+      INT_VAR planned_value = 242
+      STR_VAR resource_dir = ~override~
+      RET cbr_sae_marker_state = state_value
+    END
+    LAF cbr_apply_tempus_spec_apr_eeex
+      INT_VAR
+        kit_id = cbr_sae_resolved_kit_id
+        marker_state = cbr_sae_marker_state
+      STR_VAR
+        resource_dir = ~override~
+        template_file = ~chriz-bg-rebalance/lua/M_CBRAPR.lua~
+        component_tag = EVAL ~%cbr_sae_component_tag%~
+    END
+  END // cbr_install_tempus_spec_apr_eeex_component
 END // ALWAYS
 
 AUTO_TRA ~chriz-bg-rebalance/languages/%s~
@@ -354,17 +380,30 @@ REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9440
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9442
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9450
 REQUIRE_PREDICATE (IDS_OF_SYMBOL (~kit~ ~OHTEMPUS~) > 0) @9451
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) @9453
 
-// Kit ids are allocated per-install by ADD_KIT order — resolve OHTEMPUS
-// from the live KIT.IDS and stamp it into the listener at install time.
-OUTER_SET cbr_sae_resolved_kit_id = IDS_OF_SYMBOL (~kit~ ~OHTEMPUS~)
+OUTER_SPRINT cbr_sae_component_tag ~407~
+LAM cbr_install_tempus_spec_apr_eeex_component
 
-LAF cbr_apply_tempus_spec_apr_eeex
-  INT_VAR kit_id = cbr_sae_resolved_kit_id
-  STR_VAR
-    resource_dir = ~override~
-    template_file = ~chriz-bg-rebalance/lua/M_CBRAPR.lua~
-END
+// Component 409 — tail re-ship of the 407 listener for installs that carry
+// the v0.1.0 file (relative write, no idempotence marker → runaway APR,
+// research/07). Never reinstall 407 mid-stack: this component overwrites
+// override/M_CBRAPR.lua in place, WeiDU-tracked, and its uninstall hands the
+// previous listener back. On a fresh install it is a byte-identical no-op.
+BEGIN @409
+DESIGNATED 409
+GROUP @1400
+LABEL ~cbr_cleric_tempus_spec_apr_eeex_refresh~
+
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M_CBRAPR.lua~) @9452
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9440
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9442
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9450
+REQUIRE_PREDICATE (IDS_OF_SYMBOL (~kit~ ~OHTEMPUS~) > 0) @9451
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) @9453
+
+OUTER_SPRINT cbr_sae_component_tag ~409~
+LAM cbr_install_tempus_spec_apr_eeex_component
 
 BEGIN @408
 DESIGNATED 408

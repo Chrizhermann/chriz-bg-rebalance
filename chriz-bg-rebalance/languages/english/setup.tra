@@ -12,6 +12,7 @@
 @406 = ~Engine-table variant: full warrior attack progression (CLSWPBON, stronger than advertised)~
 @407 = ~EEex variant: exactly +1/2 attack while wielding a specialized weapon (recommended)~
 @408 = ~Cleric of Tempus: updated kit and ability descriptions~
+@409 = ~Cleric of Tempus: EEex specialization APR — re-ship the listener (fixes the runaway attacks-per-round of the v0.1.0 listener)~
 
 // Component groups
 @1100 = ~SCS adjustments~
@@ -105,6 +106,8 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9442 = ~OHTEMPUS.2DA is missing. Install the Cleric of Tempus kit before this component.~
 @9450 = ~EEex is not installed (M___EEex.lua not found). This variant requires EEex.~
 @9451 = ~KIT.IDS does not define OHTEMPUS — the Cleric of Tempus kit id cannot be resolved.~
+@9452 = ~M_CBRAPR.lua not found — install the EEex specialization APR component (407) first; this component re-ships its listener.~
+@9453 = ~SPLSTATE.IDS is missing. This component allocates a private spell state for the listener's idempotence marker.~
 @9460 = ~The Cleric of Tempus descriptions component supports BG2:EE / EET only.~
 @9461 = ~KITLIST.2DA, OHTMPS1.SPL, or OHTMPS2.SPL is missing. Install the Cleric of Tempus kit before this component.~
 @9462 = ~CBRTMG2.SPL not found — install the weapon training component (400) first; the text describes its changes.~

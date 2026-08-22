@@ -9,6 +9,27 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-instal
 Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
 `docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `CLAUDE.md`.
 
+## Status (2026-08-22)
+
+- **Component 407 (EEex spec-APR listener) was LIVE-BROKEN — fixed, shipped as 409.** The
+  user saw Branwen's APR cycle 1.5 → 5 while unpaused. Root cause (disassembly of
+  `CGameSprite::ProcessEffectList`, `research/07-spec-apr-listener-runaway.md`):
+  `EEex_Opcode_AddListsResolvedListener` fires every AI-tick PASS, but the engine rebuilds
+  `CDerivedStats` only every 15th pass / on `m_newEffect` — the v0.1.0 relative `+½` write
+  accumulated on the unrebuilt struct. Fix = per-rebuild idempotence marker: private
+  SPLSTATE bit `CBR_TEMPUS_SPEC_APR` (planned 242) set in `stats.m_spellStates` after the
+  bump; `Reload` clears it. Template now stamps kit id + state id; new tail component
+  **409** re-ships the listener over a live 407 (never reinstall 407 mid-stack). Design
+  addendum in `docs/plans/2026-07-16-tempus-completion-design.md`; TDD suite
+  `tests/test_cbrapr_listener.py` (fake-EEex Lua cadence harness) + extended hermetic and
+  installer suites. Mod VERSION → v0.2.0.
+- **KB:** the ListsResolved cadence is recorded in the bg-modding skill (`eeex-sprites.md`,
+  `ie-apr-proficiency.md` (f), `gotchas.md`) — any future EEex stat listener must be
+  idempotent per rebuild.
+- **Live check still owed by the user after 409 is installed + game restarted:** Branwen
+  wielding a 2-pip weapon reads a *steady* 1.5 (stat 8 = 7; 2.5 under Holy Power tier-1),
+  no cycling; swapping to a 0-pip weapon drops it within a second.
+
 ## Status (2026-07-20)
 
 - **Community-ideas triage: DONE** — Discord backlog (2026-07-12→20) triaged against the

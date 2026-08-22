@@ -23,6 +23,8 @@ from pathlib import Path
 from tests.ie_formats import SplAbility, make_spl, read_2da, read_eff_v2, read_spl
 from tests.test_tempus_completion import (
     EEEX_KIT_ID,
+    MARKER_SYMBOL,
+    PLANNED_STATE,
     ORIGINALS,
     ROOT,
     TOLL_SPELLS,
@@ -356,14 +358,62 @@ class TempusCompletionInstallerTests(unittest.TestCase):
         new_files = {name.upper() for name in _raw_file_tree(game.override)} - {
             name.upper() for name in game.pre_override
         }
-        self.assertEqual(new_files, {"M_CBRAPR.LUA"})
+        self.assertEqual(new_files, {"M_CBRAPR.LUA", "SPLSTATE.IDS"})
         shipped = (game.override / "M_CBRAPR.lua").read_text(encoding="ascii")
         self.assertIn(f"local CBR_APR_TEMPUS_KIT = {EEEX_KIT_ID}", shipped)
+        self.assertIn(f"local CBR_APR_MARKER_STATE = {PLANNED_STATE}", shipped)
         self.assertNotIn("CBR_TEMPUS_KIT_ID", shipped)
+        self.assertNotIn("CBR_TEMPUS_SPEC_APR_STATE", shipped)
+        ids_text = (game.override / "SPLSTATE.IDS").read_text(encoding="ascii")
+        self.assertIn(f"{PLANNED_STATE} {MARKER_SYMBOL}", ids_text)
+        self.assertIn("9 HOLY_POWER", ids_text, "materialized from the BIF, rows preserved")
         self.assertEqual(
             _read_tlk_strings(game.lang_tlk), [""], "component 407 must stay TLK-neutral"
         )
         self._uninstall_restores_override(game, 407)
+
+    def test_component_409_reships_the_listener_over_407_then_uninstalls_back(self) -> None:
+        """The live-install path: 407 (v0.1.0 listener) is mid-stack and must
+        never be reinstalled; 409 re-ships the fixed listener as a tail
+        component over the existing file and its uninstall hands the old
+        bytes back."""
+        game = self._game()
+        self._install(game, 407)
+        fresh = (game.override / "M_CBRAPR.lua").read_bytes()
+        ids_after_407 = (game.override / "SPLSTATE.IDS").read_bytes()
+        stale = b"-- stale v0.1.0 listener (relative write, no marker)\n"
+        (game.override / "M_CBRAPR.lua").write_bytes(stale)
+        tree_before_409 = _raw_file_tree(game.override)
+
+        self._install(game, 409)
+        self.assertEqual((game.override / "M_CBRAPR.lua").read_bytes(), fresh)
+        self.assertEqual(
+            (game.override / "SPLSTATE.IDS").read_bytes(), ids_after_407,
+            "the marker row already exists — 409 must not append a second one",
+        )
+        weidu_log = (game.root / "WeiDU.log").read_text(encoding="ascii", errors="replace")
+        installed = [line for line in weidu_log.splitlines() if line.startswith("~")]
+        self.assertEqual(len(installed), 2, weidu_log)
+        self.assertIn("#407", installed[0])
+        self.assertIn("#409", installed[1])
+        self.assertEqual(
+            _read_tlk_strings(game.lang_tlk), [""], "component 409 must stay TLK-neutral"
+        )
+
+        process = game.run("--force-uninstall-list", 409)
+        self.assertNotIn("NOT UNINSTALLED", game.transcript(process))
+        self.assertEqual(
+            _raw_file_tree(game.override), tree_before_409,
+            "uninstalling 409 must restore the pre-409 override byte-exactly",
+        )
+
+    def test_component_409_requires_the_407_listener(self) -> None:
+        game = self._game()
+        process = game.run("--force-install-list", 409)
+        transcript = game.transcript(process)
+        self.assertNotIn("SUCCESSFULLY INSTALLED", transcript, transcript)
+        self.assertIn("install the EEex specialization APR component (407) first", transcript)
+        self.assertEqual(game.pre_override, _raw_file_tree(game.override))
 
     def test_spec_apr_swap_406_to_407_in_one_run(self) -> None:
         """Rehearses the live migration: one WeiDU run uninstalls the

@@ -794,6 +794,12 @@ class SpecAprTests(TempusCompletionTestCase):
 # The live install's OHTEMPUS kit id (KIT.IDS 0x4029). Any positive value
 # works for the harness — the library stamps whatever it is handed.
 EEEX_KIT_ID = "16425"
+# Private SPLSTATE.IDS marker the listener uses to make its write idempotent
+# per derived-stats rebuild (research/07). 242 is the planned value; the
+# library falls back to the next free value below it when it is taken.
+PLANNED_STATE = "242"
+MARKER_SYMBOL = "CBR_TEMPUS_SPEC_APR"
+SPLSTATE_BASE_ROWS = ("9 HOLY_POWER", "246 CBR_TEMPUS_IH", "255 CYNICISM_EQUIPPED")
 
 # Machine-local fallback: EET ships a standalone Lua 5.3 interpreter inside
 # the game directory (read-only use). CBR_LUA overrides; PATH is scanned too;
@@ -824,6 +830,8 @@ class SpecAprEeexTests(TempusCompletionTestCase):
         kit_id: str,
         template: Path,
         *,
+        planned_state: str = PLANNED_STATE,
+        splstate_rows: tuple[str, ...] = SPLSTATE_BASE_ROWS,
         expect_success: bool = True,
         rerun_on_output: bool = False,
     ) -> HarnessRun:
@@ -831,7 +839,11 @@ class SpecAprEeexTests(TempusCompletionTestCase):
         self.addCleanup(fixture_holder.cleanup)
         fixture_dir = Path(fixture_holder.name) / "fixture"
         fixture_dir.mkdir(parents=True)
-        extra = (kit_id, str(template))
+        (fixture_dir / "SPLSTATE.IDS").write_text(
+            "IDS V1.0\n" + "".join(f"{row}\n" for row in splstate_rows),
+            encoding="ascii", newline="\n",
+        )
+        extra = (kit_id, str(template), planned_state)
         run = HarnessRun("specapr_eeex", fixture_dir, extra)
         self.addCleanup(run.cleanup)
         if expect_success and not run.succeeded:
@@ -856,14 +868,57 @@ class SpecAprEeexTests(TempusCompletionTestCase):
             "local CBR_APR_TEMPUS_KIT = %CBR_TEMPUS_KIT_ID%", template_text,
             "the committed template must keep the install-time placeholder",
         )
+        self.assertIn(
+            "local CBR_APR_MARKER_STATE = %CBR_TEMPUS_SPEC_APR_STATE%", template_text,
+            "the committed template must keep the marker-state placeholder",
+        )
         run = self._run_eeex(EEEX_KIT_ID, LUA_TEMPLATE, rerun_on_output=True)
         shipped = (run.output / "M_CBRAPR.lua").read_text(encoding="ascii")
         self.assertIn(f"local CBR_APR_TEMPUS_KIT = {EEEX_KIT_ID}", shipped)
+        self.assertIn(f"local CBR_APR_MARKER_STATE = {PLANNED_STATE}", shipped)
         self.assertNotIn("CBR_TEMPUS_KIT_ID", shipped)
+        self.assertNotIn("CBR_TEMPUS_SPEC_APR_STATE", shipped)
+        ids_text = (run.output / "SPLSTATE.IDS").read_text(encoding="ascii")
+        self.assertIn(f"{PLANNED_STATE} {MARKER_SYMBOL}", ids_text)
+        self.assertEqual(ids_text.count(MARKER_SYMBOL), 1)
         # The output path renders with platform separators — assert the
         # stable pieces of the summary line instead of the full path.
         self.assertIn("cbr 407: shipped", run.transcript)
         self.assertIn(f"with OHTEMPUS kit id {EEEX_KIT_ID}", run.transcript)
+        self.assertIn(f"marker state {PLANNED_STATE}", run.transcript)
+
+    def test_reuses_an_existing_private_state_symbol(self) -> None:
+        rows = SPLSTATE_BASE_ROWS + (f"200 {MARKER_SYMBOL}",)
+        run = self._run_eeex(EEEX_KIT_ID, LUA_TEMPLATE, splstate_rows=rows, rerun_on_output=True)
+        shipped = (run.output / "M_CBRAPR.lua").read_text(encoding="ascii")
+        self.assertIn("local CBR_APR_MARKER_STATE = 200", shipped)
+        ids_text = (run.output / "SPLSTATE.IDS").read_text(encoding="ascii")
+        self.assertEqual(ids_text.count(MARKER_SYMBOL), 1, "must not append a second row")
+        self.assertNotIn(f"{PLANNED_STATE} {MARKER_SYMBOL}", ids_text)
+
+    def test_occupied_planned_state_falls_back_to_next_free_value(self) -> None:
+        rows = SPLSTATE_BASE_ROWS + (f"{PLANNED_STATE} SOMEBODY_ELSE",)
+        run = self._run_eeex(EEEX_KIT_ID, LUA_TEMPLATE, splstate_rows=rows)
+        shipped = (run.output / "M_CBRAPR.lua").read_text(encoding="ascii")
+        self.assertIn("local CBR_APR_MARKER_STATE = 241", shipped)
+        ids_text = (run.output / "SPLSTATE.IDS").read_text(encoding="ascii")
+        self.assertIn(f"241 {MARKER_SYMBOL}", ids_text)
+        self.assertIn(f"{PLANNED_STATE} SOMEBODY_ELSE", ids_text, "foreign row untouched")
+
+    def test_duplicate_private_state_symbol_fails(self) -> None:
+        rows = SPLSTATE_BASE_ROWS + (f"200 {MARKER_SYMBOL}", f"201 {MARKER_SYMBOL}")
+        run = self._run_eeex(EEEX_KIT_ID, LUA_TEMPLATE, splstate_rows=rows, expect_success=False)
+        self.assertIn("defined more than once", run.transcript)
+
+    def test_template_without_state_placeholder_fails(self) -> None:
+        holder = tempfile.TemporaryDirectory(prefix="cbr-completion-template-")
+        self.addCleanup(holder.cleanup)
+        stale = Path(holder.name) / "STALE.lua"
+        stale.write_text(
+            "local CBR_APR_TEMPUS_KIT = %CBR_TEMPUS_KIT_ID%\n", encoding="ascii", newline="\n"
+        )
+        run = self._run_eeex(EEEX_KIT_ID, stale, expect_success=False)
+        self.assertIn("carries no CBR_TEMPUS_SPEC_APR_STATE placeholder", run.transcript)
 
     def test_shipped_listener_compiles_and_guards_without_eeex(self) -> None:
         lua = _find_lua()

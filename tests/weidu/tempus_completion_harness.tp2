@@ -7,9 +7,9 @@
 // Component 1 (chaos tides):     argv[4..6] = announce strrefs.
 // Component 2 (divination toll): argv[4] = count, argv[5..12] = resrefs.
 // Component 3 (spec APR):        no extra args.
-// Component 4 (spec APR EEex):   argv[4] = kit id, argv[5] = template path.
-//   Its only file input is the template (argv[5]); the fixture root is
-//   unused, and the library's own COPY creates the output root.
+// Component 4 (spec APR EEex):   argv[4] = kit id, argv[5] = template path,
+//   argv[6] = planned marker spell-state value. The fixture root carries the
+//   SPLSTATE.IDS the marker state is allocated in.
 // Component 5 (descriptions):    argv[4..6] = kit/HolyPower/Chaos strrefs.
 BACKUP ~backup~
 AUTHOR ~chriz-bg-rebalance test harness~
@@ -96,11 +96,20 @@ COPY ~%argv[2]%/CLSWPBON.2DA~ ~%argv[3]%/CBR_TEST.OK~
 BEGIN ~Tempus completion harness: spec APR EEex~
 DESIGNATED 4
 
+COPY ~%argv[2]%~ ~%argv[3]%~
 INCLUDE ~%argv[0]%~
 INCLUDE ~%argv[1]%~
 OUTER_SET cbr_harness_kit_id = %argv[4]%
+OUTER_SET cbr_harness_planned_state = %argv[6]%
+LAF cbr_allocate_tempus_spec_apr_state
+  INT_VAR planned_value = cbr_harness_planned_state
+  STR_VAR resource_dir = ~%argv[3]%~
+  RET cbr_harness_marker_state = state_value
+END
 LAF cbr_apply_tempus_spec_apr_eeex
-  INT_VAR kit_id = cbr_harness_kit_id
+  INT_VAR
+    kit_id = cbr_harness_kit_id
+    marker_state = cbr_harness_marker_state
   STR_VAR
     resource_dir = ~%argv[3]%~
     template_file = ~%argv[5]%~

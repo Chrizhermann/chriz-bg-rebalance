@@ -1,5 +1,5 @@
 // chriz-bg-rebalance — Cleric of Tempus specialization APR, EEex variant
-// (component 407).
+// (component 407; re-shipped over a live install by component 409).
 //
 // Component 406 flips CLSWPBON.2DA's CLERIC row, which grants the FULL
 // warrior WSPATCK progression (live-verified 2026-07-17: a 2-pip flail put
@@ -8,19 +8,140 @@
 // boolean class-row gate into the whole table. This variant instead ships an
 // EEex listener (M_CBRAPR.lua) that adds exactly +1/2 attack while the
 // selected weapon is one the character holds 2+ pips in, scoped to the
-// Tempus kit. EEex_Opcode_AddListsResolvedListener fires after every
-// derived-stats rebuild, so the write is self-healing, save-clean, and
-// vanishes with the file.
+// Tempus kit.
 //
-// The kit id is stamped into the Lua at install time from KIT.IDS — kit ids
-// are allocated per-install and must never be hardcoded.
+// EEex_Opcode_AddListsResolvedListener fires once per ProcessEffectList
+// PASS (every AI tick), while the engine rebuilds CDerivedStats only on some
+// of those passes (research/07). The listener therefore keys its write to a
+// private spell state it sets in the same stats struct: CDerivedStats::Reload
+// clears the bit, so "bit clear" means "this pass rebuilt the stats". That
+// state is allocated here in SPLSTATE.IDS and stamped into the Lua next to
+// the kit id — both are per-install values and must never be hardcoded.
+
+// Plan the private marker spell state against the SPLSTATE.IDS in the
+// buffer: reuse the symbol's existing value (idempotent re-install), else the
+// highest free value at or below planned_value. Mirrors the 401 planner's
+// collision policy (duplicate symbol / shared value = hard failure).
+DEFINE_PATCH_FUNCTION cbr_plan_tempus_spec_apr_state
+  INT_VAR
+    planned_value = 242
+  STR_VAR
+    symbol = ~CBR_TEMPUS_SPEC_APR~
+  RET
+    state_value
+BEGIN
+  SET state_value = "-1"
+  SPRINT cbr_sas_symbol_upper ~%symbol%~
+  TO_UPPER cbr_sas_symbol_upper
+  PATCH_IF (planned_value < 0 || planned_value > 255) BEGIN
+    PATCH_FAIL ~CBR Tempus spec APR (EEex): planned spell-state value %planned_value% is outside the collision-safe 0..255 range.~
+  END
+  FOR (cbr_sas_i = 0; cbr_sas_i < 256; ++cbr_sas_i) BEGIN
+    SET $cbr_sas_value_count(~%cbr_sas_i%~) = 0
+  END
+  SET cbr_sas_symbol_count = 0
+  SET cbr_sas_found_value = "-1"
+  SET cbr_sas_row_count = 0
+  SET cbr_sas_ids_length = BUFFER_LENGTH
+  READ_ASCII 0 cbr_sas_ids_contents (cbr_sas_ids_length)
+  INNER_PATCH ~%cbr_sas_ids_contents%~ BEGIN
+    REPLACE_EVALUATE CASE_INSENSITIVE
+      ~^[ %TAB%]*\([^ %TAB%%WNL%%MNL%%LNL%]+\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
+    BEGIN
+      PATCH_IF (IS_AN_INT ~%MATCH1%~) BEGIN
+        ++cbr_sas_row_count
+        SET cbr_sas_current_value = MATCH1
+        SPRINT cbr_sas_current_symbol ~%MATCH2%~
+        TO_UPPER cbr_sas_current_symbol
+        PATCH_IF (cbr_sas_current_value >= 0 && cbr_sas_current_value <= 255) BEGIN
+          SET $cbr_sas_value_count(~%cbr_sas_current_value%~) += 1
+        END
+        PATCH_IF (~%cbr_sas_current_symbol%~ STR_EQ ~%cbr_sas_symbol_upper%~) BEGIN
+          ++cbr_sas_symbol_count
+          SET cbr_sas_found_value = cbr_sas_current_value
+        END
+      END
+    END
+      ~~
+  END
+  PATCH_IF (cbr_sas_row_count = 0) BEGIN
+    PATCH_FAIL ~CBR Tempus spec APR (EEex): SPLSTATE.IDS has no parseable value/symbol rows.~
+  END
+  PATCH_IF (cbr_sas_symbol_count > 1) BEGIN
+    PATCH_FAIL ~CBR SPLSTATE.IDS collision: private spell-state symbol %symbol% is defined more than once.~
+  END
+  PATCH_IF (cbr_sas_symbol_count = 1) BEGIN
+    PATCH_IF (cbr_sas_found_value < 0 || cbr_sas_found_value > 255) BEGIN
+      PATCH_FAIL ~CBR SPLSTATE.IDS collision: private spell-state symbol %symbol% carries the out-of-range value %cbr_sas_found_value%.~
+    END
+    PATCH_IF ($cbr_sas_value_count(~%cbr_sas_found_value%~) != 1) BEGIN
+      PATCH_FAIL ~CBR SPLSTATE.IDS collision: the value of private spell-state symbol %symbol% is shared by another symbol.~
+    END
+    SET state_value = cbr_sas_found_value
+  END ELSE BEGIN
+    FOR (cbr_sas_candidate = planned_value; (cbr_sas_candidate >= 0) && (state_value < 0); --cbr_sas_candidate) BEGIN
+      PATCH_IF ($cbr_sas_value_count(~%cbr_sas_candidate%~) = 0) BEGIN
+        SET state_value = cbr_sas_candidate
+      END
+    END
+    PATCH_IF (state_value < 0) BEGIN
+      PATCH_FAIL ~CBR SPLSTATE.IDS spell-state allocation is exhausted: no free value at or below %planned_value%.~
+    END
+  END
+END
+
+// Allocate (or find) the marker spell state in %resource_dir%/SPLSTATE.IDS.
+// The installer materializes the live table into override first; the
+// hermetic harness hands over a fixture directory.
+DEFINE_ACTION_FUNCTION cbr_allocate_tempus_spec_apr_state
+  INT_VAR
+    planned_value = 242
+  STR_VAR
+    resource_dir = ~~
+  RET
+    state_value
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  ACTION_IF (~%resource_dir%~ STR_EQ ~~) BEGIN
+    FAIL ~CBR Tempus spec APR (EEex) requires resource_dir.~
+  END
+  OUTER_SPRINT cbr_sas_path ~%resource_dir%/SPLSTATE.IDS~
+  ACTION_IF !(FILE_EXISTS ~%cbr_sas_path%~) BEGIN
+    FAIL ~CBR Tempus spec APR (EEex) requires %cbr_sas_path% to allocate the listener's marker spell state.~
+  END
+  OUTER_SET state_value = "-1"
+  COPY ~%cbr_sas_path%~ ~%cbr_sas_path%~
+    LPF cbr_plan_tempus_spec_apr_state
+      INT_VAR planned_value = planned_value
+      STR_VAR symbol = ~CBR_TEMPUS_SPEC_APR~
+      RET cbr_sas_planned = state_value
+    END
+    INNER_ACTION BEGIN
+      OUTER_SET state_value = cbr_sas_planned
+    END
+  BUT_ONLY
+  ACTION_IF (state_value < 0 || state_value > 255) BEGIN
+    FAIL ~CBR Tempus spec APR (EEex): marker spell-state planning produced invalid value %state_value%.~
+  END
+  // Shared 401 primitive: re-validates the tuple and appends the row only
+  // when the symbol is absent (byte-stable otherwise).
+  LAF cbr_find_or_allocate_splstate
+    INT_VAR planned_value = state_value
+    STR_VAR
+      resource_path = EVAL ~%cbr_sas_path%~
+      symbol = ~CBR_TEMPUS_SPEC_APR~
+  END
+  CLEAR_IDS_MAP
+END
 
 DEFINE_ACTION_FUNCTION cbr_apply_tempus_spec_apr_eeex
   INT_VAR
     kit_id = 0
+    marker_state = "-1"
   STR_VAR
     resource_dir = ~~
     template_file = ~~
+    component_tag = ~407~
 BEGIN
   OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
   OUTER_SPRINT template_file EVALUATE_BUFFER ~%template_file%~
@@ -36,29 +157,48 @@ BEGIN
   ACTION_IF (kit_id <= 0) BEGIN
     FAIL ~CBR Tempus spec APR (EEex) validation failed: kit_id must be a positive KIT.IDS value, got %kit_id%.~
   END
+  ACTION_IF (marker_state < 0 || marker_state > 255) BEGIN
+    FAIL ~CBR Tempus spec APR (EEex) validation failed: marker_state must be a SPLSTATE.IDS value in 0..255, got %marker_state%.~
+  END
 
   COPY ~%template_file%~ ~%resource_dir%/M_CBRAPR.lua~
     PATCH_IF (INDEX_BUFFER (~CBR_TEMPUS_KIT_ID~) < 0) BEGIN
       PATCH_FAIL ~CBR Tempus spec APR (EEex) validation failed: the listener template carries no CBR_TEMPUS_KIT_ID placeholder.~
     END
+    PATCH_IF (INDEX_BUFFER (~CBR_TEMPUS_SPEC_APR_STATE~) < 0) BEGIN
+      PATCH_FAIL ~CBR Tempus spec APR (EEex) validation failed: the listener template carries no CBR_TEMPUS_SPEC_APR_STATE placeholder.~
+    END
     REPLACE_TEXTUALLY ~%CBR_TEMPUS_KIT_ID%~ ~%kit_id%~
+    REPLACE_TEXTUALLY ~%CBR_TEMPUS_SPEC_APR_STATE%~ ~%marker_state%~
     PATCH_IF (INDEX_BUFFER (~CBR_TEMPUS_KIT_ID~) >= 0) BEGIN
       PATCH_FAIL ~CBR Tempus spec APR (EEex) validation failed: a CBR_TEMPUS_KIT_ID placeholder survived substitution.~
     END
+    PATCH_IF (INDEX_BUFFER (~CBR_TEMPUS_SPEC_APR_STATE~) >= 0) BEGIN
+      PATCH_FAIL ~CBR Tempus spec APR (EEex) validation failed: a CBR_TEMPUS_SPEC_APR_STATE placeholder survived substitution.~
+    END
     PATCH_IF (INDEX_BUFFER (~local CBR_APR_TEMPUS_KIT = %kit_id%~) < 0) BEGIN
       PATCH_FAIL ~CBR Tempus spec APR (EEex) validation failed: the stamped kit-id assignment is missing.~
+    END
+    PATCH_IF (INDEX_BUFFER (~local CBR_APR_MARKER_STATE = %marker_state%~) < 0) BEGIN
+      PATCH_FAIL ~CBR Tempus spec APR (EEex) validation failed: the stamped marker-state assignment is missing.~
     END
 
   // Second pass re-validates the shipped file (and proves the write
   // landed); BUT_ONLY takes zero writes on the unchanged buffer.
   COPY ~%resource_dir%/M_CBRAPR.lua~ ~%resource_dir%/M_CBRAPR.lua~
     PATCH_IF (INDEX_BUFFER (~CBR_TEMPUS_KIT_ID~) >= 0) BEGIN
-      PATCH_FAIL ~CBR Tempus spec APR (EEex) verification failed: placeholder present in the shipped listener.~
+      PATCH_FAIL ~CBR Tempus spec APR (EEex) verification failed: kit placeholder present in the shipped listener.~
+    END
+    PATCH_IF (INDEX_BUFFER (~CBR_TEMPUS_SPEC_APR_STATE~) >= 0) BEGIN
+      PATCH_FAIL ~CBR Tempus spec APR (EEex) verification failed: marker-state placeholder present in the shipped listener.~
     END
     PATCH_IF (INDEX_BUFFER (~local CBR_APR_TEMPUS_KIT = %kit_id%~) < 0) BEGIN
       PATCH_FAIL ~CBR Tempus spec APR (EEex) verification failed: kit-id assignment missing from the shipped listener.~
     END
+    PATCH_IF (INDEX_BUFFER (~local CBR_APR_MARKER_STATE = %marker_state%~) < 0) BEGIN
+      PATCH_FAIL ~CBR Tempus spec APR (EEex) verification failed: marker-state assignment missing from the shipped listener.~
+    END
     BUT_ONLY
 
-  PRINT ~cbr 407: shipped %resource_dir%/M_CBRAPR.lua with OHTEMPUS kit id %kit_id% (+1/2 attack while wielding a 2-pip weapon).~
+  PRINT ~cbr %component_tag%: shipped %resource_dir%/M_CBRAPR.lua with OHTEMPUS kit id %kit_id% and marker state %marker_state% (+1/2 attack while wielding a 2-pip weapon).~
 END

@@ -334,3 +334,66 @@ no-HELP-column/bad-SPL-signature/nonpositive-strref controlled-RED;
 installer — full-chain 400→404→405→407→408 (TLK +3 exactly, repoints land,
 408-only uninstall restores the pre-408 override byte-exactly, appended
 strings persist) + predicate-skip without siblings. Full suite 117 green.
+
+## Addendum 2026-08-22 — 407 listener runaway + Component 409 (`cbr_cleric_tempus_spec_apr_eeex_refresh`)
+
+**Live verdict on 407 v0.1.0: broken.** In play, Branwen's attacks-per-round climbed
+1.5 → 2 → … → 5 and snapped back to 1.5, cycling rapidly whenever the game was unpaused.
+
+**Root cause (engine, not plumbing) — `research/07-spec-apr-listener-runaway.md`:** the
+2026-07-20 premise "`EEex_Opcode_AddListsResolvedListener` fires after every derived-stats
+rebuild" is false. Disassembly of `CGameSprite::ProcessEffectList` (Baldur.exe 2.6.6.0,
+RVA 0x3AB390; hook sites from `InfinityLoader.db`) shows the hook fires once per *pass*
+(every AI tick per sprite), while `CDerivedStats::Reload` + effect-list re-application run
+only when `m_id % 15 == tick % 15` or `m_newEffect` is set; every other pass takes a fast
+path straight into the same hook with the unrebuilt `m_derivedStats`. A relative
+`+½` write therefore accumulates until the next real rebuild. The Lua stat write itself
+works — the runaway is the proof.
+
+**Fix (listener, v0.2.0):** make the write idempotent per rebuild with a marker that lives
+in the same struct as the bump: a private spell state `CBR_TEMPUS_SPEC_APR` (SPLSTATE.IDS,
+planned value 242, allocated install-time like 401's bridge states) set in
+`stats.m_spellStates` (`Array<unsigned int,8>`; word `id/32`, mask `1<<(id%32)` — the
+engine's own `SetSpellState` packing) after the bump. `Reload` clears every spell state,
+so "bit clear ⇔ this pass rebuilt the stats". Gate order: kit stat 152 → marker → selected
+slot → ITM prof → pips ≥ 2 → set marker → bump. The marker is written *before* the bump so a
+missing `:set` binding can never re-enable the runaway (pcall fuse retires the listener
+after 10 errors). Read/write `sprite.m_derivedStats` directly (the struct `Reload`
+targets; identical to `getActiveStats()` at hook time because `m_bAllowEffectListCall` is
+already 1 there). Weapon swaps that do not dirty the effect list are picked up within one
+rebuild (≤ 15 ticks); swap-in on a fast pass lands immediately. Still save-clean, still
+zero residue on removal. Rejected: per-sprite "last written value" cache (ambiguous when
+the fresh engine value equals the previous bumped value — exactly Holy Power tier-1);
+Lua-managed op1 effect (persists in saves, needs refresh/removal bookkeeping inside the
+hook); forcing `m_newEffect` every tick.
+
+**Packaging:** the 407 template now carries two placeholders (`%CBR_TEMPUS_KIT_ID%`,
+`%CBR_TEMPUS_SPEC_APR_STATE%`); `tempus_spec_apr_eeex.tpa` gains
+`cbr_plan_tempus_spec_apr_state` (reuse the symbol's value, else highest free value ≤
+planned; duplicate symbol / shared value = hard failure) and
+`cbr_allocate_tempus_spec_apr_state` (wraps 401's `cbr_find_or_allocate_splstate`,
+`CLEAR_IDS_MAP` after). The tp2 shares one macro between **407** (fresh install; now also
+materializes `SPLSTATE.IDS` into override) and the new tail component **409**, which
+re-ships `override/M_CBRAPR.lua` over a live install — the live 407 is mid-stack under 408
+and is never reinstalled. 409 predicates: the 407 artifact (`M_CBRAPR.lua`) first, then
+407's own. Its uninstall hands the previous listener back (WeiDU backup); on a fresh
+install it is a byte-identical no-op. Mod `VERSION` bumped to v0.2.0.
+
+**Verification:** new `tests/lua/cbrapr_sim.lua` + `tests/test_cbrapr_listener.py` drive the
+stamped listener through the real cadence with a fake EEex surface under EET's Lua 5.3
+(13 cases: +½ exactly once per rebuild across 200 fast passes, Holy Power baseline
+1.5 → 2.0, marker lifecycle, every gate, weapon swaps on the fast path, key-encoding
+arithmetic incl. the 5 ceiling, inert on a missing array/setter). These were written first
+and reproduced the live bug against v0.1.0 (APR pinned at key 5, swap-in → key 7).
+Hermetic harness: both placeholders stamped, SPLSTATE row appended once, byte-idempotent
+re-run, symbol reuse (200), occupied 242 → 241, duplicate symbol → NOT INSTALLED, stale
+template (kit placeholder only) → NOT INSTALLED. Installer: 407 fresh (+`SPLSTATE.IDS`)
+with byte-exact uninstall; 407 → tamper → 409 re-ships exactly the fresh bytes without a
+second IDS row, WeiDU.log #407 then #409, uninstall of 409 restores the tampered file;
+409 without 407 → predicate skip. Parse-checks clean. Live deployment: tail-install 409
+with the game closed, then restart the game (`M_*.lua` load at process start).
+
+**Knowledge captured:** bg-modding KB `eeex-sprites.md` § ListsResolved,
+`ie-apr-proficiency.md` (f), `gotchas.md` § API Corrections — the per-pass cadence, the
+field map, the SPLSTATE-bit idempotence pattern, and the `InfinityLoader.db` → PE
+exception table → capstone re-derivation recipe.
