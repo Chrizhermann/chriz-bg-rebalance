@@ -5,7 +5,10 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes for a heavily-mo
 
 ## Scope boundaries (respect them)
 
-- **This repo:** SCS adjustments (1xx), SR adjustments (2xx), cross-cutting spell audits (3xx).
+- **This repo:** SCS adjustments (1xx), SR adjustments (2xx), cross-cutting spell audits (3xx),
+  **class/kit revisions of base-game and SoD kits (4xx — e.g. the Cleric of Tempus rework 400–409).**
+  Reworking an existing kit is balance work and belongs here; *adding* new kits does not
+  (no kitpack repo exists — create one only if that ever becomes a goal).
 - **NOT here:** SoD encounters/companions → `chriz-sod-rebalance`; consolidation of legacy
   fixes → `chriz-bg-modpack`; per-mod patches (Aura, Bardic Wonders, Kitpack) → their own
   `*-Chriz-Balance-Patch` repos.
@@ -41,6 +44,6 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes for a heavily-mo
 ## Conventions
 
 - Component labels: `cbr_<area>_<name>` (mirrors chriz-bg-modpack's `cbm_`).
-- Numbering: 100–199 SCS, 200–299 SR, 300–399 cross-cutting.
+- Numbering: 100–199 SCS, 200–299 SR, 300–399 cross-cutting, 400–499 class/kit revisions.
 - Every component gets a `research/NN-*.md` diagnosis with binary evidence before code.
 - Pristine pre-fix binaries → `research/originals/`.
