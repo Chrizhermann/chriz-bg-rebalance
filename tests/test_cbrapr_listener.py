@@ -148,6 +148,18 @@ class CbraprListenerTests(unittest.TestCase):
         self.assertEqual(seen["from_5"], "5", "5 is the representable ceiling")
         self.assertEqual(seen["from_10"], "5", "4.5 + 1/2 = 5")
 
+    def test_marker_write_preserves_sibling_states_in_the_same_word(self) -> None:
+        seen = self._run("sibling_bits_preserved")
+        self.assertEqual((seen["apr"], seen["marker"], seen["siblings_intact"]), ("7", "1", "1"))
+
+    def test_copy_semantics_array_retires_the_listener_instead_of_running_away(self) -> None:
+        seen = self._run("copy_semantics_array")
+        self.assertEqual(seen["apr"], "1", "no bump may land when the marker cannot persist")
+
+    def test_negative_derived_key_is_left_alone(self) -> None:
+        seen = self._run("negative_key")
+        self.assertEqual((seen["apr"], seen["marker"]), ("-1", "0"))
+
     # -- binding surface missing: stay inert ----------------------------------
 
     def test_missing_spell_state_array_never_writes(self) -> None:

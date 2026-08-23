@@ -32,8 +32,8 @@
 
 -- The vanilla engine auto-loads every override/M_*.lua; without EEex the
 -- listener API does not exist, so bow out instead of erroring at load.
-if not (EEex_Opcode_AddListsResolvedListener and EEex_Sprite_GetStat
-        and EEex_BAnd and EEex_BOr and EEex_LShift) then
+if not (EEex_Opcode_AddListsResolvedListener and EEex_BAnd and EEex_BOr
+        and EEex_LShift) then
     print("M_CBRAPR: EEex not detected - Tempus specialization APR inactive")
     return
 end
@@ -89,11 +89,19 @@ local function cbrAprBody(sprite)
     -- styles and never legitimate ITM proficiency values.
     if prof < 89 or prof > 115 or (prof >= 111 and prof <= 114) then return end
     if stats:GetAtOffset(prof) < 2 then return end
-    -- Marker first: if the array cannot be written, nothing is bumped and
-    -- the failure fuse below retires the listener instead of letting it run
-    -- away again.
+    -- The codec models keys 0..10 only; negative (penalty) keys mirror the
+    -- encoding and are left untouched rather than mis-encoded.
+    local key = stats.m_nNumberOfAttacks
+    if key < 0 then return end
+    -- Marker first, and verified: if the array cannot be written, or the
+    -- binding handed back a copy so the bit did not persist, nothing is
+    -- bumped and the failure fuse below retires the listener instead of
+    -- letting it run away again.
     states:set(CBR_APR_MARKER_WORD, EEex_BOr(word, CBR_APR_MARKER_MASK))
-    stats.m_nNumberOfAttacks = cbrAprEncode(cbrAprDecode(stats.m_nNumberOfAttacks) + 0.5)
+    if EEex_BAnd(stats.m_spellStates:get(CBR_APR_MARKER_WORD), CBR_APR_MARKER_MASK) == 0 then
+        error("CBR Tempus spec APR: marker spell state did not persist")
+    end
+    stats.m_nNumberOfAttacks = cbrAprEncode(cbrAprDecode(key) + 0.5)
 end
 
 EEex_Opcode_AddListsResolvedListener(function(sprite)

@@ -239,6 +239,51 @@ scenarios.encoding = function()
     rebuild(s, 10, tempusFlail2); out("from_10", apr(s))  -- 4.5 -> 5
 end
 
+-- Word 7 is shared with 401's Holy Power tier states (243-246) and engine
+-- states up to 255: the marker write must be a read-modify-write.
+scenarios.sibling_bits_preserved = function()
+    local s = newSprite({})
+    local siblings = (1 << 19) | (1 << 31) -- states 243 and 255
+    s.m_derivedStats._stat = {}
+    for k, v in pairs(tempusFlail2) do s.m_derivedStats._stat[k] = v end
+    s.m_derivedStats.m_nNumberOfAttacks = 1
+    s.m_derivedStats.m_spellStates._v[7] = siblings
+    fire(s)
+    out("apr", apr(s))
+    out("marker", marker(s))
+    out("siblings_intact", (s.m_derivedStats.m_spellStates._v[7] & siblings) == siblings and 1 or 0)
+end
+
+-- If the binding ever handed back a COPY of the array, :set would land in a
+-- temporary and every pass would look like a fresh rebuild - the v0.1.0
+-- runaway with no error. The listener must verify its marker landed and
+-- retire itself instead.
+scenarios.copy_semantics_array = function()
+    local s = newSprite({})
+    local backing = s.m_derivedStats.m_spellStates
+    s.m_derivedStats.m_spellStates = nil
+    setmetatable(s.m_derivedStats, { __index = function(t, k)
+        if k == "m_spellStates" then
+            local copy = newArray(8, true)
+            for i = 0, 7 do copy._v[i] = backing._v[i] end
+            return copy
+        end
+    end })
+    rebuild(s, 1, tempusFlail2)
+    fastPass(s, 30)
+    out("apr", apr(s))
+end
+
+-- Negative derived keys mirror the encoding (-6 = -1/2); the codec only
+-- models 0..10, so the listener must leave them alone.
+scenarios.negative_key = function()
+    local s = newSprite({})
+    rebuild(s, -1, tempusFlail2)
+    fastPass(s, 14)
+    out("apr", apr(s))
+    out("marker", marker(s))
+end
+
 -- Binding surface missing: never write, trip the failure fuse, stay inert.
 scenarios.missing_spellstates_array = function()
     local s = newSprite({ spellStates = false })

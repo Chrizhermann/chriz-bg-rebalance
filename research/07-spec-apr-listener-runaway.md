@@ -23,7 +23,7 @@ from the PE exception table; field names from EEex-Docs `CGameSprite`/`CDerivedS
 | RVA | What | Field |
 |---|---|---|
 | `0x3AB528` | `mov [rsi+0x4EA4], 0` | `m_bAllowEffectListCall = 0` (re-entrancy guard) |
-| `0x3AB570`–`0x3AB585` | `m_id % 15 == [+0x3A0] % 15` ‖ `[+0x4BA4]` ‖ `[+0x4E44]` else **`je 0x3AD88F`** | slot test ‖ `m_newEffect` ‖ `m_bHPCONBonusTotalUpdate` → otherwise **fast path** |
+| `0x3AB570`–`0x3AB585` | `m_id % 15 == m_PAICallCounter % 15` ‖ `[+0x4BA4]` ‖ `[+0x4E44]` else **`je 0x3AD88F`** | slot test (`+0x3A0` = `CGameAIBase::m_PAICallCounter`, the per-sprite ProcessAI call count) ‖ `m_newEffect` ‖ `m_bHPCONBonusTotalUpdate` → otherwise **fast path** |
 | `0x3AB9B8` | `m_tempStats = m_derivedStats` (operator=) | snapshot of the previous stats |
 | `0x3ABEB8` | `call CDerivedStats::Reload(&m_derivedStats, &m_baseStats, …)` | **the only rebuild** (EEex hook `…-CDerivedStats::Reload()` sits here) |
 | `0x3ABF2B`… | equipped list, timed list applied into `m_derivedStats` | full path only |
@@ -65,7 +65,8 @@ Make the write idempotent per rebuild by keying it to a marker that lives **in t
   243–246 are 401's) via the existing `cbr_find_or_allocate_splstate`, stamp the resolved
   value into the Lua next to the kit id (`%CBR_TEMPUS_SPEC_APR_STATE%`).
 - Listener order: kit stat 152 → marker bit set? return → selected-slot/prof/pips gates →
-  bump `m_derivedStats.m_nNumberOfAttacks` → set marker bit. Read and write the same struct
+  set marker bit and re-read it (a copy-returning binding would otherwise recreate the
+  runaway silently) → bump `m_derivedStats.m_nNumberOfAttacks`. Read and write the same struct
   (`sprite.m_derivedStats`, the one `Reload` targets), not `getActiveStats()`.
 - Worst-case lag after a weapon swap that does not dirty the list: ≤ 1 rebuild (≤ 15 ticks);
   swaps that add/remove equipped effects dirty it immediately. Save-clean, zero residue on

@@ -345,7 +345,7 @@ strings persist) + predicate-skip without siblings. Full suite 117 green.
 rebuild" is false. Disassembly of `CGameSprite::ProcessEffectList` (Baldur.exe 2.6.6.0,
 RVA 0x3AB390; hook sites from `InfinityLoader.db`) shows the hook fires once per *pass*
 (every AI tick per sprite), while `CDerivedStats::Reload` + effect-list re-application run
-only when `m_id % 15 == tick % 15` or `m_newEffect` is set; every other pass takes a fast
+only when `m_id % 15 == m_PAICallCounter % 15` (per-sprite AI-call counter) or `m_newEffect` is set; every other pass takes a fast
 path straight into the same hook with the unrebuilt `m_derivedStats`. A relative
 `+½` write therefore accumulates until the next real rebuild. The Lua stat write itself
 works — the runaway is the proof.
