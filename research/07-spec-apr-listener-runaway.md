@@ -90,3 +90,18 @@ re-entrancy care inside the hook); forcing `m_newEffect` each tick (15× effect 
    Power, non-qualifying weapon→no write/no marker, fuse on missing `:set`); extend the
    --nogame harness + installer suite (407 fresh, 407→409 chain, byte-exact uninstall).
 4. Game restart required after deployment (`M_*.lua` load at process start).
+
+## Outcome (2026-08-23)
+
+- Fix merged to `main` (`1d22d4a` + `e4ab589`); 136/136 tests green (19 new).
+- **Live install DONE:** `Setup-chriz-bg-rebalance.exe --force-install-list 409` with the game
+  closed → WeiDU.log `#407 #408 #409`; `override/M_CBRAPR.lua` stamped kit 16425 / marker 242,
+  byte-identical to the repo template; `242 CBR_TEMPUS_SPEC_APR` appended to SPLSTATE.IDS;
+  compiles. Backup bundle: `…modded - safety backups\cbr-tempus-409-20260823-213044`
+  (pre-install `M_CBRAPR.lua`, `SPLSTATE.IDS`, `WeiDU.log`, SHA manifest, install log).
+- Landmine hit and repaired: the deploy used `--quick-log`, which rewrote the entire live
+  WeiDU.log without component names; restored from the backup copy + the 409 line verbatim
+  (entry list verified identical). Recorded in the bg-modding KB (gotchas § WeiDU Installation).
+- **Owed by the user (in-game, after a restart):** Branwen with a 2-pip weapon = steady 1.5
+  APR (stat 8 reads 7), 2.5 under Holy Power tier-1, no cycling; swapping to a 0-pip weapon
+  drops it within a second.
