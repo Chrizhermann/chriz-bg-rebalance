@@ -1,0 +1,77 @@
+{
+  "planPath": "docs/plans/2026-08-27-scs-ambient-readiness-implementation.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Land installed evidence and a reproducible read-only audit",
+      "status": "pending"
+    },
+    {
+      "id": 2,
+      "subject": "Lock component 120 behavior with failing binary and script tests",
+      "status": "pending",
+      "blockedBy": [1]
+    },
+    {
+      "id": 3,
+      "subject": "Implement the component 120 semantic and BCS patch library",
+      "status": "pending",
+      "blockedBy": [2]
+    },
+    {
+      "id": 4,
+      "subject": "Wire and document component 120",
+      "status": "pending",
+      "blockedBy": [3]
+    },
+    {
+      "id": 5,
+      "subject": "Build the red fake-EEex suite and session-scoped probe",
+      "status": "pending",
+      "blockedBy": [1]
+    },
+    {
+      "id": 6,
+      "subject": "Obtain authorization and run the installed EEex timing/API spike",
+      "status": "pending",
+      "blockedBy": [5]
+    },
+    {
+      "id": 7,
+      "subject": "Implement the component 121 install-time manifest compiler",
+      "status": "pending",
+      "blockedBy": [6]
+    },
+    {
+      "id": 8,
+      "subject": "Implement the ambient one-slot-per-reset runtime",
+      "status": "pending",
+      "blockedBy": [7]
+    },
+    {
+      "id": 9,
+      "subject": "Implement the urgent first-contact reaction",
+      "status": "pending",
+      "blockedBy": [8]
+    },
+    {
+      "id": 10,
+      "subject": "Wire and document component 121",
+      "status": "pending",
+      "blockedBy": [4, 9]
+    },
+    {
+      "id": 11,
+      "subject": "Run final offline verification and two-pass local review",
+      "status": "pending",
+      "blockedBy": [10]
+    },
+    {
+      "id": 12,
+      "subject": "Prepare but do not perform the live deployment checkpoint",
+      "status": "pending",
+      "blockedBy": [11]
+    }
+  ],
+  "lastUpdated": "2026-08-27T19:07:18+09:00"
+}
