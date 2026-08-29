@@ -9,6 +9,32 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-instal
 Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
 `docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `CLAUDE.md`.
 
+## Status (2026-08-29) — current focus: SCS ambient readiness
+
+- **Dragon work is being handled elsewhere and is out of scope for this branch.** Do not
+  resume component 110 from this handover.
+- **Components 120 + 121 are approved and implementation is active** on branch
+  `codex/ambient-readiness-121`. The authoritative design is
+  `docs/plans/2026-08-27-scs-ambient-readiness-design.md` (commit `ae71422`); the executable
+  plan is `docs/plans/2026-08-27-scs-ambient-readiness-implementation.md` (commit `b68b22c`).
+- **120 fixes a verified SCS / Spell Revisions semantic mismatch.** This install maps both
+  `WIZARD_IMPROVED_MANTLE` and `WIZARD_MOMENT_OF_PRESCIENCE` to spell 2808, but effective
+  `SPWI808` is Moment of Prescience and has no weapon-immunity effect. The read-only audit
+  found 585 SCS common-mage scripts, 98 numeric-2808 candidates, 77 first-round blocks,
+  80 renewal blocks, 82 chain-contingency blocks, and zero unknown target-containing
+  shapes. Exact resources and hashes are in `research/09-scs-sr-moment-of-prescience.md`
+  and `research/originals/`.
+- **121 is a deliberately retireable interim hybrid**, not the final AI architecture. The
+  user is separately developing an EEex AI overhaul that may eventually claim either
+  runtime layer. Ambient readiness starts with actually memorized 8-hour-plus self-buffs,
+  curated for hostile/neutral/allied SCS casters, consumes one real slot once per proven
+  spellbook reset, and maintains natural expiry for free only when safe. Urgent readiness
+  allows one fast but normal, interruptible weapon-protection cast per contact episode.
+- **No live implementation work is authorized.** The active game remained byte-identical
+  during Task 1's audit. Implementation Task 6 is a hard gate requiring fresh explicit
+  authorization for a session-scoped timing/API probe; any later live installation is a
+  second separate checkpoint.
+
 ## Status (2026-08-22)
 
 - **Component 407 (EEex spec-APR listener) was LIVE-BROKEN — fixed, shipped as 409.** The
@@ -73,6 +99,9 @@ Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Ap
 4. **`gh` CLI state is shared across concurrent agent sessions** — another agent may have
    switched the active account. Run `gh auth status` before any gh operation; this repo needs
    `Chrizhermann` (`gh auth switch --user Chrizhermann`).
+5. **No multi-agent research or review fan-outs unless the user explicitly asks.** Keep the
+   ambient-readiness implementation sequential and land evidence/tests/components as durable
+   work.
 
 ## Testing reality
 
@@ -99,15 +128,18 @@ session — always `--exclude` them.
 
 ## Work queue
 
-0. **Component 110 dragons — design → build**: user lever answers (asked 2026-07-20) →
-   `docs/plans/*-dragons-design.md` → implement per `research/05-dragons.md` §5.
-   Then the rest of the triage order (310/311 EEex feasibility, 410+ deity weapons, 320
-   weapon dice) per `docs/plans/2026-07-20-community-ideas-triage.md`.
-1. **SR wishlist session** — *needs the user live*: walk Spell Revisions' changes, collect
+0. **Execute ambient-readiness Tasks 1–5 offline in order** — component 120 evidence/tests/
+   implementation/wiring, then component 121's red fake-EEex suite and non-persistent probe.
+   Current plan: `docs/plans/2026-08-27-scs-ambient-readiness-implementation.md`.
+1. **Stop at Task 6 for fresh authorization** — only then run the session-scoped installed
+   EEex timing/API spike. Do not infer approval from permission to work in this worktree.
+2. **Continue components 121 and final offline verification only if the probe proves the
+   required primitives.** Prepare but do not perform live deployment.
+3. **SR wishlist session** — *needs the user live*: walk Spell Revisions' changes, collect
    which to keep/revert/re-tune → `research/10-sr-wishlist.md` → design 200-series.
-2. **SCS component catalog** — solo-able: from the game install's WeiDU.log (414 entries;
+4. **SCS component catalog** — solo-able: from the game install's WeiDU.log (414 entries;
    read-only) catalog the 77 installed SCS components + balance touchpoints; propose 1xx
    candidates. (Scope inherited from chriz-sod-rebalance "Part 3".)
-3. **Formal install of comp 100 into the live game** — pending user sign-off; tail-install.
-4. **Umbrella / collection** — see `docs/plans/2026-07-03-umbrella-analysis.md`; decision
+5. **Formal install of comp 100 into the live game** — pending user sign-off; tail-install.
+6. **Umbrella / collection** — see `docs/plans/2026-07-03-umbrella-analysis.md`; decision
    pending user, work deferred until 2xx/3xx mature.

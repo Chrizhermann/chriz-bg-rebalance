@@ -4,12 +4,12 @@
     {
       "id": 1,
       "subject": "Land installed evidence and a reproducible read-only audit",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "id": 2,
       "subject": "Lock component 120 behavior with failing binary and script tests",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [1]
     },
     {
@@ -73,5 +73,5 @@
       "blockedBy": [11]
     }
   ],
-  "lastUpdated": "2026-08-27T19:07:18+09:00"
+  "lastUpdated": "2026-08-29T22:36:11+09:00"
 }
