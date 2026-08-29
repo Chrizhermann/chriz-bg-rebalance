@@ -78,8 +78,32 @@ The comparison resources demonstrate the semantic distinction:
 
 The exact false opcode-233 tier marker and opcode-328 state 64 are therefore candidates for
 surgical removal when the mismatch predicate is true. States 187/188 are a separate fact:
-they describe generic counter priority, not weapon immunity. They remain unless the isolated
-Breach/Dispel counter-effect audit proves they are false too.
+they describe generic counter priority, not weapon immunity, and must be decided from the
+installed counter graph rather than removed as a class.
+
+### Breach / Dispel counter audit (2026-08-29)
+
+The isolated installed-resource audit resolves those two states differently:
+
+- `SPLSTATE.IDS` names 187 `PRIORITY_BREACH` and 188 `PRIORITY_DISPEL`.
+- `WIZARD_BREACH` resolves to `SPWI513`. Its two opcode-146 children reach `SPWI513B/C`;
+  `SPWI513B` contains opcode 221 with parameter 1 = 9 and parameter 2 = 7. The effective
+  `SPWI808` header has secondary type / MSECTYPE 7, so the installed Breach graph can remove
+  Moment of Prescience. **State 187 is truthful and remains.**
+- `WIZARD_DISPEL_MAGIC` resolves to `SPWI302`, whose reachable opcode 58 uses caster-level
+  dispelling (`parameter2 = 0x20001`). Every one of `SPWI808`'s 19 effects has embedded SPL
+  `resist_dispel = 0`, so none is eligible for that dispel. **State 188 is false on this
+  install and is removed.**
+
+Counter-resource provenance: `SPWI302` SHA-256
+`8576d05013fc2e413e2f7fe59d6e5af1897264edcb3fac90653c98ab9cd6e19f` (538 bytes),
+`SPWI513` `7e0f1326f2410aac9046b2050d49c343da48f3bda28f01786de2c66230cff196`
+(346 bytes), `SPWI513B`
+`2ec4562b5972e27f82cfc302d5800b0611426278abb0d75f4067d250fec00785` (490 bytes), and
+`SPWI513C` `82f6b325750cb19cc438eed584094ad3a89911222d7151aed0647620778f7c46`
+(298 bytes), all from the effective override read-only. Tests model both outcomes: a future
+dispellable target keeps 188, while a counter graph proven not to reach the target's
+secondary type does not keep 187.
 
 ## Reproducible common-mage audit
 
@@ -236,5 +260,7 @@ explicit evidence files in this repository; audit reports were written outside t
 4. If the mapped Improved Mantle is already a genuine protection in a future SR version,
    component 120 is a no-op.
 5. Preserve Moment of Prescience's gameplay effects, level, school, text, and unrelated
-   metadata. Only false weapon-protection metadata and allowlisted SCS contexts are in scope.
+   metadata. Priority states are retained or removed only from the separately proven
+   installed counter semantics; false weapon metadata and allowlisted SCS contexts remain
+   the sole repair scope.
 6. Keep dragons and broader SCS AI redesign out of this component.

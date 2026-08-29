@@ -284,6 +284,47 @@ class SplFile:
             return ""
         return _resref(self.header_raw, 0x3A)
 
+    @property
+    def name_strref(self) -> int:
+        return _u32(self.header_raw, 0x08)
+
+    @property
+    def description_strref(self) -> int:
+        return _u32(self.header_raw, 0x50)
+
+    @property
+    def spell_type(self) -> int:
+        return _u16(self.header_raw, 0x1C)
+
+    @property
+    def school(self) -> int:
+        return self.header_raw[0x25]
+
+    @property
+    def secondary_type(self) -> int:
+        return self.header_raw[0x27]
+
+    @property
+    def level(self) -> int:
+        return _u32(self.header_raw, 0x34)
+
+    def metadata_key(self) -> tuple[object, ...]:
+        """User-visible/classification metadata a surgical effect edit must preserve."""
+        return (
+            self.name_strref,
+            self.description_strref,
+            self.spell_type,
+            self.school,
+            self.secondary_type,
+            self.level,
+            self.spell_icon.upper(),
+        )
+
+    def all_effects(self) -> tuple[SplEffect, ...]:
+        return self.casting_effects + tuple(
+            effect for ability in self.abilities for effect in ability.effects
+        )
+
     def ability_for_level(self, level: int) -> SplAbility:
         candidates = [ability for ability in self.abilities if ability.required_level <= level]
         if not candidates:

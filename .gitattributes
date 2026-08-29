@@ -1,2 +1,3 @@
 # Exact installed-resource evidence must remain byte-for-byte unchanged.
 research/originals/*.orig binary
+tests/fixtures/scs_weapon_semantics/*.bcs binary

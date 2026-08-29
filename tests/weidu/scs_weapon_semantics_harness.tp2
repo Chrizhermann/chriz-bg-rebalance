@@ -1,0 +1,134 @@
+// Hermetic harness for chriz-bg-rebalance/lib/scs_weapon_protection_semantics.tpa.
+// argv[0] = production TPA, argv[1] = pre-populated working resource/script root,
+// argv[2] = optional probe resref used by classification component 1.
+
+BACKUP ~backup~
+AUTHOR ~chriz-bg-rebalance test harness~
+
+ALWAYS
+  INCLUDE ~%argv[0]%~
+END
+
+BEGIN ~SCS weapon semantics harness: library smoke~
+DESIGNATED 0
+
+COPY - ~ok~ ~%argv[1]%/CBR_TEST.OK~
+
+BEGIN ~SCS weapon semantics harness: classify one spell~
+DESIGNATED 1
+
+LAF cbr_apply_scs_weapon_protection_semantics
+  STR_VAR
+    resource_dir = ~%argv[1]%~
+    script_dir   = ~%argv[1]%~
+    spell_ids    = ~%argv[1]%/SPELL.IDS~
+    phase        = ~classify~
+    probe_resref = ~%argv[2]%~
+  RET
+    cbr_h_is_protection = probe_is_protection
+    cbr_h_mismatch      = mismatch_detected
+    cbr_h_candidates    = candidate_order
+END
+COPY - ~is_weapon_protection=%cbr_h_is_protection%
+mismatch=%cbr_h_mismatch%
+candidates=%cbr_h_candidates%
+~ ~%argv[1]%/CBR_TEST.REPORT~
+COPY - ~ok~ ~%argv[1]%/CBR_TEST.OK~
+
+BEGIN ~SCS weapon semantics harness: metadata phase~
+DESIGNATED 2
+
+LAF cbr_apply_scs_weapon_protection_semantics
+  STR_VAR
+    resource_dir = ~%argv[1]%~
+    script_dir   = ~%argv[1]%~
+    spell_ids    = ~%argv[1]%/SPELL.IDS~
+    phase        = ~metadata~
+  RET
+    cbr_h_mismatch        = mismatch_detected
+    cbr_h_metadata_removed = metadata_removed
+    cbr_h_candidates      = candidate_order
+END
+COPY - ~mismatch=%cbr_h_mismatch%
+metadata_removed=%cbr_h_metadata_removed%
+candidates=%cbr_h_candidates%
+~ ~%argv[1]%/CBR_TEST.REPORT~
+COPY - ~ok~ ~%argv[1]%/CBR_TEST.OK~
+
+BEGIN ~SCS weapon semantics harness: script phase~
+DESIGNATED 3
+
+LAF cbr_apply_scs_weapon_protection_semantics
+  STR_VAR
+    resource_dir = ~%argv[1]%~
+    script_dir   = ~%argv[1]%~
+    spell_ids    = ~%argv[1]%/SPELL.IDS~
+    phase        = ~scripts~
+  RET
+    cbr_h_mismatch     = mismatch_detected
+    cbr_h_replacement  = replacement_resref
+    cbr_h_first        = first_round_removed
+    cbr_h_renewal      = renewal_removed
+    cbr_h_chain        = chain_replaced
+    cbr_h_unknown      = unknown_blocks
+END
+COPY - ~mismatch=%cbr_h_mismatch%
+replacement=%cbr_h_replacement%
+first_round_removed=%cbr_h_first%
+renewal_removed=%cbr_h_renewal%
+chain_replaced=%cbr_h_chain%
+unknown_blocks=%cbr_h_unknown%
+~ ~%argv[1]%/CBR_TEST.REPORT~
+COPY - ~ok~ ~%argv[1]%/CBR_TEST.OK~
+
+BEGIN ~SCS weapon semantics harness: full phase~
+DESIGNATED 4
+
+LAF cbr_apply_scs_weapon_protection_semantics
+  STR_VAR
+    resource_dir = ~%argv[1]%~
+    script_dir   = ~%argv[1]%~
+    spell_ids    = ~%argv[1]%/SPELL.IDS~
+    phase        = ~full~
+  RET
+    cbr_h_mismatch         = mismatch_detected
+    cbr_h_replacement      = replacement_resref
+    cbr_h_metadata_removed = metadata_removed
+    cbr_h_first            = first_round_removed
+    cbr_h_renewal          = renewal_removed
+    cbr_h_chain            = chain_replaced
+    cbr_h_unknown          = unknown_blocks
+    cbr_h_candidates       = candidate_order
+END
+COPY - ~mismatch=%cbr_h_mismatch%
+replacement=%cbr_h_replacement%
+metadata_removed=%cbr_h_metadata_removed%
+first_round_removed=%cbr_h_first%
+renewal_removed=%cbr_h_renewal%
+chain_replaced=%cbr_h_chain%
+unknown_blocks=%cbr_h_unknown%
+candidates=%cbr_h_candidates%
+~ ~%argv[1]%/CBR_TEST.REPORT~
+COPY - ~ok~ ~%argv[1]%/CBR_TEST.OK~
+
+BEGIN ~SCS weapon semantics harness: preflight only~
+DESIGNATED 5
+
+LAF cbr_apply_scs_weapon_protection_semantics
+  STR_VAR
+    resource_dir = ~%argv[1]%~
+    script_dir   = ~%argv[1]%~
+    spell_ids    = ~%argv[1]%/SPELL.IDS~
+    phase        = ~preflight~
+  RET
+    cbr_h_mismatch    = mismatch_detected
+    cbr_h_replacement = replacement_resref
+    cbr_h_unknown     = unknown_blocks
+    cbr_h_candidates  = candidate_order
+END
+COPY - ~mismatch=%cbr_h_mismatch%
+replacement=%cbr_h_replacement%
+unknown_blocks=%cbr_h_unknown%
+candidates=%cbr_h_candidates%
+~ ~%argv[1]%/CBR_TEST.REPORT~
+COPY - ~ok~ ~%argv[1]%/CBR_TEST.OK~

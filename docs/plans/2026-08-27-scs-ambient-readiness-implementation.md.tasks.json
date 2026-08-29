@@ -9,13 +9,13 @@
     {
       "id": 2,
       "subject": "Lock component 120 behavior with failing binary and script tests",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [1]
     },
     {
       "id": 3,
       "subject": "Implement the component 120 semantic and BCS patch library",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [2]
     },
     {
@@ -73,5 +73,5 @@
       "blockedBy": [11]
     }
   ],
-  "lastUpdated": "2026-08-29T22:36:11+09:00"
+  "lastUpdated": "2026-08-29T22:54:58+09:00"
 }
