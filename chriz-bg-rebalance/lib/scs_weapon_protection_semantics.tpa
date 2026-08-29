@@ -1,0 +1,1142 @@
+// SCS / Spell Revisions weapon-protection semantic repair.
+//
+// This library is deliberately self-contained. It resolves spell resources
+// through an explicit SPELL.IDS, classifies the effective SPL opcodes, and
+// edits only allowlisted SCS common-mage script blocks. The compiled-block
+// splitter is a minimal namespaced adaptation of SCS v35.21
+// stratagems/sfo2e/alter_script.tph (DavidW): blocks are isolated from CR
+// through RS/LF/CR/LF, decompiled with SC wrappers, and only a changed block
+// is recompiled.
+
+DEFINE_PATCH_FUNCTION cbr_scs_wp_validate_spl_v1
+  STR_VAR
+    resource_name = ~unknown SPL~
+  RET
+    ability_offset
+    ability_count
+    effect_offset
+    effect_count
+BEGIN
+  SET ability_offset = 0
+  SET ability_count = 0
+  SET effect_offset = 0
+  SET effect_count = 0
+
+  PATCH_IF (BUFFER_LENGTH < 0x72) BEGIN
+    PATCH_FAIL ~CBR SCS weapon-protection validation failed for %resource_name%: header is truncated (%BUFFER_LENGTH% bytes).~
+  END
+  READ_ASCII 0x00 cbr_scs_wp_signature (8)
+  PATCH_IF !(~%cbr_scs_wp_signature%~ STR_EQ ~SPL V1  ~) BEGIN
+    PATCH_FAIL ~CBR SCS weapon-protection validation failed for %resource_name%: expected SPL V1 signature.~
+  END
+
+  READ_LONG  0x64 ability_offset
+  READ_SHORT 0x68 ability_count
+  READ_LONG  0x6a effect_offset
+  READ_SHORT 0x6e cbr_scs_wp_casting_first
+  READ_SHORT 0x70 cbr_scs_wp_casting_count
+
+  SET cbr_scs_wp_ability_end = ability_offset + (ability_count * 0x28)
+  PATCH_IF (ability_offset < 0x72 || cbr_scs_wp_ability_end > BUFFER_LENGTH) BEGIN
+    PATCH_FAIL ~CBR SCS weapon-protection validation failed for %resource_name%: ability table is out of bounds.~
+  END
+  PATCH_IF (effect_offset < cbr_scs_wp_ability_end || effect_offset > BUFFER_LENGTH) BEGIN
+    PATCH_FAIL ~CBR SCS weapon-protection validation failed for %resource_name%: effect table overlaps or is out of bounds.~
+  END
+  PATCH_IF (((BUFFER_LENGTH - effect_offset) MODULO 0x30) != 0) BEGIN
+    PATCH_FAIL ~CBR SCS weapon-protection validation failed for %resource_name%: effect table has a partial opcode record.~
+  END
+  SET effect_count = (BUFFER_LENGTH - effect_offset) / 0x30
+  PATCH_IF ((cbr_scs_wp_casting_first + cbr_scs_wp_casting_count) > effect_count) BEGIN
+    PATCH_FAIL ~CBR SCS weapon-protection validation failed for %resource_name%: casting-effect slice is out of bounds.~
+  END
+
+  FOR (cbr_scs_wp_header = 0; cbr_scs_wp_header < ability_count; ++cbr_scs_wp_header) BEGIN
+    SET cbr_scs_wp_header_offset = ability_offset + (cbr_scs_wp_header * 0x28)
+    READ_SHORT (cbr_scs_wp_header_offset + 0x1e) cbr_scs_wp_header_count
+    READ_SHORT (cbr_scs_wp_header_offset + 0x20) cbr_scs_wp_header_first
+    PATCH_IF ((cbr_scs_wp_header_first + cbr_scs_wp_header_count) > effect_count) BEGIN
+      PATCH_FAIL ~CBR SCS weapon-protection validation failed for %resource_name%: ability %cbr_scs_wp_header% effect slice is out of bounds.~
+    END
+  END
+
+  // Require an exact partition before any table rebuild. The empirically
+  // correct SPL ability layout is nFx@0x1e / firstFxIdx@0x20.
+  FOR (cbr_scs_wp_partition_effect = 0; cbr_scs_wp_partition_effect < effect_count; ++cbr_scs_wp_partition_effect) BEGIN
+    SET cbr_scs_wp_partition_refs = 0
+    PATCH_IF (cbr_scs_wp_partition_effect >= cbr_scs_wp_casting_first
+           && cbr_scs_wp_partition_effect < (cbr_scs_wp_casting_first + cbr_scs_wp_casting_count)) BEGIN
+      ++cbr_scs_wp_partition_refs
+    END
+    FOR (cbr_scs_wp_partition_header = 0; cbr_scs_wp_partition_header < ability_count; ++cbr_scs_wp_partition_header) BEGIN
+      SET cbr_scs_wp_partition_header_offset = ability_offset + (cbr_scs_wp_partition_header * 0x28)
+      READ_SHORT (cbr_scs_wp_partition_header_offset + 0x1e) cbr_scs_wp_partition_count
+      READ_SHORT (cbr_scs_wp_partition_header_offset + 0x20) cbr_scs_wp_partition_first
+      PATCH_IF (cbr_scs_wp_partition_effect >= cbr_scs_wp_partition_first
+             && cbr_scs_wp_partition_effect < (cbr_scs_wp_partition_first + cbr_scs_wp_partition_count)) BEGIN
+        ++cbr_scs_wp_partition_refs
+      END
+    END
+    PATCH_IF (cbr_scs_wp_partition_refs != 1) BEGIN
+      PATCH_FAIL ~CBR SCS weapon-protection validation failed for %resource_name%: effect %cbr_scs_wp_partition_effect% has %cbr_scs_wp_partition_refs% owners; effect slices must be an exact nonoverlapping partition.~
+    END
+  END
+END
+
+// Opcode 120 is Protection from Weapons. Parameter 2 selects a weapon type;
+// when it is zero, parameter 1 selects an enchantment value. Names and spell
+// levels are intentionally not part of this classification.
+DEFINE_PATCH_FUNCTION cbr_scs_wp_classify_spell
+  STR_VAR
+    resource_name = ~unknown SPL~
+  RET
+    is_weapon_protection
+BEGIN
+  SET is_weapon_protection = 0
+  LPF cbr_scs_wp_validate_spl_v1
+    STR_VAR resource_name = EVAL ~%resource_name%~
+    RET
+      cbr_scs_wp_class_ability_offset = ability_offset
+      cbr_scs_wp_class_ability_count  = ability_count
+      cbr_scs_wp_class_effect_offset  = effect_offset
+      cbr_scs_wp_class_effect_count   = effect_count
+  END
+  PATCH_IF (cbr_scs_wp_class_ability_count < 1) BEGIN
+    PATCH_FAIL ~CBR SCS weapon-protection classification failed for %resource_name%: no reachable ability exists.~
+  END
+
+  SET cbr_scs_wp_seen_opcode120 = 0
+  SET cbr_scs_wp_valid_opcode120 = 0
+  FOR (cbr_scs_wp_class_header = 0; cbr_scs_wp_class_header < cbr_scs_wp_class_ability_count; ++cbr_scs_wp_class_header) BEGIN
+    SET cbr_scs_wp_class_header_offset = cbr_scs_wp_class_ability_offset + (cbr_scs_wp_class_header * 0x28)
+    READ_BYTE  (cbr_scs_wp_class_header_offset + 0x0c) cbr_scs_wp_class_header_target
+    READ_SHORT (cbr_scs_wp_class_header_offset + 0x1e) cbr_scs_wp_class_header_count
+    READ_SHORT (cbr_scs_wp_class_header_offset + 0x20) cbr_scs_wp_class_header_first
+    FOR (cbr_scs_wp_class_effect = 0; cbr_scs_wp_class_effect < cbr_scs_wp_class_header_count; ++cbr_scs_wp_class_effect) BEGIN
+      SET cbr_scs_wp_class_index = cbr_scs_wp_class_header_first + cbr_scs_wp_class_effect
+      SET cbr_scs_wp_class_fx = cbr_scs_wp_class_effect_offset + (cbr_scs_wp_class_index * 0x30)
+      READ_SHORT (cbr_scs_wp_class_fx + 0x00) cbr_scs_wp_class_opcode
+      PATCH_IF (cbr_scs_wp_class_opcode = 120) BEGIN
+        ++cbr_scs_wp_seen_opcode120
+        READ_BYTE (cbr_scs_wp_class_fx + 0x02) cbr_scs_wp_class_target
+        READ_LONG (cbr_scs_wp_class_fx + 0x04) cbr_scs_wp_class_parameter1
+        READ_LONG (cbr_scs_wp_class_fx + 0x08) cbr_scs_wp_class_parameter2
+        READ_BYTE (cbr_scs_wp_class_fx + 0x0c) cbr_scs_wp_class_timing
+        READ_BYTE (cbr_scs_wp_class_fx + 0x0d) cbr_scs_wp_class_resist
+        READ_LONG (cbr_scs_wp_class_fx + 0x0e) cbr_scs_wp_class_duration
+        READ_BYTE (cbr_scs_wp_class_fx + 0x12) cbr_scs_wp_class_probability1
+        READ_BYTE (cbr_scs_wp_class_fx + 0x13) cbr_scs_wp_class_probability2
+        READ_ASCII (cbr_scs_wp_class_fx + 0x14) cbr_scs_wp_class_resource (8) NULL
+        READ_LONG (cbr_scs_wp_class_fx + 0x1c) cbr_scs_wp_class_dice_number
+        READ_LONG (cbr_scs_wp_class_fx + 0x20) cbr_scs_wp_class_dice_size
+        READ_LONG (cbr_scs_wp_class_fx + 0x24) cbr_scs_wp_class_save_type
+        READ_LONG (cbr_scs_wp_class_fx + 0x2c) cbr_scs_wp_class_special
+        SET cbr_scs_wp_class_category_valid = 0
+        PATCH_IF ((cbr_scs_wp_class_parameter2 = 0 && cbr_scs_wp_class_parameter1 >= 0 && cbr_scs_wp_class_parameter1 <= 10)
+               || (cbr_scs_wp_class_parameter2 >= 1 && cbr_scs_wp_class_parameter2 <= 11)) BEGIN
+          SET cbr_scs_wp_class_category_valid = 1
+        END
+        PATCH_IF (cbr_scs_wp_class_header_target = 5
+               && cbr_scs_wp_class_target = 1
+               && cbr_scs_wp_class_category_valid
+               && cbr_scs_wp_class_timing = 0
+               && cbr_scs_wp_class_duration > 0
+               && cbr_scs_wp_class_probability1 = 100
+               && cbr_scs_wp_class_probability2 = 0
+               && ((cbr_scs_wp_class_resist BAND 2) = 2)
+               && ~%cbr_scs_wp_class_resource%~ STR_EQ ~~
+               && cbr_scs_wp_class_dice_number = 0
+               && cbr_scs_wp_class_dice_size = 0
+               && cbr_scs_wp_class_save_type = 0
+               && cbr_scs_wp_class_special = 0) BEGIN
+          ++cbr_scs_wp_valid_opcode120
+        END ELSE BEGIN
+          PATCH_FAIL ~CBR SCS weapon-protection classification failed for %resource_name%: opcode 120 at effect %cbr_scs_wp_class_index% is not a deterministic self-applied timed weapon category.~
+        END
+      END
+    END
+  END
+  PATCH_IF (cbr_scs_wp_seen_opcode120 > 0 && cbr_scs_wp_seen_opcode120 = cbr_scs_wp_valid_opcode120) BEGIN
+    SET is_weapon_protection = 1
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_scs_wp_classify_file
+  STR_VAR
+    resource_path = ~~
+    resource_name = ~~
+  RET
+    is_weapon_protection
+BEGIN
+  OUTER_SPRINT resource_path EVALUATE_BUFFER ~%resource_path%~
+  OUTER_SPRINT resource_name EVALUATE_BUFFER ~%resource_name%~
+  OUTER_SET is_weapon_protection = 0
+  ACTION_IF !(FILE_EXISTS ~%resource_path%~) BEGIN
+    FAIL ~CBR SCS weapon-protection classification is missing %resource_name% at %resource_path%.~
+  END
+  COPY ~%resource_path%~ ~%resource_path%~
+    LPF cbr_scs_wp_classify_spell
+      STR_VAR resource_name = EVAL ~%resource_name%~
+      RET cbr_scs_wp_patch_is_protection = is_weapon_protection
+    END
+    INNER_ACTION BEGIN
+      OUTER_SET is_weapon_protection = cbr_scs_wp_patch_is_protection
+    END
+  BUT_ONLY
+END
+
+DEFINE_PATCH_FUNCTION cbr_scs_wp_parse_spell_ids
+  RET
+    pfmw_number
+    mantle_number
+    improved_number
+    mop_number
+    absolute_number
+    breach_number
+    dispel_number
+BEGIN
+  SET cbr_scs_wp_ids_pfmw_count = 0
+  SET cbr_scs_wp_ids_mantle_count = 0
+  SET cbr_scs_wp_ids_improved_count = 0
+  SET cbr_scs_wp_ids_mop_count = 0
+  SET cbr_scs_wp_ids_absolute_count = 0
+  SET cbr_scs_wp_ids_breach_count = 0
+  SET cbr_scs_wp_ids_dispel_count = 0
+  READ_ASCII 0 cbr_scs_wp_ids_contents (BUFFER_LENGTH)
+  INNER_PATCH ~%cbr_scs_wp_ids_contents%~ BEGIN
+    REPLACE_EVALUATE CASE_INSENSITIVE
+      ~^\([0-9][0-9]*\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
+    BEGIN
+      SET cbr_scs_wp_ids_value = MATCH1
+      SPRINT cbr_scs_wp_ids_symbol ~%MATCH2%~
+      TO_UPPER cbr_scs_wp_ids_symbol
+      PATCH_IF (~%cbr_scs_wp_ids_symbol%~ STR_EQ ~WIZARD_PROTECTION_FROM_MAGIC_WEAPONS~) BEGIN
+        ++cbr_scs_wp_ids_pfmw_count
+        SET pfmw_number = cbr_scs_wp_ids_value
+      END ELSE PATCH_IF (~%cbr_scs_wp_ids_symbol%~ STR_EQ ~WIZARD_MANTLE~) BEGIN
+        ++cbr_scs_wp_ids_mantle_count
+        SET mantle_number = cbr_scs_wp_ids_value
+      END ELSE PATCH_IF (~%cbr_scs_wp_ids_symbol%~ STR_EQ ~WIZARD_IMPROVED_MANTLE~) BEGIN
+        ++cbr_scs_wp_ids_improved_count
+        SET improved_number = cbr_scs_wp_ids_value
+      END ELSE PATCH_IF (~%cbr_scs_wp_ids_symbol%~ STR_EQ ~WIZARD_MOMENT_OF_PRESCIENCE~) BEGIN
+        ++cbr_scs_wp_ids_mop_count
+        SET mop_number = cbr_scs_wp_ids_value
+      END ELSE PATCH_IF (~%cbr_scs_wp_ids_symbol%~ STR_EQ ~WIZARD_ABSOLUTE_IMMUNITY~) BEGIN
+        ++cbr_scs_wp_ids_absolute_count
+        SET absolute_number = cbr_scs_wp_ids_value
+      END ELSE PATCH_IF (~%cbr_scs_wp_ids_symbol%~ STR_EQ ~WIZARD_BREACH~) BEGIN
+        ++cbr_scs_wp_ids_breach_count
+        SET breach_number = cbr_scs_wp_ids_value
+      END ELSE PATCH_IF (~%cbr_scs_wp_ids_symbol%~ STR_EQ ~WIZARD_DISPEL_MAGIC~) BEGIN
+        ++cbr_scs_wp_ids_dispel_count
+        SET dispel_number = cbr_scs_wp_ids_value
+      END
+    END
+      ~~
+  END
+  PATCH_IF (cbr_scs_wp_ids_pfmw_count != 1
+         || cbr_scs_wp_ids_mantle_count != 1
+         || cbr_scs_wp_ids_improved_count != 1
+         || cbr_scs_wp_ids_mop_count != 1
+         || cbr_scs_wp_ids_absolute_count != 1
+         || cbr_scs_wp_ids_breach_count != 1
+         || cbr_scs_wp_ids_dispel_count != 1) BEGIN
+    PATCH_FAIL ~CBR SCS weapon-protection SPELL.IDS validation failed: every required symbol must map exactly once.~
+  END
+  PATCH_IF (pfmw_number < 2000 || pfmw_number > 2999
+         || mantle_number < 2000 || mantle_number > 2999
+         || improved_number < 2000 || improved_number > 2999
+         || mop_number < 2000 || mop_number > 2999
+         || absolute_number < 2000 || absolute_number > 2999
+         || breach_number < 2000 || breach_number > 2999
+         || dispel_number < 2000 || dispel_number > 2999) BEGIN
+    PATCH_FAIL ~CBR SCS weapon-protection SPELL.IDS validation failed: a required wizard spell number is outside 2000..2999.~
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_scs_wp_read_spell_ids
+  STR_VAR
+    spell_ids = ~~
+  RET
+    pfmw_number
+    mantle_number
+    improved_number
+    mop_number
+    absolute_number
+    breach_number
+    dispel_number
+BEGIN
+  OUTER_SPRINT spell_ids EVALUATE_BUFFER ~%spell_ids%~
+  ACTION_IF !(FILE_EXISTS ~%spell_ids%~) BEGIN
+    FAIL ~CBR SCS weapon-protection repair requires explicit SPELL.IDS at %spell_ids%.~
+  END
+  COPY ~%spell_ids%~ ~%spell_ids%~
+    LPF cbr_scs_wp_parse_spell_ids
+      RET
+        cbr_scs_wp_patch_pfmw = pfmw_number
+        cbr_scs_wp_patch_mantle = mantle_number
+        cbr_scs_wp_patch_improved = improved_number
+        cbr_scs_wp_patch_mop = mop_number
+        cbr_scs_wp_patch_absolute = absolute_number
+        cbr_scs_wp_patch_breach = breach_number
+        cbr_scs_wp_patch_dispel = dispel_number
+    END
+    INNER_ACTION BEGIN
+      OUTER_SET pfmw_number = cbr_scs_wp_patch_pfmw
+      OUTER_SET mantle_number = cbr_scs_wp_patch_mantle
+      OUTER_SET improved_number = cbr_scs_wp_patch_improved
+      OUTER_SET mop_number = cbr_scs_wp_patch_mop
+      OUTER_SET absolute_number = cbr_scs_wp_patch_absolute
+      OUTER_SET breach_number = cbr_scs_wp_patch_breach
+      OUTER_SET dispel_number = cbr_scs_wp_patch_dispel
+    END
+  BUT_ONLY
+END
+
+DEFINE_PATCH_FUNCTION cbr_scs_wp_spell_dispellable
+  STR_VAR resource_name = ~unknown SPL~
+  RET dispellable
+BEGIN
+  SET dispellable = 0
+  LPF cbr_scs_wp_validate_spl_v1
+    STR_VAR resource_name = EVAL ~%resource_name%~
+    RET
+      cbr_scs_wp_dispel_effect_offset = effect_offset
+      cbr_scs_wp_dispel_effect_count = effect_count
+  END
+  FOR (cbr_scs_wp_dispel_effect = 0; cbr_scs_wp_dispel_effect < cbr_scs_wp_dispel_effect_count; ++cbr_scs_wp_dispel_effect) BEGIN
+    SET cbr_scs_wp_dispel_fx = cbr_scs_wp_dispel_effect_offset + (cbr_scs_wp_dispel_effect * 0x30)
+    READ_BYTE (cbr_scs_wp_dispel_fx + 0x0d) cbr_scs_wp_dispel_resist
+    PATCH_IF ((cbr_scs_wp_dispel_resist BAND 1) = 1) BEGIN
+      SET dispellable = 1
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_scs_wp_counter_root
+  INT_VAR target_secondary = 0
+  STR_VAR resource_name = ~counter spell~
+  RET
+    direct_counter
+    helper_count
+    helper0
+    helper1
+    helper2
+    helper3
+    helper4
+    helper5
+    helper6
+    helper7
+BEGIN
+  SET direct_counter = 0
+  SET helper_count = 0
+  SPRINT helper0 ~~
+  SPRINT helper1 ~~
+  SPRINT helper2 ~~
+  SPRINT helper3 ~~
+  SPRINT helper4 ~~
+  SPRINT helper5 ~~
+  SPRINT helper6 ~~
+  SPRINT helper7 ~~
+  LPF cbr_scs_wp_validate_spl_v1
+    STR_VAR resource_name = EVAL ~%resource_name%~
+    RET
+      cbr_scs_wp_counter_effect_offset = effect_offset
+      cbr_scs_wp_counter_effect_count = effect_count
+  END
+  FOR (cbr_scs_wp_counter_effect = 0; cbr_scs_wp_counter_effect < cbr_scs_wp_counter_effect_count; ++cbr_scs_wp_counter_effect) BEGIN
+    SET cbr_scs_wp_counter_fx = cbr_scs_wp_counter_effect_offset + (cbr_scs_wp_counter_effect * 0x30)
+    READ_SHORT (cbr_scs_wp_counter_fx + 0x00) cbr_scs_wp_counter_opcode
+    READ_LONG  (cbr_scs_wp_counter_fx + 0x04) cbr_scs_wp_counter_parameter1
+    READ_LONG  (cbr_scs_wp_counter_fx + 0x08) cbr_scs_wp_counter_parameter2
+    READ_BYTE  (cbr_scs_wp_counter_fx + 0x12) cbr_scs_wp_counter_probability1
+    READ_BYTE  (cbr_scs_wp_counter_fx + 0x13) cbr_scs_wp_counter_probability2
+    READ_ASCII (cbr_scs_wp_counter_fx + 0x14) cbr_scs_wp_counter_resource (8) NULL
+    PATCH_IF (cbr_scs_wp_counter_opcode = 221
+           && cbr_scs_wp_counter_parameter1 = 9
+           && cbr_scs_wp_counter_parameter2 = target_secondary
+           && cbr_scs_wp_counter_probability1 = 100
+           && cbr_scs_wp_counter_probability2 = 0) BEGIN
+      SET direct_counter = 1
+    END
+    PATCH_IF (cbr_scs_wp_counter_opcode = 146 && !(~%cbr_scs_wp_counter_resource%~ STR_EQ ~~)) BEGIN
+      SPRINT cbr_scs_wp_counter_helper ~%cbr_scs_wp_counter_resource%~
+      TO_UPPER cbr_scs_wp_counter_helper
+      PATCH_IF (helper_count = 0) BEGIN
+        SPRINT helper0 ~%cbr_scs_wp_counter_helper%~
+      END ELSE PATCH_IF (helper_count = 1) BEGIN
+        SPRINT helper1 ~%cbr_scs_wp_counter_helper%~
+      END ELSE PATCH_IF (helper_count = 2) BEGIN
+        SPRINT helper2 ~%cbr_scs_wp_counter_helper%~
+      END ELSE PATCH_IF (helper_count = 3) BEGIN
+        SPRINT helper3 ~%cbr_scs_wp_counter_helper%~
+      END ELSE PATCH_IF (helper_count = 4) BEGIN
+        SPRINT helper4 ~%cbr_scs_wp_counter_helper%~
+      END ELSE PATCH_IF (helper_count = 5) BEGIN
+        SPRINT helper5 ~%cbr_scs_wp_counter_helper%~
+      END ELSE PATCH_IF (helper_count = 6) BEGIN
+        SPRINT helper6 ~%cbr_scs_wp_counter_helper%~
+      END ELSE PATCH_IF (helper_count = 7) BEGIN
+        SPRINT helper7 ~%cbr_scs_wp_counter_helper%~
+      END ELSE BEGIN
+        PATCH_FAIL ~CBR SCS weapon-protection counter graph for %resource_name% has more than eight direct spell helpers.~
+      END
+      ++helper_count
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_scs_wp_counter_helper
+  INT_VAR target_secondary = 0
+  STR_VAR resource_name = ~counter helper~
+  RET counter
+BEGIN
+  SET counter = 0
+  LPF cbr_scs_wp_validate_spl_v1
+    STR_VAR resource_name = EVAL ~%resource_name%~
+    RET
+      cbr_scs_wp_helper_effect_offset = effect_offset
+      cbr_scs_wp_helper_effect_count = effect_count
+  END
+  FOR (cbr_scs_wp_helper_effect = 0; cbr_scs_wp_helper_effect < cbr_scs_wp_helper_effect_count; ++cbr_scs_wp_helper_effect) BEGIN
+    SET cbr_scs_wp_helper_fx = cbr_scs_wp_helper_effect_offset + (cbr_scs_wp_helper_effect * 0x30)
+    READ_SHORT (cbr_scs_wp_helper_fx + 0x00) cbr_scs_wp_helper_opcode
+    READ_LONG  (cbr_scs_wp_helper_fx + 0x04) cbr_scs_wp_helper_parameter1
+    READ_LONG  (cbr_scs_wp_helper_fx + 0x08) cbr_scs_wp_helper_parameter2
+    READ_BYTE  (cbr_scs_wp_helper_fx + 0x12) cbr_scs_wp_helper_probability1
+    READ_BYTE  (cbr_scs_wp_helper_fx + 0x13) cbr_scs_wp_helper_probability2
+    PATCH_IF (cbr_scs_wp_helper_opcode = 221
+           && cbr_scs_wp_helper_parameter1 = 9
+           && cbr_scs_wp_helper_parameter2 = target_secondary
+           && cbr_scs_wp_helper_probability1 = 100
+           && cbr_scs_wp_helper_probability2 = 0) BEGIN
+      SET counter = 1
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_scs_wp_has_dispel_opcode
+  STR_VAR resource_name = ~Dispel Magic~
+  RET counter
+BEGIN
+  SET counter = 0
+  LPF cbr_scs_wp_validate_spl_v1
+    STR_VAR resource_name = EVAL ~%resource_name%~
+    RET
+      cbr_scs_wp_op58_effect_offset = effect_offset
+      cbr_scs_wp_op58_effect_count = effect_count
+  END
+  FOR (cbr_scs_wp_op58_effect = 0; cbr_scs_wp_op58_effect < cbr_scs_wp_op58_effect_count; ++cbr_scs_wp_op58_effect) BEGIN
+    SET cbr_scs_wp_op58_fx = cbr_scs_wp_op58_effect_offset + (cbr_scs_wp_op58_effect * 0x30)
+    READ_SHORT (cbr_scs_wp_op58_fx + 0x00) cbr_scs_wp_op58_opcode
+    READ_BYTE  (cbr_scs_wp_op58_fx + 0x12) cbr_scs_wp_op58_probability1
+    READ_BYTE  (cbr_scs_wp_op58_fx + 0x13) cbr_scs_wp_op58_probability2
+    PATCH_IF (cbr_scs_wp_op58_opcode = 58
+           && cbr_scs_wp_op58_probability1 = 100
+           && cbr_scs_wp_op58_probability2 = 0) BEGIN
+      SET counter = 1
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_scs_wp_audit_counters
+  STR_VAR
+    resource_dir = ~~
+    target_resref = ~~
+    breach_resref = ~~
+    dispel_resref = ~~
+  RET
+    keep_breach_state
+    keep_dispel_state
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  OUTER_SPRINT target_resref EVALUATE_BUFFER ~%target_resref%~
+  OUTER_SPRINT breach_resref EVALUATE_BUFFER ~%breach_resref%~
+  OUTER_SPRINT dispel_resref EVALUATE_BUFFER ~%dispel_resref%~
+  OUTER_SPRINT cbr_scs_wp_counter_target_path ~%resource_dir%/%target_resref%.SPL~
+  OUTER_SPRINT cbr_scs_wp_counter_breach_path ~%resource_dir%/%breach_resref%.SPL~
+  OUTER_SPRINT cbr_scs_wp_counter_dispel_path ~%resource_dir%/%dispel_resref%.SPL~
+  ACTION_FOR_EACH cbr_scs_wp_counter_required IN
+    ~%cbr_scs_wp_counter_target_path%~
+    ~%cbr_scs_wp_counter_breach_path%~
+    ~%cbr_scs_wp_counter_dispel_path%~
+  BEGIN
+    ACTION_IF !(FILE_EXISTS ~%cbr_scs_wp_counter_required%~) BEGIN
+      FAIL ~CBR SCS weapon-protection counter audit is missing %cbr_scs_wp_counter_required%.~
+    END
+  END
+
+  OUTER_SET cbr_scs_wp_target_secondary = 0
+  OUTER_SET cbr_scs_wp_target_dispellable = 0
+  COPY ~%cbr_scs_wp_counter_target_path%~ ~%cbr_scs_wp_counter_target_path%~
+    LPF cbr_scs_wp_spell_dispellable
+      STR_VAR resource_name = EVAL ~%target_resref%~
+      RET cbr_scs_wp_patch_target_dispellable = dispellable
+    END
+    READ_BYTE 0x27 cbr_scs_wp_patch_target_secondary
+    INNER_ACTION BEGIN
+      OUTER_SET cbr_scs_wp_target_secondary = cbr_scs_wp_patch_target_secondary
+      OUTER_SET cbr_scs_wp_target_dispellable = cbr_scs_wp_patch_target_dispellable
+    END
+  BUT_ONLY
+
+  OUTER_SET keep_breach_state = 0
+  OUTER_SET cbr_scs_wp_root_helper_count = 0
+  OUTER_SPRINT cbr_scs_wp_root_helper0 ~~
+  OUTER_SPRINT cbr_scs_wp_root_helper1 ~~
+  OUTER_SPRINT cbr_scs_wp_root_helper2 ~~
+  OUTER_SPRINT cbr_scs_wp_root_helper3 ~~
+  OUTER_SPRINT cbr_scs_wp_root_helper4 ~~
+  OUTER_SPRINT cbr_scs_wp_root_helper5 ~~
+  OUTER_SPRINT cbr_scs_wp_root_helper6 ~~
+  OUTER_SPRINT cbr_scs_wp_root_helper7 ~~
+  COPY ~%cbr_scs_wp_counter_breach_path%~ ~%cbr_scs_wp_counter_breach_path%~
+    LPF cbr_scs_wp_counter_root
+      INT_VAR target_secondary = cbr_scs_wp_target_secondary
+      STR_VAR resource_name = EVAL ~%breach_resref%~
+      RET
+        cbr_scs_wp_patch_direct_counter = direct_counter
+        cbr_scs_wp_patch_helper_count = helper_count
+        cbr_scs_wp_patch_helper0 = helper0
+        cbr_scs_wp_patch_helper1 = helper1
+        cbr_scs_wp_patch_helper2 = helper2
+        cbr_scs_wp_patch_helper3 = helper3
+        cbr_scs_wp_patch_helper4 = helper4
+        cbr_scs_wp_patch_helper5 = helper5
+        cbr_scs_wp_patch_helper6 = helper6
+        cbr_scs_wp_patch_helper7 = helper7
+    END
+    INNER_ACTION BEGIN
+      OUTER_SET keep_breach_state = cbr_scs_wp_patch_direct_counter
+      OUTER_SET cbr_scs_wp_root_helper_count = cbr_scs_wp_patch_helper_count
+      OUTER_SPRINT cbr_scs_wp_root_helper0 ~%cbr_scs_wp_patch_helper0%~
+      OUTER_SPRINT cbr_scs_wp_root_helper1 ~%cbr_scs_wp_patch_helper1%~
+      OUTER_SPRINT cbr_scs_wp_root_helper2 ~%cbr_scs_wp_patch_helper2%~
+      OUTER_SPRINT cbr_scs_wp_root_helper3 ~%cbr_scs_wp_patch_helper3%~
+      OUTER_SPRINT cbr_scs_wp_root_helper4 ~%cbr_scs_wp_patch_helper4%~
+      OUTER_SPRINT cbr_scs_wp_root_helper5 ~%cbr_scs_wp_patch_helper5%~
+      OUTER_SPRINT cbr_scs_wp_root_helper6 ~%cbr_scs_wp_patch_helper6%~
+      OUTER_SPRINT cbr_scs_wp_root_helper7 ~%cbr_scs_wp_patch_helper7%~
+    END
+  BUT_ONLY
+
+  ACTION_FOR_EACH cbr_scs_wp_counter_helper_resref IN
+    ~%cbr_scs_wp_root_helper0%~
+    ~%cbr_scs_wp_root_helper1%~
+    ~%cbr_scs_wp_root_helper2%~
+    ~%cbr_scs_wp_root_helper3%~
+    ~%cbr_scs_wp_root_helper4%~
+    ~%cbr_scs_wp_root_helper5%~
+    ~%cbr_scs_wp_root_helper6%~
+    ~%cbr_scs_wp_root_helper7%~
+  BEGIN
+    ACTION_IF !(~%cbr_scs_wp_counter_helper_resref%~ STR_EQ ~~) BEGIN
+      OUTER_SPRINT cbr_scs_wp_counter_helper_path ~%resource_dir%/%cbr_scs_wp_counter_helper_resref%.SPL~
+      ACTION_IF !(FILE_EXISTS ~%cbr_scs_wp_counter_helper_path%~) BEGIN
+        FAIL ~CBR SCS weapon-protection counter graph references missing helper %cbr_scs_wp_counter_helper_resref%.SPL.~
+      END
+      COPY ~%cbr_scs_wp_counter_helper_path%~ ~%cbr_scs_wp_counter_helper_path%~
+        LPF cbr_scs_wp_counter_helper
+          INT_VAR target_secondary = cbr_scs_wp_target_secondary
+          STR_VAR resource_name = EVAL ~%cbr_scs_wp_counter_helper_resref%~
+          RET cbr_scs_wp_patch_helper_counter = counter
+        END
+        INNER_ACTION BEGIN
+          ACTION_IF cbr_scs_wp_patch_helper_counter BEGIN
+            OUTER_SET keep_breach_state = 1
+          END
+        END
+      BUT_ONLY
+    END
+  END
+
+  OUTER_SET cbr_scs_wp_dispel_has_opcode = 0
+  COPY ~%cbr_scs_wp_counter_dispel_path%~ ~%cbr_scs_wp_counter_dispel_path%~
+    LPF cbr_scs_wp_has_dispel_opcode
+      STR_VAR resource_name = EVAL ~%dispel_resref%~
+      RET cbr_scs_wp_patch_dispel_counter = counter
+    END
+    INNER_ACTION BEGIN
+      OUTER_SET cbr_scs_wp_dispel_has_opcode = cbr_scs_wp_patch_dispel_counter
+    END
+  BUT_ONLY
+  OUTER_SET keep_dispel_state = 0
+  ACTION_IF (cbr_scs_wp_target_dispellable && cbr_scs_wp_dispel_has_opcode) BEGIN
+    OUTER_SET keep_dispel_state = 1
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_scs_wp_plan_metadata
+  INT_VAR
+    keep_breach_state = 0
+    keep_dispel_state = 0
+  STR_VAR
+    resource_name = ~Moment of Prescience~
+  RET
+    remove_count
+BEGIN
+  SET remove_count = 0
+  SET cbr_scs_wp_marker_tier_count = 0
+  SET cbr_scs_wp_marker_weapon_count = 0
+  SET cbr_scs_wp_marker_breach_count = 0
+  SET cbr_scs_wp_marker_dispel_count = 0
+  LPF cbr_scs_wp_validate_spl_v1
+    STR_VAR resource_name = EVAL ~%resource_name%~
+    RET
+      cbr_scs_wp_metadata_effect_offset = effect_offset
+      cbr_scs_wp_metadata_effect_count = effect_count
+  END
+  FOR (cbr_scs_wp_metadata_effect = 0; cbr_scs_wp_metadata_effect < cbr_scs_wp_metadata_effect_count; ++cbr_scs_wp_metadata_effect) BEGIN
+    SET cbr_scs_wp_metadata_fx = cbr_scs_wp_metadata_effect_offset + (cbr_scs_wp_metadata_effect * 0x30)
+    READ_SHORT (cbr_scs_wp_metadata_fx + 0x00) cbr_scs_wp_metadata_opcode
+    READ_LONG  (cbr_scs_wp_metadata_fx + 0x04) cbr_scs_wp_metadata_parameter1
+    READ_LONG  (cbr_scs_wp_metadata_fx + 0x08) cbr_scs_wp_metadata_parameter2
+    PATCH_IF (cbr_scs_wp_metadata_opcode = 233
+           && cbr_scs_wp_metadata_parameter1 = 2
+           && cbr_scs_wp_metadata_parameter2 = 128) BEGIN
+      ++cbr_scs_wp_marker_tier_count
+    END ELSE PATCH_IF (cbr_scs_wp_metadata_opcode = 328
+                    && cbr_scs_wp_metadata_parameter1 = 1
+                    && cbr_scs_wp_metadata_parameter2 = 64) BEGIN
+      ++cbr_scs_wp_marker_weapon_count
+    END ELSE PATCH_IF (cbr_scs_wp_metadata_opcode = 328
+                    && cbr_scs_wp_metadata_parameter1 = 1
+                    && cbr_scs_wp_metadata_parameter2 = 187) BEGIN
+      ++cbr_scs_wp_marker_breach_count
+    END ELSE PATCH_IF (cbr_scs_wp_metadata_opcode = 328
+                    && cbr_scs_wp_metadata_parameter1 = 1
+                    && cbr_scs_wp_metadata_parameter2 = 188) BEGIN
+      ++cbr_scs_wp_marker_dispel_count
+    END
+  END
+  PATCH_IF (cbr_scs_wp_marker_tier_count > 1
+         || cbr_scs_wp_marker_weapon_count > 1
+         || cbr_scs_wp_marker_breach_count > 1
+         || cbr_scs_wp_marker_dispel_count > 1) BEGIN
+    PATCH_FAIL ~CBR SCS weapon-protection metadata preflight rejected duplicate semantic markers in %resource_name%.~
+  END
+  PATCH_IF !((cbr_scs_wp_marker_tier_count = 1 && cbr_scs_wp_marker_weapon_count = 1)
+          || (cbr_scs_wp_marker_tier_count = 0 && cbr_scs_wp_marker_weapon_count = 0)) BEGIN
+    PATCH_FAIL ~CBR SCS weapon-protection metadata preflight found a partial false-marker pair in %resource_name%.~
+  END
+  SET remove_count = cbr_scs_wp_marker_tier_count + cbr_scs_wp_marker_weapon_count
+  PATCH_IF (!keep_breach_state) BEGIN
+    SET remove_count += cbr_scs_wp_marker_breach_count
+  END
+  PATCH_IF (!keep_dispel_state) BEGIN
+    SET remove_count += cbr_scs_wp_marker_dispel_count
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_scs_wp_remove_metadata
+  INT_VAR
+    keep_breach_state = 0
+    keep_dispel_state = 0
+  STR_VAR
+    resource_name = ~Moment of Prescience~
+  RET
+    removed
+BEGIN
+  SET removed = 0
+  LPF cbr_scs_wp_validate_spl_v1
+    STR_VAR resource_name = EVAL ~%resource_name%~
+    RET
+      cbr_scs_wp_remove_ability_offset = ability_offset
+      cbr_scs_wp_remove_ability_count = ability_count
+      cbr_scs_wp_remove_effect_offset = effect_offset
+      cbr_scs_wp_remove_effect_count = effect_count
+  END
+  FOR (cbr_scs_wp_remove_effect = cbr_scs_wp_remove_effect_count - 1; cbr_scs_wp_remove_effect >= 0; --cbr_scs_wp_remove_effect) BEGIN
+    SET cbr_scs_wp_remove_fx = cbr_scs_wp_remove_effect_offset + (cbr_scs_wp_remove_effect * 0x30)
+    READ_SHORT (cbr_scs_wp_remove_fx + 0x00) cbr_scs_wp_remove_opcode
+    READ_LONG  (cbr_scs_wp_remove_fx + 0x04) cbr_scs_wp_remove_parameter1
+    READ_LONG  (cbr_scs_wp_remove_fx + 0x08) cbr_scs_wp_remove_parameter2
+    SET cbr_scs_wp_remove_this = 0
+    PATCH_IF (cbr_scs_wp_remove_opcode = 233
+           && cbr_scs_wp_remove_parameter1 = 2
+           && cbr_scs_wp_remove_parameter2 = 128) BEGIN
+      SET cbr_scs_wp_remove_this = 1
+    END ELSE PATCH_IF (cbr_scs_wp_remove_opcode = 328
+                    && cbr_scs_wp_remove_parameter1 = 1
+                    && cbr_scs_wp_remove_parameter2 = 64) BEGIN
+      SET cbr_scs_wp_remove_this = 1
+    END ELSE PATCH_IF (cbr_scs_wp_remove_opcode = 328
+                    && cbr_scs_wp_remove_parameter1 = 1
+                    && cbr_scs_wp_remove_parameter2 = 187
+                    && !keep_breach_state) BEGIN
+      SET cbr_scs_wp_remove_this = 1
+    END ELSE PATCH_IF (cbr_scs_wp_remove_opcode = 328
+                    && cbr_scs_wp_remove_parameter1 = 1
+                    && cbr_scs_wp_remove_parameter2 = 188
+                    && !keep_dispel_state) BEGIN
+      SET cbr_scs_wp_remove_this = 1
+    END
+    PATCH_IF cbr_scs_wp_remove_this BEGIN
+      READ_SHORT 0x6e cbr_scs_wp_remove_casting_first
+      READ_SHORT 0x70 cbr_scs_wp_remove_casting_count
+      PATCH_IF (cbr_scs_wp_remove_effect >= cbr_scs_wp_remove_casting_first
+             && cbr_scs_wp_remove_effect < (cbr_scs_wp_remove_casting_first + cbr_scs_wp_remove_casting_count)) BEGIN
+        WRITE_SHORT 0x70 (cbr_scs_wp_remove_casting_count - 1)
+      END ELSE PATCH_IF (cbr_scs_wp_remove_casting_first > cbr_scs_wp_remove_effect) BEGIN
+        WRITE_SHORT 0x6e (cbr_scs_wp_remove_casting_first - 1)
+      END
+      FOR (cbr_scs_wp_remove_header = 0; cbr_scs_wp_remove_header < cbr_scs_wp_remove_ability_count; ++cbr_scs_wp_remove_header) BEGIN
+        SET cbr_scs_wp_remove_header_offset = cbr_scs_wp_remove_ability_offset + (cbr_scs_wp_remove_header * 0x28)
+        READ_SHORT (cbr_scs_wp_remove_header_offset + 0x1e) cbr_scs_wp_remove_header_count
+        READ_SHORT (cbr_scs_wp_remove_header_offset + 0x20) cbr_scs_wp_remove_header_first
+        PATCH_IF (cbr_scs_wp_remove_effect >= cbr_scs_wp_remove_header_first
+               && cbr_scs_wp_remove_effect < (cbr_scs_wp_remove_header_first + cbr_scs_wp_remove_header_count)) BEGIN
+          WRITE_SHORT (cbr_scs_wp_remove_header_offset + 0x1e) (cbr_scs_wp_remove_header_count - 1)
+        END ELSE PATCH_IF (cbr_scs_wp_remove_header_first > cbr_scs_wp_remove_effect) BEGIN
+          WRITE_SHORT (cbr_scs_wp_remove_header_offset + 0x20) (cbr_scs_wp_remove_header_first - 1)
+        END
+      END
+      DELETE_BYTES cbr_scs_wp_remove_fx 0x30
+      ++removed
+    END
+  END
+  LPF cbr_scs_wp_validate_spl_v1 STR_VAR resource_name = EVAL ~%resource_name%~ END
+END
+
+// Complete decompiled-block shape classifier. A false spell token alone is
+// never enough: all approved blocks require the surrounding SCS state/timer
+// contract. Target-like but unrecognized contexts are counted and retained.
+DEFINE_PATCH_FUNCTION cbr_scs_wp_classify_baf_block
+  RET shape
+BEGIN
+  SET shape = 0
+  SET cbr_scs_wp_baf_false = 0
+  PATCH_IF (INDEX_BUFFER (~WIZARD_MOMENT_OF_PRESCIENCE~) >= 0
+         || INDEX_BUFFER (~WIZARD_IMPROVED_MANTLE~) >= 0) BEGIN
+    SET cbr_scs_wp_baf_false = 1
+  END
+  PATCH_IF cbr_scs_wp_baf_false BEGIN
+    SET cbr_scs_wp_baf_cast_guard = 0
+    PATCH_IF (INDEX_BUFFER (~!GlobalTimerNotExpired("castspell","LOCALS")~) >= 0
+           && INDEX_BUFFER (~CheckStatLT(Myself,60,SPELLFAILUREMAGE)~) >= 0
+           && INDEX_BUFFER (~See(NearestEnemyOf(Myself))~) >= 0
+           && INDEX_BUFFER (~SetGlobalTimer("castspell","LOCALS",ONE_ROUND)~) >= 0
+           && INDEX_BUFFER (~SetGlobalTimer("redefend","LOCALS",7)~) >= 0
+           && INDEX_BUFFER (~Spell(Myself,WIZARD_~) >= 0
+           && INDEX_BUFFER (~HaveSpell(WIZARD_~) >= 0) BEGIN
+      SET cbr_scs_wp_baf_cast_guard = 1
+    END
+
+    PATCH_IF (cbr_scs_wp_baf_cast_guard
+           && INDEX_BUFFER (~Global("instantprep","LOCALS",0)~) >= 0
+           && INDEX_BUFFER (~SetGlobal("instantprep","LOCALS",1)~) >= 0
+           && INDEX_BUFFER (~justdonepmw~) < 0
+           && INDEX_BUFFER (~ChainContingencyFired~) < 0) BEGIN
+      SET shape = 1
+    END ELSE PATCH_IF (cbr_scs_wp_baf_cast_guard
+                    && INDEX_BUFFER (~Global("instantprep","LOCALS",1)~) >= 0
+                    && INDEX_BUFFER (~!GlobalTimerNotExpired("justdonepmw","LOCALS")~) >= 0
+                    && INDEX_BUFFER (~SetGlobalTimer("justdonepmw","LOCALS",7)~) >= 0
+                    && INDEX_BUFFER (~!CheckStatGT(Myself,0,WIZARD_PROTECTION_FROM_MAGIC_WEAPONS)~) >= 0
+                    && INDEX_BUFFER (~!CheckSpellState(Myself,TIME_STOP)~) >= 0
+                    && INDEX_BUFFER (~!StateCheck(Myself,STATE_INVISIBLE)~) >= 0
+                    && INDEX_BUFFER (~ChainContingencyFired~) < 0) BEGIN
+      SET shape = 2
+    END ELSE PATCH_IF (INDEX_BUFFER (~Global("ChainContingencyFired","LOCALS",0)~) >= 0
+                    && INDEX_BUFFER (~SetGlobal("ChainContingencyFired","LOCALS",1)~) >= 0
+                    && INDEX_BUFFER (~Allegiance(Myself,ENEMY)~) >= 0
+                    && INDEX_BUFFER (~Detect(NearestEnemyOf(Myself))~) >= 0
+                    && INDEX_BUFFER (~DMWW_mage_prep_difficulty~) >= 0
+                    && INDEX_BUFFER (~!GlobalGT("Chapter","GLOBAL",19)~) >= 0
+                    && INDEX_BUFFER (~ReallyForceSpellRES("dw#cc23",Myself)~) >= 0
+                    && INDEX_BUFFER (~ReallyForceSpell(Myself,WIZARD_~) >= 0
+                    && INDEX_BUFFER (~Continue()~) >= 0) BEGIN
+      SET shape = 3
+    END ELSE PATCH_IF (INDEX_BUFFER (~instantprep~) >= 0
+                    || INDEX_BUFFER (~justdonepmw~) >= 0
+                    || INDEX_BUFFER (~ChainContingencyFired~) >= 0) BEGIN
+      SET shape = 4
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_scs_wp_transform_bcs
+  INT_VAR
+    apply = 0
+    false_spell_number = 0
+  STR_VAR
+    replacement_symbol = ~~
+    script_name = ~unknown BCS~
+  RET
+    first_round_removed
+    renewal_removed
+    chain_replaced
+    unknown_blocks
+BEGIN
+  SET first_round_removed = 0
+  SET renewal_removed = 0
+  SET chain_replaced = 0
+  SET unknown_blocks = 0
+
+  // Decimal prefilter matches the effective dynamically resolved SPELL.IDS
+  // number embedded in compiled BCS action/trigger records.
+  PATCH_IF (INDEX_BUFFER (~%false_spell_number%~) >= 0) BEGIN
+    SPRINT cbr_scs_wp_new_blocks ~~
+    SET cbr_scs_wp_block_start = INDEX_BUFFER (~CR~)
+    PATCH_IF (cbr_scs_wp_block_start <= 0) BEGIN
+      PATCH_FAIL ~CBR SCS weapon-protection script preflight found no compiled blocks in %script_name%.~
+    END
+    WHILE (cbr_scs_wp_block_start > 0) BEGIN
+      SET cbr_scs_wp_block_end = INDEX_BUFFER (~RS%LNL%CR%LNL%~)
+      PATCH_IF (cbr_scs_wp_block_end < cbr_scs_wp_block_start) BEGIN
+        PATCH_FAIL ~CBR SCS weapon-protection script preflight found an unterminated block in %script_name%.~
+      END
+      SET cbr_scs_wp_block_length = (cbr_scs_wp_block_end - cbr_scs_wp_block_start) + 6
+      READ_ASCII cbr_scs_wp_block_start cbr_scs_wp_raw_block (cbr_scs_wp_block_length)
+      INNER_PATCH_SAVE cbr_scs_wp_baf_block ~SC%LNL%%cbr_scs_wp_raw_block%SC%LNL%~ BEGIN
+        PATCH_TRY
+          DECOMPILE_BCS_TO_BAF
+        WITH DEFAULT
+          PATCH_PRINT ~CBR failed to decompile one allowlisted block in %script_name%.~
+          PATCH_RERAISE
+        END
+      END
+      INNER_PATCH ~%cbr_scs_wp_baf_block%~ BEGIN
+        LPF cbr_scs_wp_classify_baf_block RET cbr_scs_wp_block_shape = shape END
+      END
+
+      SPRINT cbr_scs_wp_output_block ~%cbr_scs_wp_raw_block%~
+      PATCH_IF (cbr_scs_wp_block_shape = 1) BEGIN
+        ++first_round_removed
+        PATCH_IF apply BEGIN
+          SPRINT cbr_scs_wp_output_block ~~
+        END
+      END ELSE PATCH_IF (cbr_scs_wp_block_shape = 2) BEGIN
+        ++renewal_removed
+        PATCH_IF apply BEGIN
+          SPRINT cbr_scs_wp_output_block ~~
+        END
+      END ELSE PATCH_IF (cbr_scs_wp_block_shape = 3) BEGIN
+        ++chain_replaced
+        PATCH_IF (~%replacement_symbol%~ STR_EQ ~~) BEGIN
+          PATCH_FAIL ~CBR SCS weapon-protection script preflight found a chain-contingency use in %script_name% but no safe lower protection exists.~
+        END
+        INNER_PATCH_SAVE cbr_scs_wp_changed_baf ~%cbr_scs_wp_baf_block%~ BEGIN
+          REPLACE_TEXTUALLY CASE_INSENSITIVE ~WIZARD_MOMENT_OF_PRESCIENCE~ ~%replacement_symbol%~
+          REPLACE_TEXTUALLY CASE_INSENSITIVE ~WIZARD_IMPROVED_MANTLE~ ~%replacement_symbol%~
+          PATCH_IF (INDEX_BUFFER (~WIZARD_MOMENT_OF_PRESCIENCE~) >= 0
+                 || INDEX_BUFFER (~WIZARD_IMPROVED_MANTLE~) >= 0
+                 || INDEX_BUFFER (~%replacement_symbol%~) < 0) BEGIN
+            PATCH_FAIL ~CBR SCS weapon-protection chain substitution was not exact in %script_name%.~
+          END
+        END
+        INNER_PATCH_SAVE cbr_scs_wp_compiled_block ~%cbr_scs_wp_changed_baf%~ BEGIN
+          PATCH_TRY
+            COMPILE_BAF_TO_BCS
+          WITH DEFAULT
+            PATCH_PRINT ~CBR failed to compile the planned chain-contingency block for %script_name%.~
+            PATCH_RERAISE
+          END
+          SET cbr_scs_wp_compiled_start = INDEX_BUFFER (~CR~)
+          SET cbr_scs_wp_compiled_end = INDEX_BUFFER (~RS%LNL%CR%LNL%~)
+          PATCH_IF (cbr_scs_wp_compiled_start <= 0 || cbr_scs_wp_compiled_end < cbr_scs_wp_compiled_start) BEGIN
+            PATCH_FAIL ~CBR SCS weapon-protection chain compilation produced an invalid block for %script_name%.~
+          END
+          SET cbr_scs_wp_compiled_length = (cbr_scs_wp_compiled_end - cbr_scs_wp_compiled_start) + 6
+          DELETE_BYTES (cbr_scs_wp_compiled_start + cbr_scs_wp_compiled_length) (BUFFER_LENGTH - cbr_scs_wp_compiled_start - cbr_scs_wp_compiled_length)
+          DELETE_BYTES 0 cbr_scs_wp_compiled_start
+        END
+        PATCH_IF apply BEGIN
+          SPRINT cbr_scs_wp_output_block ~%cbr_scs_wp_compiled_block%~
+        END
+      END ELSE PATCH_IF (cbr_scs_wp_block_shape = 4) BEGIN
+        ++unknown_blocks
+      END
+
+      SPRINT cbr_scs_wp_new_blocks ~%cbr_scs_wp_new_blocks%%cbr_scs_wp_output_block%~
+      DELETE_BYTES cbr_scs_wp_block_start cbr_scs_wp_block_length
+      SET cbr_scs_wp_block_start = INDEX_BUFFER (~CR~)
+    END
+    PATCH_IF (BUFFER_LENGTH != 6) BEGIN
+      PATCH_FAIL ~CBR SCS weapon-protection script preflight found an unexpected compiled wrapper in %script_name%.~
+    END
+    READ_ASCII 0 cbr_scs_wp_empty_wrapper (6)
+    PATCH_IF !(~%cbr_scs_wp_empty_wrapper%~ STR_EQ ~SC%LNL%SC%LNL%~) BEGIN
+      PATCH_FAIL ~CBR SCS weapon-protection script preflight found a noncanonical compiled wrapper in %script_name%.~
+    END
+    INSERT_BYTES 3 (STRING_LENGTH ~%cbr_scs_wp_new_blocks%~)
+    WRITE_ASCIIE 3 ~%cbr_scs_wp_new_blocks%~
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_scs_wp_scan_scripts
+  INT_VAR
+    apply = 0
+    false_spell_number = 0
+  STR_VAR
+    script_dir = ~~
+    replacement_symbol = ~~
+  RET
+    script_count
+    first_round_removed
+    renewal_removed
+    chain_replaced
+    unknown_blocks
+BEGIN
+  OUTER_SPRINT script_dir EVALUATE_BUFFER ~%script_dir%~
+  OUTER_SPRINT replacement_symbol EVALUATE_BUFFER ~%replacement_symbol%~
+  OUTER_SET script_count = 0
+  OUTER_SET first_round_removed = 0
+  OUTER_SET renewal_removed = 0
+  OUTER_SET chain_replaced = 0
+  OUTER_SET unknown_blocks = 0
+  ACTION_IF (FILE_EXISTS ~%script_dir%~) BEGIN
+    ACTION_BASH_FOR ~%script_dir%~ ~^dw#mg[0-9]+\.bcs$~ BEGIN
+      OUTER_SET script_count += 1
+      COPY ~%BASH_FOR_FILESPEC%~ ~%BASH_FOR_FILESPEC%~
+        LPF cbr_scs_wp_transform_bcs
+          INT_VAR
+            apply = apply
+            false_spell_number = false_spell_number
+          STR_VAR
+            replacement_symbol = EVAL ~%replacement_symbol%~
+            script_name = EVAL ~%BASH_FOR_FILE%~
+          RET
+            cbr_scs_wp_patch_first = first_round_removed
+            cbr_scs_wp_patch_renewal = renewal_removed
+            cbr_scs_wp_patch_chain = chain_replaced
+            cbr_scs_wp_patch_unknown = unknown_blocks
+        END
+        INNER_ACTION BEGIN
+          OUTER_SET first_round_removed += cbr_scs_wp_patch_first
+          OUTER_SET renewal_removed += cbr_scs_wp_patch_renewal
+          OUTER_SET chain_replaced += cbr_scs_wp_patch_chain
+          OUTER_SET unknown_blocks += cbr_scs_wp_patch_unknown
+        END
+      BUT_ONLY
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_apply_scs_weapon_protection_semantics
+  STR_VAR
+    resource_dir = ~~
+    script_dir = ~~
+    spell_ids = ~~
+    phase = ~full~
+    probe_resref = ~NONE~
+  RET
+    probe_is_protection
+    mismatch_detected
+    candidate_order
+    replacement_resref
+    metadata_removed
+    first_round_removed
+    renewal_removed
+    chain_replaced
+    unknown_blocks
+BEGIN
+  // LAF does not expand STR_VAR placeholders supplied by the isolated argv
+  // harness, so normalize the public boundary before any path validation.
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  OUTER_SPRINT script_dir EVALUATE_BUFFER ~%script_dir%~
+  OUTER_SPRINT spell_ids EVALUATE_BUFFER ~%spell_ids%~
+  OUTER_SPRINT phase EVALUATE_BUFFER ~%phase%~
+  OUTER_SPRINT probe_resref EVALUATE_BUFFER ~%probe_resref%~
+  ACTION_IF (~%resource_dir%~ STR_EQ ~~ || ~%script_dir%~ STR_EQ ~~ || ~%spell_ids%~ STR_EQ ~~) BEGIN
+    FAIL ~CBR SCS weapon-protection repair requires explicit resource_dir, script_dir, and spell_ids paths.~
+  END
+  ACTION_IF !(~%phase%~ STR_EQ ~classify~
+           || ~%phase%~ STR_EQ ~metadata~
+           || ~%phase%~ STR_EQ ~scripts~
+           || ~%phase%~ STR_EQ ~full~
+           || ~%phase%~ STR_EQ ~preflight~) BEGIN
+    FAIL ~CBR SCS weapon-protection repair received invalid phase %phase%.~
+  END
+
+  OUTER_SET probe_is_protection = 0
+  OUTER_SET mismatch_detected = 0
+  OUTER_SPRINT candidate_order ~~
+  OUTER_SPRINT replacement_resref ~~
+  OUTER_SET metadata_removed = 0
+  OUTER_SET first_round_removed = 0
+  OUTER_SET renewal_removed = 0
+  OUTER_SET chain_replaced = 0
+  OUTER_SET unknown_blocks = 0
+
+  LAF cbr_scs_wp_read_spell_ids
+    STR_VAR spell_ids = EVAL ~%spell_ids%~
+    RET
+      cbr_scs_wp_pfmw_number = pfmw_number
+      cbr_scs_wp_mantle_number = mantle_number
+      cbr_scs_wp_improved_number = improved_number
+      cbr_scs_wp_mop_number = mop_number
+      cbr_scs_wp_absolute_number = absolute_number
+      cbr_scs_wp_breach_number = breach_number
+      cbr_scs_wp_dispel_number = dispel_number
+  END
+  OUTER_SET cbr_scs_wp_pfmw_slot = cbr_scs_wp_pfmw_number - 2000
+  OUTER_SET cbr_scs_wp_mantle_slot = cbr_scs_wp_mantle_number - 2000
+  OUTER_SET cbr_scs_wp_improved_slot = cbr_scs_wp_improved_number - 2000
+  OUTER_SET cbr_scs_wp_mop_slot = cbr_scs_wp_mop_number - 2000
+  OUTER_SET cbr_scs_wp_absolute_slot = cbr_scs_wp_absolute_number - 2000
+  OUTER_SET cbr_scs_wp_breach_slot = cbr_scs_wp_breach_number - 2000
+  OUTER_SET cbr_scs_wp_dispel_slot = cbr_scs_wp_dispel_number - 2000
+  OUTER_SPRINT cbr_scs_wp_pfmw_resref ~SPWI%cbr_scs_wp_pfmw_slot%~
+  OUTER_SPRINT cbr_scs_wp_mantle_resref ~SPWI%cbr_scs_wp_mantle_slot%~
+  OUTER_SPRINT cbr_scs_wp_improved_resref ~SPWI%cbr_scs_wp_improved_slot%~
+  OUTER_SPRINT cbr_scs_wp_mop_resref ~SPWI%cbr_scs_wp_mop_slot%~
+  OUTER_SPRINT cbr_scs_wp_absolute_resref ~SPWI%cbr_scs_wp_absolute_slot%~
+  OUTER_SPRINT cbr_scs_wp_breach_resref ~SPWI%cbr_scs_wp_breach_slot%~
+  OUTER_SPRINT cbr_scs_wp_dispel_resref ~SPWI%cbr_scs_wp_dispel_slot%~
+
+  OUTER_SPRINT cbr_scs_wp_pfmw_path ~%resource_dir%/%cbr_scs_wp_pfmw_resref%.SPL~
+  OUTER_SPRINT cbr_scs_wp_mantle_path ~%resource_dir%/%cbr_scs_wp_mantle_resref%.SPL~
+  OUTER_SPRINT cbr_scs_wp_improved_path ~%resource_dir%/%cbr_scs_wp_improved_resref%.SPL~
+  OUTER_SPRINT cbr_scs_wp_absolute_path ~%resource_dir%/%cbr_scs_wp_absolute_resref%.SPL~
+  LAF cbr_scs_wp_classify_file
+    STR_VAR resource_path = EVAL ~%cbr_scs_wp_pfmw_path%~ resource_name = EVAL ~%cbr_scs_wp_pfmw_resref%~
+    RET cbr_scs_wp_pfmw_is_protection = is_weapon_protection
+  END
+  LAF cbr_scs_wp_classify_file
+    STR_VAR resource_path = EVAL ~%cbr_scs_wp_mantle_path%~ resource_name = EVAL ~%cbr_scs_wp_mantle_resref%~
+    RET cbr_scs_wp_mantle_is_protection = is_weapon_protection
+  END
+  LAF cbr_scs_wp_classify_file
+    STR_VAR resource_path = EVAL ~%cbr_scs_wp_improved_path%~ resource_name = EVAL ~%cbr_scs_wp_improved_resref%~
+    RET cbr_scs_wp_improved_is_protection = is_weapon_protection
+  END
+  LAF cbr_scs_wp_classify_file
+    STR_VAR resource_path = EVAL ~%cbr_scs_wp_absolute_path%~ resource_name = EVAL ~%cbr_scs_wp_absolute_resref%~
+    RET cbr_scs_wp_absolute_is_protection = is_weapon_protection
+  END
+
+  ACTION_IF (cbr_scs_wp_absolute_is_protection) BEGIN
+    OUTER_SPRINT candidate_order ~%cbr_scs_wp_absolute_resref%~
+  END
+  ACTION_IF (cbr_scs_wp_improved_is_protection
+          && !(~%cbr_scs_wp_improved_resref%~ STR_EQ ~%cbr_scs_wp_absolute_resref%~)) BEGIN
+    ACTION_IF (~%candidate_order%~ STR_EQ ~~) BEGIN
+      OUTER_SPRINT candidate_order ~%cbr_scs_wp_improved_resref%~
+    END ELSE BEGIN
+      OUTER_SPRINT candidate_order ~%candidate_order%,%cbr_scs_wp_improved_resref%~
+    END
+  END
+  ACTION_IF (cbr_scs_wp_mantle_is_protection
+          && !(~%cbr_scs_wp_mantle_resref%~ STR_EQ ~%cbr_scs_wp_absolute_resref%~)
+          && !(cbr_scs_wp_improved_is_protection && ~%cbr_scs_wp_mantle_resref%~ STR_EQ ~%cbr_scs_wp_improved_resref%~)) BEGIN
+    ACTION_IF (~%candidate_order%~ STR_EQ ~~) BEGIN
+      OUTER_SPRINT candidate_order ~%cbr_scs_wp_mantle_resref%~
+    END ELSE BEGIN
+      OUTER_SPRINT candidate_order ~%candidate_order%,%cbr_scs_wp_mantle_resref%~
+    END
+  END
+  ACTION_IF (cbr_scs_wp_pfmw_is_protection
+          && !(~%cbr_scs_wp_pfmw_resref%~ STR_EQ ~%cbr_scs_wp_absolute_resref%~)
+          && !(cbr_scs_wp_improved_is_protection && ~%cbr_scs_wp_pfmw_resref%~ STR_EQ ~%cbr_scs_wp_improved_resref%~)
+          && !(cbr_scs_wp_mantle_is_protection && ~%cbr_scs_wp_pfmw_resref%~ STR_EQ ~%cbr_scs_wp_mantle_resref%~)) BEGIN
+    ACTION_IF (~%candidate_order%~ STR_EQ ~~) BEGIN
+      OUTER_SPRINT candidate_order ~%cbr_scs_wp_pfmw_resref%~
+    END ELSE BEGIN
+      OUTER_SPRINT candidate_order ~%candidate_order%,%cbr_scs_wp_pfmw_resref%~
+    END
+  END
+
+  ACTION_IF (!cbr_scs_wp_improved_is_protection && cbr_scs_wp_improved_number = cbr_scs_wp_mop_number) BEGIN
+    OUTER_SET mismatch_detected = 1
+  END
+  ACTION_IF cbr_scs_wp_mantle_is_protection BEGIN
+    OUTER_SPRINT replacement_resref ~%cbr_scs_wp_mantle_resref%~
+    OUTER_SPRINT cbr_scs_wp_replacement_symbol ~WIZARD_MANTLE~
+  END ELSE ACTION_IF cbr_scs_wp_pfmw_is_protection BEGIN
+    OUTER_SPRINT replacement_resref ~%cbr_scs_wp_pfmw_resref%~
+    OUTER_SPRINT cbr_scs_wp_replacement_symbol ~WIZARD_PROTECTION_FROM_MAGIC_WEAPONS~
+  END ELSE BEGIN
+    OUTER_SPRINT cbr_scs_wp_replacement_symbol ~~
+  END
+
+  ACTION_IF (~%phase%~ STR_EQ ~classify~) BEGIN
+    ACTION_IF (~%probe_resref%~ STR_EQ ~NONE~ || ~%probe_resref%~ STR_EQ ~~) BEGIN
+      FAIL ~CBR SCS weapon-protection classify phase requires probe_resref.~
+    END
+    OUTER_SPRINT cbr_scs_wp_probe_path ~%resource_dir%/%probe_resref%.SPL~
+    LAF cbr_scs_wp_classify_file
+      STR_VAR resource_path = EVAL ~%cbr_scs_wp_probe_path%~ resource_name = EVAL ~%probe_resref%~
+      RET probe_is_protection = is_weapon_protection
+    END
+  END ELSE ACTION_IF mismatch_detected BEGIN
+    // SCS absence is a whole-library no-op. Do not infer presence from a
+    // historical script count; require at least one current allowlisted name.
+    OUTER_SET cbr_scs_wp_common_script_count = 0
+    ACTION_IF (FILE_EXISTS ~%script_dir%~) BEGIN
+      ACTION_BASH_FOR ~%script_dir%~ ~^dw#mg[0-9]+\.bcs$~ BEGIN
+        OUTER_SET cbr_scs_wp_common_script_count += 1
+      END
+    END
+    ACTION_IF (cbr_scs_wp_common_script_count > 0) BEGIN
+      LAF cbr_scs_wp_audit_counters
+        STR_VAR
+          resource_dir = EVAL ~%resource_dir%~
+          target_resref = EVAL ~%cbr_scs_wp_improved_resref%~
+          breach_resref = EVAL ~%cbr_scs_wp_breach_resref%~
+          dispel_resref = EVAL ~%cbr_scs_wp_dispel_resref%~
+        RET
+          cbr_scs_wp_keep_breach = keep_breach_state
+          cbr_scs_wp_keep_dispel = keep_dispel_state
+      END
+
+      OUTER_SET cbr_scs_wp_planned_metadata_removed = 0
+      COPY ~%cbr_scs_wp_improved_path%~ ~%cbr_scs_wp_improved_path%~
+        LPF cbr_scs_wp_plan_metadata
+          INT_VAR keep_breach_state = cbr_scs_wp_keep_breach keep_dispel_state = cbr_scs_wp_keep_dispel
+          STR_VAR resource_name = EVAL ~%cbr_scs_wp_improved_resref%~
+          RET cbr_scs_wp_patch_planned_removed = remove_count
+        END
+        INNER_ACTION BEGIN
+          OUTER_SET cbr_scs_wp_planned_metadata_removed = cbr_scs_wp_patch_planned_removed
+        END
+      BUT_ONLY
+
+      // Full preflight decompiles every candidate block and compiles each
+      // planned chain replacement without writing any file.
+      LAF cbr_scs_wp_scan_scripts
+        INT_VAR apply = 0 false_spell_number = cbr_scs_wp_improved_number
+        STR_VAR script_dir = EVAL ~%script_dir%~ replacement_symbol = EVAL ~%cbr_scs_wp_replacement_symbol%~
+        RET
+          cbr_scs_wp_preflight_script_count = script_count
+          cbr_scs_wp_preflight_first = first_round_removed
+          cbr_scs_wp_preflight_renewal = renewal_removed
+          cbr_scs_wp_preflight_chain = chain_replaced
+          cbr_scs_wp_preflight_unknown = unknown_blocks
+      END
+      OUTER_SET unknown_blocks = cbr_scs_wp_preflight_unknown
+
+      ACTION_IF (~%phase%~ STR_EQ ~metadata~ || ~%phase%~ STR_EQ ~full~) BEGIN
+        COPY ~%cbr_scs_wp_improved_path%~ ~%cbr_scs_wp_improved_path%~
+          LPF cbr_scs_wp_remove_metadata
+            INT_VAR keep_breach_state = cbr_scs_wp_keep_breach keep_dispel_state = cbr_scs_wp_keep_dispel
+            STR_VAR resource_name = EVAL ~%cbr_scs_wp_improved_resref%~
+            RET cbr_scs_wp_patch_removed = removed
+          END
+          PATCH_IF (cbr_scs_wp_patch_removed != cbr_scs_wp_planned_metadata_removed) BEGIN
+            PATCH_FAIL ~CBR SCS weapon-protection metadata mutation diverged from preflight.~
+          END
+          INNER_ACTION BEGIN
+            OUTER_SET metadata_removed = cbr_scs_wp_patch_removed
+          END
+        BUT_ONLY
+      END
+      ACTION_IF (~%phase%~ STR_EQ ~scripts~ || ~%phase%~ STR_EQ ~full~) BEGIN
+        LAF cbr_scs_wp_scan_scripts
+          INT_VAR apply = 1 false_spell_number = cbr_scs_wp_improved_number
+          STR_VAR script_dir = EVAL ~%script_dir%~ replacement_symbol = EVAL ~%cbr_scs_wp_replacement_symbol%~
+          RET
+            cbr_scs_wp_apply_script_count = script_count
+            first_round_removed
+            renewal_removed
+            chain_replaced
+            unknown_blocks
+        END
+        ACTION_IF (cbr_scs_wp_apply_script_count != cbr_scs_wp_preflight_script_count) BEGIN
+          FAIL ~CBR SCS weapon-protection script set changed between preflight and mutation.~
+        END
+      END
+    END
+  END
+END

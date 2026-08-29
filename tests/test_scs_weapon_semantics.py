@@ -404,7 +404,12 @@ def build_fixture(
     return ids
 
 
-def _snapshot(root: Path, *, exclude_harness: bool = True) -> dict[str, bytes]:
+def _snapshot(
+    root: Path,
+    *,
+    exclude_harness: bool = True,
+    casefold_paths: bool = False,
+) -> dict[str, bytes]:
     result = {}
     for path in root.rglob("*"):
         if not path.is_file():
@@ -412,6 +417,12 @@ def _snapshot(root: Path, *, exclude_harness: bool = True) -> dict[str, bytes]:
         relative = path.relative_to(root).as_posix()
         if exclude_harness and relative.upper().startswith("CBR_TEST."):
             continue
+        # WeiDU v249 restores backed-up resource filenames in uppercase on
+        # Windows.  Resource lookup is case-insensitive, so uninstall checks
+        # normalize only the path spelling while retaining the full file set
+        # and exact bytes.
+        if casefold_paths:
+            relative = relative.casefold()
         result[relative] = path.read_bytes()
     return result
 
@@ -756,7 +767,11 @@ class ScsWeaponSemanticsTests(unittest.TestCase):
 
     def test_uninstall_restores_every_prior_byte(self) -> None:
         fixture = self._fixture()
-        before = _snapshot(fixture.root, exclude_harness=False)
+        before = _snapshot(
+            fixture.root,
+            exclude_harness=False,
+            casefold_paths=True,
+        )
         run_temporary = tempfile.TemporaryDirectory(prefix="cbr-scs-uninstall-")
         self.addCleanup(run_temporary.cleanup)
         installed = _run_harness(fixture, "full", run_temporary=run_temporary)
@@ -768,7 +783,14 @@ class ScsWeaponSemanticsTests(unittest.TestCase):
             operation="--force-uninstall-list",
         )
         self.assertNotIn("NOT UNINSTALLED", removed.transcript, removed.transcript)
-        self.assertEqual(_snapshot(fixture.root, exclude_harness=False), before)
+        self.assertEqual(
+            _snapshot(
+                fixture.root,
+                exclude_harness=False,
+                casefold_paths=True,
+            ),
+            before,
+        )
 
 
 if __name__ == "__main__":

@@ -7,12 +7,21 @@ AUTHOR ~chriz-bg-rebalance test harness~
 
 ALWAYS
   INCLUDE ~%argv[0]%~
+  DEFINE_PATCH_FUNCTION cbr_h_replace_with_text
+    STR_VAR text = ~~
+  BEGIN
+    SPRINT text EVALUATE_BUFFER ~%text%~
+    DELETE_BYTES 0 BUFFER_LENGTH
+    INSERT_BYTES 0 (STRING_LENGTH ~%text%~)
+    WRITE_ASCIIE 0 ~%text%~
+  END
 END
 
 BEGIN ~SCS weapon semantics harness: library smoke~
 DESIGNATED 0
 
-COPY - ~ok~ ~%argv[1]%/CBR_TEST.OK~
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[1]%/CBR_TEST.OK~
+  LPF cbr_h_replace_with_text STR_VAR text = ~ok~ END
 
 BEGIN ~SCS weapon semantics harness: classify one spell~
 DESIGNATED 1
@@ -29,11 +38,13 @@ LAF cbr_apply_scs_weapon_protection_semantics
     cbr_h_mismatch      = mismatch_detected
     cbr_h_candidates    = candidate_order
 END
-COPY - ~is_weapon_protection=%cbr_h_is_protection%
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[1]%/CBR_TEST.REPORT~
+  LPF cbr_h_replace_with_text STR_VAR text = ~is_weapon_protection=%cbr_h_is_protection%
 mismatch=%cbr_h_mismatch%
 candidates=%cbr_h_candidates%
-~ ~%argv[1]%/CBR_TEST.REPORT~
-COPY - ~ok~ ~%argv[1]%/CBR_TEST.OK~
+~ END
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[1]%/CBR_TEST.OK~
+  LPF cbr_h_replace_with_text STR_VAR text = ~ok~ END
 
 BEGIN ~SCS weapon semantics harness: metadata phase~
 DESIGNATED 2
@@ -49,11 +60,13 @@ LAF cbr_apply_scs_weapon_protection_semantics
     cbr_h_metadata_removed = metadata_removed
     cbr_h_candidates      = candidate_order
 END
-COPY - ~mismatch=%cbr_h_mismatch%
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[1]%/CBR_TEST.REPORT~
+  LPF cbr_h_replace_with_text STR_VAR text = ~mismatch=%cbr_h_mismatch%
 metadata_removed=%cbr_h_metadata_removed%
 candidates=%cbr_h_candidates%
-~ ~%argv[1]%/CBR_TEST.REPORT~
-COPY - ~ok~ ~%argv[1]%/CBR_TEST.OK~
+~ END
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[1]%/CBR_TEST.OK~
+  LPF cbr_h_replace_with_text STR_VAR text = ~ok~ END
 
 BEGIN ~SCS weapon semantics harness: script phase~
 DESIGNATED 3
@@ -72,14 +85,16 @@ LAF cbr_apply_scs_weapon_protection_semantics
     cbr_h_chain        = chain_replaced
     cbr_h_unknown      = unknown_blocks
 END
-COPY - ~mismatch=%cbr_h_mismatch%
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[1]%/CBR_TEST.REPORT~
+  LPF cbr_h_replace_with_text STR_VAR text = ~mismatch=%cbr_h_mismatch%
 replacement=%cbr_h_replacement%
 first_round_removed=%cbr_h_first%
 renewal_removed=%cbr_h_renewal%
 chain_replaced=%cbr_h_chain%
 unknown_blocks=%cbr_h_unknown%
-~ ~%argv[1]%/CBR_TEST.REPORT~
-COPY - ~ok~ ~%argv[1]%/CBR_TEST.OK~
+~ END
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[1]%/CBR_TEST.OK~
+  LPF cbr_h_replace_with_text STR_VAR text = ~ok~ END
 
 BEGIN ~SCS weapon semantics harness: full phase~
 DESIGNATED 4
@@ -100,7 +115,8 @@ LAF cbr_apply_scs_weapon_protection_semantics
     cbr_h_unknown          = unknown_blocks
     cbr_h_candidates       = candidate_order
 END
-COPY - ~mismatch=%cbr_h_mismatch%
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[1]%/CBR_TEST.REPORT~
+  LPF cbr_h_replace_with_text STR_VAR text = ~mismatch=%cbr_h_mismatch%
 replacement=%cbr_h_replacement%
 metadata_removed=%cbr_h_metadata_removed%
 first_round_removed=%cbr_h_first%
@@ -108,8 +124,9 @@ renewal_removed=%cbr_h_renewal%
 chain_replaced=%cbr_h_chain%
 unknown_blocks=%cbr_h_unknown%
 candidates=%cbr_h_candidates%
-~ ~%argv[1]%/CBR_TEST.REPORT~
-COPY - ~ok~ ~%argv[1]%/CBR_TEST.OK~
+~ END
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[1]%/CBR_TEST.OK~
+  LPF cbr_h_replace_with_text STR_VAR text = ~ok~ END
 
 BEGIN ~SCS weapon semantics harness: preflight only~
 DESIGNATED 5
@@ -126,9 +143,11 @@ LAF cbr_apply_scs_weapon_protection_semantics
     cbr_h_unknown     = unknown_blocks
     cbr_h_candidates  = candidate_order
 END
-COPY - ~mismatch=%cbr_h_mismatch%
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[1]%/CBR_TEST.REPORT~
+  LPF cbr_h_replace_with_text STR_VAR text = ~mismatch=%cbr_h_mismatch%
 replacement=%cbr_h_replacement%
 unknown_blocks=%cbr_h_unknown%
 candidates=%cbr_h_candidates%
-~ ~%argv[1]%/CBR_TEST.REPORT~
-COPY - ~ok~ ~%argv[1]%/CBR_TEST.OK~
+~ END
+COPY ~%argv[1]%/SPELL.IDS~ ~%argv[1]%/CBR_TEST.OK~
+  LPF cbr_h_replace_with_text STR_VAR text = ~ok~ END
