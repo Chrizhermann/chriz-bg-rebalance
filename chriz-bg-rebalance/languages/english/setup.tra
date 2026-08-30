@@ -4,6 +4,7 @@
 @100 = ~SCS: Telekinetic Storm — restore save vs. spell for half damage (+ bypass Mirror Image)~
 @101 = ~SCS: Adventurer's Mart — restore the five Freedom scrolls (spell tweak orphaned in v35)~
 @120 = ~SCS + Spell Revisions: repair false weapon-protection semantics~
+@121 = ~EEex + SCS: ambient caster readiness and one honest first-contact defense~
 @400 = ~Cleric of Tempus: weapon training — axe, longsword, crossbow, and two-pip mastery~
 @401 = ~Cleric of Tempus: Holy Power — automatic semantic detection (recommended)~
 @402 = ~Cleric of Tempus: Holy Power — force true-doubling compatibility~
@@ -87,6 +88,13 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9123 = ~SPELL.IDS does not contain every required wizard-spell symbol with a valid mapping.~
 @9124 = ~One or more dynamically mapped weapon-protection or counter spell resources are missing.~
 @9125 = ~The installed WIZARD_IMPROVED_MANTLE mapping is not the known false Moment of Prescience weapon-protection mismatch — nothing to repair.~
+@9130 = ~The EEex ambient-readiness bridge supports BG2:EE / EET only.~
+@9131 = ~SCS Smarter Mages component 6030 is not installed — there are no recognized SCS casters for this bridge.~
+@9132 = ~The EEex base component is not installed. This bridge was verified on EEex v0.11.0-alpha and rechecks every required API at runtime.~
+@9133 = ~The EEex LuaJIT component is not installed. The verified ambient-readiness runtime requires EEex component 1.~
+@9134 = ~EEex's M_*.lua autoload bootstrap (M___EEex.lua) is missing.~
+@9135 = ~The final loose SPELL.IDS is missing. Install SCS and spell revisions before this tail component.~
+@9136 = ~SCS's final instant-prebuff mapping is missing from weidu_external/data/stratagems.~
 @9400 = ~The Cleric of Tempus Holy Power component supports BG2:EE / EET only.~
 @9401 = ~OHTEMPUS.2DA is missing. Install the Cleric of Tempus kit before this component.~
 @9402 = ~OHTMPS1.SPL is missing. Install the Cleric of Tempus kit before this component.~

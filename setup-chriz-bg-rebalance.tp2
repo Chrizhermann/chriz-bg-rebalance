@@ -17,6 +17,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/tempus_spec_apr_eeex.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/tempus_descriptions.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/scs_weapon_protection_semantics.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/ambient_readiness.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -298,6 +299,51 @@ LAF cbr_apply_scs_weapon_protection_semantics
 END
 
 PRINT ~cbr 120: metadata=%cbr_120_metadata%; first-round=%cbr_120_first%; renewal=%cbr_120_renewal%; chain=%cbr_120_chain%; unknown=%cbr_120_unknown%; replacement=%cbr_120_replacement%.~
+
+BEGIN @121
+DESIGNATED 121
+GROUP @1100
+LABEL ~cbr_eeex_ambient_readiness~
+
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9130
+REQUIRE_PREDICATE
+  (MOD_IS_INSTALLED ~eeex/eeex.tp2~ 0)
+  @9132
+REQUIRE_PREDICATE
+  (MOD_IS_INSTALLED ~eeex/eeex.tp2~ 1)
+  @9133
+REQUIRE_PREDICATE
+  (FILE_EXISTS_IN_GAME ~M___EEex.lua~)
+  @9134
+REQUIRE_PREDICATE
+  (MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 6030)
+  @9131
+REQUIRE_PREDICATE
+  ((FILE_EXISTS_IN_GAME ~SPELL.IDS~) AND (FILE_EXISTS ~override/SPELL.IDS~))
+  @9135
+REQUIRE_PREDICATE
+  (FILE_EXISTS ~weidu_external/data/stratagems/instant_prebuff_spells.2da~)
+  @9136
+
+// The install-time compiler resolves every candidate from the final SPELL.IDS,
+// validates the installed SPL semantics and SCS cosmetic-free delivery map,
+// then stamps exactly one backup-aware M_ autoload module. It does not patch
+// SCS scripts or any spell resource, and it remains independent of component
+// 120 while importing the same semantic classifier.
+LAF cbr_install_ambient_readiness_runtime
+  STR_VAR
+    spell_table = ~chriz-bg-rebalance/data/ambient_readiness_spells.2da~
+    override_table = ~chriz-bg-rebalance/data/ambient_readiness_overrides.2da~
+    resource_dir = ~override~
+    spell_ids = ~override/SPELL.IDS~
+    prebuff_map = ~weidu_external/data/stratagems/instant_prebuff_spells.2da~
+    template_file = ~chriz-bg-rebalance/lua/M_CBRRDY.lua~
+  RET
+    cbr_121_ambient_count = ambient_count
+    cbr_121_urgent_count = urgent_count
+END
+
+PRINT ~cbr 121: shipped M_CBRRDY.lua (ambient=%cbr_121_ambient_count%; urgent=%cbr_121_urgent_count%; verified EEex profile v0.11.0-alpha with runtime API gates).~
 
 // ============================================================
 // Class and kit revisions (400-499)

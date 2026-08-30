@@ -246,6 +246,7 @@ DEFINE_ACTION_FUNCTION cbr_compile_ambient_readiness_manifest
   RET
     ambient_count
     urgent_count
+    manifest_text
 BEGIN
   OUTER_SPRINT spell_table EVALUATE_BUFFER ~%spell_table%~
   OUTER_SPRINT override_table EVALUATE_BUFFER ~%override_table%~
@@ -510,8 +511,14 @@ BEGIN
     FAIL ~CBR ambient readiness has no genuine installed urgent weapon-protection candidate.~
   END
 
-  OUTER_SPRINT cbr_rdy_manifest ~return {
+  OUTER_SPRINT cbr_rdy_manifest ~{
     schema_version = 1,
+    runtime_profile = {
+        minimum_eeex_version = "0.11.0-alpha",
+        requires_base_component = 0,
+        requires_luajit_component = 1,
+        verified_on = "2026-08-30",
+    },
     minimum_duration = 2400,
     maintenance_cadence_ticks = 15,
     contact_rearm_seconds = 6,
@@ -586,12 +593,15 @@ BEGIN
 }
 ~
 
+  OUTER_SPRINT manifest_text ~%cbr_rdy_manifest%~
+  OUTER_SPRINT cbr_rdy_manifest_file ~return %cbr_rdy_manifest%~
+
   COPY ~%spell_table%~ ~%output_file%~
     DELETE_BYTES 0 BUFFER_LENGTH
-    INSERT_BYTES 0 (STRING_LENGTH ~%cbr_rdy_manifest%~)
-    WRITE_ASCIIE 0 ~%cbr_rdy_manifest%~
+    INSERT_BYTES 0 (STRING_LENGTH ~%cbr_rdy_manifest_file%~)
+    WRITE_ASCIIE 0 ~%cbr_rdy_manifest_file%~
 
-  OUTER_SET cbr_rdy_expected_manifest_length = STRING_LENGTH ~%cbr_rdy_manifest%~
+  OUTER_SET cbr_rdy_expected_manifest_length = STRING_LENGTH ~%cbr_rdy_manifest_file%~
   COPY ~%output_file%~ ~%output_file%~
     SET cbr_rdy_actual_manifest_length = BUFFER_LENGTH
     SET cbr_rdy_schema_index = INDEX_BUFFER (~schema_version = 1~)
@@ -604,6 +614,93 @@ BEGIN
            || cbr_rdy_urgent_index < 0
            || cbr_rdy_placeholder_index >= 0) BEGIN
       PATCH_FAIL ~CBR ambient readiness manifest verification failed after write: expected=%cbr_rdy_expected_manifest_length% actual=%cbr_rdy_actual_manifest_length% schema=%cbr_rdy_schema_index% ambient=%cbr_rdy_ambient_index% urgent=%cbr_rdy_urgent_index% placeholder=%cbr_rdy_placeholder_index%.~
+    END
+  BUT_ONLY
+END
+
+// Compile and publish the final autoload module through one WeiDU-owned
+// override path. The compiler writes its validated manifest to that path only
+// after all installed-resource checks pass; the second COPY replaces that
+// intermediate buffer with the stamped runtime in the same component
+// transaction. A later failure therefore rolls back to the exact pre-install
+// file, and uninstall restores/removes only M_CBRRDY.lua.
+DEFINE_ACTION_FUNCTION cbr_install_ambient_readiness_runtime
+  STR_VAR
+    spell_table = ~~
+    override_table = ~~
+    resource_dir = ~~
+    spell_ids = ~~
+    prebuff_map = ~~
+    template_file = ~~
+  RET
+    ambient_count
+    urgent_count
+BEGIN
+  OUTER_SPRINT spell_table EVALUATE_BUFFER ~%spell_table%~
+  OUTER_SPRINT override_table EVALUATE_BUFFER ~%override_table%~
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  OUTER_SPRINT spell_ids EVALUATE_BUFFER ~%spell_ids%~
+  OUTER_SPRINT prebuff_map EVALUATE_BUFFER ~%prebuff_map%~
+  OUTER_SPRINT template_file EVALUATE_BUFFER ~%template_file%~
+  ACTION_IF (~%resource_dir%~ STR_EQ ~~) BEGIN
+    FAIL ~CBR ambient readiness runtime installer requires resource_dir.~
+  END
+  ACTION_IF !(FILE_EXISTS ~%template_file%~) BEGIN
+    FAIL ~CBR ambient readiness runtime template is missing: %template_file%.~
+  END
+
+  // Read-only template preflight before the compiler creates its output.
+  COPY ~%template_file%~ ~%template_file%~
+    PATCH_IF (INDEX_BUFFER (~CBR_RDY_MANIFEST~) < 0) BEGIN
+      PATCH_FAIL ~CBR ambient readiness runtime template has no manifest placeholder.~
+    END
+    PATCH_IF (INDEX_BUFFER (~CBR_TEST~) >= 0
+           || INDEX_BUFFER (~RDY_PROBE~) >= 0
+           || INDEX_BUFFER (~C:\\~) >= 0
+           || INDEX_BUFFER (~/mnt/~) >= 0) BEGIN
+      PATCH_FAIL ~CBR ambient readiness runtime template contains a test, probe, or machine-specific token.~
+    END
+  BUT_ONLY
+
+  OUTER_SPRINT cbr_rdy_runtime_path ~%resource_dir%/M_CBRRDY.lua~
+  LAF cbr_compile_ambient_readiness_manifest
+    STR_VAR
+      spell_table = EVAL ~%spell_table%~
+      override_table = EVAL ~%override_table%~
+      resource_dir = EVAL ~%resource_dir%~
+      spell_ids = EVAL ~%spell_ids%~
+      prebuff_map = EVAL ~%prebuff_map%~
+      output_file = EVAL ~%cbr_rdy_runtime_path%~
+    RET
+      cbr_rdy_installed_ambient_count = ambient_count
+      cbr_rdy_installed_urgent_count = urgent_count
+      cbr_rdy_runtime_manifest = manifest_text
+  END
+  OUTER_SET ambient_count = cbr_rdy_installed_ambient_count
+  OUTER_SET urgent_count = cbr_rdy_installed_urgent_count
+
+  COPY ~%template_file%~ ~%cbr_rdy_runtime_path%~
+    PATCH_IF (INDEX_BUFFER (~CBR_RDY_MANIFEST~) < 0) BEGIN
+      PATCH_FAIL ~CBR ambient readiness runtime template lost its manifest placeholder.~
+    END
+    REPLACE_TEXTUALLY ~%CBR_RDY_MANIFEST%~ ~%cbr_rdy_runtime_manifest%~
+    PATCH_IF (INDEX_BUFFER (~CBR_RDY_MANIFEST~) >= 0
+           || INDEX_BUFFER (~schema_version = 1~) < 0
+           || INDEX_BUFFER (~minimum_eeex_version = "0.11.0-alpha"~) < 0
+           || INDEX_BUFFER (~ambient_spells = {~) < 0
+           || INDEX_BUFFER (~urgent_candidates = {~) < 0
+           || INDEX_BUFFER (~CBR_TEST~) >= 0
+           || INDEX_BUFFER (~RDY_PROBE~) >= 0
+           || INDEX_BUFFER (~C:\\~) >= 0
+           || INDEX_BUFFER (~/mnt/~) >= 0) BEGIN
+      PATCH_FAIL ~CBR ambient readiness stamped runtime failed verification.~
+    END
+
+  COPY ~%cbr_rdy_runtime_path%~ ~%cbr_rdy_runtime_path%~
+    PATCH_IF (INDEX_BUFFER (~CBR_RDY_MANIFEST~) >= 0
+           || INDEX_BUFFER (~schema_version = 1~) < 0
+           || INDEX_BUFFER (~minimum_eeex_version = "0.11.0-alpha"~) < 0) BEGIN
+      PATCH_FAIL ~CBR ambient readiness shipped runtime failed post-write verification.~
     END
   BUT_ONLY
 END

@@ -7,6 +7,7 @@ The active BG2:EE install is never consulted or written.
 from __future__ import annotations
 
 import dataclasses
+import re
 import shutil
 import subprocess
 import tempfile
@@ -21,10 +22,15 @@ from tests.ie_formats import (
     write_spl,
 )
 from tests.test_ambient_readiness_listener import _find_lua
+from tests.test_tempus_holy_power_installer import (
+    ONE_EMPTY_STRING_TLK,
+    _write_key_and_bif,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WEIDU = ROOT / "weidu.exe"
+SETUP_TP2 = ROOT / "setup-chriz-bg-rebalance.tp2"
 HARNESS = ROOT / "tests" / "weidu" / "ambient_readiness_harness.tp2"
 WEAPON_TPA = (
     ROOT / "chriz-bg-rebalance" / "lib" / "scs_weapon_protection_semantics.tpa"
@@ -272,6 +278,165 @@ def _transcript(process: subprocess.CompletedProcess[str]) -> str:
     return f"{process.stdout}\n{process.stderr}".strip()
 
 
+def _tree(path: Path) -> dict[str, bytes]:
+    return {
+        item.relative_to(path).as_posix().upper(): item.read_bytes()
+        for item in path.rglob("*")
+        if item.is_file()
+    }
+
+
+class AmbientReadinessGame:
+    """Minimal BG2EE game for the real public component 121 transaction."""
+
+    def __init__(
+        self,
+        temporary: tempfile.TemporaryDirectory[str],
+        *,
+        scs_installed: bool = True,
+        eeex_base: bool = True,
+        eeex_luajit: bool = True,
+        autoload_marker: bool = True,
+        prebuff_map: bool = True,
+        malformed_mapping: bool = False,
+        missing_required_mapping: bool = False,
+        existing_runtime: bool = False,
+        **fixture_kwargs: object,
+    ) -> None:
+        self.temporary = temporary
+        self.fixture = _build_fixture(temporary, **fixture_kwargs)
+        self.root = Path(temporary.name) / "game"
+        self.root.mkdir()
+        self.override = self.root / "override"
+        self.override.mkdir()
+
+        shutil.copy2(SETUP_TP2, self.root / SETUP_TP2.name)
+        shutil.copytree(ROOT / "chriz-bg-rebalance", self.root / "chriz-bg-rebalance")
+        if missing_required_mapping:
+            table_path = (
+                self.root
+                / "chriz-bg-rebalance"
+                / "data"
+                / "ambient_readiness_spells.2da"
+            )
+            table_text = table_path.read_text(encoding="ascii")
+            table_text = table_text.replace(
+                "WIZARD_STONE_SKIN 1 2400 218 0 0",
+                "WIZARD_STONE_SKIN 1 2400 218 0 1",
+            )
+            table_path.write_text(table_text, encoding="ascii", newline="\n")
+        for source in self.fixture.root.iterdir():
+            if source.is_file() and (
+                source.suffix.upper() == ".SPL" or source.name.upper() == "SPELL.IDS"
+            ):
+                shutil.copy2(source, self.override / source.name)
+        (self.override / "KIT.IDS").write_text(
+            "IDS V1.0\n0 NONE\n", encoding="ascii", newline="\n"
+        )
+        (self.override / "STATS.IDS").write_text(
+            "IDS V1.0\n1 STREXTRA\n", encoding="ascii", newline="\n"
+        )
+        (self.override / "dw#mg100.bcs").write_bytes(
+            b"synthetic SCS common-mage script sentinel\r\n"
+        )
+        if autoload_marker:
+            (self.override / "M___EEex.lua").write_text(
+                "if not EEex_Active then error('EEex not active') end\n",
+                encoding="ascii",
+                newline="\n",
+            )
+        if existing_runtime:
+            (self.override / "M_CBRRDY.lua").write_bytes(
+                b"-- prior ambient-readiness runtime to restore on uninstall\r\n"
+            )
+
+        external = self.root / "weidu_external" / "data" / "stratagems"
+        if prebuff_map:
+            external.mkdir(parents=True)
+            mapping = self.fixture.prebuff_map.read_text(encoding="ascii")
+            if malformed_mapping:
+                mapping += "WIZARD_STONE_SKIN_PREBUFF DWSW999\n"
+            if missing_required_mapping:
+                mapping = "\n".join(
+                    line
+                    for line in mapping.splitlines()
+                    if not line.startswith("WIZARD_STONE_SKIN_PREBUFF ")
+                ) + "\n"
+            (external / "instant_prebuff_spells.2da").write_text(
+                mapping, encoding="ascii", newline="\n"
+            )
+
+        log_lines: list[str] = []
+        if eeex_base:
+            log_lines.append("~EEEX/EEEX.TP2~ #0 #0 // EEex: v0.11.0-alpha")
+        if eeex_luajit:
+            log_lines.append(
+                "~EEEX/EEEX.TP2~ #0 #1 // Experimental - Use LuaJIT: v0.11.0-alpha"
+            )
+        if scs_installed:
+            log_lines.append(
+                "~STRATAGEMS/SETUP-STRATAGEMS.TP2~ #0 #6030 // Smarter Mages: 35.21"
+            )
+        if log_lines:
+            (self.root / "WeiDU.log").write_text(
+                "\n".join(log_lines) + "\n", encoding="ascii", newline="\n"
+            )
+
+        self.bif_path = _write_key_and_bif(
+            self.root,
+            (("OH6000", "ARE", b"synthetic BG2EE marker"),),
+        )
+        self.lang_tlk = self.root / "lang/en_US/dialog.tlk"
+        self.lang_tlk.parent.mkdir(parents=True)
+        self.lang_tlk.write_bytes(ONE_EMPTY_STRING_TLK)
+        self.root_tlk = self.root / "dialog.tlk"
+        self.root_tlk.write_bytes(ONE_EMPTY_STRING_TLK)
+        self.before_override = _tree(self.override)
+        self.before_spell_and_script = {
+            key: value
+            for key, value in self.before_override.items()
+            if key.endswith((".SPL", ".BCS"))
+        }
+
+    def run(self, *operation: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                str(WEIDU),
+                str(self.root / SETUP_TP2.name),
+                "--game",
+                str(self.root),
+                *operation,
+                "--language",
+                "0",
+                "--use-lang",
+                "en_US",
+                "--no-exit-pause",
+                "--quick-log",
+            ],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+
+    @staticmethod
+    def transcript(process: subprocess.CompletedProcess[str]) -> str:
+        return _transcript(process)
+
+    def active_weidu_log(self) -> str:
+        path = self.root / "WeiDU.log"
+        if not path.exists():
+            return ""
+        return "\n".join(
+            line
+            for line in path.read_text(
+                encoding="ascii", errors="replace"
+            ).splitlines()
+            if not line.lstrip().startswith("//")
+        )
+
+
 class ProductionManifestGateTests(unittest.TestCase):
     def test_component_121_manifest_assets_exist(self) -> None:
         missing = [
@@ -398,6 +563,184 @@ class AmbientReadinessManifestTests(unittest.TestCase):
         first = fixture.output.read_bytes()
         self._run_success(fixture)
         self.assertEqual(fixture.output.read_bytes(), first)
+
+
+class AmbientReadinessPublicInstallerTests(unittest.TestCase):
+    def _game(self, **kwargs: object) -> AmbientReadinessGame:
+        temporary = tempfile.TemporaryDirectory(prefix="cbr-rdy-public-")
+        self.addCleanup(temporary.cleanup)
+        return AmbientReadinessGame(temporary, **kwargs)
+
+    def _install(self, game: AmbientReadinessGame) -> str:
+        process = game.run("--force-install-list", "121")
+        transcript = game.transcript(process)
+        self.assertEqual(process.returncode, 0, transcript)
+        self.assertIn("SUCCESSFULLY INSTALLED", transcript, transcript)
+        self.assertRegex(game.active_weidu_log(), r"(?m)#0\s+#121\b")
+        return transcript
+
+    def _runtime(self, game: AmbientReadinessGame) -> str:
+        path = game.override / "M_CBRRDY.lua"
+        self.assertTrue(path.is_file())
+        source = path.read_text(encoding="ascii")
+        self.assertNotIn("%CBR_RDY_MANIFEST%", source)
+        self.assertIn('minimum_eeex_version = "0.11.0-alpha"', source)
+        self.assertIn("requires_base_component = 0", source)
+        self.assertIn("requires_luajit_component = 1", source)
+        self.assertNotIn("CBR_TEST", source)
+        self.assertNotIn("RDY_PROBE", source)
+        self.assertNotIn("C:\\", source)
+        self.assertNotIn("/mnt/", source)
+        self.assertNotIn(" << ", source)
+        self.assertNotIn(" & ", source)
+        self.assertNotIn(" | ", source)
+        lua = _find_lua()
+        if lua is not None:
+            parsed = subprocess.run(
+                [lua, "-e", f"assert(loadfile([[{path.resolve().as_posix()}]]))"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(parsed.returncode, 0, parsed.stderr)
+        return source
+
+    @staticmethod
+    def _urgent_genuine(source: str, symbol: str) -> int:
+        match = re.search(
+            rf'key = "{re.escape(symbol)}".*?genuine_weapon_immunity = ([01])',
+            source,
+            flags=re.DOTALL,
+        )
+        if match is None:
+            raise AssertionError(f"missing urgent manifest entry for {symbol}")
+        return int(match.group(1))
+
+    def test_current_scs_sr_install_ships_only_a_stamped_runtime(self) -> None:
+        game = self._game()
+        transcript = self._install(game)
+        source = self._runtime(game)
+        self.assertIn("ambient=6", transcript)
+        self.assertIn("urgent=4", transcript)
+        self.assertEqual(
+            self._urgent_genuine(source, "WIZARD_IMPROVED_MANTLE"), 0
+        )
+        self.assertEqual(
+            {
+                key: value
+                for key, value in _tree(game.override).items()
+                if key.endswith((".SPL", ".BCS"))
+            },
+            game.before_spell_and_script,
+            "component 121 must not patch SCS scripts or spell mechanics",
+        )
+        self.assertEqual(
+            set(_tree(game.override)) - set(game.before_override),
+            {"M_CBRRDY.LUA"},
+        )
+
+    def test_future_genuine_improved_mantle_is_enabled_semantically(self) -> None:
+        game = self._game(future_improved_mantle=True)
+        self._install(game)
+        source = self._runtime(game)
+        self.assertEqual(
+            self._urgent_genuine(source, "WIZARD_IMPROVED_MANTLE"), 1
+        )
+
+    def test_missing_optional_ambient_candidate_still_installs(self) -> None:
+        game = self._game(missing_symbol="WIZARD_ARMOR")
+        transcript = self._install(game)
+        source = self._runtime(game)
+        self.assertIn("missing SPELL.IDS symbol", transcript)
+        self.assertIn("ambient=5", transcript)
+        self.assertNotIn('key = "WIZARD_ARMOR"', source)
+
+    def test_missing_prerequisites_skip_without_override_mutation(self) -> None:
+        cases = (
+            ("scs", {"scs_installed": False}, "Smarter Mages"),
+            (
+                "eeex",
+                {
+                    "eeex_base": False,
+                    "eeex_luajit": False,
+                    "autoload_marker": False,
+                },
+                "EEex",
+            ),
+            ("luajit", {"eeex_luajit": False}, "LuaJIT"),
+            ("autoload", {"autoload_marker": False}, "autoload"),
+            ("mapping", {"prebuff_map": False}, "prebuff"),
+        )
+        for name, kwargs, diagnostic in cases:
+            with self.subTest(name=name):
+                game = self._game(**kwargs)
+                process = game.run("--force-install-list", "121")
+                transcript = game.transcript(process)
+                self.assertEqual(process.returncode, 0, transcript)
+                self.assertIn("SKIPPING", transcript, transcript)
+                self.assertIn(diagnostic.lower(), transcript.lower())
+                self.assertNotRegex(game.active_weidu_log(), r"(?m)#0\s+#121\b")
+                self.assertEqual(_tree(game.override), game.before_override)
+
+    def test_malformed_recognized_mapping_fails_before_override_mutation(self) -> None:
+        for name, kwargs, diagnostic in (
+            ("duplicate", {"malformed_mapping": True}, "maps more than once"),
+            (
+                "missing_required",
+                {"missing_required_mapping": True},
+                "required candidate WIZARD_STONE_SKIN has no unique SCS prebuff mapping",
+            ),
+        ):
+            with self.subTest(name=name):
+                game = self._game(**kwargs)
+                process = game.run("--force-install-list", "121")
+                transcript = game.transcript(process)
+                self.assertNotEqual(process.returncode, 0, transcript)
+                self.assertIn(diagnostic, transcript)
+                self.assertNotRegex(game.active_weidu_log(), r"(?m)#0\s+#121\b")
+                self.assertEqual(_tree(game.override), game.before_override)
+
+    def test_reinstall_is_deterministic_and_uninstall_restores_every_byte(self) -> None:
+        game = self._game(existing_runtime=True)
+        prior_runtime = (game.override / "M_CBRRDY.lua").read_bytes()
+        self._install(game)
+        installed = _tree(game.override)
+        runtime = (game.override / "M_CBRRDY.lua").read_bytes()
+        self.assertNotEqual(runtime, prior_runtime)
+
+        process = game.run(
+            "--force-uninstall-list",
+            "121",
+            "--force-install-list",
+            "121",
+        )
+        transcript = game.transcript(process)
+        self.assertEqual(process.returncode, 0, transcript)
+        self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+        self.assertEqual(_tree(game.override), installed)
+        self.assertEqual((game.override / "M_CBRRDY.lua").read_bytes(), runtime)
+
+        removed = game.run("--force-uninstall-list", "121")
+        transcript = game.transcript(removed)
+        self.assertEqual(removed.returncode, 0, transcript)
+        self.assertIn("SUCCESSFULLY REMOVED", transcript)
+        self.assertNotRegex(game.active_weidu_log(), r"(?m)#0\s+#121\b")
+        self.assertEqual(_tree(game.override), game.before_override)
+
+    def test_component_boundaries_are_explicit(self) -> None:
+        tp2 = SETUP_TP2.read_text(encoding="utf-8")
+        block_120 = re.search(
+            r"(?ms)^BEGIN @120\b.*?(?=^BEGIN\b|\Z)", tp2
+        )
+        block_121 = re.search(
+            r"(?ms)^BEGIN @121\b.*?(?=^BEGIN\b|\Z)", tp2
+        )
+        self.assertIsNotNone(block_120)
+        self.assertIsNotNone(block_121, "intentional RED: public component 121 is absent")
+        self.assertNotRegex(block_120.group(0), r"(?i)EEex|M___EEex")
+        self.assertNotIn("cbr_apply_scs_weapon_protection_semantics", block_121.group(0))
+        self.assertNotRegex(block_121.group(0), r"(?i)COPY_EXISTING.*\.(?:SPL|BCS)")
 
 
 if __name__ == "__main__":

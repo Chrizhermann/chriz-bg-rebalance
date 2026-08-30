@@ -197,7 +197,13 @@ class _RuntimeCase(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.holder.cleanup()
 
-    def _run(self, scenario: str) -> dict[str, str]:
+    def _run(
+        self,
+        scenario: str,
+        *,
+        expected_reset_listeners: str = "1",
+        expected_marshal_handlers: str = "1",
+    ) -> dict[str, str]:
         process = subprocess.run(
             [self.lua, str(SIMULATOR), str(self.runtime), scenario],
             capture_output=True,
@@ -217,12 +223,37 @@ class _RuntimeCase(unittest.TestCase):
                 observations[key] = value
         self.assertEqual(observations.get("tick_listeners"), "1", process.stdout)
         self.assertEqual(observations.get("started_action_listeners"), "1", process.stdout)
-        self.assertEqual(observations.get("reset_listeners"), "1", process.stdout)
-        self.assertEqual(observations.get("marshal_handlers"), "1", process.stdout)
+        self.assertEqual(
+            observations.get("reset_listeners"),
+            expected_reset_listeners,
+            process.stdout,
+        )
+        self.assertEqual(
+            observations.get("marshal_handlers"),
+            expected_marshal_handlers,
+            process.stdout,
+        )
         return observations
 
 
 class AmbientReadinessRuntimeShellTests(_RuntimeCase):
+    def test_missing_layer_specific_apis_retire_only_that_layer(self) -> None:
+        missing_urgent = self._run("runtime_missing_urgent_api")
+        self.assertEqual(missing_urgent["ambient_live"], "1")
+        self.assertEqual(missing_urgent["ambient_faulted"], "0")
+        self.assertEqual(missing_urgent["urgent_faulted"], "1")
+        self.assertEqual(missing_urgent["urgent_unsupported_logs"], "1")
+
+        missing_ambient = self._run(
+            "runtime_missing_ambient_api",
+            expected_reset_listeners="0",
+            expected_marshal_handlers="0",
+        )
+        self.assertEqual(missing_ambient["urgent_live"], "1")
+        self.assertEqual(missing_ambient["urgent_faulted"], "0")
+        self.assertEqual(missing_ambient["ambient_faulted"], "1")
+        self.assertEqual(missing_ambient["ambient_unsupported_logs"], "1")
+
     def test_hot_reload_flags_and_independent_fault_fuses(self) -> None:
         seen = self._run("runtime_shell")
         self.assertEqual(seen["listeners_after_reload"], "1")

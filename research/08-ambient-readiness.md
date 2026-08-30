@@ -8,7 +8,8 @@ tactic; (2) give fighters / rogues / clerics SOME pre-buffs too.
 Provenance: research run `wf_34058b37-a06` (2026-08-22/23) — the SCS pre-buff and EEex-API
 readers completed with file:line evidence (raw JSON kept in the session scratchpad as
 `research_prebuff.json` / `research_eeex.json`); the detection / buff-duration / prior-art readers
-were stopped (token budget) and replaced by the direct checks in §2. Nothing here was live-tested.
+were stopped (token budget) and replaced by the direct checks in §2. The later, explicitly
+authorized live capability spike is recorded in `research/10-ambient-readiness-spike.md`.
 
 ## 0. Reconciliation and current decision record (2026-08-29)
 
@@ -109,6 +110,32 @@ The production paths are now fixed to the proven installed contracts:
 `GetInControlOfDialog()` observation is not a dialogue-active predicate (it was true during
 ordinary play), so the runtime does not reinterpret it. Dialogue/tactical actions remain
 outside the passive allowlist and uncertainty remains a no-action result.
+
+### 0.3 Offline implementation result (2026-08-30)
+
+Components 120 and 121 are implemented on `codex/ambient-readiness-121`; neither has been
+installed into the active game. Component 121's public WeiDU transaction requires BG2:EE/EET,
+SCS Smarter Mages 6030, EEex components 0 and 1, `M___EEex.lua`, final loose `SPELL.IDS`, and
+SCS's final `instant_prebuff_spells.2da`. The exact probed profile (EEex v0.11.0-alpha,
+2026-08-30) is stamped into the generated manifest, while the runtime independently checks
+every required API entry point and remains inert with one diagnostic if the profile is not
+actually available.
+
+The install-time compiler resolves each candidate dynamically, validates both memorized and
+cosmetic-free delivery SPL semantics, and classifies urgent candidates by reachable genuine
+opcode 120. Current SR Moment of Prescience is therefore emitted as a false Improved Mantle
+candidate and skipped at runtime; a future restored Improved Mantle is automatically enabled.
+The public component publishes only `override/M_CBRRDY.lua` through WeiDU's backup-aware
+transaction and changes no SPL or BCS file.
+
+Hermetic coverage now includes absent SCS/EEex/LuaJIT/autoload/mapping prerequisites, current
+SCS/SR, future genuine Improved Mantle, optional ambient omissions, malformed mapping
+rollback, deterministic reinstall, exact synthetic uninstall restoration, and stamped Lua
+syntax/token checks. The fake-EEex suite covers exact ambient debit/reset/maintenance and SCS
+reimbursement, normal urgent casting and interruption, passive-only queue displacement,
+Project Image exclusion, bounded retry, contact rearm, hot reload, ownership flags, marshal
+shape, and independent fault fuses. Live deployment and gameplay acceptance remain a
+separate user-approval checkpoint.
 
 ## 1. How SCS 35.21 pre-buffs in this install (verified)
 

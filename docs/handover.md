@@ -7,13 +7,13 @@ Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
 
 SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-install WeiDU mod.
 Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
-`docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `CLAUDE.md`.
+`docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `AGENTS.md`.
 
-## Status (2026-08-29) — current focus: SCS ambient readiness
+## Status (2026-08-30) — current focus: final offline review of SCS ambient readiness
 
 - **Dragon work is being handled elsewhere and is out of scope for this branch.** Do not
   resume component 110 from this handover.
-- **Components 120 + 121 are approved and implementation is active** on branch
+- **Components 120 + 121 are approved and implemented offline** on branch
   `codex/ambient-readiness-121`. The authoritative design is
   `docs/plans/2026-08-27-scs-ambient-readiness-design.md` (commit `ae71422`); the executable
   plan is `docs/plans/2026-08-27-scs-ambient-readiness-implementation.md` (commit `b68b22c`).
@@ -30,10 +30,11 @@ Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Ap
   curated for hostile/neutral/allied SCS casters, consumes one real slot once per proven
   spellbook reset, and maintains natural expiry for free only when safe. Urgent readiness
   allows one fast but normal, interruptible weapon-protection cast per contact episode.
-- **No live implementation work is authorized.** The active game remained byte-identical
-  during Task 1's audit. Implementation Task 6 is a hard gate requiring fresh explicit
-  authorization for a session-scoped timing/API probe; any later live installation is a
-  second separate checkpoint.
+- **The separately authorized Task 6 capability spike is complete and cleaned up.** It used
+  a disposable save, installed nothing, wrote no save, and ended with Baldur/InfinityLoader
+  closed and every hashed game input unchanged. The production fake-runtime, compiler, and
+  public synthetic installer suites are green through Task 10. **No live component install
+  is authorized**; deployment remains a second, separate user-approval checkpoint.
 
 ## Status (2026-08-22)
 
@@ -128,18 +129,17 @@ session — always `--exclude` them.
 
 ## Work queue
 
-0. **Execute ambient-readiness Tasks 1–5 offline in order** — component 120 evidence/tests/
-   implementation/wiring, then component 121's red fake-EEex suite and non-persistent probe.
-   Current plan: `docs/plans/2026-08-27-scs-ambient-readiness-implementation.md`.
-1. **Stop at Task 6 for fresh authorization** — only then run the session-scoped installed
-   EEex timing/API spike. Do not infer approval from permission to work in this worktree.
-2. **Continue components 121 and final offline verification only if the probe proves the
-   required primitives.** Prepare but do not perform live deployment.
-3. **SR wishlist session** — *needs the user live*: walk Spell Revisions' changes, collect
+0. **Run ambient-readiness Task 11** — complete clean-process verification and the two-pass
+   local requirement/failure review for all branch changes since `ae71422`. Current plan:
+   `docs/plans/2026-08-27-scs-ambient-readiness-implementation.md`.
+1. **Run Task 12** — prepare the explicit live acceptance checklist, but do not install,
+   launch, mutate a save, or deploy either component. Live deployment requires a fresh user
+   approval checkpoint and should install/test 120 before 121 on the researched SR setup.
+2. **SR wishlist session** — *needs the user live*: walk Spell Revisions' changes, collect
    which to keep/revert/re-tune → `research/10-sr-wishlist.md` → design 200-series.
-4. **SCS component catalog** — solo-able: from the game install's WeiDU.log (414 entries;
+3. **SCS component catalog** — solo-able: from the game install's WeiDU.log (414 entries;
    read-only) catalog the 77 installed SCS components + balance touchpoints; propose 1xx
    candidates. (Scope inherited from chriz-sod-rebalance "Part 3".)
-5. **Formal install of comp 100 into the live game** — pending user sign-off; tail-install.
-6. **Umbrella / collection** — see `docs/plans/2026-07-03-umbrella-analysis.md`; decision
+4. **Formal install of comp 100 into the live game** — pending user sign-off; tail-install.
+5. **Umbrella / collection** — see `docs/plans/2026-07-03-umbrella-analysis.md`; decision
    pending user, work deferred until 2xx/3xx mature.

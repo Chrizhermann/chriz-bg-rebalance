@@ -849,30 +849,52 @@ _G.CBR_RDY_TRAMPOLINES = {
     end,
 }
 
-local required = {
-    EEex_Opcode_AddListsResolvedListener,
-    EEex_Action_AddSpriteStartedActionListener,
-    EEex_Sprite_AddQuickListCountsResetListener,
-    EEex_Sprite_AddMarshalHandlers,
-    EEex_GameObject_Get,
-    EEex_GetUDAux,
-    EEex_Sprite_GetLocalInt,
-    EEex_Trigger_EvalConditionalStringAsAIBase,
-    EEex_GameState_GetTime,
-    EEex_Resource_Demand,
-    EEex_Utility_IterateCPtrList,
-    EEex_GameObject_ApplyEffect,
-    EEex_RunWithStackManager,
-    EEex_Sprite_GetState,
-    EEex_Action_QueueResponseStringOnAIBase,
-    EEex_BAnd,
-}
-local supported = true
-for _, callback in ipairs(required) do
-    if type(callback) ~= "function" then supported = false end
+local function apis_available(entries)
+    for _, entry in ipairs(entries) do
+        if type(entry[2]) ~= "function" then return false end
+    end
+    return true
 end
 
-if supported and not _G.CBR_RDY_LISTENERS_REGISTERED then
+local shared_supported = apis_available({
+    { "EEex_Opcode_AddListsResolvedListener", EEex_Opcode_AddListsResolvedListener },
+    { "EEex_Action_AddSpriteStartedActionListener", EEex_Action_AddSpriteStartedActionListener },
+    { "EEex_GameObject_Get", EEex_GameObject_Get },
+    { "EEex_GetUDAux", EEex_GetUDAux },
+    { "EEex_Sprite_GetLocalInt", EEex_Sprite_GetLocalInt },
+    { "EEex_Trigger_EvalConditionalStringAsAIBase", EEex_Trigger_EvalConditionalStringAsAIBase },
+    { "EEex_GameState_GetTime", EEex_GameState_GetTime },
+    { "EEex_Utility_IterateCPtrList", EEex_Utility_IterateCPtrList },
+})
+local ambient_supported = shared_supported and apis_available({
+    { "EEex_Sprite_AddQuickListCountsResetListener", EEex_Sprite_AddQuickListCountsResetListener },
+    { "EEex_Sprite_AddMarshalHandlers", EEex_Sprite_AddMarshalHandlers },
+    { "EEex_Resource_Demand", EEex_Resource_Demand },
+    { "EEex_GameObject_ApplyEffect", EEex_GameObject_ApplyEffect },
+    { "EEex_RunWithStackManager", EEex_RunWithStackManager },
+})
+local urgent_supported = shared_supported and apis_available({
+    { "EEex_Sprite_GetState", EEex_Sprite_GetState },
+    { "EEex_Action_QueueResponseStringOnAIBase", EEex_Action_QueueResponseStringOnAIBase },
+    { "EEex_BAnd", EEex_BAnd },
+    { "Infinity_GetInCutsceneMode", Infinity_GetInCutsceneMode },
+})
+
+local function retire_unsupported(layer)
+    state[layer .. "_faulted"] = 1
+    local logged = layer .. "_unsupported_logged"
+    if flag(state[logged], 0) == 0 then
+        state[logged] = 1
+        print("[CBR Ready] " .. layer
+            .. " disabled: required EEex API is unavailable")
+    end
+end
+
+if not ambient_supported then retire_unsupported("ambient") end
+if not urgent_supported then retire_unsupported("urgent") end
+
+if shared_supported and (ambient_supported or urgent_supported)
+        and not _G.CBR_RDY_TICK_ACTION_LISTENERS_REGISTERED then
     EEex_Opcode_AddListsResolvedListener(function(sprite)
         local current = _G.CBR_RDY_TRAMPOLINES
         if current and current.tick then current.tick(sprite) end
@@ -881,6 +903,11 @@ if supported and not _G.CBR_RDY_LISTENERS_REGISTERED then
         local current = _G.CBR_RDY_TRAMPOLINES
         if current and current.action then current.action(sprite, action) end
     end)
+    _G.CBR_RDY_TICK_ACTION_LISTENERS_REGISTERED = 1
+    _G.CBR_RDY_LISTENERS_REGISTERED = 1
+end
+
+if ambient_supported and not _G.CBR_RDY_AMBIENT_STATE_LISTENERS_REGISTERED then
     EEex_Sprite_AddQuickListCountsResetListener(function(sprite)
         local current = _G.CBR_RDY_TRAMPOLINES
         if current and current.reset then current.reset(sprite) end
@@ -895,8 +922,5 @@ if supported and not _G.CBR_RDY_LISTENERS_REGISTERED then
             local current = _G.CBR_RDY_TRAMPOLINES
             if current and current.import then current.import(sprite, saved) end
         end)
-    _G.CBR_RDY_LISTENERS_REGISTERED = 1
-elseif not supported and flag(state.unsupported_logged, 0) == 0 then
-    state.unsupported_logged = 1
-    print("[CBR Ready] disabled: required EEex listener API is unavailable")
+    _G.CBR_RDY_AMBIENT_STATE_LISTENERS_REGISTERED = 1
 end

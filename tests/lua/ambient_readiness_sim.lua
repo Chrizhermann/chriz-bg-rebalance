@@ -543,6 +543,26 @@ end
 
 local scenarios = {}
 
+scenarios.runtime_missing_urgent_api = function()
+    local sprite = newSprite({ seeParty = false })
+    memorize(sprite, "spwi408")
+    fireTick(sprite)
+    out("ambient_live", active(sprite, "spwi408"))
+    out("ambient_faulted", CBR_RDY_STATE.ambient_faulted or 0)
+    out("urgent_faulted", CBR_RDY_STATE.urgent_faulted or 0)
+    out("urgent_unsupported_logs", countPrinted("urgent disabled: required EEex API"))
+end
+
+scenarios.runtime_missing_ambient_api = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi611")
+    fireTick(sprite)
+    out("urgent_live", bool(sprite.queueCount == 1))
+    out("urgent_faulted", CBR_RDY_STATE.urgent_faulted or 0)
+    out("ambient_faulted", CBR_RDY_STATE.ambient_faulted or 0)
+    out("ambient_unsupported_logs", countPrinted("ambient disabled: required EEex API"))
+end
+
 scenarios.runtime_shell = function()
     reloadRuntime()
     out("listeners_after_reload", #tickListeners)
@@ -1060,6 +1080,11 @@ end
 
 assert(runtimePath and scenarioName,
     "usage: lua ambient_readiness_sim.lua <stamped-runtime.lua> <scenario>")
+if scenarioName == "runtime_missing_urgent_api" then
+    EEex_Sprite_GetState = nil
+elseif scenarioName == "runtime_missing_ambient_api" then
+    EEex_GameObject_ApplyEffect = nil
+end
 reloadRuntime()
 out("tick_listeners", #tickListeners)
 out("started_action_listeners", #startedActionListeners)

@@ -29,6 +29,7 @@ reported upstream first (see `research/02-upstream-scs-report-draft.md`).
 | 100 | SCS adjustments | Telekinetic Storm: restore save vs. spell for half damage (+ bypass Mirror Image) | ✅ implemented |
 | 101 | SCS adjustments | Restore five Freedom scrolls to the Adventurer's Mart | ✅ implemented |
 | 120 | SCS adjustments | Repair the SCS/SR false Improved Mantle weapon-protection semantics | ✅ implemented |
+| 121 | SCS adjustments | EEex ambient caster readiness + one honest first-contact defense | ✅ implemented; pending live deployment |
 | 2xx | SR adjustments | Cherry-picked Spell Revisions tweaks | 📋 planning (`docs/00-project-scope.md`) |
 | 3xx | Cross-cutting audits | e.g. generalized save-for-half audit | 📋 planning |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
@@ -71,6 +72,46 @@ namespaced adaptation of SCS v35.21's `alter_script.tph`; credit for the underly
 script system belongs to DavidW. Spell Revisions and Moment of Prescience are by Demivrgvs
 and the Gibberlings3 team.
 
+### Component 121 — EEex ambient readiness bridge
+
+This is an interim bridge for SCS casters, not the eventual full EEex AI overhaul. At install
+time it resolves the final `SPELL.IDS`, validates the installed spell effects, and imports
+SCS's own cosmetic-free prebuff mapping. It then ships one stamped `M_CBRRDY.lua`; it does
+not patch SCS combat scripts or spell mechanics. It requires BG2:EE/EET, SCS Smarter Mages
+6030, EEex base + LuaJIT components (verified on v0.11.0-alpha), the `M_*.lua` autoload
+bootstrap, and the final SCS prebuff map. Missing prerequisites skip cleanly; malformed
+recognized data fails before the override transaction is retained. Component 120 is
+independent, but installing 120 first is recommended on the currently researched SR setup.
+
+The ambient layer considers only recognized, settled SCS casters and conservative installed
+self-buffs lasting at least 2,400 seconds. A caster must really have the spell memorized. The
+first confirmed application spends exactly one memorized copy; only an actual engine
+spellbook reset (normally rest) opens that charge again. Natural expiry may be maintained for
+free while the caster is safe, out of combat, and cannot see the party. Dispel, early removal,
+or suspicious early loss suppresses maintenance until the next real reset. Save/load, area
+change, and elapsed time are not treated as rests, and the narrow initial SCS-prebuff
+reimbursement prevents a second charge for the same managed spell.
+
+The urgent layer gives a hostile caster one fast but ordinary self-cast on clear first
+contact. It may replace only proven idle/wander/movement work, never attacks, casts,
+dialogue, cutscenes, tactical/unknown queues, or Project Image actors. The engine owns the
+slot, aura, casting time, visuals, and interruption. Candidates are Absolute Immunity,
+genuine Improved Mantle, Mantle, then Protection from Magical Weapons, filtered by installed
+opcode-120 semantics and actual memorization. The episode is spent when casting starts and
+rearms only after a full round without seeing the party. Players can therefore bait or
+interrupt the response, but continuous sight cannot farm repeated casts.
+
+The two layers can be retired independently without uninstalling the component:
+
+- `CBR_RDY_AMBIENT_ENABLED = 0` disables ambient maintenance;
+- `CBR_RDY_URGENT_ENABLED = 0` disables the first-contact reaction; and
+- `CBR_RDY_EXTERNAL_OWNER` is a bitmask for a replacement AI: bit 1 claims ambient, bit 2
+  claims urgent, and value 3 claims both.
+
+Each callback layer also has its own fail-closed fuse. Offensive AI, target selection,
+sequencers, later-round defense choices, non-caster potion logic, and the future full EEex AI
+are deliberately out of scope.
+
 ### Components 401–403 — Cleric of Tempus Holy Power
 
 These mutually exclusive choices install the same five-tier Holy Power redesign. Component 401
@@ -103,9 +144,10 @@ target install's conventions) copy the WeiDU template as `Setup-chriz-bg-rebalan
 ./Setup-chriz-bg-rebalance.exe --force-install-list 401 --language 0 --no-exit-pause
 ```
 
-Use `100`, `101`, `120`, or exactly one of `401`/`402`/`403` as appropriate; the example
+Use `100`, `101`, `120`, `121`, or exactly one of `401`/`402`/`403` as appropriate; the example
 selects the recommended Tempus mode. Install component 120 after the final Spell Revisions
 and SCS Smarter Mages components so it sees the effective spell and generated-script shapes.
+On the researched SCS/SR/EEex setup, install 120 before 121.
 
 Always tail-install: append after the current last WeiDU.log entry. Never uninstall.
 
