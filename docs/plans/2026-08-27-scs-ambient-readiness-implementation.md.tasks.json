@@ -39,13 +39,13 @@
     {
       "id": 7,
       "subject": "Implement the component 121 install-time manifest compiler",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [6]
     },
     {
       "id": 8,
       "subject": "Implement the ambient one-slot-per-reset runtime",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [7]
     },
     {
@@ -73,5 +73,5 @@
       "blockedBy": [11]
     }
   ],
-  "lastUpdated": "2026-08-30T10:42:00+09:00"
+  "lastUpdated": "2026-08-30T10:59:10+09:00"
 }

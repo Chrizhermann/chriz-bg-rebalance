@@ -1,0 +1,609 @@
+// Component 121 ambient-readiness install-time manifest compiler.
+//
+// The compiler is intentionally file-based and preflight-first so the same
+// function can be exercised hermetically under --nogame and used by the public
+// installer after resources have been materialized in override. It assumes
+// scs_weapon_protection_semantics.tpa has already been included and reuses its
+// strict SPL V1 validator and genuine opcode-120 classifier.
+
+DEFINE_PATCH_FUNCTION cbr_rdy_classify_ambient_spell
+  INT_VAR
+    expected_spell_type = 0
+    minimum_duration = 2400
+    detection_opcode = 0
+    detection_parameter2 = 0
+  STR_VAR
+    resource_name = ~unknown ambient spell~
+  RET
+    supported
+    actual_duration
+BEGIN
+  SET supported = 0
+  SET actual_duration = 0
+  LPF cbr_scs_wp_validate_spl_v1
+    STR_VAR resource_name = EVAL ~%resource_name%~
+    RET
+      cbr_rdy_ability_offset = ability_offset
+      cbr_rdy_ability_count = ability_count
+      cbr_rdy_effect_offset = effect_offset
+  END
+
+  READ_SHORT 0x1c cbr_rdy_spell_type
+  READ_LONG 0x34 cbr_rdy_spell_level
+  SET cbr_rdy_all_abilities_valid = 1
+  PATCH_IF (cbr_rdy_spell_type != expected_spell_type
+         || cbr_rdy_spell_level < 1
+         || cbr_rdy_ability_count < 1) BEGIN
+    SET cbr_rdy_all_abilities_valid = 0
+  END
+
+  SET cbr_rdy_minimum_observed_duration = 2147483647
+  FOR (cbr_rdy_header = 0; cbr_rdy_header < cbr_rdy_ability_count; ++cbr_rdy_header) BEGIN
+    SET cbr_rdy_header_offset = cbr_rdy_ability_offset + (cbr_rdy_header * 0x28)
+    READ_BYTE (cbr_rdy_header_offset + 0x0c) cbr_rdy_header_target
+    READ_SHORT (cbr_rdy_header_offset + 0x1e) cbr_rdy_header_count
+    READ_SHORT (cbr_rdy_header_offset + 0x20) cbr_rdy_header_first
+    SET cbr_rdy_marker_found = 0
+    PATCH_IF !(cbr_rdy_header_target = 1 || cbr_rdy_header_target = 5) BEGIN
+      SET cbr_rdy_all_abilities_valid = 0
+    END
+    FOR (cbr_rdy_effect = 0; cbr_rdy_effect < cbr_rdy_header_count; ++cbr_rdy_effect) BEGIN
+      SET cbr_rdy_effect_index = cbr_rdy_header_first + cbr_rdy_effect
+      SET cbr_rdy_fx = cbr_rdy_effect_offset + (cbr_rdy_effect_index * 0x30)
+      READ_SHORT (cbr_rdy_fx + 0x00) cbr_rdy_opcode
+      READ_BYTE  (cbr_rdy_fx + 0x02) cbr_rdy_target
+      READ_LONG  (cbr_rdy_fx + 0x08) cbr_rdy_parameter2
+      READ_BYTE  (cbr_rdy_fx + 0x0c) cbr_rdy_timing
+      READ_LONG  (cbr_rdy_fx + 0x0e) cbr_rdy_duration
+      READ_BYTE  (cbr_rdy_fx + 0x12) cbr_rdy_probability1
+      READ_BYTE  (cbr_rdy_fx + 0x13) cbr_rdy_probability2
+      PATCH_IF (cbr_rdy_opcode = detection_opcode
+             && cbr_rdy_parameter2 = detection_parameter2
+             && (cbr_rdy_target = 1 || cbr_rdy_target = 2)
+             && cbr_rdy_timing = 0
+             && cbr_rdy_duration >= minimum_duration
+             && cbr_rdy_probability1 = 100
+             && cbr_rdy_probability2 = 0) BEGIN
+        SET cbr_rdy_marker_found = 1
+        PATCH_IF (cbr_rdy_duration < cbr_rdy_minimum_observed_duration) BEGIN
+          SET cbr_rdy_minimum_observed_duration = cbr_rdy_duration
+        END
+      END
+    END
+    PATCH_IF !cbr_rdy_marker_found BEGIN
+      SET cbr_rdy_all_abilities_valid = 0
+    END
+  END
+
+  PATCH_IF cbr_rdy_all_abilities_valid
+         && cbr_rdy_minimum_observed_duration != 2147483647 BEGIN
+    SET supported = 1
+    SET actual_duration = cbr_rdy_minimum_observed_duration
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_rdy_resolve_symbol_from_ids
+  STR_VAR wanted_symbol = ~~
+  RET
+    matches
+    spell_number
+BEGIN
+  SET matches = 0
+  SET spell_number = 0
+  SPRINT cbr_rdy_wanted_symbol ~%wanted_symbol%~
+  TO_UPPER cbr_rdy_wanted_symbol
+  READ_ASCII 0 cbr_rdy_ids_contents (BUFFER_LENGTH)
+  INNER_PATCH ~%cbr_rdy_ids_contents%~ BEGIN
+    REPLACE_EVALUATE CASE_INSENSITIVE
+      ~^\([0-9][0-9]*\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
+    BEGIN
+      SPRINT cbr_rdy_ids_symbol ~%MATCH2%~
+      TO_UPPER cbr_rdy_ids_symbol
+      PATCH_IF (~%cbr_rdy_ids_symbol%~ STR_EQ ~%cbr_rdy_wanted_symbol%~) BEGIN
+        ++matches
+        SET spell_number = MATCH1
+      END
+    END
+      ~~
+  END
+  PATCH_IF (matches > 1) BEGIN
+    PATCH_FAIL ~CBR ambient readiness SPELL.IDS validation failed: %cbr_rdy_wanted_symbol% maps more than once.~
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_rdy_resolve_spell_symbol
+  STR_VAR
+    spell_ids = ~~
+    symbol = ~~
+  RET
+    found
+    spell_number
+    spell_resref
+    spell_type
+BEGIN
+  OUTER_SPRINT spell_ids EVALUATE_BUFFER ~%spell_ids%~
+  OUTER_SPRINT symbol EVALUATE_BUFFER ~%symbol%~
+  OUTER_SET found = 0
+  OUTER_SET spell_number = 0
+  OUTER_SET spell_type = 0
+  OUTER_SPRINT spell_resref ~~
+  ACTION_IF !(FILE_EXISTS ~%spell_ids%~) BEGIN
+    FAIL ~CBR ambient readiness requires SPELL.IDS at %spell_ids%.~
+  END
+  COPY ~%spell_ids%~ ~%spell_ids%~
+    LPF cbr_rdy_resolve_symbol_from_ids
+      STR_VAR wanted_symbol = EVAL ~%symbol%~
+      RET
+        cbr_rdy_matches = matches
+        cbr_rdy_number = spell_number
+    END
+    INNER_ACTION BEGIN
+      OUTER_SET found = cbr_rdy_matches
+      OUTER_SET spell_number = cbr_rdy_number
+    END
+  BUT_ONLY
+
+  ACTION_IF found = 1 BEGIN
+    OUTER_SET cbr_rdy_slot = 0
+    ACTION_IF (~%symbol%~ STRING_MATCHES_REGEXP ~^CLERIC_~) = 0
+           && spell_number >= 1000 && spell_number < 2000 BEGIN
+      OUTER_SET spell_type = 2
+      OUTER_SET cbr_rdy_slot = spell_number - 1000
+      OUTER_SPRINT cbr_rdy_prefix ~SPPR~
+    END ELSE ACTION_IF (~%symbol%~ STRING_MATCHES_REGEXP ~^WIZARD_~) = 0
+                    && spell_number >= 2000 && spell_number < 3000 BEGIN
+      OUTER_SET spell_type = 1
+      OUTER_SET cbr_rdy_slot = spell_number - 2000
+      OUTER_SPRINT cbr_rdy_prefix ~SPWI~
+    END ELSE BEGIN
+      FAIL ~CBR ambient readiness SPELL.IDS validation failed: %symbol%=%spell_number% is outside its supported spell namespace.~
+    END
+    ACTION_IF cbr_rdy_slot < 10 BEGIN
+      OUTER_SPRINT spell_resref ~%cbr_rdy_prefix%00%cbr_rdy_slot%~
+    END ELSE ACTION_IF cbr_rdy_slot < 100 BEGIN
+      OUTER_SPRINT spell_resref ~%cbr_rdy_prefix%0%cbr_rdy_slot%~
+    END ELSE BEGIN
+      OUTER_SPRINT spell_resref ~%cbr_rdy_prefix%%cbr_rdy_slot%~
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_rdy_lookup_prebuff_from_text
+  STR_VAR wanted_key = ~~
+  RET
+    matches
+    delivery_resref
+BEGIN
+  SET matches = 0
+  SPRINT delivery_resref ~~
+  SPRINT cbr_rdy_wanted_key ~%wanted_key%~
+  TO_UPPER cbr_rdy_wanted_key
+  READ_ASCII 0 cbr_rdy_map_contents (BUFFER_LENGTH)
+  INNER_PATCH ~%cbr_rdy_map_contents%~ BEGIN
+    REPLACE_EVALUATE CASE_INSENSITIVE
+      ~^\([^ %TAB%%WNL%%MNL%%LNL%]+\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
+    BEGIN
+      SPRINT cbr_rdy_map_key ~%MATCH1%~
+      SPRINT cbr_rdy_map_value ~%MATCH2%~
+      TO_UPPER cbr_rdy_map_key
+      TO_UPPER cbr_rdy_map_value
+      PATCH_IF (~%cbr_rdy_map_key%~ STR_EQ ~%cbr_rdy_wanted_key%~) BEGIN
+        ++matches
+        SPRINT delivery_resref ~%cbr_rdy_map_value%~
+      END
+    END
+      ~~
+  END
+  PATCH_IF (matches > 1) BEGIN
+    PATCH_FAIL ~CBR ambient readiness prebuff-map validation failed: %cbr_rdy_wanted_key% maps more than once.~
+  END
+  PATCH_IF (matches = 1
+         && ((STRING_LENGTH ~%delivery_resref%~) < 1
+          || (STRING_LENGTH ~%delivery_resref%~) > 8
+          || (~%delivery_resref%~ STRING_MATCHES_REGEXP ~^[A-Z0-9_#][A-Z0-9_#]*$~) != 0)) BEGIN
+    PATCH_FAIL ~CBR ambient readiness prebuff-map validation failed: %cbr_rdy_wanted_key% has invalid resref %delivery_resref%.~
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_rdy_lookup_prebuff
+  STR_VAR
+    prebuff_map = ~~
+    symbol = ~~
+  RET
+    found
+    delivery_resref
+BEGIN
+  OUTER_SPRINT prebuff_map EVALUATE_BUFFER ~%prebuff_map%~
+  OUTER_SPRINT symbol EVALUATE_BUFFER ~%symbol%~
+  OUTER_SPRINT cbr_rdy_prebuff_key ~%symbol%_PREBUFF~
+  OUTER_SET found = 0
+  OUTER_SPRINT delivery_resref ~~
+  ACTION_IF !(FILE_EXISTS ~%prebuff_map%~) BEGIN
+    FAIL ~CBR ambient readiness requires the SCS instant-prebuff mapping at %prebuff_map%.~
+  END
+  COPY ~%prebuff_map%~ ~%prebuff_map%~
+    LPF cbr_rdy_lookup_prebuff_from_text
+      STR_VAR wanted_key = EVAL ~%cbr_rdy_prebuff_key%~
+      RET
+        cbr_rdy_map_matches = matches
+        cbr_rdy_map_delivery = delivery_resref
+    END
+    INNER_ACTION BEGIN
+      OUTER_SET found = cbr_rdy_map_matches
+      OUTER_SPRINT delivery_resref ~%cbr_rdy_map_delivery%~
+    END
+  BUT_ONLY
+END
+
+DEFINE_ACTION_FUNCTION cbr_compile_ambient_readiness_manifest
+  STR_VAR
+    spell_table = ~~
+    override_table = ~~
+    resource_dir = ~~
+    spell_ids = ~~
+    prebuff_map = ~~
+    output_file = ~~
+  RET
+    ambient_count
+    urgent_count
+BEGIN
+  OUTER_SPRINT spell_table EVALUATE_BUFFER ~%spell_table%~
+  OUTER_SPRINT override_table EVALUATE_BUFFER ~%override_table%~
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  OUTER_SPRINT spell_ids EVALUATE_BUFFER ~%spell_ids%~
+  OUTER_SPRINT prebuff_map EVALUATE_BUFFER ~%prebuff_map%~
+  OUTER_SPRINT output_file EVALUATE_BUFFER ~%output_file%~
+  ACTION_FOR_EACH cbr_rdy_required_path IN
+    ~%spell_table%~
+    ~%override_table%~
+    ~%spell_ids%~
+    ~%prebuff_map%~
+  BEGIN
+    ACTION_IF !(FILE_EXISTS ~%cbr_rdy_required_path%~) BEGIN
+      FAIL ~CBR ambient readiness manifest input is missing: %cbr_rdy_required_path%.~
+    END
+  END
+  ACTION_IF (~%resource_dir%~ STR_EQ ~~) OR (~%output_file%~ STR_EQ ~~) BEGIN
+    FAIL ~CBR ambient readiness manifest compiler requires resource_dir and output_file.~
+  END
+
+  ACTION_CLEAR_ARRAY cbr_rdy_spell_keys
+  ACTION_CLEAR_ARRAY cbr_rdy_spell_grade
+  ACTION_CLEAR_ARRAY cbr_rdy_spell_duration
+  ACTION_CLEAR_ARRAY cbr_rdy_spell_opcode
+  ACTION_CLEAR_ARRAY cbr_rdy_spell_parameter2
+  ACTION_CLEAR_ARRAY cbr_rdy_spell_required
+  ACTION_CLEAR_ARRAY cbr_rdy_emit_ambient
+  ACTION_CLEAR_ARRAY cbr_rdy_ambient_resref
+  ACTION_CLEAR_ARRAY cbr_rdy_ambient_delivery
+  ACTION_CLEAR_ARRAY cbr_rdy_ambient_number
+  ACTION_CLEAR_ARRAY cbr_rdy_ambient_duration
+  ACTION_CLEAR_ARRAY cbr_rdy_override_keys
+  ACTION_CLEAR_ARRAY cbr_rdy_override_grade
+  ACTION_CLEAR_ARRAY cbr_rdy_override_include
+  ACTION_CLEAR_ARRAY cbr_rdy_override_exclude
+
+  COPY ~%spell_table%~ ~%spell_table%~
+    COUNT_2DA_COLS cbr_rdy_spell_columns
+    PATCH_IF (cbr_rdy_spell_columns != 6) BEGIN
+      PATCH_FAIL ~CBR ambient readiness spell table must have a row label plus five columns; found %cbr_rdy_spell_columns%.~
+    END
+    READ_2DA_ENTRIES_NOW cbr_rdy_spell_rows 6
+    PATCH_IF (cbr_rdy_spell_rows < 1) BEGIN
+      PATCH_FAIL ~CBR ambient readiness spell table has no candidates.~
+    END
+    FOR (cbr_rdy_row = 0; cbr_rdy_row < cbr_rdy_spell_rows; ++cbr_rdy_row) BEGIN
+      READ_2DA_ENTRY_FORMER cbr_rdy_spell_rows cbr_rdy_row 0 cbr_rdy_symbol
+      READ_2DA_ENTRY_FORMER cbr_rdy_spell_rows cbr_rdy_row 1 cbr_rdy_grade
+      READ_2DA_ENTRY_FORMER cbr_rdy_spell_rows cbr_rdy_row 2 cbr_rdy_min_duration
+      READ_2DA_ENTRY_FORMER cbr_rdy_spell_rows cbr_rdy_row 3 cbr_rdy_detect_opcode
+      READ_2DA_ENTRY_FORMER cbr_rdy_spell_rows cbr_rdy_row 4 cbr_rdy_detect_parameter2
+      READ_2DA_ENTRY_FORMER cbr_rdy_spell_rows cbr_rdy_row 5 cbr_rdy_required
+      SPRINT cbr_rdy_symbol ~%cbr_rdy_symbol%~
+      TO_UPPER cbr_rdy_symbol
+      PATCH_IF ((~%cbr_rdy_symbol%~ STRING_MATCHES_REGEXP ~^\(CLERIC\|WIZARD\)_[A-Z0-9_][A-Z0-9_]*$~) != 0
+             || cbr_rdy_grade < 1 || cbr_rdy_grade > 3
+             || cbr_rdy_min_duration < 2400
+             || cbr_rdy_detect_opcode < 0 || cbr_rdy_detect_opcode > 500
+             || !(cbr_rdy_required = 0 || cbr_rdy_required = 1)) BEGIN
+        PATCH_FAIL ~CBR ambient readiness spell table has an invalid row for %cbr_rdy_symbol%.~
+      END
+      INNER_ACTION BEGIN
+        ACTION_IF VARIABLE_IS_SET $cbr_rdy_spell_keys(~%cbr_rdy_symbol%~) BEGIN
+          FAIL ~CBR ambient readiness spell table has duplicate candidate %cbr_rdy_symbol%.~
+        END
+        OUTER_SET $cbr_rdy_spell_keys(~%cbr_rdy_symbol%~) = 1
+        OUTER_SET $cbr_rdy_spell_grade(~%cbr_rdy_symbol%~) = cbr_rdy_grade
+        OUTER_SET $cbr_rdy_spell_duration(~%cbr_rdy_symbol%~) = cbr_rdy_min_duration
+        OUTER_SET $cbr_rdy_spell_opcode(~%cbr_rdy_symbol%~) = cbr_rdy_detect_opcode
+        OUTER_SET $cbr_rdy_spell_parameter2(~%cbr_rdy_symbol%~) = cbr_rdy_detect_parameter2
+        OUTER_SET $cbr_rdy_spell_required(~%cbr_rdy_symbol%~) = cbr_rdy_required
+      END
+    END
+  BUT_ONLY
+
+  COPY ~%override_table%~ ~%override_table%~
+    COUNT_2DA_COLS cbr_rdy_override_columns
+    // COUNT_2DA_COLS reports only the three header cells when the shipped
+    // table has no data rows; once a row exists it reports label+3 (=4).
+    PATCH_IF !(cbr_rdy_override_columns = 3 || cbr_rdy_override_columns = 4) BEGIN
+      PATCH_FAIL ~CBR ambient readiness override table must have three value columns; found %cbr_rdy_override_columns%.~
+    END
+    READ_2DA_ENTRIES_NOW cbr_rdy_override_rows 4
+    FOR (cbr_rdy_row = 0; cbr_rdy_row < cbr_rdy_override_rows; ++cbr_rdy_row) BEGIN
+      READ_2DA_ENTRY_FORMER cbr_rdy_override_rows cbr_rdy_row 0 cbr_rdy_actor
+      READ_2DA_ENTRY_FORMER cbr_rdy_override_rows cbr_rdy_row 1 cbr_rdy_grade
+      READ_2DA_ENTRY_FORMER cbr_rdy_override_rows cbr_rdy_row 2 cbr_rdy_include
+      READ_2DA_ENTRY_FORMER cbr_rdy_override_rows cbr_rdy_row 3 cbr_rdy_exclude
+      SPRINT cbr_rdy_actor ~%cbr_rdy_actor%~
+      SPRINT cbr_rdy_include ~%cbr_rdy_include%~
+      SPRINT cbr_rdy_exclude ~%cbr_rdy_exclude%~
+      TO_UPPER cbr_rdy_actor
+      TO_UPPER cbr_rdy_include
+      TO_UPPER cbr_rdy_exclude
+      PATCH_IF (~%cbr_rdy_include%~ STR_EQ ~-~) BEGIN SPRINT cbr_rdy_include ~~ END
+      PATCH_IF (~%cbr_rdy_exclude%~ STR_EQ ~-~) BEGIN SPRINT cbr_rdy_exclude ~~ END
+      PATCH_IF ((STRING_LENGTH ~%cbr_rdy_actor%~) < 1
+             || (STRING_LENGTH ~%cbr_rdy_actor%~) > 8
+             || (~%cbr_rdy_actor%~ STRING_MATCHES_REGEXP ~^[A-Z0-9_#][A-Z0-9_#]*$~) != 0
+             || cbr_rdy_grade < 0 || cbr_rdy_grade > 3
+             || (!(~%cbr_rdy_include%~ STR_EQ ~~)
+                 && (~%cbr_rdy_include%~ STRING_MATCHES_REGEXP ~^[A-Z0-9_,][A-Z0-9_,]*$~) != 0)
+             || (!(~%cbr_rdy_exclude%~ STR_EQ ~~)
+                 && (~%cbr_rdy_exclude%~ STRING_MATCHES_REGEXP ~^[A-Z0-9_,][A-Z0-9_,]*$~) != 0)) BEGIN
+        PATCH_FAIL ~CBR ambient readiness override table has an invalid row for %cbr_rdy_actor%.~
+      END
+      INNER_ACTION BEGIN
+        ACTION_IF VARIABLE_IS_SET $cbr_rdy_override_keys(~%cbr_rdy_actor%~) BEGIN
+          FAIL ~CBR ambient readiness override table has duplicate override %cbr_rdy_actor%.~
+        END
+        OUTER_SET $cbr_rdy_override_keys(~%cbr_rdy_actor%~) = 1
+        OUTER_SET $cbr_rdy_override_grade(~%cbr_rdy_actor%~) = cbr_rdy_grade
+        OUTER_SPRINT $cbr_rdy_override_include(~%cbr_rdy_actor%~) ~%cbr_rdy_include%~
+        OUTER_SPRINT $cbr_rdy_override_exclude(~%cbr_rdy_actor%~) ~%cbr_rdy_exclude%~
+      END
+    END
+  BUT_ONLY
+
+  OUTER_SET ambient_count = 0
+  ACTION_SORT_ARRAY_INDICES cbr_rdy_spell_keys LEXICOGRAPHICALLY
+  ACTION_PHP_EACH cbr_rdy_spell_keys AS cbr_rdy_symbol => cbr_rdy_discard BEGIN
+    OUTER_SET cbr_rdy_required = $cbr_rdy_spell_required(~%cbr_rdy_symbol%~)
+    LAF cbr_rdy_resolve_spell_symbol
+      STR_VAR spell_ids = EVAL ~%spell_ids%~ symbol = EVAL ~%cbr_rdy_symbol%~
+      RET
+        cbr_rdy_symbol_found = found
+        cbr_rdy_number = spell_number
+        cbr_rdy_resref = spell_resref
+        cbr_rdy_expected_type = spell_type
+    END
+    ACTION_IF cbr_rdy_symbol_found != 1 BEGIN
+      ACTION_IF cbr_rdy_required BEGIN
+        FAIL ~CBR ambient readiness required candidate %cbr_rdy_symbol% is missing from SPELL.IDS.~
+      END
+      PRINT ~CBR ambient readiness: skipping %cbr_rdy_symbol% (missing SPELL.IDS symbol).~
+    END ELSE BEGIN
+      LAF cbr_rdy_lookup_prebuff
+        STR_VAR prebuff_map = EVAL ~%prebuff_map%~ symbol = EVAL ~%cbr_rdy_symbol%~
+        RET cbr_rdy_delivery_found = found cbr_rdy_delivery = delivery_resref
+      END
+      ACTION_IF cbr_rdy_delivery_found != 1 BEGIN
+        ACTION_IF cbr_rdy_required BEGIN
+          FAIL ~CBR ambient readiness required candidate %cbr_rdy_symbol% has no unique SCS prebuff mapping.~
+        END
+        PRINT ~CBR ambient readiness: skipping %cbr_rdy_symbol% (missing prebuff delivery mapping).~
+      END ELSE ACTION_IF !(FILE_EXISTS ~%resource_dir%/%cbr_rdy_resref%.SPL~) BEGIN
+        ACTION_IF cbr_rdy_required BEGIN
+          FAIL ~CBR ambient readiness required memorized resource %cbr_rdy_resref%.SPL is missing.~
+        END
+        PRINT ~CBR ambient readiness: skipping %cbr_rdy_symbol% (missing memorized spell resource).~
+      END ELSE ACTION_IF !(FILE_EXISTS ~%resource_dir%/%cbr_rdy_delivery%.SPL~) BEGIN
+        ACTION_IF cbr_rdy_required BEGIN
+          FAIL ~CBR ambient readiness required delivery resource %cbr_rdy_delivery%.SPL is missing.~
+        END
+        PRINT ~CBR ambient readiness: skipping %cbr_rdy_symbol% (missing prebuff delivery resource).~
+      END ELSE BEGIN
+        OUTER_SET cbr_rdy_min_duration = $cbr_rdy_spell_duration(~%cbr_rdy_symbol%~)
+        OUTER_SET cbr_rdy_detect_opcode = $cbr_rdy_spell_opcode(~%cbr_rdy_symbol%~)
+        OUTER_SET cbr_rdy_detect_parameter2 = $cbr_rdy_spell_parameter2(~%cbr_rdy_symbol%~)
+        OUTER_SET cbr_rdy_source_supported = 0
+        OUTER_SET cbr_rdy_source_duration = 0
+        COPY ~%resource_dir%/%cbr_rdy_resref%.SPL~ ~%resource_dir%/%cbr_rdy_resref%.SPL~
+          LPF cbr_rdy_classify_ambient_spell
+            INT_VAR
+              expected_spell_type = cbr_rdy_expected_type
+              minimum_duration = cbr_rdy_min_duration
+              detection_opcode = cbr_rdy_detect_opcode
+              detection_parameter2 = cbr_rdy_detect_parameter2
+            STR_VAR resource_name = EVAL ~%cbr_rdy_resref%.SPL~
+            RET
+              cbr_rdy_patch_supported = supported
+              cbr_rdy_patch_duration = actual_duration
+          END
+          INNER_ACTION BEGIN
+            OUTER_SET cbr_rdy_source_supported = cbr_rdy_patch_supported
+            OUTER_SET cbr_rdy_source_duration = cbr_rdy_patch_duration
+          END
+        BUT_ONLY
+        OUTER_SET cbr_rdy_delivery_supported = 0
+        OUTER_SET cbr_rdy_delivery_duration = 0
+        COPY ~%resource_dir%/%cbr_rdy_delivery%.SPL~ ~%resource_dir%/%cbr_rdy_delivery%.SPL~
+          LPF cbr_rdy_classify_ambient_spell
+            INT_VAR
+              expected_spell_type = cbr_rdy_expected_type
+              minimum_duration = cbr_rdy_min_duration
+              detection_opcode = cbr_rdy_detect_opcode
+              detection_parameter2 = cbr_rdy_detect_parameter2
+            STR_VAR resource_name = EVAL ~%cbr_rdy_delivery%.SPL~
+            RET
+              cbr_rdy_patch_supported = supported
+              cbr_rdy_patch_duration = actual_duration
+          END
+          INNER_ACTION BEGIN
+            OUTER_SET cbr_rdy_delivery_supported = cbr_rdy_patch_supported
+            OUTER_SET cbr_rdy_delivery_duration = cbr_rdy_patch_duration
+          END
+        BUT_ONLY
+        ACTION_IF !(cbr_rdy_source_supported && cbr_rdy_delivery_supported) BEGIN
+          ACTION_IF cbr_rdy_required BEGIN
+            FAIL ~CBR ambient readiness required candidate %cbr_rdy_symbol% has unsupported ambient semantics.~
+          END
+          PRINT ~CBR ambient readiness: skipping %cbr_rdy_symbol% (unsupported ambient semantics).~
+        END ELSE BEGIN
+          OUTER_SET cbr_rdy_actual_duration = cbr_rdy_source_duration
+          ACTION_IF cbr_rdy_delivery_duration < cbr_rdy_actual_duration BEGIN
+            OUTER_SET cbr_rdy_actual_duration = cbr_rdy_delivery_duration
+          END
+          OUTER_SET $cbr_rdy_emit_ambient(~%cbr_rdy_symbol%~) = 1
+          OUTER_SPRINT $cbr_rdy_ambient_resref(~%cbr_rdy_symbol%~) ~%cbr_rdy_resref%~
+          OUTER_SPRINT $cbr_rdy_ambient_delivery(~%cbr_rdy_symbol%~) ~%cbr_rdy_delivery%~
+          OUTER_SET $cbr_rdy_ambient_number(~%cbr_rdy_symbol%~) = cbr_rdy_number
+          OUTER_SET $cbr_rdy_ambient_duration(~%cbr_rdy_symbol%~) = cbr_rdy_actual_duration
+          OUTER_SET ambient_count += 1
+        END
+      END
+    END
+  END
+
+  OUTER_SET urgent_count = 0
+  OUTER_SET cbr_rdy_genuine_urgent_count = 0
+  ACTION_CLEAR_ARRAY cbr_rdy_urgent_key
+  ACTION_CLEAR_ARRAY cbr_rdy_urgent_resref
+  ACTION_CLEAR_ARRAY cbr_rdy_urgent_number
+  ACTION_CLEAR_ARRAY cbr_rdy_urgent_genuine
+  OUTER_SET cbr_rdy_urgent_index = 0
+  ACTION_FOR_EACH cbr_rdy_urgent_symbol IN
+    ~WIZARD_ABSOLUTE_IMMUNITY~
+    ~WIZARD_IMPROVED_MANTLE~
+    ~WIZARD_MANTLE~
+    ~WIZARD_PROTECTION_FROM_MAGIC_WEAPONS~
+  BEGIN
+    LAF cbr_rdy_resolve_spell_symbol
+      STR_VAR spell_ids = EVAL ~%spell_ids%~ symbol = EVAL ~%cbr_rdy_urgent_symbol%~
+      RET
+        cbr_rdy_urgent_found = found
+        cbr_rdy_urgent_spell_number = spell_number
+        cbr_rdy_urgent_spell_resref = spell_resref
+    END
+    ACTION_IF cbr_rdy_urgent_found != 1 BEGIN
+      PRINT ~CBR ambient readiness: skipping urgent %cbr_rdy_urgent_symbol% (missing SPELL.IDS symbol).~
+    END ELSE ACTION_IF !(FILE_EXISTS ~%resource_dir%/%cbr_rdy_urgent_spell_resref%.SPL~) BEGIN
+      PRINT ~CBR ambient readiness: skipping urgent %cbr_rdy_urgent_symbol% (missing spell resource).~
+    END ELSE BEGIN
+      LAF cbr_scs_wp_classify_file
+        STR_VAR
+          resource_path = EVAL ~%resource_dir%/%cbr_rdy_urgent_spell_resref%.SPL~
+          resource_name = EVAL ~%cbr_rdy_urgent_spell_resref%.SPL~
+        RET cbr_rdy_is_genuine = is_weapon_protection
+      END
+      OUTER_SET $cbr_rdy_urgent_key(~%cbr_rdy_urgent_index%~) = 0
+      OUTER_SPRINT $cbr_rdy_urgent_key(~%cbr_rdy_urgent_index%~) ~%cbr_rdy_urgent_symbol%~
+      OUTER_SPRINT $cbr_rdy_urgent_resref(~%cbr_rdy_urgent_index%~) ~%cbr_rdy_urgent_spell_resref%~
+      OUTER_SET $cbr_rdy_urgent_number(~%cbr_rdy_urgent_index%~) = cbr_rdy_urgent_spell_number
+      OUTER_SET $cbr_rdy_urgent_genuine(~%cbr_rdy_urgent_index%~) = cbr_rdy_is_genuine
+      OUTER_SET cbr_rdy_genuine_urgent_count += cbr_rdy_is_genuine
+      OUTER_SET cbr_rdy_urgent_index += 1
+      OUTER_SET urgent_count += 1
+    END
+  END
+  ACTION_IF cbr_rdy_genuine_urgent_count < 1 BEGIN
+    FAIL ~CBR ambient readiness has no genuine installed urgent weapon-protection candidate.~
+  END
+
+  OUTER_SPRINT cbr_rdy_manifest ~return {
+    schema_version = 1,
+    minimum_duration = 2400,
+    maintenance_cadence_ticks = 15,
+    contact_rearm_seconds = 6,
+    defaults = {
+        ambient_enabled = 1,
+        urgent_enabled = 1,
+        external_owner = 0,
+        scs_caster_grade = 1,
+    },
+    grades = {
+        minimum = 0,
+        baseline = 1,
+        reserved_maximum = 3,
+    },
+    ambient_spells = {
+~
+  ACTION_SORT_ARRAY_INDICES cbr_rdy_emit_ambient LEXICOGRAPHICALLY
+  ACTION_PHP_EACH cbr_rdy_emit_ambient AS cbr_rdy_symbol => cbr_rdy_discard BEGIN
+    OUTER_SPRINT cbr_rdy_resref $cbr_rdy_ambient_resref(~%cbr_rdy_symbol%~)
+    OUTER_SPRINT cbr_rdy_delivery $cbr_rdy_ambient_delivery(~%cbr_rdy_symbol%~)
+    OUTER_SET cbr_rdy_number = $cbr_rdy_ambient_number(~%cbr_rdy_symbol%~)
+    OUTER_SET cbr_rdy_actual_duration = $cbr_rdy_ambient_duration(~%cbr_rdy_symbol%~)
+    OUTER_SET cbr_rdy_grade = $cbr_rdy_spell_grade(~%cbr_rdy_symbol%~)
+    OUTER_SET cbr_rdy_detect_opcode = $cbr_rdy_spell_opcode(~%cbr_rdy_symbol%~)
+    OUTER_SET cbr_rdy_detect_parameter2 = $cbr_rdy_spell_parameter2(~%cbr_rdy_symbol%~)
+    OUTER_SPRINT cbr_rdy_manifest ~%cbr_rdy_manifest%        {
+            key = "%cbr_rdy_symbol%",
+            resref = "%cbr_rdy_resref%",
+            spell_number = %cbr_rdy_number%,
+            delivery = "%cbr_rdy_delivery%",
+            duration = %cbr_rdy_actual_duration%,
+            minimum_grade = %cbr_rdy_grade%,
+            detection_opcode = %cbr_rdy_detect_opcode%,
+            detection_parameter2 = %cbr_rdy_detect_parameter2%,
+            self_target = 1,
+            defensive = 1,
+        },
+~
+  END
+  OUTER_SPRINT cbr_rdy_manifest ~%cbr_rdy_manifest%    },
+    urgent_candidates = {
+~
+  OUTER_FOR (cbr_rdy_emit_index = 0; cbr_rdy_emit_index < urgent_count; ++cbr_rdy_emit_index) BEGIN
+    OUTER_SPRINT cbr_rdy_urgent_symbol $cbr_rdy_urgent_key(~%cbr_rdy_emit_index%~)
+    OUTER_SPRINT cbr_rdy_resref $cbr_rdy_urgent_resref(~%cbr_rdy_emit_index%~)
+    OUTER_SET cbr_rdy_number = $cbr_rdy_urgent_number(~%cbr_rdy_emit_index%~)
+    OUTER_SET cbr_rdy_is_genuine = $cbr_rdy_urgent_genuine(~%cbr_rdy_emit_index%~)
+    OUTER_SPRINT cbr_rdy_manifest ~%cbr_rdy_manifest%        {
+            key = "%cbr_rdy_urgent_symbol%",
+            resref = "%cbr_rdy_resref%",
+            spell_number = %cbr_rdy_number%,
+            genuine_weapon_immunity = %cbr_rdy_is_genuine%,
+        },
+~
+  END
+  OUTER_SPRINT cbr_rdy_manifest ~%cbr_rdy_manifest%    },
+    overrides = {
+~
+  ACTION_SORT_ARRAY_INDICES cbr_rdy_override_keys LEXICOGRAPHICALLY
+  ACTION_PHP_EACH cbr_rdy_override_keys AS cbr_rdy_actor => cbr_rdy_discard BEGIN
+    OUTER_SET cbr_rdy_grade = $cbr_rdy_override_grade(~%cbr_rdy_actor%~)
+    OUTER_SPRINT cbr_rdy_include $cbr_rdy_override_include(~%cbr_rdy_actor%~)
+    OUTER_SPRINT cbr_rdy_exclude $cbr_rdy_override_exclude(~%cbr_rdy_actor%~)
+    OUTER_SPRINT cbr_rdy_manifest ~%cbr_rdy_manifest%        ["%cbr_rdy_actor%"] = {
+            grade = %cbr_rdy_grade%,
+            include = "%cbr_rdy_include%",
+            exclude = "%cbr_rdy_exclude%",
+        },
+~
+  END
+  OUTER_SPRINT cbr_rdy_manifest ~%cbr_rdy_manifest%    },
+}
+~
+
+  COPY ~%spell_table%~ ~%output_file%~
+    DELETE_BYTES 0 BUFFER_LENGTH
+    INSERT_BYTES 0 (STRING_LENGTH ~%cbr_rdy_manifest%~)
+    WRITE_ASCIIE 0 ~%cbr_rdy_manifest%~
+
+  OUTER_SET cbr_rdy_expected_manifest_length = STRING_LENGTH ~%cbr_rdy_manifest%~
+  COPY ~%output_file%~ ~%output_file%~
+    SET cbr_rdy_actual_manifest_length = BUFFER_LENGTH
+    SET cbr_rdy_schema_index = INDEX_BUFFER (~schema_version = 1~)
+    SET cbr_rdy_ambient_index = INDEX_BUFFER (~ambient_spells = {~)
+    SET cbr_rdy_urgent_index = INDEX_BUFFER (~urgent_candidates = {~)
+    SET cbr_rdy_placeholder_index = INDEX_BUFFER (~%~)
+    PATCH_IF (cbr_rdy_actual_manifest_length != cbr_rdy_expected_manifest_length
+           || cbr_rdy_schema_index < 0
+           || cbr_rdy_ambient_index < 0
+           || cbr_rdy_urgent_index < 0
+           || cbr_rdy_placeholder_index >= 0) BEGIN
+      PATCH_FAIL ~CBR ambient readiness manifest verification failed after write: expected=%cbr_rdy_expected_manifest_length% actual=%cbr_rdy_actual_manifest_length% schema=%cbr_rdy_schema_index% ambient=%cbr_rdy_ambient_index% urgent=%cbr_rdy_urgent_index% placeholder=%cbr_rdy_placeholder_index%.~
+    END
+  BUT_ONLY
+END

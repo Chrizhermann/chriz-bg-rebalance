@@ -347,6 +347,29 @@ def make_spl(abilities: Iterable[SplAbility]) -> SplFile:
     return SplFile(abilities=tuple(abilities), header_raw=bytes(header))
 
 
+def make_spl_header(
+    *,
+    spell_type: int,
+    level: int,
+    school: int = 0,
+    secondary_type: int = 0,
+) -> bytes:
+    """Return a minimal SPL V1 header with explicit classification metadata."""
+    if spell_type not in (0, 1, 2):
+        raise ValueError(f"unsupported synthetic spell type: {spell_type}")
+    if not 0 <= level <= 9:
+        raise ValueError(f"unsupported synthetic spell level: {level}")
+    header = bytearray(SPL_HEADER_SIZE)
+    header[:8] = b"SPL V1  "
+    _put_u16(header, 0x1C, spell_type)
+    header[0x25] = school & 0xFF
+    header[0x27] = secondary_type & 0xFF
+    _put_u32(header, 0x34, level)
+    _put_u32(header, 0x64, SPL_HEADER_SIZE)
+    _put_u32(header, 0x6A, SPL_HEADER_SIZE)
+    return bytes(header)
+
+
 @dataclasses.dataclass(frozen=True)
 class EffV2:
     opcode: int = 0
