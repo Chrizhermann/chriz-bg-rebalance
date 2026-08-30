@@ -127,6 +127,48 @@ class AmbientReadinessAssetTests(unittest.TestCase):
         self.assertIn("probe.active", source)
         self.assertIn("probe.listeners_registered", source)
 
+    def test_probe_updates_quick_lists_with_a_real_ability_id(self) -> None:
+        source = PROBE.read_text(encoding="ascii")
+        self.assertIn('{ ["name"] = "abilityId", ["struct"] = "CAbilityId" }', source)
+        self.assertIn("abilityId.m_itemType = 1", source)
+        self.assertIn("abilityId.m_res:set(resref)", source)
+        self.assertIn(
+            "sprite:CheckQuickLists(abilityId, change_amount, 0, 0)", source
+        )
+        self.assertIn("update_quick_lists(sprite, resref, -1)", source)
+        self.assertIn("update_quick_lists(token.sprite, token.resref, 1)", source)
+        self.assertNotIn("sprite:CheckQuickLists(level - 1, -1, 0, 0)", source)
+
+    def test_probe_records_the_engine_spellbook_reset_hook(self) -> None:
+        source = PROBE.read_text(encoding="ascii")
+        self.assertIn("EEex_Sprite_AddQuickListCountsResetListener", source)
+        self.assertIn('log("spellbook_reset", "id=" .. object_id(sprite))', source)
+        self.assertIn("probe.reset_listener_registered", source)
+
+    def test_probe_reads_installed_action_resrefs_from_cstring_storage(self) -> None:
+        source = PROBE.read_text(encoding="ascii")
+        self.assertIn("action.m_string1.m_pchData:get()", source)
+        self.assertNotIn("action.m_string1:get()", source)
+
+    def test_probe_inspects_the_installed_queued_action_list(self) -> None:
+        source = PROBE.read_text(encoding="ascii")
+        self.assertIn("sprite.m_queuedActions", source)
+        self.assertNotIn("sprite.m_actionQueue", source)
+
+    def test_probe_logs_the_installed_action_specific_id(self) -> None:
+        source = PROBE.read_text(encoding="ascii")
+        self.assertIn(
+            '" specific=" .. tostring(action and action.m_specificID)', source
+        )
+
+    def test_probe_records_the_installed_project_image_relation(self) -> None:
+        source = PROBE.read_text(encoding="ascii")
+        self.assertIn("effect.m_effectId == 237", source)
+        self.assertIn("effect.m_dWFlags == 2", source)
+        self.assertIn("effect.m_sourceId", source)
+        self.assertIn("EEex_Sprite_GetState(sprite)", source)
+        self.assertIn('"project_image=" .. project_image_relation(sprite)', source)
+
 
 class ProductionRuntimeGateTests(unittest.TestCase):
     def test_runtime_template_exists(self) -> None:

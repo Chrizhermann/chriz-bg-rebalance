@@ -14,6 +14,7 @@ probe.version = 1
 probe.active = probe.active or 0
 probe.generation = probe.generation or 0
 probe.listeners_registered = probe.listeners_registered or 0
+probe.reset_listener_registered = probe.reset_listener_registered or 0
 probe.logs = probe.logs or {}
 probe.watches = probe.watches or {}
 probe.debits = probe.debits or {}
@@ -78,8 +79,8 @@ end
 local function action_resref(action)
     if not action then return "" end
     local ok, value = pcall(function()
-        if action.m_string1 and action.m_string1.get then
-            return action.m_string1:get()
+        if action.m_string1 and action.m_string1.m_pchData then
+            return action.m_string1.m_pchData:get()
         end
         return ""
     end)
@@ -90,13 +91,49 @@ end
 local function queue_ids(sprite)
     local result = {}
     local ok = pcall(function()
-        if not (sprite and sprite.m_actionQueue and EEex_Utility_IterateCPtrList) then return end
-        EEex_Utility_IterateCPtrList(sprite.m_actionQueue, function(action)
+        if not (sprite and sprite.m_queuedActions and EEex_Utility_IterateCPtrList) then
+            error("queued actions unavailable")
+        end
+        EEex_Utility_IterateCPtrList(sprite.m_queuedActions, function(action)
             result[#result + 1] = tostring(action.m_actionID)
         end)
     end)
     if not ok then return "<unavailable>" end
     return table.concat(result, ",")
+end
+
+local function project_image_relation(sprite)
+    if not (sprite and EEex_Utility_IterateCPtrList and EEex_Sprite_GetState) then
+        return "<unavailable>"
+    end
+    local state = nil
+    local clone_owner = nil
+    local owner_lock = false
+    local ok = pcall(function()
+        state = EEex_Sprite_GetState(sprite)
+        EEex_Utility_IterateCPtrList(sprite.m_timedEffectList, function(effect)
+            if effect.m_effectId == 237 and effect.m_dWFlags == 2 then
+                clone_owner = tonumber(effect.m_sourceId)
+            end
+            local source = ""
+            if effect.m_sourceRes then source = normalize(effect.m_sourceRes:get()) end
+            if source == "spwi703"
+                    and ((effect.m_effectId == 233
+                            and effect.m_effectAmount == 2
+                            and effect.m_dWFlags == 127)
+                        or effect.m_effectId == 20) then
+                owner_lock = true
+            end
+        end)
+    end)
+    if not ok then return "<unavailable>" end
+    if clone_owner and clone_owner >= 0 then
+        return "clone:owner=" .. tostring(clone_owner)
+    end
+    if owner_lock then
+        return "owner_locked:state=" .. tostring(state)
+    end
+    return "none:state=" .. tostring(state)
 end
 
 local function spell_level(resref)
@@ -140,12 +177,19 @@ local function find_available_record(sprite, resref)
     return found, level
 end
 
-local function rebuild_quick_lists(sprite, level)
-    if not sprite or not sprite.CheckQuickLists then return false end
+local function update_quick_lists(sprite, resref, change_amount)
+    if not (sprite and sprite.CheckQuickLists and EEex_RunWithStackManager) then
+        return false
+    end
     local ok = pcall(function()
-        -- The exact arguments are a Task 6 measurement, not a production
-        -- claim.  A disposable actor is reloaded if this does not round-trip.
-        sprite:CheckQuickLists(level - 1, -1, 0, 0)
+        EEex_RunWithStackManager({
+            { ["name"] = "abilityId", ["struct"] = "CAbilityId" },
+        }, function(manager)
+            local abilityId = manager:getUD("abilityId")
+            abilityId.m_itemType = 1
+            abilityId.m_res:set(resref)
+            sprite:CheckQuickLists(abilityId, change_amount, 0, 0)
+        end)
     end)
     return ok
 end
@@ -167,7 +211,7 @@ function probe.snapshot(sprite, label)
         "inafight=" .. tostring(get_local(sprite, "inafight")),
         "dialogue_gate=" .. tostring(get_local(sprite, "dialogue")),
         "cutscene_gate=" .. tostring(get_local(sprite, "cutscene")),
-        "project_image_owner=" .. tostring(get_local(sprite, "project_image_owner")),
+        "project_image=" .. project_image_relation(sprite),
     }
     log("snapshot", table.concat(parts, " "))
     return parts
@@ -222,11 +266,11 @@ function probe.debit_once(sprite, resref)
     if not record then return nil, "no available memorized record" end
     local old_flags = tonumber(record.m_flags)
     record.m_flags = old_flags - 1
-    local rebuilt = rebuild_quick_lists(sprite, level)
+    local rebuilt = update_quick_lists(sprite, resref, -1)
     local after = probe.available_count(sprite, resref)
     if not rebuilt or before == nil or after ~= before - 1 then
         record.m_flags = old_flags
-        rebuild_quick_lists(sprite, level)
+        update_quick_lists(sprite, resref, 1)
         return nil, "debit did not confirm and was restored"
     end
     local token = {
@@ -246,7 +290,7 @@ function probe.restore_debit(token_key)
     local token = probe.debits[token_key]
     if not token then return false, "unknown debit token" end
     local ok = pcall(function() token.record.m_flags = token.old_flags end)
-    local rebuilt = ok and rebuild_quick_lists(token.sprite, token.level)
+    local rebuilt = ok and update_quick_lists(token.sprite, token.resref, 1)
     local restored = rebuilt and probe.available_count(token.sprite, token.resref)
     if not (ok and rebuilt and restored and restored > 0) then
         log("restore_error", tostring(token_key))
@@ -319,6 +363,7 @@ local function started_action_callback(sprite, action)
     local resref = action_resref(action)
     log("action_started", "id=" .. id
         .. " action=" .. tostring(action and action.m_actionID)
+        .. " specific=" .. tostring(action and action.m_specificID)
         .. " resref=" .. resref
         .. " queue=" .. queue_ids(sprite))
     local selected = current.selected_casts[id]
@@ -332,14 +377,23 @@ local function started_action_callback(sprite, action)
     end
 end
 
+local function reset_callback(sprite)
+    local current = _G.CBR_RDY_PROBE
+    if not current or current.active ~= 1 then return end
+    log("spellbook_reset", "id=" .. object_id(sprite))
+end
+
 function probe.install()
-    if probe.active == 1 then return true end
     if not (EEex_Opcode_AddListsResolvedListener
-            and EEex_Action_AddSpriteStartedActionListener) then
+            and EEex_Action_AddSpriteStartedActionListener
+            and EEex_Sprite_AddQuickListCountsResetListener) then
         return false, "required listener APIs unavailable"
     end
-    probe.generation = probe.generation + 1
-    probe.active = 1
+    local activating = probe.active ~= 1
+    if activating then
+        probe.generation = probe.generation + 1
+        probe.active = 1
+    end
     if probe.listeners_registered ~= 1 then
         EEex_Opcode_AddListsResolvedListener(function(sprite)
             local ok, err = xpcall(function() tick_callback(sprite) end, debug.traceback)
@@ -352,7 +406,15 @@ function probe.install()
         end)
         probe.listeners_registered = 1
     end
-    log("install", "generation=" .. probe.generation)
+    if probe.reset_listener_registered ~= 1 then
+        EEex_Sprite_AddQuickListCountsResetListener(function(sprite)
+            local ok, err = xpcall(
+                function() reset_callback(sprite) end, debug.traceback)
+            if not ok then log("reset_error", err) end
+        end)
+        probe.reset_listener_registered = 1
+    end
+    if activating then log("install", "generation=" .. probe.generation) end
     return true
 end
 

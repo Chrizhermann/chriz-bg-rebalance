@@ -45,14 +45,17 @@ Current agreed contract:
   order is Absolute Immunity, genuine Improved Mantle, Mantle, then PfMW, filtered by actual
   opcode semantics. The attempt is spent when casting starts; a contact episode rearms only
   after one full round without seeing any party member.
-- The exact installed EEex timing, action, and memorized-slot primitives remain **unproven**.
-  The session-scoped probe in implementation Task 6 is a hard separate authorization gate.
-  No production runtime mechanism may be chosen merely from the historical API hypotheses
-  below.
+- The separately authorized installed EEex spike is now complete. Exact-record debit and
+  quick-list repair, engine reset notification, cosmetic-free SCS delivery, narrow initial
+  SCS reimbursement, current/queued action inspection, normal `SpellRES`, start
+  confirmation/interruption, visibility rearm, and Project Image ownership are **proven**.
+  An independent global “dialogue active” boolean remains ambiguous and therefore receives
+  no speculative implementation. See `research/10-ambient-readiness-spike.md`.
 
 Current read-only recheck on `2026-08-29` confirms SCS 35.21 component 6030 and 585 installed
-common-mage scripts. It does not replace the still-needed live timing/API spike. The active
-game was not written during this recheck.
+common-mage scripts. The authorized 2026-08-30 spike used only a disposable save and
+transient remote-console IPC; it installed nothing, saved nothing, and finished with the
+game closed and all hashed game inputs unchanged.
 
 ### 0.1 Session-scoped Task 6 probe prepared (2026-08-30)
 
@@ -77,6 +80,35 @@ slot experiment must still use a disposable actor/save and may not be repeated o
 unless restoration is independently confirmed or the save is reloaded. No production API
 choice is considered proven merely because the probe parses or because an action was queued;
 Task 6 must separately observe the started action and resulting engine state.
+
+### 0.2 Task 6 capability decision (2026-08-30)
+
+The measured SCS gap is real: the hostile-at-load case took 0.570 s from first observed
+`See([PC])` to `instantprep=1`; the neutral-to-hostile case took 0.938 s from EA change to
+the completed preparation marker. Cosmetic-free `DWSW408` landed at +0.871 s in the latter
+case. These are representative scheduling observations rather than performance promises.
+
+The production paths are now fixed to the proven installed contracts:
+
+- mutate exactly one available mage/priest memorized record and rebuild quick lists with a
+  real `CAbilityId` and change amount `-1` / `+1`;
+- treat `EEex_Sprite_AddQuickListCountsResetListener` as the only charge-reset signal;
+- identify `m_curAction`, `m_queuedActions`, action `m_specificID`, and CString resrefs via
+  `m_string1.m_pchData:get()`; unknown current/queued representation skips;
+- queue urgent defense as normal action 31 `SpellRES`, and spend the contact attempt on an
+  exact started-action callback even when the spell is interrupted before the engine
+  debits its slot;
+- identify a Project Image clone by opcode 237, parameter 2 equal to 2, and `m_sourceId`
+  pointing to its engine-disabled owner; both clone and locked owner skip; and
+- reimburse only the exact initial generic SCS delivery-181 / adjacent RemoveSpell-147
+  sequence for the ledger-paid spell, after confirming its numeric `m_specificID`, delivery
+  effect, and availability delta. Free `_PRECAST`, renewal, combat, non-adjacent, and unknown
+  shapes never reimburse.
+
+`Infinity_GetInCutsceneMode()` is a proven cutscene predicate. The available
+`GetInControlOfDialog()` observation is not a dialogue-active predicate (it was true during
+ordinary play), so the runtime does not reinterpret it. Dialogue/tactical actions remain
+outside the passive allowlist and uncertainty remains a no-action result.
 
 ## 1. How SCS 35.21 pre-buffs in this install (verified)
 

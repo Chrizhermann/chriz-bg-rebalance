@@ -33,7 +33,7 @@
     {
       "id": 6,
       "subject": "Obtain authorization and run the installed EEex timing/API spike",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [5]
     },
     {
@@ -73,5 +73,5 @@
       "blockedBy": [11]
     }
   ],
-  "lastUpdated": "2026-08-30T09:25:46+09:00"
+  "lastUpdated": "2026-08-30T10:42:00+09:00"
 }

@@ -1,21 +1,25 @@
 # SCS ambient readiness and first-contact defense — components 120 / 121
 
-**Status:** Approved by the user on 2026-08-27. This is a transitional compatibility
-bridge for the current SCS-based install, not the end-state combat-AI architecture. The
-user is developing a broader EEex AI overhaul in parallel; this design must be easy for
-that future system to retire without uninstalling a WeiDU component.
+**Status:** Approved by the user on 2026-08-27; installed EEex primitives validated on
+2026-08-30. This is a transitional compatibility bridge for the current SCS-based install,
+not the end-state combat-AI architecture. The user is developing a broader EEex AI overhaul
+in parallel; this design must be easy for that future system to retire without uninstalling
+a WeiDU component.
 
-Evidence base: `research/08-ambient-readiness.md` in the source checkout, the installed
-SCS 35.21 / Spell Revisions resources in the read-only game directory, and the additional
-2026-08-27 inspection summarized below. No production-game files were changed during
-design.
+Evidence base: `research/08-ambient-readiness.md`, the installed SCS 35.21 / Spell
+Revisions resources in the read-only game directory, the 2026-08-27 inspection summarized
+below, and the separately authorized disposable-session spike in
+`research/10-ambient-readiness-spike.md`. No component was installed and no production save
+or game resource was changed by the spike.
 
 ## 1. Problem and confirmed evidence
 
 The current install already uses SCS's highest preparation tier. SCS's long/medium/short
 preparation batches are instant once their script blocks run, but most are gated on
-`See()`. Script cadence, an occupied action, and neutral-to-hostile transitions can delay
-that evaluation by one to three seconds in observed play. PfMW, Mantle, and Absolute
+`See()`. Script cadence, an occupied action, and neutral-to-hostile transitions delay that
+evaluation. The installed spike observed 0.570 s from first `See([PC])` to the preparation
+marker for a hostile-at-load caster and 0.938 s from EA change to that marker for a
+neutral-to-hostile caster. PfMW, Mantle, and Absolute
 Immunity are deliberately excluded from SCS's instant prebuff table and are normal first
 combat casts. A caster can therefore die to a fast archer or melee rush before beginning
 the defensive cast a competent mage would choose on seeing an attack.
@@ -131,9 +135,13 @@ spell-count refresh. The next successful ambient application consumes one newly 
 copy.
 
 The runtime must also prevent SCS's later sight-triggered prebuff batch from charging the
-same already-active ambient spell a second time. Any reimbursement is narrowly limited to
-the exact managed resref, an already-charged ledger entry, the active managed effect, and
-the initial SCS-prebuff window. Genuine combat casts and renewals are never reimbursed.
+same already-active ambient spell a second time. Reimbursement is limited to a ledger-paid
+spell while `instantprep` was initially 0, its exact manifest delivery effect being active,
+and the observed adjacent SCS action pair: delivery action 181 followed by RemoveSpell 147
+whose `m_specificID` is the same resolved spell number and whose availability delta is one.
+Only the component's own debited record is restored, leaving one net copy spent. Free
+`_PRECAST` blocks, non-adjacent/unknown shapes, genuine combat casts, and renewals are never
+reimbursed.
 
 ### Maintenance and counterplay
 
@@ -155,7 +163,8 @@ No EEex userdata, transient object ID, or contact state is saved.
 On an eligible caster's AI tick, the accelerator requires all of the following:
 
 - the caster is hostile toward the party and can normally `See([PC])`;
-- it is conscious and not in dialogue or cutscene handling;
+- it is conscious, `Infinity_GetInCutsceneMode()` is false, and its exact current/queued
+  actions contain no dialogue, cutscene, tactical, or otherwise unproven work;
 - no genuine weapon protection is already active;
 - at least one semantically valid protection is genuinely memorized and available;
 - no accelerated attempt has been spent in the current contact episode; and
@@ -165,10 +174,12 @@ The candidate order follows SCS's installed preference order but filters by actu
 Absolute Immunity, a genuine Improved Mantle if one exists, Mantle, then PfMW. Moment of
 Prescience is not a weapon-protection candidate under the current SR installation.
 
-Only passive work may be displaced: idle, wandering, or ordinary movement. The runtime
-must prove both the current action and relevant queued work safe before clearing anything.
-An existing cast, attack, tactical action, dialogue action, cutscene action, or uncertain
-queue is left untouched and control stays with SCS.
+Only installed-action IDs proven by the spike may be displaced: NoAction/idle,
+RandomWalk 85, and ordinary MoveToPoint 23. The runtime inspects `m_curAction` and every
+entry in `m_queuedActions`; an existing cast (including SpellRES 31), Attack 3, tactical,
+dialogue, cutscene, unknown action, or unavailable queue representation is left untouched
+and control stays with SCS. `GetInControlOfDialog()` is not treated as a dialogue-active
+boolean because it returned true during ordinary play.
 
 The selected spell is queued as a normal self-cast. The engine consumes its memorized
 copy, applies aura and casting time, displays the cast normally, and permits interruption.
@@ -178,6 +189,11 @@ to start may receive one bounded retry; it cannot become an every-tick loop.
 A contact episode rearms only after one full round without seeing any party member. This
 deliberately permits players to bait and wait out defenses, at the cost of the mage's real
 spell slots. It removes reaction-latency cheese without removing tactical counterplay.
+
+Project Image is excluded structurally. A clone is recognized by active opcode 237 with
+parameter 2 equal to 2 and a valid owner `m_sourceId`; its owner is separately excluded by
+the engine-disabled state and `SPWI703` lock effects. Missing or inconsistent ownership
+information fails closed.
 
 ## 6. Runtime safety and failure policy
 
