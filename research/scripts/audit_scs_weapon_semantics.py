@@ -97,52 +97,199 @@ def _contains_alias(block: str) -> bool:
     return any(alias in upper for alias in SPELL_ALIASES)
 
 
-def _has(pattern: str, block: str) -> bool:
-    return re.search(pattern, block, flags=re.IGNORECASE | re.MULTILINE) is not None
+_ALIAS_RE = re.compile(
+    r"WIZARD_(?:MOMENT_OF_PRESCIENCE|IMPROVED_MANTLE)", re.IGNORECASE
+)
+_FALSE_ALIAS = "WIZARD_FALSE_WEAPON_PROTECTION"
+
+
+def _canonical_lines(block: str) -> tuple[str, ...]:
+    lines: list[str] = []
+    for source in block.splitlines():
+        # WeiDU may annotate RES casts with a trailing resource comment.
+        line = source.split("//", 1)[0].strip()
+        if line:
+            lines.append(_ALIAS_RE.sub(_FALSE_ALIAS, line))
+    return tuple(lines)
+
+
+_FIRST_ROUND = (
+    "IF",
+    '!GlobalTimerNotExpired("castspell","LOCALS")',
+    f"HaveSpell({_FALSE_ALIAS})",
+    "CheckStatLT(Myself,60,SPELLFAILUREMAGE)",
+    'Global("instantprep","LOCALS",0)',
+    "See(NearestEnemyOf(Myself))",
+    "THEN",
+    "RESPONSE #100",
+    'SetGlobalTimer("castspell","LOCALS",ONE_ROUND)',
+    f"Spell(Myself,{_FALSE_ALIAS})",
+    'SetGlobal("instantprep","LOCALS",1)',
+    'SetGlobalTimer("redefend","LOCALS",7)',
+    "END",
+)
+
+_RENEWAL = (
+    "IF",
+    '!GlobalTimerNotExpired("castspell","LOCALS")',
+    f"HaveSpell({_FALSE_ALIAS})",
+    "CheckStatLT(Myself,60,SPELLFAILUREMAGE)",
+    "!CheckStatGT(Myself,0,WIZARD_PROTECTION_FROM_MAGIC_WEAPONS)",
+    "!CheckSpellState(Myself,TIME_STOP)",
+    "!StateCheck(Myself,STATE_INVISIBLE)",
+    "See(NearestEnemyOf(Myself))",
+    '!GlobalTimerNotExpired("justdonepmw","LOCALS")',
+    'Global("instantprep","LOCALS",1)',
+    "THEN",
+    "RESPONSE #100",
+    'SetGlobalTimer("castspell","LOCALS",ONE_ROUND)',
+    f"Spell(Myself,{_FALSE_ALIAS})",
+    'SetGlobalTimer("redefend","LOCALS",7)',
+    'SetGlobalTimer("justdonepmw","LOCALS",7)',
+    "END",
+)
+
+_CHAIN_HELPER = 'ReallyForceSpellRES("<CHAIN_HELPER>",Myself)'
+_CHAIN_PREFIX = (
+    "IF",
+    'Global("ChainContingencyFired","LOCALS",0)',
+    "Allegiance(Myself,ENEMY)",
+    "OR(7)",
+    "Detect(NearestEnemyOf(Myself))",
+    "Range(Player1,20)",
+    "Range(Player2,20)",
+    "Range(Player3,20)",
+    "Range(Player4,20)",
+    "Range(Player5,20)",
+    "Range(Player6,20)",
+    "!StateCheck(Myself,STATE_REALLY_DEAD)",
+)
+_CHAIN_SUFFIX = (
+    "THEN",
+    "RESPONSE #100",
+    'SetGlobal("ChainContingencyFired","LOCALS",1)',
+    _CHAIN_HELPER,
+    f"ReallyForceSpell(Myself,{_FALSE_ALIAS})",
+    "Continue()",
+    "END",
+)
+
+_CHAIN_PREP_LOW = _CHAIN_PREFIX + (
+    "OR(4)",
+    'INI("DMWW_mage_prep_difficulty",0)',
+    'INI("DMWW_mage_prep_difficulty",1)',
+    'INI("DMWW_mage_prep_difficulty",2)',
+    'INI("DMWW_mage_prep_difficulty",3)',
+    "OR(2)",
+    '!INI("DMWW_mage_prep_difficulty",0)',
+    "DifficultyLT(HARD)",
+    "OR(4)",
+    'INI("DMWW_mage_prep_difficulty",0)',
+    'INI("DMWW_mage_prep_difficulty",1)',
+    'INI("DMWW_mage_prep_difficulty",2)',
+    'Global("created_out_of_sight","LOCALS",1)',
+    "OR(3)",
+    '!INI("DMWW_mage_prep_difficulty",0)',
+    "DifficultyLT(NORMAL)",
+    'Global("created_out_of_sight","LOCALS",1)',
+    '!GlobalGT("Chapter","GLOBAL",19)',
+) + _CHAIN_SUFFIX
+
+_CHAIN_PREP_HIGH = _CHAIN_PREFIX + (
+    '!INI("DMWW_mage_prep_difficulty",1)',
+    '!INI("DMWW_mage_prep_difficulty",2)',
+    "OR(2)",
+    "DifficultyGT(EASY)",
+    '!INI("DMWW_mage_prep_difficulty",0)',
+    "OR(6)",
+    'Global("created_out_of_sight","LOCALS",0)',
+    'INI("DMWW_mage_prep_difficulty",0)',
+    'INI("DMWW_mage_prep_difficulty",4)',
+    'INI("DMWW_mage_prep_difficulty",5)',
+    'INI("DMWW_mage_prep_difficulty",6)',
+    'INI("DMWW_mage_prep_difficulty",7)',
+    "OR(6)",
+    'Global("created_out_of_sight","LOCALS",0)',
+    "DifficultyGT(NORMAL)",
+    'INI("DMWW_mage_prep_difficulty",4)',
+    'INI("DMWW_mage_prep_difficulty",5)',
+    'INI("DMWW_mage_prep_difficulty",6)',
+    'INI("DMWW_mage_prep_difficulty",7)',
+    '!GlobalGT("Chapter","GLOBAL",19)',
+) + _CHAIN_SUFFIX
+
+
+def _first_round_difficulty(variable: str) -> tuple[str, ...]:
+    return _FIRST_ROUND[:5] + (
+        "OR(3)",
+        f'INI("{variable}",0)',
+        f'INI("{variable}",1)',
+        f'INI("{variable}",2)',
+        "OR(2)",
+        "DifficultyLT(NORMAL)",
+        f'!INI("{variable}",0)',
+        "See(NearestEnemyOf(Myself))",
+    ) + _FIRST_ROUND[6:]
+
+
+_FIRST_ROUND_CHAPTER_RANGE = _FIRST_ROUND[:4] + (
+    '!GlobalGT("Chapter","GLOBAL",19)',
+    _FIRST_ROUND[4],
+    "OR(7)",
+    "See(NearestEnemyOf(Myself))",
+    *(f"Range(Player{number},15)" for number in range(1, 7)),
+) + _FIRST_ROUND[6:]
+
+_FIRST_ROUND_FAMILIES = {
+    _FIRST_ROUND,
+    _FIRST_ROUND_CHAPTER_RANGE,
+    *(
+        _first_round_difficulty(variable)
+        for variable in (
+            "DMWW_mage_difficulty",
+            "DMWW_ascension_difficulty",
+            "DMWW_beholder_difficulty",
+        )
+    ),
+}
+
+
+def _chain_difficulty(variable: str) -> tuple[str, ...]:
+    return _CHAIN_PREFIX + (
+        '!GlobalGT("Chapter","GLOBAL",19)',
+        "OR(6)",
+        f'INI("{variable}",0)',
+        *(f'INI("{variable}",{value})' for value in range(3, 8)),
+        "OR(6)",
+        "DifficultyGT(EASY)",
+        *(f'INI("{variable}",{value})' for value in range(3, 8)),
+    ) + _CHAIN_SUFFIX
+
+
+_CHAIN_FAMILIES = {
+    _CHAIN_PREP_LOW,
+    _CHAIN_PREP_HIGH,
+    _chain_difficulty("DMWW_mage_difficulty"),
+    _chain_difficulty("DMWW_beholder_difficulty"),
+}
+
+_CHAIN_HELPER_RE = re.compile(
+    r'^ReallyForceSpellRES\("dw#cc[0-9]+",Myself\)$', re.IGNORECASE
+)
+
+
+def _mask_chain_helper(lines: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(_CHAIN_HELPER if _CHAIN_HELPER_RE.fullmatch(line) else line for line in lines)
 
 
 def _classify_block(block: str) -> str:
-    alias = r"(?:WIZARD_MOMENT_OF_PRESCIENCE|WIZARD_IMPROVED_MANTLE)"
-
-    is_chain = all(
-        (
-            _has(r'Global\(\s*"ChainContingencyFired"\s*,\s*"LOCALS"\s*,\s*0\s*\)', block),
-            _has(r'SetGlobal\(\s*"ChainContingencyFired"\s*,\s*"LOCALS"\s*,\s*1\s*\)', block),
-            _has(r'ReallyForceSpellRES\(\s*"dw#cc[^"\r\n]*"\s*,\s*Myself\s*\)', block),
-            _has(rf'ReallyForceSpell\(\s*Myself\s*,\s*{alias}\s*\)', block),
-            _has(r'Continue\(\s*\)', block),
-        )
-    )
-    if is_chain:
+    canonical = _canonical_lines(block)
+    if _mask_chain_helper(canonical) in _CHAIN_FAMILIES:
         return "chain_contingency"
-
-    is_renewal = all(
-        (
-            _has(rf'HaveSpell\(\s*{alias}\s*\)', block),
-            _has(r'Global\(\s*"instantprep"\s*,\s*"LOCALS"\s*,\s*1\s*\)', block),
-            _has(
-                r'!CheckStatGT\(\s*Myself\s*,\s*0\s*,\s*'
-                r'WIZARD_PROTECTION_FROM_MAGIC_WEAPONS\s*\)',
-                block,
-            ),
-            _has(rf'Spell\(\s*Myself\s*,\s*{alias}\s*\)', block),
-            _has(r'SetGlobalTimer\(\s*"justdonepmw"\s*,\s*"LOCALS"\s*,\s*7\s*\)', block),
-        )
-    ) and not _has(r"ReallyForceSpell", block)
-    if is_renewal:
+    if canonical == _RENEWAL:
         return "renewal"
-
-    is_first_round = all(
-        (
-            _has(rf'HaveSpell\(\s*{alias}\s*\)', block),
-            _has(r'Global\(\s*"instantprep"\s*,\s*"LOCALS"\s*,\s*0\s*\)', block),
-            _has(rf'Spell\(\s*Myself\s*,\s*{alias}\s*\)', block),
-            _has(r'SetGlobal\(\s*"instantprep"\s*,\s*"LOCALS"\s*,\s*1\s*\)', block),
-        )
-    ) and not _has(r"ReallyForceSpell", block)
-    if is_first_round:
+    if canonical in _FIRST_ROUND_FAMILIES:
         return "first_round"
-
     return "unknown"
 
 

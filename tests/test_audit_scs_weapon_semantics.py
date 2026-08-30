@@ -40,7 +40,9 @@ RENEWAL = """\
 IF
   !GlobalTimerNotExpired("castspell","LOCALS")
   HaveSpell(WIZARD_MOMENT_OF_PRESCIENCE)
+  CheckStatLT(Myself,60,SPELLFAILUREMAGE)
   !CheckStatGT(Myself,0,WIZARD_PROTECTION_FROM_MAGIC_WEAPONS)
+  !CheckSpellState(Myself,TIME_STOP)
   !StateCheck(Myself,STATE_INVISIBLE)
   See(NearestEnemyOf(Myself))
   !GlobalTimerNotExpired("justdonepmw","LOCALS")
@@ -58,7 +60,32 @@ CHAIN_CONTINGENCY = """\
 IF
   Global("ChainContingencyFired","LOCALS",0)
   Allegiance(Myself,ENEMY)
-  Detect(NearestEnemyOf(Myself))
+  OR(7)
+    Detect(NearestEnemyOf(Myself))
+    Range(Player1,20)
+    Range(Player2,20)
+    Range(Player3,20)
+    Range(Player4,20)
+    Range(Player5,20)
+    Range(Player6,20)
+  !StateCheck(Myself,STATE_REALLY_DEAD)
+  OR(4)
+    INI("DMWW_mage_prep_difficulty",0)
+    INI("DMWW_mage_prep_difficulty",1)
+    INI("DMWW_mage_prep_difficulty",2)
+    INI("DMWW_mage_prep_difficulty",3)
+  OR(2)
+    !INI("DMWW_mage_prep_difficulty",0)
+    DifficultyLT(HARD)
+  OR(4)
+    INI("DMWW_mage_prep_difficulty",0)
+    INI("DMWW_mage_prep_difficulty",1)
+    INI("DMWW_mage_prep_difficulty",2)
+    Global("created_out_of_sight","LOCALS",1)
+  OR(3)
+    !INI("DMWW_mage_prep_difficulty",0)
+    DifficultyLT(NORMAL)
+    Global("created_out_of_sight","LOCALS",1)
   !GlobalGT("Chapter","GLOBAL",19)
 THEN
   RESPONSE #100
@@ -78,6 +105,12 @@ THEN
     DisplayStringHead(Myself,12345)
 END
 """
+
+NEAR_MATCH = FIRST_ROUND.replace(
+    "    Spell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)\n",
+    "    Spell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)\n"
+    "    SetGlobal(\"cbr_extra\",\"LOCALS\",1)\n",
+)
 
 
 def _sha256(path: Path) -> str:
@@ -123,7 +156,15 @@ class AuditScsWeaponSemanticsTests(unittest.TestCase):
         override.mkdir(parents=True)
 
         (override / "dw#mg10.bcs").write_text(
-            FIRST_ROUND + "\n" + RENEWAL + "\n" + CHAIN_CONTINGENCY + "\n" + UNKNOWN,
+            FIRST_ROUND
+            + "\n"
+            + RENEWAL
+            + "\n"
+            + CHAIN_CONTINGENCY
+            + "\n"
+            + UNKNOWN
+            + "\n"
+            + NEAR_MATCH,
             encoding="ascii",
             newline="\n",
         )
@@ -189,7 +230,7 @@ class AuditScsWeaponSemanticsTests(unittest.TestCase):
                     "first_round": 2,
                     "renewal": 1,
                     "chain_contingency": 1,
-                    "unknown_blocks": 1,
+                    "unknown_blocks": 2,
                 },
             )
             self.assertEqual([entry["name"] for entry in first_report["scripts"]], ["dw#mg10.bcs", "DW#MG11.BCS"])
@@ -197,7 +238,7 @@ class AuditScsWeaponSemanticsTests(unittest.TestCase):
                 "chain_contingency": [2],
                 "first_round": [0],
                 "renewal": [1],
-                "unknown": [3],
+                "unknown": [3, 4],
             })
 
             for name, (before_bytes, before_hash) in snapshots.items():
@@ -231,6 +272,42 @@ class AuditScsWeaponSemanticsTests(unittest.TestCase):
 
             self.assertFalse(forbidden.exists())
             self.assertFalse((root / "fake-weidu.jsonl").exists())
+
+    def test_every_installed_structural_family_is_classified_exactly(self) -> None:
+        from tests.test_scs_weapon_semantics import _chain_family, _first_round_family
+
+        for variable in (
+            "DMWW_mage_difficulty",
+            "DMWW_ascension_difficulty",
+            "DMWW_beholder_difficulty",
+        ):
+            self.assertEqual(
+                audit_scs_weapon_semantics._classify_block(
+                    _first_round_family("difficulty", variable)
+                ),
+                "first_round",
+            )
+        self.assertEqual(
+            audit_scs_weapon_semantics._classify_block(
+                _first_round_family("chapter_range")
+            ),
+            "first_round",
+        )
+        for kind, helper, variable in (
+            ("prep_low", "dw#cc25", "DMWW_mage_difficulty"),
+            ("prep_high", "dw#cc15", "DMWW_mage_difficulty"),
+            ("difficulty", "dw#cc0", "DMWW_mage_difficulty"),
+            ("difficulty", "dw#cc19", "DMWW_beholder_difficulty"),
+        ):
+            self.assertEqual(
+                audit_scs_weapon_semantics._classify_block(
+                    _chain_family(kind, helper, variable)
+                ),
+                "chain_contingency",
+            )
+        self.assertEqual(
+            audit_scs_weapon_semantics._classify_block(NEAR_MATCH), "unknown"
+        )
 
     def test_cli_requires_explicit_inputs(self) -> None:
         completed = subprocess.run(

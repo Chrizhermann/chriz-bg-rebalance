@@ -397,6 +397,7 @@ def _write_minimal_script_ids(root: Path, spell_ids: str) -> None:
 0x4046 CheckStatLT(O:Object*,I:Value*,I:StatNum*Stats)
 0x4074 Detect(O:Object*)
 0x4089 OR(I:OrCount*)
+0x40D1 DifficultyGT(I:Amount*DIFFLEV)
 0x40D2 DifficultyLT(I:Amount*DIFFLEV)
 0x40E2 CheckSpellState(O:Object*,I:State*splstate)
 0x40ED INI(S:Name*,I:Number*)
@@ -647,6 +648,164 @@ def _roundtrip_bcs(source: Path, ids_root: Path) -> tuple[str, bytes]:
         return text, compiled.read_bytes()
 
 
+def _compile_baf_text(source: str, ids_root: Path) -> bytes:
+    with tempfile.TemporaryDirectory(prefix="cbr-scs-baf-") as temporary:
+        scratch = Path(temporary)
+        baf = scratch / "adversarial.baf"
+        baf.write_text(source, encoding="utf-8", newline="\n")
+        compile_result = subprocess.run(
+            [
+                str(WEIDU),
+                "--nogame",
+                "--search-ids",
+                str(ids_root),
+                str(baf),
+                "--no-exit-pause",
+            ],
+            cwd=scratch,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if compile_result.returncode != 0:
+            raise AssertionError(
+                f"adversarial fixture compile failed:\n"
+                f"{compile_result.stdout}\n{compile_result.stderr}"
+            )
+        compiled = scratch / "adversarial.bcs"
+        if not compiled.is_file():
+            raise AssertionError(
+                f"WeiDU did not emit {compiled}:\n"
+                f"{compile_result.stdout}\n{compile_result.stderr}"
+            )
+        return compiled.read_bytes()
+
+
+def _first_round_family(kind: str, variable: str = "DMWW_mage_difficulty") -> str:
+    common = [
+        '  !GlobalTimerNotExpired("castspell","LOCALS")',
+        "  HaveSpell(WIZARD_MOMENT_OF_PRESCIENCE)",
+        "  CheckStatLT(Myself,60,SPELLFAILUREMAGE)",
+    ]
+    if kind == "plain":
+        triggers = [
+            '  Global("instantprep","LOCALS",0)',
+            "  See(NearestEnemyOf(Myself))",
+        ]
+    elif kind == "difficulty":
+        triggers = [
+            '  Global("instantprep","LOCALS",0)',
+            "  OR(3)",
+            f'    INI("{variable}",0)',
+            f'    INI("{variable}",1)',
+            f'    INI("{variable}",2)',
+            "  OR(2)",
+            "    DifficultyLT(NORMAL)",
+            f'    !INI("{variable}",0)',
+            "  See(NearestEnemyOf(Myself))",
+        ]
+    elif kind == "chapter_range":
+        triggers = [
+            '  !GlobalGT("Chapter","GLOBAL",19)',
+            '  Global("instantprep","LOCALS",0)',
+            "  OR(7)",
+            "    See(NearestEnemyOf(Myself))",
+            *(f"    Range(Player{number},15)" for number in range(1, 7)),
+        ]
+    else:
+        raise ValueError(kind)
+    return "\n".join(
+        [
+            "IF",
+            *common,
+            *triggers,
+            "THEN",
+            "  RESPONSE #100",
+            '    SetGlobalTimer("castspell","LOCALS",ONE_ROUND)',
+            "    Spell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)",
+            '    SetGlobal("instantprep","LOCALS",1)',
+            '    SetGlobalTimer("redefend","LOCALS",7)',
+            "END",
+            "",
+        ]
+    )
+
+
+def _chain_family(kind: str, helper: str, variable: str = "DMWW_mage_difficulty") -> str:
+    common = [
+        '  Global("ChainContingencyFired","LOCALS",0)',
+        "  Allegiance(Myself,ENEMY)",
+        "  OR(7)",
+        "    Detect(NearestEnemyOf(Myself))",
+        *(f"    Range(Player{number},20)" for number in range(1, 7)),
+        "  !StateCheck(Myself,STATE_REALLY_DEAD)",
+    ]
+    if kind == "prep_low":
+        triggers = [
+            "  OR(4)",
+            '    INI("DMWW_mage_prep_difficulty",0)',
+            '    INI("DMWW_mage_prep_difficulty",1)',
+            '    INI("DMWW_mage_prep_difficulty",2)',
+            '    INI("DMWW_mage_prep_difficulty",3)',
+            "  OR(2)",
+            '    !INI("DMWW_mage_prep_difficulty",0)',
+            "    DifficultyLT(HARD)",
+            "  OR(4)",
+            '    INI("DMWW_mage_prep_difficulty",0)',
+            '    INI("DMWW_mage_prep_difficulty",1)',
+            '    INI("DMWW_mage_prep_difficulty",2)',
+            '    Global("created_out_of_sight","LOCALS",1)',
+            "  OR(3)",
+            '    !INI("DMWW_mage_prep_difficulty",0)',
+            "    DifficultyLT(NORMAL)",
+            '    Global("created_out_of_sight","LOCALS",1)',
+            '  !GlobalGT("Chapter","GLOBAL",19)',
+        ]
+    elif kind == "prep_high":
+        triggers = [
+            '  !INI("DMWW_mage_prep_difficulty",1)',
+            '  !INI("DMWW_mage_prep_difficulty",2)',
+            "  OR(2)",
+            "    DifficultyGT(EASY)",
+            '    !INI("DMWW_mage_prep_difficulty",0)',
+            "  OR(6)",
+            '    Global("created_out_of_sight","LOCALS",0)',
+            *(f'    INI("DMWW_mage_prep_difficulty",{value})' for value in (0, 4, 5, 6, 7)),
+            "  OR(6)",
+            '    Global("created_out_of_sight","LOCALS",0)',
+            "    DifficultyGT(NORMAL)",
+            *(f'    INI("DMWW_mage_prep_difficulty",{value})' for value in (4, 5, 6, 7)),
+            '  !GlobalGT("Chapter","GLOBAL",19)',
+        ]
+    elif kind == "difficulty":
+        triggers = [
+            '  !GlobalGT("Chapter","GLOBAL",19)',
+            "  OR(6)",
+            *(f'    INI("{variable}",{value})' for value in (0, 3, 4, 5, 6, 7)),
+            "  OR(6)",
+            "    DifficultyGT(EASY)",
+            *(f'    INI("{variable}",{value})' for value in (3, 4, 5, 6, 7)),
+        ]
+    else:
+        raise ValueError(kind)
+    return "\n".join(
+        [
+            "IF",
+            *common,
+            *triggers,
+            "THEN",
+            "  RESPONSE #100",
+            '    SetGlobal("ChainContingencyFired","LOCALS",1)',
+            f'    ReallyForceSpellRES("{helper}",Myself)',
+            "    ReallyForceSpell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)",
+            "    Continue()",
+            "END",
+            "",
+        ]
+    )
+
+
 class ScsWeaponFixtureTests(unittest.TestCase):
     def test_bcs_fixtures_are_live_shaped_and_hermetic(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cbr-scs-ids-") as temporary:
@@ -827,6 +986,46 @@ class ScsWeaponSemanticsTests(unittest.TestCase):
         self.assertIn("cbr_chain_before", baf)
         self.assertIn("cbr_chain_after", baf)
 
+    def test_all_installed_scs_shape_families_are_allowlisted(self) -> None:
+        first_round_cases = (
+            ("difficulty", "DMWW_mage_difficulty"),
+            ("difficulty", "DMWW_ascension_difficulty"),
+            ("difficulty", "DMWW_beholder_difficulty"),
+            ("chapter_range", "DMWW_mage_difficulty"),
+        )
+        for kind, variable in first_round_cases:
+            with self.subTest(layer="first_round", kind=kind, variable=variable):
+                fixture = self._fixture(scripts=False)
+                target = fixture.root / "dw#mg100.bcs"
+                target.write_bytes(
+                    _compile_baf_text(_first_round_family(kind, variable), fixture.root)
+                )
+                self._run(fixture, "scripts")
+                report = _parse_report(fixture.root)
+                self.assertEqual(report["first_round_removed"], "1")
+                self.assertEqual(report["unknown_blocks"], "0")
+
+        chain_cases = (
+            ("prep_low", "dw#cc25", "DMWW_mage_difficulty"),
+            ("prep_high", "dw#cc15", "DMWW_mage_difficulty"),
+            ("difficulty", "dw#cc0", "DMWW_mage_difficulty"),
+            ("difficulty", "dw#cc19", "DMWW_beholder_difficulty"),
+        )
+        for kind, helper, variable in chain_cases:
+            with self.subTest(layer="chain", kind=kind, helper=helper, variable=variable):
+                fixture = self._fixture(scripts=False)
+                target = fixture.root / "dw#mg100.bcs"
+                target.write_bytes(
+                    _compile_baf_text(_chain_family(kind, helper, variable), fixture.root)
+                )
+                self._run(fixture, "scripts")
+                report = _parse_report(fixture.root)
+                self.assertEqual(report["chain_replaced"], "1")
+                self.assertEqual(report["unknown_blocks"], "0")
+                baf, _ = _roundtrip_bcs(target, fixture.root)
+                self.assertIn(f'ReallyForceSpellRES("{helper}",Myself)', baf)
+                self.assertIn("ReallyForceSpell(Myself,WIZARD_MANTLE)", baf)
+
     def test_unknown_scope_and_noop_matrix(self) -> None:
         fixture = self._fixture()
         unrelated_before = (fixture.root / "dw#mg103.bcs").read_bytes()
@@ -844,6 +1043,30 @@ class ScsWeaponSemanticsTests(unittest.TestCase):
                 before = _snapshot(noop.root)
                 self._run(noop, "full")
                 self.assertEqual(_snapshot(noop.root), before)
+
+    def test_near_match_blocks_are_reported_and_left_byte_identical(self) -> None:
+        cases = {
+            "extra_action": (
+                "    Spell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)\n",
+                "    Spell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)\n"
+                "    SetGlobal(\"cbr_extra\",\"LOCALS\",1)\n",
+            ),
+            "different_cast": (
+                "    Spell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)\n",
+                "    Spell(Myself,WIZARD_MANTLE)\n",
+            ),
+        }
+        for name, (old, new) in cases.items():
+            with self.subTest(name=name):
+                fixture = self._fixture()
+                target = fixture.root / "dw#mg100.bcs"
+                baf, _ = _roundtrip_bcs(target, fixture.root)
+                self.assertEqual(baf.count(old), 1)
+                target.write_bytes(_compile_baf_text(baf.replace(old, new), fixture.root))
+                before = target.read_bytes()
+                self._run(fixture, "scripts")
+                self.assertEqual(_parse_report(fixture.root)["unknown_blocks"], "2")
+                self.assertEqual(target.read_bytes(), before)
 
     def test_preflight_rejects_unsafe_graphs_atomically(self) -> None:
         cases = (
@@ -1005,6 +1228,23 @@ class ScsWeaponPublicInstallerTests(unittest.TestCase):
                     game.before_override,
                 )
                 game.assert_stable_inputs(self)
+
+    def test_public_preflight_failure_rolls_back_materialized_resources(self) -> None:
+        game = self._game(breach_layout="missing")
+        process = game.run("--force-install-list", "120")
+        transcript = game.transcript(process)
+        self.assertNotEqual(0, process.returncode, transcript)
+        self.assertIn("references missing helper", transcript)
+        self.assertNotRegex(game.active_weidu_log(), r"(?m)#0\s+#120\b")
+        self.assertEqual(
+            _snapshot(
+                game.override,
+                exclude_harness=False,
+                casefold_paths=True,
+            ),
+            game.before_override,
+        )
+        game.assert_stable_inputs(self)
 
     def test_public_reinstall_is_stable_and_uninstall_restores_every_byte(self) -> None:
         game = self._game()

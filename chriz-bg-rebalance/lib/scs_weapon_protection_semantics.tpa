@@ -707,29 +707,192 @@ DEFINE_PATCH_FUNCTION cbr_scs_wp_classify_baf_block
 BEGIN
   SET shape = 0
   SET cbr_scs_wp_baf_false = 0
+  SET cbr_scs_wp_baf_have_and_cast = 0
+  SET cbr_scs_wp_baf_force_cast = 0
+  COUNT_REGEXP_INSTANCES ~%LNL%~ cbr_scs_wp_baf_line_breaks
+  COUNT_REGEXP_INSTANCES ~OR(7)~ cbr_scs_wp_baf_or7
+  COUNT_REGEXP_INSTANCES ~OR(6)~ cbr_scs_wp_baf_or6
+  COUNT_REGEXP_INSTANCES ~OR(4)~ cbr_scs_wp_baf_or4
+  COUNT_REGEXP_INSTANCES ~OR(3)~ cbr_scs_wp_baf_or3
+  COUNT_REGEXP_INSTANCES ~OR(2)~ cbr_scs_wp_baf_or2
+  COUNT_REGEXP_INSTANCES ~DMWW_~ cbr_scs_wp_baf_dmww
+  COUNT_REGEXP_INSTANCES ~Global("created_out_of_sight","LOCALS",0)~ cbr_scs_wp_baf_created0
+  COUNT_REGEXP_INSTANCES ~Global("created_out_of_sight","LOCALS",1)~ cbr_scs_wp_baf_created1
+  COUNT_REGEXP_INSTANCES ~ReallyForceSpellRES("dw#cc[0-9][0-9]*",Myself)~ cbr_scs_wp_baf_chain_helper
+
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_prep_difficulty",0)~ cbr_scs_wp_baf_prep0
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_prep_difficulty",1)~ cbr_scs_wp_baf_prep1
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_prep_difficulty",2)~ cbr_scs_wp_baf_prep2
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_prep_difficulty",3)~ cbr_scs_wp_baf_prep3
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_prep_difficulty",4)~ cbr_scs_wp_baf_prep4
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_prep_difficulty",5)~ cbr_scs_wp_baf_prep5
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_prep_difficulty",6)~ cbr_scs_wp_baf_prep6
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_prep_difficulty",7)~ cbr_scs_wp_baf_prep7
+
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_difficulty",0)~ cbr_scs_wp_baf_mage0
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_difficulty",1)~ cbr_scs_wp_baf_mage1
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_difficulty",2)~ cbr_scs_wp_baf_mage2
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_difficulty",3)~ cbr_scs_wp_baf_mage3
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_difficulty",4)~ cbr_scs_wp_baf_mage4
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_difficulty",5)~ cbr_scs_wp_baf_mage5
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_difficulty",6)~ cbr_scs_wp_baf_mage6
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_mage_difficulty",7)~ cbr_scs_wp_baf_mage7
+
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_ascension_difficulty",0)~ cbr_scs_wp_baf_asc0
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_ascension_difficulty",1)~ cbr_scs_wp_baf_asc1
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_ascension_difficulty",2)~ cbr_scs_wp_baf_asc2
+
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_beholder_difficulty",0)~ cbr_scs_wp_baf_beholder0
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_beholder_difficulty",1)~ cbr_scs_wp_baf_beholder1
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_beholder_difficulty",2)~ cbr_scs_wp_baf_beholder2
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_beholder_difficulty",3)~ cbr_scs_wp_baf_beholder3
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_beholder_difficulty",4)~ cbr_scs_wp_baf_beholder4
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_beholder_difficulty",5)~ cbr_scs_wp_baf_beholder5
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_beholder_difficulty",6)~ cbr_scs_wp_baf_beholder6
+  COUNT_REGEXP_INSTANCES ~INI("DMWW_beholder_difficulty",7)~ cbr_scs_wp_baf_beholder7
+
   PATCH_IF (INDEX_BUFFER (~WIZARD_MOMENT_OF_PRESCIENCE~) >= 0
          || INDEX_BUFFER (~WIZARD_IMPROVED_MANTLE~) >= 0) BEGIN
     SET cbr_scs_wp_baf_false = 1
   END
+  PATCH_IF ((INDEX_BUFFER (~HaveSpell(WIZARD_MOMENT_OF_PRESCIENCE)~) >= 0
+          && INDEX_BUFFER (~Spell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)~) >= 0)
+         || (INDEX_BUFFER (~HaveSpell(WIZARD_IMPROVED_MANTLE)~) >= 0
+          && INDEX_BUFFER (~Spell(Myself,WIZARD_IMPROVED_MANTLE)~) >= 0)) BEGIN
+    SET cbr_scs_wp_baf_have_and_cast = 1
+  END
+  PATCH_IF (INDEX_BUFFER (~ReallyForceSpell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)~) >= 0
+         || INDEX_BUFFER (~ReallyForceSpell(Myself,WIZARD_IMPROVED_MANTLE)~) >= 0) BEGIN
+    SET cbr_scs_wp_baf_force_cast = 1
+  END
   PATCH_IF cbr_scs_wp_baf_false BEGIN
     SET cbr_scs_wp_baf_cast_guard = 0
-    PATCH_IF (INDEX_BUFFER (~!GlobalTimerNotExpired("castspell","LOCALS")~) >= 0
+    SET cbr_scs_wp_baf_first_family = 0
+    SET cbr_scs_wp_baf_chain_common = 0
+    SET cbr_scs_wp_baf_chain_family = 0
+    PATCH_IF (cbr_scs_wp_baf_have_and_cast
+           && INDEX_BUFFER (~!GlobalTimerNotExpired("castspell","LOCALS")~) >= 0
            && INDEX_BUFFER (~CheckStatLT(Myself,60,SPELLFAILUREMAGE)~) >= 0
            && INDEX_BUFFER (~See(NearestEnemyOf(Myself))~) >= 0
            && INDEX_BUFFER (~SetGlobalTimer("castspell","LOCALS",ONE_ROUND)~) >= 0
            && INDEX_BUFFER (~SetGlobalTimer("redefend","LOCALS",7)~) >= 0
-           && INDEX_BUFFER (~Spell(Myself,WIZARD_~) >= 0
-           && INDEX_BUFFER (~HaveSpell(WIZARD_~) >= 0) BEGIN
+           && INDEX_BUFFER (~RESPONSE #100~) >= 0) BEGIN
       SET cbr_scs_wp_baf_cast_guard = 1
     END
 
+    // Exact first-round families observed in the audited SCS 35.21 install.
+    PATCH_IF (cbr_scs_wp_baf_line_breaks = 14
+           && cbr_scs_wp_baf_dmww = 0
+           && cbr_scs_wp_baf_or7 = 0
+           && cbr_scs_wp_baf_or3 = 0
+           && cbr_scs_wp_baf_or2 = 0
+           && INDEX_BUFFER (~See(NearestEnemyOf(Myself))~) >= 0) BEGIN
+      SET cbr_scs_wp_baf_first_family = 1
+    END ELSE PATCH_IF (cbr_scs_wp_baf_line_breaks = 21
+                    && cbr_scs_wp_baf_dmww = 4
+                    && cbr_scs_wp_baf_or3 = 1
+                    && cbr_scs_wp_baf_or2 = 1
+                    && INDEX_BUFFER (~DifficultyLT(NORMAL)~) >= 0
+                    && INDEX_BUFFER (~See(NearestEnemyOf(Myself))~) >= 0
+                    && ((cbr_scs_wp_baf_mage0 = 2 && cbr_scs_wp_baf_mage1 = 1 && cbr_scs_wp_baf_mage2 = 1)
+                     || (cbr_scs_wp_baf_asc0 = 2 && cbr_scs_wp_baf_asc1 = 1 && cbr_scs_wp_baf_asc2 = 1)
+                     || (cbr_scs_wp_baf_beholder0 = 2 && cbr_scs_wp_baf_beholder1 = 1 && cbr_scs_wp_baf_beholder2 = 1))) BEGIN
+      SET cbr_scs_wp_baf_first_family = 1
+    END ELSE PATCH_IF (cbr_scs_wp_baf_line_breaks = 22
+                    && cbr_scs_wp_baf_dmww = 0
+                    && cbr_scs_wp_baf_or7 = 1
+                    && INDEX_BUFFER (~!GlobalGT("Chapter","GLOBAL",19)~) >= 0
+                    && INDEX_BUFFER (~See(NearestEnemyOf(Myself))~) >= 0
+                    && INDEX_BUFFER (~Range(Player1,15)~) >= 0
+                    && INDEX_BUFFER (~Range(Player2,15)~) >= 0
+                    && INDEX_BUFFER (~Range(Player3,15)~) >= 0
+                    && INDEX_BUFFER (~Range(Player4,15)~) >= 0
+                    && INDEX_BUFFER (~Range(Player5,15)~) >= 0
+                    && INDEX_BUFFER (~Range(Player6,15)~) >= 0) BEGIN
+      SET cbr_scs_wp_baf_first_family = 1
+    END
+
+    PATCH_IF (cbr_scs_wp_baf_force_cast
+           && cbr_scs_wp_baf_chain_helper = 1
+           && cbr_scs_wp_baf_or7 = 1
+           && INDEX_BUFFER (~Global("ChainContingencyFired","LOCALS",0)~) >= 0
+           && INDEX_BUFFER (~SetGlobal("ChainContingencyFired","LOCALS",1)~) >= 0
+           && INDEX_BUFFER (~Allegiance(Myself,ENEMY)~) >= 0
+           && INDEX_BUFFER (~Detect(NearestEnemyOf(Myself))~) >= 0
+           && INDEX_BUFFER (~Range(Player1,20)~) >= 0
+           && INDEX_BUFFER (~Range(Player2,20)~) >= 0
+           && INDEX_BUFFER (~Range(Player3,20)~) >= 0
+           && INDEX_BUFFER (~Range(Player4,20)~) >= 0
+           && INDEX_BUFFER (~Range(Player5,20)~) >= 0
+           && INDEX_BUFFER (~Range(Player6,20)~) >= 0
+           && INDEX_BUFFER (~!StateCheck(Myself,STATE_REALLY_DEAD)~) >= 0
+           && INDEX_BUFFER (~!GlobalGT("Chapter","GLOBAL",19)~) >= 0
+           && INDEX_BUFFER (~RESPONSE #100~) >= 0
+           && INDEX_BUFFER (~Continue()~) >= 0) BEGIN
+      SET cbr_scs_wp_baf_chain_common = 1
+    END
+
+    // Low-prep, high-prep, and ordinary difficulty chain families. The
+    // generated dw#cc helper is preserved and only its numeric shape is gated.
+    PATCH_IF (cbr_scs_wp_baf_line_breaks = 38
+           && cbr_scs_wp_baf_dmww = 9
+           && cbr_scs_wp_baf_or6 = 0
+           && cbr_scs_wp_baf_or4 = 2
+           && cbr_scs_wp_baf_or3 = 1
+           && cbr_scs_wp_baf_or2 = 1
+           && cbr_scs_wp_baf_prep0 = 4
+           && cbr_scs_wp_baf_prep1 = 2
+           && cbr_scs_wp_baf_prep2 = 2
+           && cbr_scs_wp_baf_prep3 = 1
+           && cbr_scs_wp_baf_created1 = 2
+           && INDEX_BUFFER (~DifficultyLT(HARD)~) >= 0
+           && INDEX_BUFFER (~DifficultyLT(NORMAL)~) >= 0) BEGIN
+      SET cbr_scs_wp_baf_chain_family = 1
+    END ELSE PATCH_IF (cbr_scs_wp_baf_line_breaks = 40
+                    && cbr_scs_wp_baf_dmww = 12
+                    && cbr_scs_wp_baf_or6 = 2
+                    && cbr_scs_wp_baf_or4 = 0
+                    && cbr_scs_wp_baf_or3 = 0
+                    && cbr_scs_wp_baf_or2 = 1
+                    && cbr_scs_wp_baf_prep0 = 2
+                    && cbr_scs_wp_baf_prep1 = 1
+                    && cbr_scs_wp_baf_prep2 = 1
+                    && cbr_scs_wp_baf_prep4 = 2
+                    && cbr_scs_wp_baf_prep5 = 2
+                    && cbr_scs_wp_baf_prep6 = 2
+                    && cbr_scs_wp_baf_prep7 = 2
+                    && cbr_scs_wp_baf_created0 = 2
+                    && INDEX_BUFFER (~DifficultyGT(EASY)~) >= 0
+                    && INDEX_BUFFER (~DifficultyGT(NORMAL)~) >= 0) BEGIN
+      SET cbr_scs_wp_baf_chain_family = 1
+    END ELSE PATCH_IF (cbr_scs_wp_baf_line_breaks = 35
+                    && cbr_scs_wp_baf_dmww = 11
+                    && cbr_scs_wp_baf_or6 = 2
+                    && cbr_scs_wp_baf_or4 = 0
+                    && cbr_scs_wp_baf_or3 = 0
+                    && cbr_scs_wp_baf_or2 = 0
+                    && INDEX_BUFFER (~DifficultyGT(EASY)~) >= 0
+                    && ((cbr_scs_wp_baf_mage0 = 1
+                      && cbr_scs_wp_baf_mage3 = 2 && cbr_scs_wp_baf_mage4 = 2
+                      && cbr_scs_wp_baf_mage5 = 2 && cbr_scs_wp_baf_mage6 = 2
+                      && cbr_scs_wp_baf_mage7 = 2)
+                     || (cbr_scs_wp_baf_beholder0 = 1
+                      && cbr_scs_wp_baf_beholder3 = 2 && cbr_scs_wp_baf_beholder4 = 2
+                      && cbr_scs_wp_baf_beholder5 = 2 && cbr_scs_wp_baf_beholder6 = 2
+                      && cbr_scs_wp_baf_beholder7 = 2))) BEGIN
+      SET cbr_scs_wp_baf_chain_family = 1
+    END
+
     PATCH_IF (cbr_scs_wp_baf_cast_guard
+           && cbr_scs_wp_baf_first_family
            && INDEX_BUFFER (~Global("instantprep","LOCALS",0)~) >= 0
            && INDEX_BUFFER (~SetGlobal("instantprep","LOCALS",1)~) >= 0
            && INDEX_BUFFER (~justdonepmw~) < 0
            && INDEX_BUFFER (~ChainContingencyFired~) < 0) BEGIN
       SET shape = 1
     END ELSE PATCH_IF (cbr_scs_wp_baf_cast_guard
+                    && cbr_scs_wp_baf_line_breaks = 18
+                    && cbr_scs_wp_baf_dmww = 0
                     && INDEX_BUFFER (~Global("instantprep","LOCALS",1)~) >= 0
                     && INDEX_BUFFER (~!GlobalTimerNotExpired("justdonepmw","LOCALS")~) >= 0
                     && INDEX_BUFFER (~SetGlobalTimer("justdonepmw","LOCALS",7)~) >= 0
@@ -738,15 +901,8 @@ BEGIN
                     && INDEX_BUFFER (~!StateCheck(Myself,STATE_INVISIBLE)~) >= 0
                     && INDEX_BUFFER (~ChainContingencyFired~) < 0) BEGIN
       SET shape = 2
-    END ELSE PATCH_IF (INDEX_BUFFER (~Global("ChainContingencyFired","LOCALS",0)~) >= 0
-                    && INDEX_BUFFER (~SetGlobal("ChainContingencyFired","LOCALS",1)~) >= 0
-                    && INDEX_BUFFER (~Allegiance(Myself,ENEMY)~) >= 0
-                    && INDEX_BUFFER (~Detect(NearestEnemyOf(Myself))~) >= 0
-                    && INDEX_BUFFER (~DMWW_mage_prep_difficulty~) >= 0
-                    && INDEX_BUFFER (~!GlobalGT("Chapter","GLOBAL",19)~) >= 0
-                    && INDEX_BUFFER (~ReallyForceSpellRES("dw#cc23",Myself)~) >= 0
-                    && INDEX_BUFFER (~ReallyForceSpell(Myself,WIZARD_~) >= 0
-                    && INDEX_BUFFER (~Continue()~) >= 0) BEGIN
+    END ELSE PATCH_IF (cbr_scs_wp_baf_chain_common
+                    && cbr_scs_wp_baf_chain_family) BEGIN
       SET shape = 3
     END ELSE PATCH_IF (INDEX_BUFFER (~instantprep~) >= 0
                     || INDEX_BUFFER (~justdonepmw~) >= 0

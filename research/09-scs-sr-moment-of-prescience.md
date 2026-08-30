@@ -139,6 +139,15 @@ Observed totals:
 Every candidate contained at least one recognized context. These counts describe this
 installation and are evidence, not future installer predicates.
 
+The final matcher allowlists complete canonical families rather than a bag of identifying
+substrings: plain, difficulty-gated, and chapter/range-gated first-round blocks; the one
+renewal shape; and low-prep, high-prep, and ordinary-difficulty Chain Contingency blocks.
+Difficulty-variable variants are explicit, while each generated numeric `dw#cc*` helper is
+validated and left unchanged. Adversarial fixtures with an added action or a
+different actual cast are reported as unknown and remain untouched. A 2026-08-30
+production-on-copies pass over all 98 candidates reproduced `77 / 80 / 82 / 0`; the live
+candidate aggregate hash was identical before and after.
+
 ### Representative installed decompilations
 
 `dw#mg14.bcs` contains two chain-contingency variants (helpers `dw#cc23` and `dw#cc15`) and
