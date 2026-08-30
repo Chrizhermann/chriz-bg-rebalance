@@ -54,6 +54,30 @@ Current read-only recheck on `2026-08-29` confirms SCS 35.21 component 6030 and 
 common-mage scripts. It does not replace the still-needed live timing/API spike. The active
 game was not written during this recheck.
 
+### 0.1 Session-scoped Task 6 probe prepared (2026-08-30)
+
+`research/scripts/ambient_readiness_probe.lua` is the reviewable, non-persistent probe for
+the remaining capability gate. Merely loading it defines `_G.CBR_RDY_PROBE`; registration is
+an explicit `CBR_RDY_PROBE.install()` call. Its process-lifetime listeners are append-only
+but root-guarded, and `CBR_RDY_PROBE.teardown()` makes them inert. The probe keeps timestamps
+and observations only in memory and exposes them through `dump()`; it has no file, resource,
+save, or installer write path.
+
+The only mutating helpers are explicit controlled experiments:
+
+- `debit_once(sprite, resref)` changes one available memorized bit only after validation,
+  records an in-memory restoration token, rebuilds quick lists, and rolls back immediately
+  if the expected one-slot delta is not observed;
+- `restore_debit(token)` restores that exact record and confirms availability; and
+- `queue_normal_cast(sprite, resref)` queues an ordinary self `SpellRES`, leaving slot,
+  aura, casting time, visuals, and interruption to the engine.
+
+`teardown()` attempts every outstanding restoration before becoming inert. A controlled
+slot experiment must still use a disposable actor/save and may not be repeated on that actor
+unless restoration is independently confirmed or the save is reloaded. No production API
+choice is considered proven merely because the probe parses or because an action was queued;
+Task 6 must separately observe the started action and resulting engine state.
+
 ## 1. How SCS 35.21 pre-buffs in this install (verified)
 
 - **Mechanism** (`stratagems/caster_shared/caster_definitions.ssl:470-513`): each prep block =

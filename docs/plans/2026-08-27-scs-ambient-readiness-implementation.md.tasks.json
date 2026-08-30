@@ -27,7 +27,7 @@
     {
       "id": 5,
       "subject": "Build the red fake-EEex suite and session-scoped probe",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1]
     },
     {
@@ -73,5 +73,5 @@
       "blockedBy": [11]
     }
   ],
-  "lastUpdated": "2026-08-30T09:14:02+09:00"
+  "lastUpdated": "2026-08-30T09:25:46+09:00"
 }
