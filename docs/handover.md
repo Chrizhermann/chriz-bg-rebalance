@@ -9,11 +9,11 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-instal
 Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
 `docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `AGENTS.md`.
 
-## Status (2026-08-30) — current focus: final offline review of SCS ambient readiness
+## Status (2026-08-30) — SCS ambient readiness offline implementation complete
 
 - **Dragon work is being handled elsewhere and is out of scope for this branch.** Do not
   resume component 110 from this handover.
-- **Components 120 + 121 are approved and implemented offline** on branch
+- **Components 120 + 121 are approved, implemented, and fully reviewed offline** on branch
   `codex/ambient-readiness-121`. The authoritative design is
   `docs/plans/2026-08-27-scs-ambient-readiness-design.md` (commit `ae71422`); the executable
   plan is `docs/plans/2026-08-27-scs-ambient-readiness-implementation.md` (commit `b68b22c`).
@@ -32,9 +32,13 @@ Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Ap
   allows one fast but normal, interruptible weapon-protection cast per contact episode.
 - **The separately authorized Task 6 capability spike is complete and cleaned up.** It used
   a disposable save, installed nothing, wrote no save, and ended with Baldur/InfinityLoader
-  closed and every hashed game input unchanged. The production fake-runtime, compiler, and
-  public synthetic installer suites are green through Task 10. **No live component install
-  is authorized**; deployment remains a second, separate user-approval checkpoint.
+  closed and every hashed game input unchanged. The two-pass Task 11 review tightened
+  component 120 to every installed canonical BCS family, protected EEex session caches from
+  recycled object IDs, required complete effect-list visibility, and replaced the stock
+  Project Image resref assumption with final-`SPELL.IDS` resolution. WeiDU parse-check and
+  all 216 repository tests passed in a clean process. Task 12's approval-gated procedure is
+  `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`. **No live component install
+  is authorized**; neither live gameplay acceptance nor deployment has been performed.
 
 ## Status (2026-08-22)
 
@@ -129,17 +133,15 @@ session — always `--exclude` them.
 
 ## Work queue
 
-0. **Run ambient-readiness Task 11** — complete clean-process verification and the two-pass
-   local requirement/failure review for all branch changes since `ae71422`. Current plan:
-   `docs/plans/2026-08-27-scs-ambient-readiness-implementation.md`.
-1. **Run Task 12** — prepare the explicit live acceptance checklist, but do not install,
-   launch, mutate a save, or deploy either component. Live deployment requires a fresh user
-   approval checkpoint and should install/test 120 before 121 on the researched SR setup.
-2. **SR wishlist session** — *needs the user live*: walk Spell Revisions' changes, collect
+0. **Wait for explicit ambient-readiness live-deployment approval.** The complete staged
+   evidence, rollback boundary, gameplay matrix, and process/IPC cleanup procedure is in
+   `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`. Do not install, launch,
+   mutate a save, or deploy either component merely because the offline branch is ready.
+1. **SR wishlist session** — *needs the user live*: walk Spell Revisions' changes, collect
    which to keep/revert/re-tune → `research/10-sr-wishlist.md` → design 200-series.
-3. **SCS component catalog** — solo-able: from the game install's WeiDU.log (414 entries;
+2. **SCS component catalog** — solo-able: from the game install's WeiDU.log (414 entries;
    read-only) catalog the 77 installed SCS components + balance touchpoints; propose 1xx
    candidates. (Scope inherited from chriz-sod-rebalance "Part 3".)
-4. **Formal install of comp 100 into the live game** — pending user sign-off; tail-install.
-5. **Umbrella / collection** — see `docs/plans/2026-07-03-umbrella-analysis.md`; decision
+3. **Formal install of comp 100 into the live game** — pending user sign-off; tail-install.
+4. **Umbrella / collection** — see `docs/plans/2026-07-03-umbrella-analysis.md`; decision
    pending user, work deferred until 2xx/3xx mature.

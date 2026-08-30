@@ -63,15 +63,15 @@
     {
       "id": 11,
       "subject": "Run final offline verification and two-pass local review",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [10]
     },
     {
       "id": 12,
       "subject": "Prepare but do not perform the live deployment checkpoint",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [11]
     }
   ],
-  "lastUpdated": "2026-08-30T11:33:29+09:00"
+  "lastUpdated": "2026-08-30T12:22:32+09:00"
 }
