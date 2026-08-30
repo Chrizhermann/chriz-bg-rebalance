@@ -60,12 +60,15 @@ def _manifest_expression() -> str:
     return text[match.end() :].strip()
 
 
-def _stamp_runtime(destination: Path) -> None:
+def _stamp_runtime(destination: Path, manifest_expression: str | None = None) -> None:
     source = PRODUCTION.read_text(encoding="ascii")
     placeholder = "%CBR_RDY_MANIFEST%"
     if source.count(placeholder) != 1:
         raise AssertionError("M_CBRRDY.lua must contain exactly one manifest placeholder")
-    stamped = source.replace(placeholder, _manifest_expression())
+    stamped = source.replace(
+        placeholder,
+        manifest_expression if manifest_expression is not None else _manifest_expression(),
+    )
     destination.write_text(stamped, encoding="ascii", newline="\n")
 
 
@@ -95,6 +98,7 @@ class AmbientReadinessAssetTests(unittest.TestCase):
             "assert(m.defaults.urgent_enabled==1);"
             "assert(m.defaults.external_owner==0);"
             "assert(m.minimum_duration==2400);"
+            "assert(m.project_image_resref=='spwi703');"
             "for _,s in ipairs(m.ambient_spells) do "
             "assert(s.duration>=2400 and s.self_target==1 and s.defensive==1) end;"
             "io.write(#m.ambient_spells, '\\t', #m.urgent_candidates)"
@@ -201,11 +205,12 @@ class _RuntimeCase(unittest.TestCase):
         self,
         scenario: str,
         *,
+        runtime: Path | None = None,
         expected_reset_listeners: str = "1",
         expected_marshal_handlers: str = "1",
     ) -> dict[str, str]:
         process = subprocess.run(
-            [self.lua, str(SIMULATOR), str(self.runtime), scenario],
+            [self.lua, str(SIMULATOR), str(runtime or self.runtime), scenario],
             capture_output=True,
             text=True,
             timeout=60,
@@ -268,6 +273,21 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         self.assertEqual(seen["ambient_fused"], "1")
         self.assertEqual(seen["urgent_after_ambient_fault"], "1")
 
+    def test_missing_project_image_manifest_identity_retires_only_urgent(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cbr-readiness-no-project-image-") as temporary:
+            runtime = Path(temporary) / "M_CBRRDY.lua"
+            manifest = _manifest_expression().replace(
+                'project_image_resref = "spwi703"',
+                'project_image_resref = ""',
+            )
+            self.assertNotEqual(manifest, _manifest_expression())
+            _stamp_runtime(runtime, manifest)
+            seen = self._run("runtime_missing_project_image_identity", runtime=runtime)
+        self.assertEqual(seen["ambient_live"], "1")
+        self.assertEqual(seen["ambient_faulted"], "0")
+        self.assertEqual(seen["urgent_faulted"], "1")
+        self.assertEqual(seen["urgent_unsupported_logs"], "1")
+
     def test_runtime_uses_the_proven_installed_binding_shapes(self) -> None:
         source = PRODUCTION.read_text(encoding="ascii")
         for required in (
@@ -282,10 +302,11 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
             "opcode == 237",
             "effect.m_dWFlags",
             "effect.m_sourceId",
-            'source == "spwi703"',
+            "manifest.project_image_resref",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, source)
+        self.assertNotIn('source == "spwi703"', source)
         for obsolete in (
             "EEex_Sprite_GetSpellbookResetSerial",
             "m_actionQueue",
@@ -402,6 +423,17 @@ class AmbientReadinessListenerTests(_RuntimeCase):
         self.assertEqual(seen["listeners_after_reload"], "1")
         self.assertEqual(seen["ambient_tracebacks"], "1")
         self.assertEqual(seen["ambient_inert_after_fault"], "1")
+
+    def test_reused_engine_object_id_gets_fresh_session_state(self) -> None:
+        seen = self._run("ambient_sprite_lifetime")
+        self.assertEqual(seen["replacement_active"], "1")
+        self.assertEqual(seen["replacement_available_after"], "0")
+
+    def test_incomplete_effect_list_view_fails_closed_before_debit(self) -> None:
+        seen = self._run("ambient_incomplete_effect_view")
+        self.assertEqual(seen["effect_active"], "0")
+        self.assertEqual(seen["available_after"], "1")
+        self.assertEqual(seen["ambient_faulted"], "1")
 
 
 class UrgentReadinessListenerTests(_RuntimeCase):

@@ -8,6 +8,7 @@ return {
     minimum_duration = 2400,
     maintenance_cadence_ticks = 15,
     contact_rearm_seconds = 6,
+    project_image_resref = "spwi703",
     defaults = {
         ambient_enabled = 1,
         urgent_enabled = 1,

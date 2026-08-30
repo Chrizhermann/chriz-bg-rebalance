@@ -58,6 +58,8 @@ URGENT = (
     ("WIZARD_PROTECTION_FROM_MAGIC_WEAPONS", 2611, "SPWI611", True),
 )
 
+PROJECT_IMAGE = ("WIZARD_PROJECT_IMAGE", 2703, "SPWI703")
+
 
 @dataclasses.dataclass
 class Fixture:
@@ -142,6 +144,9 @@ def _build_fixture(
     duplicate_override: bool = False,
     duplicate_required_symbol: bool = False,
     future_improved_mantle: bool = False,
+    project_image_number: int = PROJECT_IMAGE[1],
+    missing_project_image_symbol: bool = False,
+    missing_project_image_resource: bool = False,
 ) -> Fixture:
     root = Path(temporary.name) / "fixture"
     root.mkdir()
@@ -158,6 +163,8 @@ def _build_fixture(
         ids_lines.append(f"{value} {symbol}")
         if duplicate_required_symbol and symbol == "WIZARD_PROTECTION_FROM_MAGIC_WEAPONS":
             ids_lines.append(f"{value + 1} {symbol}")
+    if not missing_project_image_symbol:
+        ids_lines.append(f"{project_image_number} {PROJECT_IMAGE[0]}")
     spell_ids = root / "SPELL.IDS"
     spell_ids.write_text("\n".join(ids_lines) + "\n", encoding="ascii", newline="\n")
 
@@ -211,6 +218,10 @@ def _build_fixture(
                 genuine=(True if symbol == "WIZARD_IMPROVED_MANTLE" and future_improved_mantle else genuine)
             ),
         )
+
+    project_image_resref = f"SPWI{project_image_number - 2000:03d}"
+    if not missing_project_image_resource:
+        write_spl(root / f"{project_image_resref}.SPL", _urgent_spell(genuine=False))
 
     if duplicate_override:
         override_table.write_text(
@@ -498,12 +509,36 @@ class AmbientReadinessManifestTests(unittest.TestCase):
             self._read_with_lua(
                 fixture,
                 "#m.ambient_spells, '\\t', #m.urgent_candidates, '\\t', "
-                "m.urgent_candidates[2].genuine_weapon_immunity",
+                "m.urgent_candidates[2].genuine_weapon_immunity, '\\t', "
+                "m.project_image_resref",
             ),
-            "6\t4\t0",
+            "6\t4\t0\tspwi703",
         )
         positions = [text.index(f'key = "{row[0]}"') for row in AMBIENT]
         self.assertEqual(positions, sorted(positions))
+
+    def test_project_image_identity_is_resolved_from_installed_spell_ids(self) -> None:
+        fixture = self._fixture(project_image_number=2903)
+        self._run_success(fixture)
+        self.assertEqual(
+            self._read_with_lua(fixture, "m.project_image_resref"), "spwi903"
+        )
+
+    def test_missing_project_image_identity_fails_before_output(self) -> None:
+        for kwargs, diagnostic in (
+            ({"missing_project_image_symbol": True}, "WIZARD_PROJECT_IMAGE"),
+            ({"missing_project_image_resource": True}, "SPWI703.SPL"),
+        ):
+            with self.subTest(kwargs=kwargs):
+                fixture = self._fixture(**kwargs)
+                fixture.output.write_bytes(b"sentinel-before-project-image-preflight")
+                process = _run_harness(fixture)
+                self.assertNotEqual(process.returncode, 0, _transcript(process))
+                self.assertIn(diagnostic, _transcript(process))
+                self.assertEqual(
+                    fixture.output.read_bytes(),
+                    b"sentinel-before-project-image-preflight",
+                )
 
     def test_missing_optional_symbol_or_delivery_is_skipped_with_diagnostic(self) -> None:
         cases = (
@@ -587,6 +622,7 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
         self.assertIn('minimum_eeex_version = "0.11.0-alpha"', source)
         self.assertIn("requires_base_component = 0", source)
         self.assertIn("requires_luajit_component = 1", source)
+        self.assertIn('project_image_resref = "spwi703"', source)
         self.assertNotIn("CBR_TEST", source)
         self.assertNotIn("RDY_PROBE", source)
         self.assertNotIn("C:\\", source)
@@ -690,6 +726,11 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
                 "missing_required",
                 {"missing_required_mapping": True},
                 "required candidate WIZARD_STONE_SKIN has no unique SCS prebuff mapping",
+            ),
+            (
+                "missing_project_image",
+                {"missing_project_image_resource": True},
+                "required Project Image resource SPWI703.SPL is missing",
             ),
         ):
             with self.subTest(name=name):

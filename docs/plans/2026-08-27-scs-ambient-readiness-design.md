@@ -192,8 +192,9 @@ spell slots. It removes reaction-latency cheese without removing tactical counte
 
 Project Image is excluded structurally. A clone is recognized by active opcode 237 with
 parameter 2 equal to 2 and a valid owner `m_sourceId`; its owner is separately excluded by
-the engine-disabled state and `SPWI703` lock effects. Missing or inconsistent ownership
-information fails closed.
+the engine-disabled state and lock effects whose source is the installed
+`WIZARD_PROJECT_IMAGE` identity resolved through `SPELL.IDS` (currently `SPWI703`). Missing
+or inconsistent spell identity or ownership information fails closed.
 
 ## 6. Runtime safety and failure policy
 

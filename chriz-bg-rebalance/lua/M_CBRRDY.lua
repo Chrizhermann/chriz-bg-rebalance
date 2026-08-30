@@ -13,6 +13,11 @@ local function flag(value, fallback)
     return tonumber(value) or fallback
 end
 
+local project_image_resref = normalize(manifest.project_image_resref)
+local project_image_identity_supported = #project_image_resref >= 1
+    and #project_image_resref <= 8
+    and string.match(project_image_resref, "^[a-z0-9_#]+$") ~= nil
+
 if CBR_RDY_AMBIENT_ENABLED == nil then
     CBR_RDY_AMBIENT_ENABLED = flag(manifest.defaults.ambient_enabled, 1)
 end
@@ -28,7 +33,6 @@ _G.CBR_RDY_STATE = _G.CBR_RDY_STATE or {
     urgent_faulted = 0,
     ambient_fault_logged = 0,
     urgent_fault_logged = 0,
-    unsupported_logged = 0,
     generation = 0,
 }
 local state = _G.CBR_RDY_STATE
@@ -189,10 +193,28 @@ local function game_time()
     return tonumber(EEex_GameState_GetTime()) or 0
 end
 
-local function session_for(id)
+local function sprite_nonce(sprite)
+    local aux = EEex_GetUDAux(sprite)
+    local nonce = tonumber(aux.CBR_RDY_SESSION_NONCE)
+    if not nonce or nonce < 1 then
+        state.next_sprite_nonce = flag(state.next_sprite_nonce, 0) + 1
+        nonce = state.next_sprite_nonce
+        aux.CBR_RDY_SESSION_NONCE = nonce
+    end
+    return nonce
+end
+
+local function session_for(sprite, id)
+    local nonce = sprite_nonce(sprite)
     local session = state.ambient_sessions[id]
-    if not session then
-        session = { tick = 0, checked = {}, reimbursement = {}, pending = nil }
+    if not session or session.nonce ~= nonce then
+        session = {
+            nonce = nonce,
+            tick = 0,
+            checked = {},
+            reimbursement = {},
+            pending = nil,
+        }
         state.ambient_sessions[id] = session
     end
     return session
@@ -203,11 +225,14 @@ local function classify(sprite, id)
         return nil
     end
     local key = actor_key(sprite)
+    local nonce = sprite_nonce(sprite)
     local cached = state.classifications[id]
-    if key ~= "" and cached and cached.actor == key then return cached end
+    if key ~= "" and cached and cached.actor == key
+            and cached.nonce == nonce then return cached end
     local override = actor_overrides[key]
     local classification = {
         actor = key,
+        nonce = nonce,
         eligible = 1,
         grade = override and flag(override.grade,
             flag(manifest.defaults.scs_caster_grade, 1))
@@ -317,25 +342,25 @@ local function effect_source(effect)
 end
 
 local function matching_effect_active(sprite, record, delivery_only)
-    local readable = false
+    local lists = {}
     local found = false
     for _, field in ipairs({ "m_timedEffectList", "m_equipedEffectList" }) do
         local list = sprite[field]
-        if list then
-            readable = true
-            EEex_Utility_IterateCPtrList(list, function(effect)
-                local source = effect_source(effect)
-                if tonumber(effect.m_effectId) == record.detection_opcode
-                        and tonumber(effect.m_dWFlags) == record.detection_parameter2
-                        and (source == record.delivery
-                            or (not delivery_only and source == record.resref)) then
-                    found = true
-                    return true
-                end
-            end)
-        end
+        if not list then error("effect lists unavailable") end
+        lists[#lists + 1] = list
     end
-    if not readable then error("effect lists unavailable") end
+    for _, list in ipairs(lists) do
+        EEex_Utility_IterateCPtrList(list, function(effect)
+            local source = effect_source(effect)
+            if tonumber(effect.m_effectId) == record.detection_opcode
+                    and tonumber(effect.m_dWFlags) == record.detection_parameter2
+                    and (source == record.delivery
+                        or (not delivery_only and source == record.resref)) then
+                found = true
+                return true
+            end
+        end)
+    end
     return found
 end
 
@@ -362,19 +387,21 @@ local function get_ledger(sprite)
     return ledger
 end
 
-local function failure_for(id, resref)
+local function failure_for(sprite, id, resref)
+    local nonce = sprite_nonce(sprite)
     local actor = state.ambient_failures[id]
-    return actor and actor[resref] or nil
+    return actor and actor.nonce == nonce and actor.spells[resref] or nil
 end
 
-local function disable_spell(id, record, reason)
+local function disable_spell(sprite, id, record, reason)
+    local nonce = sprite_nonce(sprite)
     local actor = state.ambient_failures[id]
-    if not actor then
-        actor = {}
+    if not actor or actor.nonce ~= nonce then
+        actor = { nonce = nonce, spells = {} }
         state.ambient_failures[id] = actor
     end
-    if not actor[record.resref] then
-        actor[record.resref] = { disabled = 1, attempts = 1 }
+    if not actor.spells[record.resref] then
+        actor.spells[record.resref] = { disabled = 1, attempts = 1 }
         print("[CBR Ready] ambient spell disabled for this session: "
             .. record.resref .. " (" .. tostring(reason) .. ")")
     end
@@ -401,7 +428,7 @@ local function apply_first(sprite, id, record, ledger, session)
     local before = available_count(sprite, record.resref)
     if not before or before < 1 then return false end
     if not apply_delivery(sprite, id, record) then
-        disable_spell(id, record, "delivery effect was not confirmed")
+        disable_spell(sprite, id, record, "delivery effect was not confirmed")
         return false
     end
 
@@ -414,7 +441,7 @@ local function apply_first(sprite, id, record, ledger, session)
         spell_record.m_flags = old_flags
         pcall(update_quick_lists, sprite, record.resref, 1)
         local restored = available_count(sprite, record.resref)
-        disable_spell(id, record, restored == before
+        disable_spell(sprite, id, record, restored == before
             and "slot debit failed and was restored"
             or "slot debit restoration could not be confirmed")
         return false
@@ -447,7 +474,7 @@ local function maintain(sprite, id, record, ledger_record, visible)
     if apply_delivery(sprite, id, record) then
         ledger_record.expected_expiry = now + record.duration
     else
-        disable_spell(id, record, "maintenance delivery was not confirmed")
+        disable_spell(sprite, id, record, "maintenance delivery was not confirmed")
     end
 end
 
@@ -456,7 +483,7 @@ local function ambient_tick(sprite)
     if not current then return end
     local classification = classify(current, id)
     if not classification then return end
-    local session = session_for(id)
+    local session = session_for(current, id)
     session.tick = session.tick + 1
     local cadence = flag(manifest.maintenance_cadence_ticks, 15)
     local maintenance_tick = cadence > 0 and session.tick % cadence == 0
@@ -464,7 +491,7 @@ local function ambient_tick(sprite)
     local ledger = get_ledger(current)
     for _, record in ipairs(ambient_records) do
         if classification_allows(classification, record)
-                and not failure_for(id, record.resref) then
+                and not failure_for(current, id, record.resref) then
             local ledger_record = ledger.spells[record.resref]
             if ledger_record and ledger_record.charged == 1 then
                 if maintenance_tick then
@@ -493,7 +520,7 @@ end
 local function ambient_action(sprite, action)
     local current, id = resolve_sprite(sprite)
     if not current then return end
-    local session = session_for(id)
+    local session = session_for(current, id)
     local action_id = tonumber(action and action.m_actionID)
     local pending = session.pending
     session.pending = nil
@@ -506,7 +533,7 @@ local function ambient_action(sprite, action)
                     pending.resref, pending.available_before) then
             session.reimbursement[pending.resref] = nil
         elseif after == pending.available_before - 1 then
-            disable_spell(id, ambient_by_resref[pending.resref],
+            disable_spell(current, id, ambient_by_resref[pending.resref],
                 "initial SCS reimbursement restoration failed")
         end
         return
@@ -580,7 +607,7 @@ local function import_ledger(sprite, saved)
                     suppressed = record.suppressed,
                 }
             elseif ambient_by_resref[resref] then
-                disable_spell(id, ambient_by_resref[resref], "malformed saved ledger")
+                disable_spell(current, id, ambient_by_resref[resref], "malformed saved ledger")
             end
         end
     end
@@ -632,10 +659,10 @@ local function project_image_safe(sprite)
         if opcode == 237 and parameter2 == 2 then
             clone_markers = clone_markers + 1
             clone_owner = tonumber(effect.m_sourceId)
-        elseif source == "spwi703" and opcode == 233
+        elseif source == project_image_resref and opcode == 233
                 and parameter1 == 2 and parameter2 == 127 then
             owner_lock_233 = true
-        elseif source == "spwi703" and opcode == 20 then
+        elseif source == project_image_resref and opcode == 20 then
             owner_lock_20 = true
         end
     end)
@@ -713,12 +740,14 @@ local function urgent_tick(sprite)
     if not current then return end
     local classification = classify(current, id)
     if not classification then return end
+    local enemy_ally = current.m_typeAI
+        and tonumber(current.m_typeAI.m_EnemyAlly)
+    if enemy_ally ~= 255 then return end
     local visible = sees_party(current)
     local now = game_time()
     local contact = contact_for(current)
     if not update_contact_visibility(contact, visible, now) then return end
     if contact.spent == 1 then return end
-    if tonumber(current.m_typeAI.m_EnemyAlly) ~= 255 then return end
     if not conscious(current) or not outside_cutscene() then return end
     if not project_image_safe(current) or weapon_immunity_active(current) then return end
 
@@ -873,25 +902,31 @@ local ambient_supported = shared_supported and apis_available({
     { "EEex_GameObject_ApplyEffect", EEex_GameObject_ApplyEffect },
     { "EEex_RunWithStackManager", EEex_RunWithStackManager },
 })
-local urgent_supported = shared_supported and apis_available({
+local urgent_supported = shared_supported and project_image_identity_supported
+    and apis_available({
     { "EEex_Sprite_GetState", EEex_Sprite_GetState },
     { "EEex_Action_QueueResponseStringOnAIBase", EEex_Action_QueueResponseStringOnAIBase },
     { "EEex_BAnd", EEex_BAnd },
     { "Infinity_GetInCutsceneMode", Infinity_GetInCutsceneMode },
 })
 
-local function retire_unsupported(layer)
+local function retire_unsupported(layer, detail)
     state[layer .. "_faulted"] = 1
     local logged = layer .. "_unsupported_logged"
     if flag(state[logged], 0) == 0 then
         state[logged] = 1
         print("[CBR Ready] " .. layer
-            .. " disabled: required EEex API is unavailable")
+            .. " disabled: " .. detail)
     end
 end
 
-if not ambient_supported then retire_unsupported("ambient") end
-if not urgent_supported then retire_unsupported("urgent") end
+if not ambient_supported then
+    retire_unsupported("ambient", "required EEex API is unavailable")
+end
+if not urgent_supported then
+    retire_unsupported("urgent",
+        "required EEex API or Project Image manifest identity is unavailable")
+end
 
 if shared_supported and (ambient_supported or urgent_supported)
         and not _G.CBR_RDY_TICK_ACTION_LISTENERS_REGISTERED then

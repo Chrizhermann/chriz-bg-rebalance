@@ -366,6 +366,25 @@ BEGIN
     END
   BUT_ONLY
 
+  // Project Image ownership is a hard urgent-layer safety gate. Spell
+  // Revisions may relocate standard spell symbols, so stamp the installed
+  // identity instead of teaching the runtime a stock SPWI slot.
+  LAF cbr_rdy_resolve_spell_symbol
+    STR_VAR
+      spell_ids = EVAL ~%spell_ids%~
+      symbol = ~WIZARD_PROJECT_IMAGE~
+    RET
+      cbr_rdy_project_image_found = found
+      cbr_rdy_project_image_resref = spell_resref
+  END
+  ACTION_IF cbr_rdy_project_image_found != 1 BEGIN
+    FAIL ~CBR ambient readiness required safety symbol WIZARD_PROJECT_IMAGE is missing from SPELL.IDS.~
+  END
+  ACTION_IF !(FILE_EXISTS ~%resource_dir%/%cbr_rdy_project_image_resref%.SPL~) BEGIN
+    FAIL ~CBR ambient readiness required Project Image resource %cbr_rdy_project_image_resref%.SPL is missing.~
+  END
+  ACTION_TO_LOWER cbr_rdy_project_image_resref
+
   OUTER_SET ambient_count = 0
   ACTION_SORT_ARRAY_INDICES cbr_rdy_spell_keys LEXICOGRAPHICALLY
   ACTION_PHP_EACH cbr_rdy_spell_keys AS cbr_rdy_symbol => cbr_rdy_discard BEGIN
@@ -522,6 +541,7 @@ BEGIN
     minimum_duration = 2400,
     maintenance_cadence_ticks = 15,
     contact_rearm_seconds = 6,
+    project_image_resref = "%cbr_rdy_project_image_resref%",
     defaults = {
         ambient_enabled = 1,
         urgent_enabled = 1,
@@ -607,11 +627,13 @@ BEGIN
     SET cbr_rdy_schema_index = INDEX_BUFFER (~schema_version = 1~)
     SET cbr_rdy_ambient_index = INDEX_BUFFER (~ambient_spells = {~)
     SET cbr_rdy_urgent_index = INDEX_BUFFER (~urgent_candidates = {~)
+    SET cbr_rdy_project_image_index = INDEX_BUFFER (~project_image_resref = "~)
     SET cbr_rdy_placeholder_index = INDEX_BUFFER (~%~)
     PATCH_IF (cbr_rdy_actual_manifest_length != cbr_rdy_expected_manifest_length
            || cbr_rdy_schema_index < 0
            || cbr_rdy_ambient_index < 0
            || cbr_rdy_urgent_index < 0
+           || cbr_rdy_project_image_index < 0
            || cbr_rdy_placeholder_index >= 0) BEGIN
       PATCH_FAIL ~CBR ambient readiness manifest verification failed after write: expected=%cbr_rdy_expected_manifest_length% actual=%cbr_rdy_actual_manifest_length% schema=%cbr_rdy_schema_index% ambient=%cbr_rdy_ambient_index% urgent=%cbr_rdy_urgent_index% placeholder=%cbr_rdy_placeholder_index%.~
     END
@@ -687,6 +709,7 @@ BEGIN
     PATCH_IF (INDEX_BUFFER (~CBR_RDY_MANIFEST~) >= 0
            || INDEX_BUFFER (~schema_version = 1~) < 0
            || INDEX_BUFFER (~minimum_eeex_version = "0.11.0-alpha"~) < 0
+           || INDEX_BUFFER (~project_image_resref = "~) < 0
            || INDEX_BUFFER (~ambient_spells = {~) < 0
            || INDEX_BUFFER (~urgent_candidates = {~) < 0
            || INDEX_BUFFER (~CBR_TEST~) >= 0
@@ -699,7 +722,8 @@ BEGIN
   COPY ~%cbr_rdy_runtime_path%~ ~%cbr_rdy_runtime_path%~
     PATCH_IF (INDEX_BUFFER (~CBR_RDY_MANIFEST~) >= 0
            || INDEX_BUFFER (~schema_version = 1~) < 0
-           || INDEX_BUFFER (~minimum_eeex_version = "0.11.0-alpha"~) < 0) BEGIN
+           || INDEX_BUFFER (~minimum_eeex_version = "0.11.0-alpha"~) < 0
+           || INDEX_BUFFER (~project_image_resref = "~) < 0) BEGIN
       PATCH_FAIL ~CBR ambient readiness shipped runtime failed post-write verification.~
     END
   BUT_ONLY

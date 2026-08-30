@@ -149,6 +149,7 @@ local spritesByID = {}
 local auxBySprite = setmetatable({}, { __mode = "k" })
 local printed = {}
 local originalPrint = print
+local projectImageResref = "spwi703"
 
 print = function(...)
     local values = {}
@@ -227,7 +228,7 @@ local function newSprite(options)
     options = options or {}
     nextSpriteID = nextSpriteID + 1
     local sprite = {
-        m_id = nextSpriteID,
+        m_id = options.id or nextSpriteID,
         m_scriptName = newResRef(options.name or "cbr_default"),
         m_typeAI = { m_EnemyAlly = options.ea or 255 },
         m_pArea = {},
@@ -287,6 +288,8 @@ local function newSprite(options)
         sprite.m_equipedEffectList = nil
     elseif options.timedEffectsUnavailable then
         sprite.m_timedEffectList = nil
+    elseif options.equippedEffectsUnavailable then
+        sprite.m_equipedEffectList = nil
     end
     if options.conscious == false then sprite.state = 1 end
     if options.genuineWeaponImmunity then
@@ -375,7 +378,7 @@ local function addProjectImageClone(sprite, ownerID)
         m_effectId = 237,
         m_dWFlags = 2,
         m_sourceId = ownerID,
-        m_sourceRes = newResRef("spwi703"),
+        m_sourceRes = newResRef(projectImageResref),
     }
 end
 
@@ -385,12 +388,12 @@ local function addProjectImageOwnerLock(sprite)
         m_effectId = 233,
         m_effectAmount = 2,
         m_dWFlags = 127,
-        m_sourceRes = newResRef("spwi703"),
+        m_sourceRes = newResRef(projectImageResref),
     }
     sprite.m_timedEffectList.values[#sprite.m_timedEffectList.values + 1] = {
         m_effectId = 20,
         m_dWFlags = 0,
-        m_sourceRes = newResRef("spwi703"),
+        m_sourceRes = newResRef(projectImageResref),
     }
 end
 
@@ -562,6 +565,9 @@ scenarios.runtime_missing_ambient_api = function()
     out("ambient_faulted", CBR_RDY_STATE.ambient_faulted or 0)
     out("ambient_unsupported_logs", countPrinted("ambient disabled: required EEex API"))
 end
+
+scenarios.runtime_missing_project_image_identity =
+    scenarios.runtime_missing_urgent_api
 
 scenarios.runtime_shell = function()
     reloadRuntime()
@@ -807,7 +813,7 @@ scenarios.ambient_transaction_failure = function()
     memorize(apply, "spwi408")
     fireTick(apply)
     for _ = 1, 60 do fireTick(apply) end
-    local applyFailures = CBR_RDY_STATE.ambient_failures[apply.m_id] or {}
+    local applyFailures = (CBR_RDY_STATE.ambient_failures[apply.m_id] or {}).spells or {}
     out("apply_availability_restored", countAvailable(apply, "spwi408"))
     out("apply_disabled", (applyFailures.spwi408 or {}).disabled or 0)
     out("apply_attempts", (applyFailures.spwi408 or {}).attempts or 0)
@@ -816,7 +822,7 @@ scenarios.ambient_transaction_failure = function()
     memorize(quick, "spwi408")
     fireTick(quick)
     for _ = 1, 60 do fireTick(quick) end
-    local quickFailures = CBR_RDY_STATE.ambient_failures[quick.m_id] or {}
+    local quickFailures = (CBR_RDY_STATE.ambient_failures[quick.m_id] or {}).spells or {}
     out("quick_availability_restored", countAvailable(quick, "spwi408"))
     out("quick_disabled", (quickFailures.spwi408 or {}).disabled or 0)
     out("quick_attempts", (quickFailures.spwi408 or {}).attempts or 0)
@@ -911,6 +917,26 @@ scenarios.ambient_runtime_safety = function()
     for _ = 1, 30 do fireTick(fault) end
     out("ambient_tracebacks", countPrinted("ambient disabled"))
     out("ambient_inert_after_fault", bool(applicationCount(fault, "spwi408") == 1))
+end
+
+scenarios.ambient_sprite_lifetime = function()
+    local first = newSprite({ id = 7001, failApply = true })
+    memorize(first, "spwi408")
+    fireTick(first)
+    local replacement = newSprite({ id = 7001 })
+    memorize(replacement, "spwi408")
+    fireTick(replacement)
+    out("replacement_active", active(replacement, "spwi408"))
+    out("replacement_available_after", countAvailable(replacement, "spwi408"))
+end
+
+scenarios.ambient_incomplete_effect_view = function()
+    local sprite = newSprite({ equippedEffectsUnavailable = true })
+    memorize(sprite, "spwi408")
+    fireTick(sprite)
+    out("effect_active", active(sprite, "spwi408"))
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("ambient_faulted", CBR_RDY_STATE.ambient_faulted or 0)
 end
 
 local function urgentResult(options, spells)

@@ -125,6 +125,8 @@ The install-time compiler resolves each candidate dynamically, validates both me
 cosmetic-free delivery SPL semantics, and classifies urgent candidates by reachable genuine
 opcode 120. Current SR Moment of Prescience is therefore emitted as a false Improved Mantle
 candidate and skipped at runtime; a future restored Improved Mantle is automatically enabled.
+The Project Image owner-lock source is likewise resolved from the final `SPELL.IDS` and
+stamped into the runtime rather than assuming the currently observed `SPWI703` slot.
 The public component publishes only `override/M_CBRRDY.lua` through WeiDU's backup-aware
 transaction and changes no SPL or BCS file.
 
@@ -134,8 +136,9 @@ rollback, deterministic reinstall, exact synthetic uninstall restoration, and st
 syntax/token checks. The fake-EEex suite covers exact ambient debit/reset/maintenance and SCS
 reimbursement, normal urgent casting and interruption, passive-only queue displacement,
 Project Image exclusion, bounded retry, contact rearm, hot reload, ownership flags, marshal
-shape, and independent fault fuses. Live deployment and gameplay acceptance remain a
-separate user-approval checkpoint.
+shape, recycled engine-object IDs, incomplete effect-list fail-closed behavior, and
+independent fault fuses. Live deployment and gameplay acceptance remain a separate
+user-approval checkpoint.
 
 ## 1. How SCS 35.21 pre-buffs in this install (verified)
 
