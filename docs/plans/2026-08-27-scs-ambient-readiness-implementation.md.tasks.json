@@ -45,19 +45,19 @@
     {
       "id": 8,
       "subject": "Implement the ambient one-slot-per-reset runtime",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [7]
     },
     {
       "id": 9,
       "subject": "Implement the urgent first-contact reaction",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [8]
     },
     {
       "id": 10,
       "subject": "Wire and document component 121",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [4, 9]
     },
     {
@@ -73,5 +73,5 @@
       "blockedBy": [11]
     }
   ],
-  "lastUpdated": "2026-08-30T10:59:10+09:00"
+  "lastUpdated": "2026-08-30T11:21:22+09:00"
 }

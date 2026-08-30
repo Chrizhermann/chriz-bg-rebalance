@@ -232,7 +232,7 @@ local function newSprite(options)
         m_typeAI = { m_EnemyAlly = options.ea or 255 },
         m_pArea = {},
         m_curAction = { m_actionID = options.action or 0 },
-        m_queuedActions = options.queueUnavailable and nil or newPtrList(options.queue or {}),
+        m_queuedActions = newPtrList(options.queue or {}),
         m_timedEffectList = newPtrList({}),
         m_equipedEffectList = newPtrList({}),
         m_memorizedSpellsMage = newLevelArray(),
@@ -245,7 +245,7 @@ local function newSprite(options)
         seeParty = options.seeParty ~= false,
         cutscene = options.cutscene == true,
         conscious = options.conscious ~= false,
-        projectImageOwnerCertain = options.projectImageOwnerCertain ~= false,
+        state = options.state or 0,
         genuineWeaponImmunity = options.genuineWeaponImmunity == true,
         active = {},
         applications = {},
@@ -259,6 +259,7 @@ local function newSprite(options)
         engineCastingTime = 0,
         interrupted = options.interrupted == true,
         autoStart = options.autoStart ~= false,
+        retainFailedQueue = options.retainFailedQueue == true,
         failApply = options.failApply == true,
         failQuickList = options.failQuickList == true,
         failVisibility = options.failVisibility == true,
@@ -280,6 +281,21 @@ local function newSprite(options)
         self.actionsCleared = (self.actionsCleared or 0) + 1
     end
     if options.settled == false then sprite.m_pArea = nil end
+    if options.queueUnavailable then sprite.m_queuedActions = nil end
+    if options.effectListsUnavailable then
+        sprite.m_timedEffectList = nil
+        sprite.m_equipedEffectList = nil
+    elseif options.timedEffectsUnavailable then
+        sprite.m_timedEffectList = nil
+    end
+    if options.conscious == false then sprite.state = 1 end
+    if options.genuineWeaponImmunity then
+        sprite.m_timedEffectList.values[#sprite.m_timedEffectList.values + 1] = {
+            m_effectId = 120,
+            m_dWFlags = 2,
+            m_sourceRes = newResRef("spwi611"),
+        }
+    end
     spritesByID[sprite.m_id] = sprite
     return sprite
 end
@@ -320,15 +336,15 @@ function EEex_Trigger_EvalConditionalStringAsAIBase(trigger, sprite)
     return false
 end
 
+function EEex_Sprite_GetState(sprite)
+    return sprite.state
+end
+
 function Infinity_GetInCutsceneMode()
     for _, sprite in pairs(spritesByID) do
         if sprite.cutscene then return true end
     end
     return false
-end
-
-function EEex_Sprite_IsProjectImageOwnerCertain(sprite)
-    return sprite.projectImageOwnerCertain
 end
 
 function EEex_GameObject_ApplyEffect(sprite, args)
@@ -352,6 +368,30 @@ function EEex_GameObject_ApplyEffect(sprite, args)
             m_sourceRes = newResRef(delivered),
         }
     end
+end
+
+local function addProjectImageClone(sprite, ownerID)
+    sprite.m_timedEffectList.values[#sprite.m_timedEffectList.values + 1] = {
+        m_effectId = 237,
+        m_dWFlags = 2,
+        m_sourceId = ownerID,
+        m_sourceRes = newResRef("spwi703"),
+    }
+end
+
+local function addProjectImageOwnerLock(sprite)
+    sprite.state = 0x30
+    sprite.m_timedEffectList.values[#sprite.m_timedEffectList.values + 1] = {
+        m_effectId = 233,
+        m_effectAmount = 2,
+        m_dWFlags = 127,
+        m_sourceRes = newResRef("spwi703"),
+    }
+    sprite.m_timedEffectList.values[#sprite.m_timedEffectList.values + 1] = {
+        m_effectId = 20,
+        m_dWFlags = 0,
+        m_sourceRes = newResRef("spwi703"),
+    }
 end
 
 -------------------------------------------------------------------------------
@@ -389,23 +429,38 @@ function EEex_Action_QueueResponseStringOnAIBase(response, sprite)
     sprite.queueCount = sprite.queueCount + 1
     sprite.queuedResponses[#sprite.queuedResponses + 1] = response
     local resref = response:match('[Ss]pellRES%(%s*"([^"]+)"')
-    if not resref or not sprite.autoStart then return end
+    if not resref then return end
+    if not sprite.autoStart then
+        if sprite.retainFailedQueue then
+            sprite.m_queuedActions = newPtrList({ {
+                m_actionID = 31,
+                m_string1 = newCString(lower(resref)),
+            } })
+        end
+        return
+    end
     local action = {
         m_actionID = 31,
         m_string1 = newCString(lower(resref)),
         cbrNormalSpellRES = 1,
     }
     fireStarted(sprite, action)
-    local consumed = setFirstAvailable(sprite, resref, 0)
-    if consumed then sprite.engineSlotDebits = sprite.engineSlotDebits + 1 end
     sprite.engineAura = 1
     sprite.engineCastingTime = 1
     if not sprite.interrupted then
+        local consumed = setFirstAvailable(sprite, resref, 0)
+        if consumed then sprite.engineSlotDebits = sprite.engineSlotDebits + 1 end
         sprite.active[lower(resref)] = {
             appliedAt = fakeClock,
             expectedExpiry = fakeClock + 24,
         }
+        sprite.m_timedEffectList.values[#sprite.m_timedEffectList.values + 1] = {
+            m_effectId = 120,
+            m_dWFlags = 2,
+            m_sourceRes = newResRef(lower(resref)),
+        }
     end
+    sprite.m_curAction = { m_actionID = 0 }
 end
 
 local function fireTick(sprite)
@@ -831,9 +886,11 @@ scenarios.ambient_runtime_safety = function()
     local fault = newSprite({ failVisibility = true })
     memorize(fault, "spwi408")
     fireTick(fault)
-    fireTick(fault)
+    removeActive(fault, "spwi408")
+    fakeClock = fakeClock + 2400
+    for _ = 1, 30 do fireTick(fault) end
     out("ambient_tracebacks", countPrinted("ambient disabled"))
-    out("ambient_inert_after_fault", bool(active(fault, "spwi408") == 0))
+    out("ambient_inert_after_fault", bool(applicationCount(fault, "spwi408") == 1))
 end
 
 local function urgentResult(options, spells)
@@ -847,10 +904,14 @@ scenarios.urgent_hard_gates = function()
     out("eligible", bool(urgentResult({}, { "spwi611" }).queueCount == 1))
     out("not_hostile", bool(urgentResult({ ea = 128 }, { "spwi611" }).queueCount > 0))
     out("not_visible", bool(urgentResult({ seeParty = false }, { "spwi611" }).queueCount > 0))
+    out("unsettled", bool(urgentResult({ settled = false }, { "spwi611" }).queueCount > 0))
+    out("unrecognized", bool(urgentResult({ scsCaster = false }, { "spwi611" }).queueCount > 0))
     out("unconscious", bool(urgentResult({ conscious = false }, { "spwi611" }).queueCount > 0))
     out("already_protected", bool(urgentResult({ genuineWeaponImmunity = true }, { "spwi611" }).queueCount > 0))
+    out("unknown_effect_lists", bool(urgentResult({ effectListsUnavailable = true }, { "spwi611" }).queueCount > 0))
+    out("partial_effect_lists", bool(urgentResult({ timedEffectsUnavailable = true }, { "spwi611" }).queueCount > 0))
     out("no_slot", bool(urgentResult({}, {}).queueCount > 0))
-    out("dialogue", bool(urgentResult({ dialogue = true }, { "spwi611" }).queueCount > 0))
+    out("dialogue", bool(urgentResult({ action = 137 }, { "spwi611" }).queueCount > 0))
     out("cutscene", bool(urgentResult({ cutscene = true }, { "spwi611" }).queueCount > 0))
 end
 
@@ -879,6 +940,8 @@ scenarios.urgent_action_safety = function()
         tactical = { action = 100 },
         dialogue = { action = 137 },
         cutscene = { action = 121 },
+        passive_queue = { action = 0, queue = { { m_actionID = 23 }, { m_actionID = 85 } } },
+        unsafe_queue = { action = 0, queue = { { m_actionID = 3 } } },
         unknown_queue = { action = 0, queueUnavailable = true },
     }
     for key, options in pairs(cases) do
@@ -888,8 +951,25 @@ scenarios.urgent_action_safety = function()
 end
 
 scenarios.urgent_project_image = function()
-    out("owner_known_safe", bool(urgentResult({ projectImageOwnerCertain = true }).queueCount == 1))
-    out("owner_uncertain", bool(urgentResult({ projectImageOwnerCertain = false }).queueCount > 0))
+    out("ordinary_actor", bool(urgentResult({}).queueCount == 1))
+
+    local uncertain = newSprite({})
+    memorize(uncertain, "spwi611")
+    addProjectImageClone(uncertain, -1)
+    fireTick(uncertain)
+    out("owner_uncertain", bool(uncertain.queueCount > 0))
+
+    local owner = newSprite({})
+    memorize(owner, "spwi611")
+    addProjectImageOwnerLock(owner)
+    fireTick(owner)
+    out("locked_owner", bool(owner.queueCount > 0))
+
+    local clone = newSprite({})
+    memorize(clone, "spwi611")
+    addProjectImageClone(clone, owner.m_id)
+    fireTick(clone)
+    out("valid_clone", bool(clone.queueCount > 0))
 end
 
 scenarios.urgent_normal_cast = function()
@@ -908,6 +988,8 @@ scenarios.urgent_interrupted_started = function()
     local state = EEex_GetUDAux(sprite).CBR_RDY_CONTACT or {}
     out("started", sprite.starts)
     out("effect_active", active(sprite, "spwi611"))
+    out("engine_slot_debits", sprite.engineSlotDebits)
+    out("available_after", countAvailable(sprite, "spwi611"))
     out("queues", sprite.queueCount)
     out("episode_spent", state.spent or 0)
 end
@@ -928,6 +1010,17 @@ scenarios.urgent_never_started_retry = function()
     out("episode_spent", state.spent or 0)
 end
 
+scenarios.urgent_never_started_unsafe_queue = function()
+    local sprite = newSprite({ autoStart = false, retainFailedQueue = true })
+    memorize(sprite, "spwi611")
+    fireTick(sprite)
+    fakeClock = fakeClock + 2
+    fireTick(sprite)
+    local state = EEex_GetUDAux(sprite).CBR_RDY_CONTACT or {}
+    out("queues", sprite.queueCount)
+    out("episode_spent", state.spent or 0)
+end
+
 scenarios.urgent_contact_rearm = function()
     local sprite = newSprite({ interrupted = true })
     memorize(sprite, "spwi611", 2)
@@ -935,12 +1028,14 @@ scenarios.urgent_contact_rearm = function()
     for _ = 1, 30 do fireTick(sprite) end
     out("continuous_sight_queues", sprite.queueCount)
     sprite.seeParty = false
+    fireTick(sprite)
     fakeClock = fakeClock + 5
     fireTick(sprite)
     sprite.seeParty = true
     fireTick(sprite)
     out("short_loss_queues", sprite.queueCount)
     sprite.seeParty = false
+    fireTick(sprite)
     fakeClock = fakeClock + 6
     fireTick(sprite)
     sprite.seeParty = true

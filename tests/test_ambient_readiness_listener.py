@@ -246,6 +246,12 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
             "m_queuedActions",
             "m_string1.m_pchData:get()",
             "Infinity_GetInCutsceneMode",
+            "EEex_Sprite_GetState",
+            "effect.m_effectId",
+            "opcode == 237",
+            "effect.m_dWFlags",
+            "effect.m_sourceId",
+            'source == "spwi703"',
         ):
             with self.subTest(required=required):
                 self.assertIn(required, source)
@@ -253,6 +259,8 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
             "EEex_Sprite_GetSpellbookResetSerial",
             "m_actionQueue",
             "EEex_Sprite_IsInDialogue",
+            "EEex_Sprite_IsConscious",
+            "EEex_Sprite_IsProjectImageOwnerCertain",
             "EEex_GameState_IsCutsceneMode",
         ):
             with self.subTest(obsolete=obsolete):
@@ -371,8 +379,12 @@ class UrgentReadinessListenerTests(_RuntimeCase):
         self.assertEqual(seen["eligible"], "1")
         self.assertEqual(seen["not_hostile"], "0")
         self.assertEqual(seen["not_visible"], "0")
+        self.assertEqual(seen["unsettled"], "0")
+        self.assertEqual(seen["unrecognized"], "0")
         self.assertEqual(seen["unconscious"], "0")
         self.assertEqual(seen["already_protected"], "0")
+        self.assertEqual(seen["unknown_effect_lists"], "0")
+        self.assertEqual(seen["partial_effect_lists"], "0")
         self.assertEqual(seen["no_slot"], "0")
         self.assertEqual(seen["dialogue"], "0")
         self.assertEqual(seen["cutscene"], "0")
@@ -394,12 +406,16 @@ class UrgentReadinessListenerTests(_RuntimeCase):
         self.assertEqual(seen["tactical"], "0")
         self.assertEqual(seen["dialogue"], "0")
         self.assertEqual(seen["cutscene"], "0")
+        self.assertEqual(seen["passive_queue"], "1")
+        self.assertEqual(seen["unsafe_queue"], "0")
         self.assertEqual(seen["unknown_queue"], "0")
 
     def test_project_image_owner_uncertainty_skips(self) -> None:
         seen = self._run("urgent_project_image")
-        self.assertEqual(seen["owner_known_safe"], "1")
+        self.assertEqual(seen["ordinary_actor"], "1")
         self.assertEqual(seen["owner_uncertain"], "0")
+        self.assertEqual(seen["locked_owner"], "0")
+        self.assertEqual(seen["valid_clone"], "0")
 
     def test_normal_cast_owns_slot_aura_time_and_interruption(self) -> None:
         seen = self._run("urgent_normal_cast")
@@ -414,6 +430,8 @@ class UrgentReadinessListenerTests(_RuntimeCase):
         seen = self._run("urgent_interrupted_started")
         self.assertEqual(seen["started"], "1")
         self.assertEqual(seen["effect_active"], "0")
+        self.assertEqual(seen["engine_slot_debits"], "0")
+        self.assertEqual(seen["available_after"], "1")
         self.assertEqual(seen["queues"], "1")
         self.assertEqual(seen["episode_spent"], "1")
 
@@ -421,6 +439,11 @@ class UrgentReadinessListenerTests(_RuntimeCase):
         seen = self._run("urgent_never_started_retry")
         self.assertEqual(seen["queues"], "2")
         self.assertEqual(seen["starts"], "0")
+        self.assertEqual(seen["episode_spent"], "1")
+
+    def test_never_started_cast_with_an_unsafe_queue_closes_the_episode(self) -> None:
+        seen = self._run("urgent_never_started_unsafe_queue")
+        self.assertEqual(seen["queues"], "1")
         self.assertEqual(seen["episode_spent"], "1")
 
     def test_contact_rearms_only_after_one_full_round_out_of_sight(self) -> None:

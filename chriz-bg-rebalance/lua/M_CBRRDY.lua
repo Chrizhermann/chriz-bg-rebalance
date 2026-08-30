@@ -48,15 +48,20 @@ local function action_resref(action)
     return normalize(value)
 end
 
-local function queued_actions_readable(sprite)
+local passive_action = { [0] = 1, [23] = 1, [85] = 1 }
+
+local function passive_actions_only(sprite)
     if not (sprite and sprite.m_queuedActions and EEex_Utility_IterateCPtrList) then
         return false
     end
-    local readable = true
+    local current_id = sprite.m_curAction and tonumber(sprite.m_curAction.m_actionID)
+    if not current_id or not passive_action[current_id] then return false end
+    local safe = true
     EEex_Utility_IterateCPtrList(sprite.m_queuedActions, function(action)
-        if type(action.m_actionID) ~= "number" then readable = false end
+        local action_id = action and tonumber(action.m_actionID)
+        if not action_id or not passive_action[action_id] then safe = false end
     end)
-    return readable
+    return safe
 end
 
 local function outside_cutscene()
@@ -106,6 +111,21 @@ for _, source in ipairs(manifest.ambient_spells or {}) do
         ambient_by_resref[record.resref] = record
         ambient_by_delivery[record.delivery] = record
         ambient_by_number[record.spell_number] = record
+    end
+end
+
+local urgent_records = {}
+local urgent_by_resref = {}
+for _, source in ipairs(manifest.urgent_candidates or {}) do
+    local record = {
+        key = normalize(source.key),
+        resref = normalize(source.resref),
+        spell_number = tonumber(source.spell_number),
+        genuine = flag(source.genuine_weapon_immunity, 0),
+    }
+    if record.key ~= "" and record.resref ~= "" and record.spell_number then
+        urgent_records[#urgent_records + 1] = record
+        urgent_by_resref[record.resref] = record
     end
 end
 
@@ -434,13 +454,13 @@ end
 local function ambient_tick(sprite)
     local current, id = resolve_sprite(sprite)
     if not current then return end
-    local visible = sees_party(current)
     local classification = classify(current, id)
     if not classification then return end
     local session = session_for(id)
     session.tick = session.tick + 1
     local cadence = flag(manifest.maintenance_cadence_ticks, 15)
     local maintenance_tick = cadence > 0 and session.tick % cadence == 0
+    local visible = nil
     local ledger = get_ledger(current)
     for _, record in ipairs(ambient_records) do
         if classification_allows(classification, record)
@@ -448,6 +468,7 @@ local function ambient_tick(sprite)
             local ledger_record = ledger.spells[record.resref]
             if ledger_record and ledger_record.charged == 1 then
                 if maintenance_tick then
+                    if visible == nil then visible = sees_party(current) end
                     maintain(current, id, record, ledger_record, visible)
                 end
             elseif session.checked[record.resref] ~= 1 then
@@ -566,6 +587,194 @@ local function import_ledger(sprite, saved)
     EEex_GetUDAux(current).CBR_RDY_LEDGER = result
 end
 
+local function for_each_effect(sprite, callback)
+    local lists = {}
+    for _, field in ipairs({ "m_timedEffectList", "m_equipedEffectList" }) do
+        local list = sprite[field]
+        if not list then return false end
+        lists[#lists + 1] = list
+    end
+    for _, list in ipairs(lists) do
+        EEex_Utility_IterateCPtrList(list, callback)
+    end
+    return true
+end
+
+local function weapon_immunity_active(sprite)
+    local found = false
+    local readable = for_each_effect(sprite, function(effect)
+        if tonumber(effect.m_effectId) == 120 then
+            found = true
+            return true
+        end
+    end)
+    if not readable then return true end
+    return found
+end
+
+local function conscious(sprite)
+    local value = tonumber(EEex_Sprite_GetState(sprite))
+    if not value or type(EEex_BAnd) ~= "function" then return false end
+    local disabled_mask = 0x8010202D
+    return EEex_BAnd(value, disabled_mask) == 0
+end
+
+local function project_image_safe(sprite)
+    local clone_owner = nil
+    local clone_markers = 0
+    local owner_lock_233 = false
+    local owner_lock_20 = false
+    local readable = for_each_effect(sprite, function(effect)
+        local opcode = tonumber(effect.m_effectId)
+        local parameter1 = tonumber(effect.m_effectAmount)
+        local parameter2 = tonumber(effect.m_dWFlags)
+        local source = effect_source(effect)
+        if opcode == 237 and parameter2 == 2 then
+            clone_markers = clone_markers + 1
+            clone_owner = tonumber(effect.m_sourceId)
+        elseif source == "spwi703" and opcode == 233
+                and parameter1 == 2 and parameter2 == 127 then
+            owner_lock_233 = true
+        elseif source == "spwi703" and opcode == 20 then
+            owner_lock_20 = true
+        end
+    end)
+    if not readable then return false end
+    if clone_markers > 0 then
+        if clone_markers ~= 1 or not clone_owner or clone_owner < 0 then return false end
+        local owner = EEex_GameObject_Get(clone_owner)
+        if not owner or object_id(owner) ~= clone_owner
+                or clone_owner == object_id(sprite) then return false end
+        return false
+    end
+    if owner_lock_233 or owner_lock_20 then
+        if not (owner_lock_233 and owner_lock_20) then return false end
+        return false
+    end
+    return true
+end
+
+local function select_urgent_candidate(sprite)
+    for _, record in ipairs(urgent_records) do
+        if record.genuine == 1 then
+            local available_record = find_available_record(sprite, record.resref)
+            if available_record then return record end
+        end
+    end
+    return nil
+end
+
+local function contact_for(sprite)
+    local aux = EEex_GetUDAux(sprite)
+    local contact = aux.CBR_RDY_CONTACT
+    if type(contact) ~= "table" then
+        contact = {
+            spent = 0,
+            attempts = 0,
+            pending_resref = "",
+            queued_at = 0,
+            unseen_since = -1,
+            rearmed = 0,
+        }
+        aux.CBR_RDY_CONTACT = contact
+    end
+    return contact
+end
+
+local function reset_contact(contact)
+    contact.spent = 0
+    contact.attempts = 0
+    contact.pending_resref = ""
+    contact.queued_at = 0
+end
+
+local function update_contact_visibility(contact, visible, now)
+    local rearm_seconds = flag(manifest.contact_rearm_seconds, 6)
+    if visible then
+        if contact.unseen_since >= 0
+                and now - contact.unseen_since >= rearm_seconds then
+            reset_contact(contact)
+        end
+        contact.unseen_since = -1
+        contact.rearmed = 0
+        return true
+    end
+    if contact.unseen_since < 0 then contact.unseen_since = now end
+    if contact.rearmed == 0
+            and now - contact.unseen_since >= rearm_seconds then
+        reset_contact(contact)
+        contact.rearmed = 1
+    end
+    return false
+end
+
+local function urgent_tick(sprite)
+    local current, id = resolve_sprite(sprite)
+    if not current then return end
+    local classification = classify(current, id)
+    if not classification then return end
+    local visible = sees_party(current)
+    local now = game_time()
+    local contact = contact_for(current)
+    if not update_contact_visibility(contact, visible, now) then return end
+    if contact.spent == 1 then return end
+    if tonumber(current.m_typeAI.m_EnemyAlly) ~= 255 then return end
+    if not conscious(current) or not outside_cutscene() then return end
+    if not project_image_safe(current) or weapon_immunity_active(current) then return end
+
+    local retry = contact.pending_resref ~= ""
+    if retry and now - contact.queued_at < 2 then return end
+    if retry and contact.attempts >= 2 then
+        contact.spent = 1
+        contact.pending_resref = ""
+        return
+    end
+
+    local candidate = retry and urgent_by_resref[contact.pending_resref]
+        or select_urgent_candidate(current)
+    if retry then
+        local available_record = candidate
+            and candidate.genuine == 1
+            and find_available_record(current, candidate.resref)
+        if not available_record then
+            contact.spent = 1
+            contact.pending_resref = ""
+            return
+        end
+    end
+    if not candidate or not passive_actions_only(current)
+            or type(current.virtual_ClearActions) ~= "function" then
+        if retry then
+            contact.spent = 1
+            contact.pending_resref = ""
+        end
+        return
+    end
+
+    current:virtual_ClearActions()
+    contact.attempts = contact.attempts + 1
+    contact.pending_resref = candidate.resref
+    contact.queued_at = now
+    local response = string.format('SpellRES("%s",Myself)', candidate.resref)
+    pcall(EEex_Action_QueueResponseStringOnAIBase, response, current)
+    if contact.attempts >= 2 and contact.pending_resref ~= "" then
+        contact.spent = 1
+        contact.pending_resref = ""
+    end
+end
+
+local function urgent_action(sprite, action)
+    local current = resolve_sprite(sprite)
+    if not current then return end
+    local contact = contact_for(current)
+    if contact.pending_resref ~= ""
+            and tonumber(action and action.m_actionID) == 31
+            and action_resref(action) == contact.pending_resref then
+        contact.spent = 1
+        contact.pending_resref = ""
+    end
+end
+
 local function layer_enabled(layer)
     if layer == "ambient" then
         return flag(CBR_RDY_AMBIENT_ENABLED, 0) == 1
@@ -605,8 +814,8 @@ _G.CBR_RDY_HANDLERS = {
     ambient_reset = ambient_reset,
     ambient_export = copy_ledger,
     ambient_import = import_ledger,
-    urgent_tick = function() end,
-    urgent_action = function() end,
+    urgent_tick = urgent_tick,
+    urgent_action = urgent_action,
     urgent_reset = function() end,
 }
 
@@ -654,6 +863,9 @@ local required = {
     EEex_Utility_IterateCPtrList,
     EEex_GameObject_ApplyEffect,
     EEex_RunWithStackManager,
+    EEex_Sprite_GetState,
+    EEex_Action_QueueResponseStringOnAIBase,
+    EEex_BAnd,
 }
 local supported = true
 for _, callback in ipairs(required) do
