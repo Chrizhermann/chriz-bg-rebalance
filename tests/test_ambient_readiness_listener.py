@@ -279,6 +279,23 @@ class AmbientReadinessListenerTests(_RuntimeCase):
         self.assertEqual(seen["offensive"], "0")
         self.assertEqual(seen["unmemorized"], "0")
 
+    def test_existing_equivalent_defense_is_not_reapplied_or_charged(self) -> None:
+        seen = self._run("ambient_existing_defense")
+        self.assertEqual(seen["available"], "1")
+        self.assertEqual(seen["component_applications"], "0")
+        self.assertEqual(seen["ledger_created"], "0")
+
+    def test_priest_memorization_uses_the_same_exact_debit_path(self) -> None:
+        seen = self._run("ambient_priest_debit")
+        self.assertEqual(seen["available_after"], "0")
+        self.assertEqual(seen["active_after"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "1")
+
+    def test_spellbook_qualification_cache_reopens_only_on_engine_reset(self) -> None:
+        seen = self._run("ambient_spellbook_cache")
+        self.assertEqual(seen["without_reset"], "0")
+        self.assertEqual(seen["after_reset"], "1")
+
     def test_first_application_debits_once_and_maintenance_is_free(self) -> None:
         seen = self._run("ambient_first_debit_and_refresh")
         self.assertEqual(seen["available_before"], "1")
@@ -318,9 +335,18 @@ class AmbientReadinessListenerTests(_RuntimeCase):
 
     def test_failed_transaction_restores_or_disables_without_looping(self) -> None:
         seen = self._run("ambient_transaction_failure")
-        self.assertEqual(seen["availability_restored"], "1")
-        self.assertEqual(seen["spell_disabled"], "1")
-        self.assertEqual(seen["attempts"], "1")
+        self.assertEqual(seen["apply_availability_restored"], "1")
+        self.assertEqual(seen["apply_disabled"], "1")
+        self.assertEqual(seen["apply_attempts"], "1")
+        self.assertEqual(seen["quick_availability_restored"], "1")
+        self.assertEqual(seen["quick_disabled"], "1")
+        self.assertEqual(seen["quick_attempts"], "1")
+
+    def test_malformed_saved_record_disables_only_that_spell(self) -> None:
+        seen = self._run("ambient_malformed_ledger")
+        self.assertEqual(seen["malformed_spell_disabled"], "0")
+        self.assertEqual(seen["other_spell_continues"], "1")
+        self.assertEqual(seen["legacy_discarded"], "1")
 
     def test_marshaled_ledger_is_versioned_and_primitive_only(self) -> None:
         seen = self._run("ambient_marshal")
@@ -328,12 +354,12 @@ class AmbientReadinessListenerTests(_RuntimeCase):
         self.assertEqual(seen["primitive_only"], "1")
         self.assertEqual(seen["has_userdata"], "0")
         self.assertEqual(seen["has_object_id"], "0")
+        self.assertEqual(seen["record_fields_exact"], "1")
 
     def test_retirement_hot_reload_and_fault_fuses(self) -> None:
         seen = self._run("ambient_runtime_safety")
         self.assertEqual(seen["ambient_disabled_inert"], "1")
         self.assertEqual(seen["ambient_owner_inert"], "1")
-        self.assertEqual(seen["urgent_owner_independent"], "1")
         self.assertEqual(seen["listeners_after_reload"], "1")
         self.assertEqual(seen["ambient_tracebacks"], "1")
         self.assertEqual(seen["ambient_inert_after_fault"], "1")

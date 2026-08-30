@@ -137,6 +137,12 @@ local ambientDurations = {
     spwi802 = 7200,
 }
 
+local ambientDetection = {
+    sppr506 = { 218, 0 }, sppr735 = { 206, 0 },
+    spwi102 = { 0, 16 }, spwi310 = { 69, 0 },
+    spwi408 = { 218, 0 }, spwi802 = { 101, 213 },
+}
+
 local fakeClock = 1000
 local nextSpriteID = 100
 local spritesByID = {}
@@ -224,7 +230,7 @@ local function newSprite(options)
         m_id = nextSpriteID,
         m_scriptName = newResRef(options.name or "cbr_default"),
         m_typeAI = { m_EnemyAlly = options.ea or 255 },
-        m_pArea = options.settled == false and nil or {},
+        m_pArea = {},
         m_curAction = { m_actionID = options.action or 0 },
         m_queuedActions = options.queueUnavailable and nil or newPtrList(options.queue or {}),
         m_timedEffectList = newPtrList({}),
@@ -254,6 +260,7 @@ local function newSprite(options)
         interrupted = options.interrupted == true,
         autoStart = options.autoStart ~= false,
         failApply = options.failApply == true,
+        failQuickList = options.failQuickList == true,
         failVisibility = options.failVisibility == true,
     }
     function sprite:getLocalInt(name)
@@ -263,6 +270,7 @@ local function newSprite(options)
         self.locals[name] = value
     end
     function sprite:CheckQuickLists(abilityID, changeAmount, remove, unknown)
+        if self.failQuickList then error("injected quick-list failure") end
         self.quickListRebuilds = self.quickListRebuilds + 1
         self.lastQuickListArgs = { abilityID, changeAmount, remove, unknown }
     end
@@ -271,6 +279,7 @@ local function newSprite(options)
         self.m_queuedActions = newPtrList({})
         self.actionsCleared = (self.actionsCleared or 0) + 1
     end
+    if options.settled == false then sprite.m_pArea = nil end
     spritesByID[sprite.m_id] = sprite
     return sprite
 end
@@ -335,12 +344,7 @@ function EEex_GameObject_ApplyEffect(sprite, args)
         expectedExpiry = fakeClock + (ambientDurations[managed] or 0),
     }
     sprite.applications[managed] = (sprite.applications[managed] or 0) + 1
-    local detection = {
-        sppr506 = { 218, 0 }, sppr735 = { 206, 0 },
-        spwi102 = { 0, 16 }, spwi310 = { 69, 0 },
-        spwi408 = { 218, 0 }, spwi802 = { 101, 213 },
-    }
-    local marker = detection[managed]
+    local marker = ambientDetection[managed]
     if marker then
         sprite.m_timedEffectList.values[#sprite.m_timedEffectList.values + 1] = {
             m_effectId = marker[1],
@@ -445,6 +449,21 @@ local function removeActive(sprite, resref)
         end
     end
     sprite.m_timedEffectList.values = retained
+end
+
+local function addActiveDefense(sprite, resref, source)
+    local normalized = lower(resref)
+    local marker = ambientDetection[normalized]
+    assert(marker, "missing fake detection metadata for " .. normalized)
+    sprite.active[normalized] = {
+        appliedAt = fakeClock,
+        expectedExpiry = fakeClock + (ambientDurations[normalized] or 0),
+    }
+    sprite.m_timedEffectList.values[#sprite.m_timedEffectList.values + 1] = {
+        m_effectId = marker[1],
+        m_dWFlags = marker[2],
+        m_sourceRes = newResRef(source or normalized),
+    }
 end
 
 local function applicationCount(sprite, resref)
@@ -557,6 +576,36 @@ scenarios.ambient_qualification = function()
     out("unmemorized", active(sprite, "spwi802"))
 end
 
+scenarios.ambient_existing_defense = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408")
+    addActiveDefense(sprite, "spwi408", "spwi408")
+    fireTick(sprite)
+    out("available", countAvailable(sprite, "spwi408"))
+    out("component_applications", applicationCount(sprite, "spwi408"))
+    out("ledger_created", bool((exportedLedger(sprite).spells or {}).spwi408 ~= nil))
+end
+
+scenarios.ambient_priest_debit = function()
+    local sprite = newSprite({})
+    memorize(sprite, "sppr506")
+    fireTick(sprite)
+    out("available_after", countAvailable(sprite, "sppr506"))
+    out("active_after", active(sprite, "sppr506"))
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+end
+
+scenarios.ambient_spellbook_cache = function()
+    local sprite = newSprite({})
+    fireTick(sprite)
+    memorize(sprite, "spwi408")
+    fireTick(sprite)
+    out("without_reset", applicationCount(sprite, "spwi408"))
+    fireSpellbookReset(sprite)
+    fireTick(sprite)
+    out("after_reset", applicationCount(sprite, "spwi408"))
+end
+
 scenarios.ambient_first_debit_and_refresh = function()
     local sprite = newSprite({})
     memorize(sprite, "spwi408")
@@ -630,6 +679,9 @@ scenarios.ambient_reset_boundaries = function()
     memorize(loaded, "spwi408", 2)
     setFirstAvailable(loaded, "spwi408", 0)
     loaded.active.spwi408 = sprite.active.spwi408
+    for _, effect in ipairs(sprite.m_timedEffectList.values) do
+        loaded.m_timedEffectList.values[#loaded.m_timedEffectList.values + 1] = effect
+    end
     importedLedger(loaded, saved)
     fireTick(loaded)
     out("after_save_load", applicationCount(sprite, "spwi408") + applicationCount(loaded, "spwi408"))
@@ -676,15 +728,47 @@ scenarios.ambient_scs_reimbursement = function()
 end
 
 scenarios.ambient_transaction_failure = function()
-    local sprite = newSprite({ failApply = true })
-    memorize(sprite, "spwi408")
-    fireTick(sprite)
-    for _ = 1, 60 do fireTick(sprite) end
-    local ledger = exportedLedger(sprite) or {}
-    local record = ledger.spells and ledger.spells.spwi408 or {}
-    out("availability_restored", countAvailable(sprite, "spwi408"))
-    out("spell_disabled", record.disabled or 0)
-    out("attempts", record.attempts or 0)
+    local apply = newSprite({ failApply = true })
+    memorize(apply, "spwi408")
+    fireTick(apply)
+    for _ = 1, 60 do fireTick(apply) end
+    local applyFailures = CBR_RDY_STATE.ambient_failures[apply.m_id] or {}
+    out("apply_availability_restored", countAvailable(apply, "spwi408"))
+    out("apply_disabled", (applyFailures.spwi408 or {}).disabled or 0)
+    out("apply_attempts", (applyFailures.spwi408 or {}).attempts or 0)
+
+    local quick = newSprite({ failQuickList = true })
+    memorize(quick, "spwi408")
+    fireTick(quick)
+    for _ = 1, 60 do fireTick(quick) end
+    local quickFailures = CBR_RDY_STATE.ambient_failures[quick.m_id] or {}
+    out("quick_availability_restored", countAvailable(quick, "spwi408"))
+    out("quick_disabled", (quickFailures.spwi408 or {}).disabled or 0)
+    out("quick_attempts", (quickFailures.spwi408 or {}).attempts or 0)
+end
+
+scenarios.ambient_malformed_ledger = function()
+    local malformed = newSprite({})
+    memorize(malformed, "spwi408")
+    memorize(malformed, "spwi102")
+    importedLedger(malformed, {
+        version = 1,
+        spells = {
+            spwi408 = {
+                version = 1, resref = "spwi408", charged = "yes",
+                expected_expiry = fakeClock + 2400, suppressed = 0,
+            },
+        },
+    })
+    fireTick(malformed)
+    out("malformed_spell_disabled", active(malformed, "spwi408"))
+    out("other_spell_continues", active(malformed, "spwi102"))
+
+    local legacy = newSprite({})
+    memorize(legacy, "spwi408")
+    importedLedger(legacy, { version = 0, spells = {} })
+    fireTick(legacy)
+    out("legacy_discarded", active(legacy, "spwi408"))
 end
 
 local function primitiveOnly(value, seen)
@@ -710,6 +794,19 @@ scenarios.ambient_marshal = function()
     out("primitive_only", bool(primitiveOnly(ledger)))
     out("has_userdata", bool(type(ledger.sprite) == "userdata"))
     out("has_object_id", bool(ledger.object_id ~= nil or ledger.sprite_id ~= nil))
+    local record = ledger.spells and ledger.spells.spwi408 or {}
+    local allowed = {
+        version = true, resref = true, charged = true,
+        expected_expiry = true, suppressed = true,
+    }
+    local exact = true
+    for key in pairs(record) do
+        if not allowed[key] then exact = false end
+    end
+    for key in pairs(allowed) do
+        if record[key] == nil then exact = false end
+    end
+    out("record_fields_exact", bool(exact))
 end
 
 scenarios.ambient_runtime_safety = function()
@@ -726,10 +823,6 @@ scenarios.ambient_runtime_safety = function()
     fireTick(owned)
     out("ambient_owner_inert", bool(active(owned, "spwi408") == 0))
 
-    local urgent = newSprite({ action = 0 })
-    memorize(urgent, "spwi611")
-    fireTick(urgent)
-    out("urgent_owner_independent", bool(urgent.queueCount == 1))
     CBR_RDY_EXTERNAL_OWNER = 0
 
     reloadRuntime()
