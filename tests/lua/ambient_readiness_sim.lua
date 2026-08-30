@@ -74,7 +74,29 @@ end
 local function newResRef(value)
     local result = { value = lower(value) }
     function result:get() return self.value end
+    function result:set(nextValue) self.value = lower(nextValue) end
     return result
+end
+
+local function newCString(value)
+    return { m_pchData = newResRef(value) }
+end
+
+function EEex_RunWithStackManager(specifications, callback)
+    local values = {}
+    for _, specification in ipairs(specifications or {}) do
+        if specification.struct == "CAbilityId" then
+            values[specification.name] = {
+                m_itemType = 0,
+                m_res = newResRef(""),
+            }
+        else
+            values[specification.name] = {}
+        end
+    end
+    callback({
+        getUD = function(_, name) return values[name] end,
+    })
 end
 
 local spellLevels = {
@@ -200,21 +222,21 @@ local function newSprite(options)
     nextSpriteID = nextSpriteID + 1
     local sprite = {
         m_id = nextSpriteID,
-        m_scriptName = newResRef(options.script or "dw#mg100"),
+        m_scriptName = newResRef(options.name or "cbr_default"),
         m_typeAI = { m_EnemyAlly = options.ea or 255 },
         m_pArea = options.settled == false and nil or {},
         m_curAction = { m_actionID = options.action or 0 },
-        m_actionQueue = newPtrList(options.queue or {}),
+        m_queuedActions = options.queueUnavailable and nil or newPtrList(options.queue or {}),
+        m_timedEffectList = newPtrList({}),
+        m_equipedEffectList = newPtrList({}),
         m_memorizedSpellsMage = newLevelArray(),
         m_memorizedSpellsPriest = newLevelArray(),
         locals = {
             caster_label_ini = options.scsCaster == false and 0 or 1,
+            instantprep = options.instantprep or 0,
             inafight = options.inCombat and 1 or 0,
-            CBR_TEST_RESET_SERIAL = options.resetSerial or 1,
         },
-        scriptName = lower(options.name or "cbr_default"),
         seeParty = options.seeParty ~= false,
-        dialogue = options.dialogue == true,
         cutscene = options.cutscene == true,
         conscious = options.conscious ~= false,
         projectImageOwnerCertain = options.projectImageOwnerCertain ~= false,
@@ -233,7 +255,6 @@ local function newSprite(options)
         autoStart = options.autoStart ~= false,
         failApply = options.failApply == true,
         failVisibility = options.failVisibility == true,
-        spellbookResetSerial = options.resetSerial or 1,
     }
     function sprite:getLocalInt(name)
         return self.locals[name] or 0
@@ -247,7 +268,7 @@ local function newSprite(options)
     end
     function sprite:virtual_ClearActions()
         self.m_curAction = { m_actionID = 0 }
-        self.m_actionQueue = newPtrList({})
+        self.m_queuedActions = newPtrList({})
         self.actionsCleared = (self.actionsCleared or 0) + 1
     end
     spritesByID[sprite.m_id] = sprite
@@ -290,26 +311,7 @@ function EEex_Trigger_EvalConditionalStringAsAIBase(trigger, sprite)
     return false
 end
 
-function EEex_Sprite_GetSpellState(sprite, state)
-    if state == "CBR_GENUINE_WEAPON_IMMUNITY" then
-        return sprite.genuineWeaponImmunity and 1 or 0
-    end
-    return sprite.active[lower(state)] and 1 or 0
-end
-
-function EEex_Sprite_HasActiveSpell(sprite, resref)
-    return sprite.active[lower(resref)] ~= nil
-end
-
-function EEex_Sprite_IsConscious(sprite)
-    return sprite.conscious
-end
-
-function EEex_Sprite_IsInDialogue(sprite)
-    return sprite.dialogue
-end
-
-function EEex_GameState_IsCutsceneMode()
+function Infinity_GetInCutsceneMode()
     for _, sprite in pairs(spritesByID) do
         if sprite.cutscene then return true end
     end
@@ -320,13 +322,12 @@ function EEex_Sprite_IsProjectImageOwnerCertain(sprite)
     return sprite.projectImageOwnerCertain
 end
 
-function EEex_Sprite_GetSpellbookResetSerial(sprite)
-    return sprite.spellbookResetSerial
-end
-
 function EEex_GameObject_ApplyEffect(sprite, args)
     sprite.directEffects = sprite.directEffects + 1
     if sprite.failApply then return end
+    if args.effectID ~= 146 or args.dwFlags ~= 1 then
+        error("ambient delivery must use instant opcode 146")
+    end
     local delivered = lower(args.res or args.m_sourceRes)
     local managed = deliveryToSpell[delivered] or delivered
     sprite.active[managed] = {
@@ -334,6 +335,19 @@ function EEex_GameObject_ApplyEffect(sprite, args)
         expectedExpiry = fakeClock + (ambientDurations[managed] or 0),
     }
     sprite.applications[managed] = (sprite.applications[managed] or 0) + 1
+    local detection = {
+        sppr506 = { 218, 0 }, sppr735 = { 206, 0 },
+        spwi102 = { 0, 16 }, spwi310 = { 69, 0 },
+        spwi408 = { 218, 0 }, spwi802 = { 101, 213 },
+    }
+    local marker = detection[managed]
+    if marker then
+        sprite.m_timedEffectList.values[#sprite.m_timedEffectList.values + 1] = {
+            m_effectId = marker[1],
+            m_dWFlags = marker[2],
+            m_sourceRes = newResRef(delivered),
+        }
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -342,6 +356,7 @@ end
 
 local tickListeners = {}
 local startedActionListeners = {}
+local resetListeners = {}
 local marshalHandlers = {}
 
 function EEex_Opcode_AddListsResolvedListener(callback)
@@ -350,6 +365,10 @@ end
 
 function EEex_Action_AddSpriteStartedActionListener(callback)
     startedActionListeners[#startedActionListeners + 1] = callback
+end
+
+function EEex_Sprite_AddQuickListCountsResetListener(callback)
+    resetListeners[#resetListeners + 1] = callback
 end
 
 function EEex_Sprite_AddMarshalHandlers(name, exporter, importer)
@@ -369,7 +388,7 @@ function EEex_Action_QueueResponseStringOnAIBase(response, sprite)
     if not resref or not sprite.autoStart then return end
     local action = {
         m_actionID = 31,
-        m_string1 = newResRef(lower(resref)),
+        m_string1 = newCString(lower(resref)),
         cbrNormalSpellRES = 1,
     }
     fireStarted(sprite, action)
@@ -387,6 +406,10 @@ end
 
 local function fireTick(sprite)
     for _, callback in ipairs(tickListeners) do callback(sprite) end
+end
+
+local function fireSpellbookReset(sprite)
+    for _, callback in ipairs(resetListeners) do callback(sprite) end
 end
 
 local function exportedLedger(sprite)
@@ -411,6 +434,19 @@ local function active(sprite, resref)
     return sprite.active[lower(resref)] and 1 or 0
 end
 
+local function removeActive(sprite, resref)
+    local normalized = lower(resref)
+    sprite.active[normalized] = nil
+    local retained = {}
+    for _, effect in ipairs(sprite.m_timedEffectList.values) do
+        local source = effect.m_sourceRes and lower(effect.m_sourceRes:get()) or ""
+        if deliveryToSpell[source] ~= normalized then
+            retained[#retained + 1] = effect
+        end
+    end
+    sprite.m_timedEffectList.values = retained
+end
+
 local function applicationCount(sprite, resref)
     return sprite.applications[lower(resref)] or 0
 end
@@ -432,6 +468,42 @@ end
 -------------------------------------------------------------------------------
 
 local scenarios = {}
+
+scenarios.runtime_shell = function()
+    reloadRuntime()
+    out("listeners_after_reload", #tickListeners)
+    out("started_after_reload", #startedActionListeners)
+    out("reset_after_reload", #resetListeners)
+
+    local ambientCalls = 0
+    local urgentCalls = 0
+    CBR_RDY_HANDLERS.ambient_tick = function() ambientCalls = ambientCalls + 1 end
+    CBR_RDY_HANDLERS.urgent_tick = function() urgentCalls = urgentCalls + 1 end
+    local sprite = newSprite({})
+
+    CBR_RDY_AMBIENT_ENABLED = 0
+    fireTick(sprite)
+    out("ambient_enable_gate", bool(ambientCalls == 0))
+    CBR_RDY_AMBIENT_ENABLED = 1
+
+    CBR_RDY_EXTERNAL_OWNER = 1
+    fireTick(sprite)
+    out("ambient_owner_gate", bool(ambientCalls == 0))
+    out("urgent_owner_independent", bool(urgentCalls == 2))
+
+    CBR_RDY_EXTERNAL_OWNER = 2
+    fireTick(sprite)
+    out("urgent_owner_gate", bool(urgentCalls == 2))
+    out("ambient_owner_independent", bool(ambientCalls == 1))
+
+    CBR_RDY_EXTERNAL_OWNER = 0
+    CBR_RDY_HANDLERS.ambient_tick = function() error("injected shell fault") end
+    fireTick(sprite)
+    fireTick(sprite)
+    out("ambient_tracebacks", countPrinted("ambient disabled"))
+    out("ambient_fused", CBR_RDY_STATE.ambient_faulted or 0)
+    out("urgent_after_ambient_fault", bool(urgentCalls == 4))
+end
 
 scenarios.ambient_classification = function()
     local settled = newSprite({})
@@ -496,7 +568,7 @@ scenarios.ambient_first_debit_and_refresh = function()
     local record = ledger.spells and ledger.spells.spwi408 or {}
     out("ledger_charged", record.charged or 0)
     out("quicklist_rebuilds", sprite.quickListRebuilds)
-    sprite.active.spwi408 = nil
+    removeActive(sprite, "spwi408")
     fakeClock = fakeClock + 2400
     sprite.seeParty = false
     sprite.locals.inafight = 0
@@ -509,7 +581,7 @@ scenarios.ambient_natural_expiry = function()
     local sprite = newSprite({})
     memorize(sprite, "spwi408")
     fireTick(sprite)
-    sprite.active.spwi408 = nil
+    removeActive(sprite, "spwi408")
     fakeClock = fakeClock + 2400
     sprite.seeParty = true
     for _ = 1, 15 do fireTick(sprite) end
@@ -527,7 +599,7 @@ scenarios.ambient_early_removal = function()
     local sprite = newSprite({})
     memorize(sprite, "spwi408", 2)
     fireTick(sprite)
-    sprite.active.spwi408 = nil
+    removeActive(sprite, "spwi408")
     fakeClock = fakeClock + 60
     sprite.seeParty = false
     for _ = 1, 30 do fireTick(sprite) end
@@ -535,10 +607,10 @@ scenarios.ambient_early_removal = function()
     local beforeRecord = before.spells and before.spells.spwi408 or {}
     out("suppressed", beforeRecord.suppressed or 0)
     out("applications_before_reset", applicationCount(sprite, "spwi408"))
-    sprite.spellbookResetSerial = sprite.spellbookResetSerial + 1
     for _, list in pairs(sprite.m_memorizedSpellsMage.levels) do
         for _, record in ipairs(list.values) do restoreRecord(record) end
     end
+    fireSpellbookReset(sprite)
     fireTick(sprite)
     local after = exportedLedger(sprite) or {}
     local afterRecord = after.spells and after.spells.spwi408 or {}
@@ -567,12 +639,12 @@ scenarios.ambient_reset_boundaries = function()
     loaded.locals.CBR_TEST_PARTY_REST = 1
     fireTick(loaded)
     out("after_party_rest_only", applicationCount(sprite, "spwi408") + applicationCount(loaded, "spwi408"))
-    loaded.active.spwi408 = nil
+    removeActive(loaded, "spwi408")
     loaded.seeParty = false
-    loaded.spellbookResetSerial = loaded.spellbookResetSerial + 1
     for _, list in pairs(loaded.m_memorizedSpellsMage.levels) do
         for _, record in ipairs(list.values) do restoreRecord(record) end
     end
+    fireSpellbookReset(loaded)
     fireTick(loaded)
     out("after_engine_reset", applicationCount(sprite, "spwi408") + applicationCount(loaded, "spwi408"))
 end
@@ -582,24 +654,24 @@ scenarios.ambient_scs_reimbursement = function()
     memorize(exact, "spwi408", 2)
     fireTick(exact)
     local before = countAvailable(exact, "spwi408")
+    fireStarted(exact, { m_actionID = 181, m_string1 = newCString("dwsw408") })
     setFirstAvailable(exact, "spwi408", 0)
-    exact.locals.CBR_TEST_INITIAL_PREBUFF = 1
-    fireStarted(exact, { m_actionID = 181, m_string1 = newResRef("dwsw408") })
+    fireStarted(exact, { m_actionID = 147, m_specificID = 2408 })
     out("exact_initial_reimbursed", bool(countAvailable(exact, "spwi408") == before))
 
     local combat = newSprite({})
     memorize(combat, "spwi408", 2)
     fireTick(combat)
     setFirstAvailable(combat, "spwi408", 0)
-    fireStarted(combat, { m_actionID = 31, m_string1 = newResRef("spwi408") })
+    fireStarted(combat, { m_actionID = 31, m_string1 = newCString("spwi408") })
     out("unrelated_combat_reimbursed", bool(countAvailable(combat, "spwi408") > 0))
 
-    local renewal = newSprite({})
+    local renewal = newSprite({ instantprep = 1 })
     memorize(renewal, "spwi408", 2)
     fireTick(renewal)
+    fireStarted(renewal, { m_actionID = 181, m_string1 = newCString("dwsw408") })
     setFirstAvailable(renewal, "spwi408", 0)
-    renewal.locals.CBR_TEST_INITIAL_PREBUFF = 0
-    fireStarted(renewal, { m_actionID = 181, m_string1 = newResRef("dwsw408") })
+    fireStarted(renewal, { m_actionID = 147, m_specificID = 2408 })
     out("renewal_reimbursed", bool(countAvailable(renewal, "spwi408") > 0))
 end
 
@@ -707,14 +779,14 @@ end
 scenarios.urgent_action_safety = function()
     local cases = {
         idle = { action = 0 },
-        wander = { action = 83 },
+        wander = { action = 85 },
         movement = { action = 23 },
         cast = { action = 31 },
         attack = { action = 3 },
         tactical = { action = 100 },
         dialogue = { action = 137 },
         cutscene = { action = 121 },
-        unknown_queue = { action = 0, queue = { { m_actionID = 999 } } },
+        unknown_queue = { action = 0, queueUnavailable = true },
     }
     for key, options in pairs(cases) do
         local sprite = urgentResult(options, { "spwi611" })
@@ -803,6 +875,7 @@ assert(runtimePath and scenarioName,
 reloadRuntime()
 out("tick_listeners", #tickListeners)
 out("started_action_listeners", #startedActionListeners)
+out("reset_listeners", #resetListeners)
 local marshalCount = 0
 for _ in pairs(marshalHandlers) do marshalCount = marshalCount + 1 end
 out("marshal_handlers", marshalCount)

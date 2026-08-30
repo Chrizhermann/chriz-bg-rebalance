@@ -217,8 +217,46 @@ class _RuntimeCase(unittest.TestCase):
                 observations[key] = value
         self.assertEqual(observations.get("tick_listeners"), "1", process.stdout)
         self.assertEqual(observations.get("started_action_listeners"), "1", process.stdout)
+        self.assertEqual(observations.get("reset_listeners"), "1", process.stdout)
         self.assertEqual(observations.get("marshal_handlers"), "1", process.stdout)
         return observations
+
+
+class AmbientReadinessRuntimeShellTests(_RuntimeCase):
+    def test_hot_reload_flags_and_independent_fault_fuses(self) -> None:
+        seen = self._run("runtime_shell")
+        self.assertEqual(seen["listeners_after_reload"], "1")
+        self.assertEqual(seen["started_after_reload"], "1")
+        self.assertEqual(seen["reset_after_reload"], "1")
+        self.assertEqual(seen["ambient_enable_gate"], "1")
+        self.assertEqual(seen["ambient_owner_gate"], "1")
+        self.assertEqual(seen["urgent_owner_independent"], "1")
+        self.assertEqual(seen["urgent_owner_gate"], "1")
+        self.assertEqual(seen["ambient_owner_independent"], "1")
+        self.assertEqual(seen["ambient_tracebacks"], "1")
+        self.assertEqual(seen["ambient_fused"], "1")
+        self.assertEqual(seen["urgent_after_ambient_fault"], "1")
+
+    def test_runtime_uses_the_proven_installed_binding_shapes(self) -> None:
+        source = PRODUCTION.read_text(encoding="ascii")
+        for required in (
+            "EEex_Sprite_AddQuickListCountsResetListener",
+            "EEex_RunWithStackManager",
+            'struct = "CAbilityId"',
+            "m_queuedActions",
+            "m_string1.m_pchData:get()",
+            "Infinity_GetInCutsceneMode",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, source)
+        for obsolete in (
+            "EEex_Sprite_GetSpellbookResetSerial",
+            "m_actionQueue",
+            "EEex_Sprite_IsInDialogue",
+            "EEex_GameState_IsCutsceneMode",
+        ):
+            with self.subTest(obsolete=obsolete):
+                self.assertNotIn(obsolete, source)
 
 
 class AmbientReadinessListenerTests(_RuntimeCase):
