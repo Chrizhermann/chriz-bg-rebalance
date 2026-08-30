@@ -264,3 +264,29 @@ explicit evidence files in this repository; audit reports were written outside t
    installed counter semantics; false weapon metadata and allowlisted SCS contexts remain
    the sole repair scope.
 6. Keep dragons and broader SCS AI redesign out of this component.
+
+## Implemented component 120
+
+The public WeiDU component is designated **120** with label
+`cbr_scs_sr_weapon_protection_semantics`. It requires BG2:EE/EET, SCS Smarter Mages 6030,
+the final loose SCS `SPELL.IDS`, every required symbolic mapping, and the installed SR alias
+where Improved Mantle and Moment of Prescience share a spell number. Missing target mods
+therefore `REQUIRE_PREDICATE`-skip; malformed mapped resources fail before mutation.
+
+The alias predicate deliberately does not pretend to prove spell mechanics. The shared
+semantic classifier remains authoritative: if the aliased spell has gained a genuine,
+deterministic self-applied opcode-120 protection in a future SR version, installation is a
+byte-no-op and reports zero changes.
+
+For the current proven mismatch, the component prints one summary containing exact metadata,
+first-round, renewal, chain-contingency, unknown-shape, and replacement counts. Its public
+synthetic-game tests cover the current SCS/SR combination, absent SCS, absent SR aliasing, a
+future restored Improved Mantle, an unknown target-like SCS block, reinstall byte stability,
+and complete WeiDU uninstall restoration. Non-common-mage scripts such as `bheye.bcs` remain
+outside the allowlist.
+
+The compiled-block isolation technique is a minimal namespaced adaptation of DavidW's SCS
+v35.21 `stratagems/sfo2e/alter_script.tph`; it is vendored so this tail component never loads
+another installed mod's implementation at runtime. Spell Revisions and Moment of Prescience
+are credited to Demivrgvs and the Gibberlings3 team. No active-game write or installation was
+performed while implementing component 120.

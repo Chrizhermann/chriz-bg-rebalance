@@ -21,7 +21,7 @@
     {
       "id": 4,
       "subject": "Wire and document component 120",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [3]
     },
     {
@@ -73,5 +73,5 @@
       "blockedBy": [11]
     }
   ],
-  "lastUpdated": "2026-08-30T06:15:48+09:00"
+  "lastUpdated": "2026-08-30T09:14:02+09:00"
 }

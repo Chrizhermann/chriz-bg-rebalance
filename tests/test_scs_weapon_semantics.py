@@ -1,8 +1,8 @@
-"""Hermetic binary and BCS tests for component 120.
+"""Hermetic binary, BCS, and public-installer tests for component 120.
 
 The checked-in BCS donors contain live-byte-identical target blocks.  Every
-WeiDU invocation in this module uses a temporary resource tree plus minimal
-IDS maps under --nogame; the active game is never consulted.
+WeiDU invocation in this module uses either a temporary resource tree under
+--nogame or a synthetic KEY/BIFF/TLK game; the active game is never consulted.
 """
 
 from __future__ import annotations
@@ -16,10 +16,15 @@ import unittest
 from pathlib import Path
 
 from tests.ie_formats import SplAbility, SplEffect, SplFile, read_spl, write_spl
+from tests.test_tempus_holy_power_installer import (
+    ONE_EMPTY_STRING_TLK,
+    _write_key_and_bif,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WEIDU = ROOT / "weidu.exe"
+SETUP_TP2 = ROOT / "setup-chriz-bg-rebalance.tp2"
 HARNESS = ROOT / "tests" / "weidu" / "scs_weapon_semantics_harness.tp2"
 PRODUCTION_TPA = (
     ROOT / "chriz-bg-rebalance" / "lib" / "scs_weapon_protection_semantics.tpa"
@@ -87,6 +92,113 @@ class HarnessResult:
             and (self.fixture.root / "CBR_TEST.OK").is_file()
             and "SUCCESSFULLY INSTALLED" in self.transcript
         )
+
+
+class ScsWeaponInstallerGame:
+    """Synthetic BG2EE game that exercises the real public component."""
+
+    def __init__(
+        self,
+        temporary: tempfile.TemporaryDirectory[str],
+        *,
+        scs_installed: bool = True,
+        **fixture_kwargs: object,
+    ) -> None:
+        self.temporary = temporary
+        self.root = Path(temporary.name) / "game"
+        self.root.mkdir()
+        self.override = self.root / "override"
+        self.override.mkdir()
+        self.fixture_root = Path(temporary.name) / "fixture"
+        self.ids = build_fixture(self.fixture_root, **fixture_kwargs)
+
+        shutil.copy2(SETUP_TP2, self.root / SETUP_TP2.name)
+        shutil.copytree(
+            ROOT / "chriz-bg-rebalance",
+            self.root / "chriz-bg-rebalance",
+        )
+        for source in self.fixture_root.iterdir():
+            if source.is_file():
+                shutil.copy2(source, self.override / source.name)
+        (self.override / "KIT.IDS").write_text(
+            "IDS V1.0\n0 NONE\n",
+            encoding="ascii",
+            newline="\n",
+        )
+
+        self.bif_path = _write_key_and_bif(
+            self.root,
+            (("OH6000", "ARE", b"synthetic BG2EE marker"),),
+        )
+        self.lang_tlk = self.root / "lang/en_US/dialog.tlk"
+        self.lang_tlk.parent.mkdir(parents=True)
+        self.lang_tlk.write_bytes(ONE_EMPTY_STRING_TLK)
+        self.root_tlk = self.root / "dialog.tlk"
+        self.root_tlk.write_bytes(ONE_EMPTY_STRING_TLK)
+        if scs_installed:
+            (self.root / "WeiDU.log").write_text(
+                "~STRATAGEMS/SETUP-STRATAGEMS.TP2~ #0 #6030 "
+                "// Smarter Mages\n",
+                encoding="ascii",
+                newline="\n",
+            )
+
+        self.before_override = _snapshot(
+            self.override,
+            exclude_harness=False,
+            casefold_paths=True,
+        )
+        self.stable_hashes = {
+            "key": _sha256(self.root / "chitin.key"),
+            "bif": _sha256(self.bif_path),
+            "lang_tlk": _sha256(self.lang_tlk),
+            "root_tlk": _sha256(self.root_tlk),
+        }
+
+    def run(self, *operation: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                str(WEIDU),
+                str(self.root / SETUP_TP2.name),
+                "--game",
+                str(self.root),
+                *operation,
+                "--language",
+                "0",
+                "--use-lang",
+                "en_US",
+                "--no-exit-pause",
+                "--quick-log",
+            ],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+
+    @staticmethod
+    def transcript(process: subprocess.CompletedProcess[str]) -> str:
+        return f"{process.stdout}\n{process.stderr}".strip()
+
+    def active_weidu_log(self) -> str:
+        path = self.root / "WeiDU.log"
+        if not path.exists():
+            return ""
+        return "\n".join(
+            line
+            for line in path.read_text(
+                encoding="utf-8",
+                errors="replace",
+            ).splitlines()
+            if not line.lstrip().startswith("//")
+        )
+
+    def assert_stable_inputs(self, testcase: unittest.TestCase) -> None:
+        testcase.assertEqual(self.stable_hashes["key"], _sha256(self.root / "chitin.key"))
+        testcase.assertEqual(self.stable_hashes["bif"], _sha256(self.bif_path))
+        testcase.assertEqual(self.stable_hashes["lang_tlk"], _sha256(self.lang_tlk))
+        testcase.assertEqual(self.stable_hashes["root_tlk"], _sha256(self.root_tlk))
 
 
 def _sha256(path: Path) -> str:
@@ -791,6 +903,150 @@ class ScsWeaponSemanticsTests(unittest.TestCase):
             ),
             before,
         )
+
+
+class ScsWeaponPublicInstallerTests(unittest.TestCase):
+    def _game(self, **kwargs: object) -> ScsWeaponInstallerGame:
+        temporary = tempfile.TemporaryDirectory(prefix="cbr-scs-installer-")
+        self.addCleanup(temporary.cleanup)
+        return ScsWeaponInstallerGame(temporary, **kwargs)
+
+    def _install(self, game: ScsWeaponInstallerGame) -> subprocess.CompletedProcess[str]:
+        process = game.run("--force-install-list", "120")
+        transcript = game.transcript(process)
+        self.assertEqual(0, process.returncode, transcript)
+        self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+        self.assertRegex(game.active_weidu_log(), r"(?m)#0\s+#120\b")
+        game.assert_stable_inputs(self)
+        return process
+
+    def test_public_component_repairs_only_proven_current_contexts(self) -> None:
+        game = self._game()
+        target = game.override / "SPWI808.SPL"
+        before_spell = read_spl(target)
+        untouched = {
+            name: (game.override / name).read_bytes()
+            for name in ("dw#mg103.bcs", "bheye.bcs", "dw#mgx.bcs")
+        }
+
+        installed = self._install(game)
+        transcript = game.transcript(installed)
+        self.assertIn("cbr 120:", transcript)
+        self.assertIn("metadata=3", transcript)
+        self.assertIn("first-round=1", transcript)
+        self.assertIn("renewal=1", transcript)
+        self.assertIn("chain=1", transcript)
+        self.assertIn("unknown=1", transcript)
+        self.assertIn("replacement=SPWI708", transcript)
+
+        after_spell = read_spl(target)
+
+        def false_metadata(effect: SplEffect) -> bool:
+            return (
+                (effect.opcode == 233 and effect.parameter1 == 2 and effect.parameter2 == 128)
+                or (
+                    effect.opcode == 328
+                    and effect.parameter1 == 1
+                    and effect.parameter2 in (64, 188)
+                )
+            )
+
+        self.assertEqual(after_spell.metadata_key(), before_spell.metadata_key())
+        self.assertEqual(after_spell.casting_effects, before_spell.casting_effects)
+        self.assertEqual(
+            tuple(effect.canonical() for effect in after_spell.abilities[0].effects),
+            tuple(
+                effect.canonical()
+                for effect in before_spell.abilities[0].effects
+                if not false_metadata(effect)
+            ),
+        )
+        for name, payload in untouched.items():
+            self.assertEqual((game.override / name).read_bytes(), payload, name)
+
+        first_round, _ = _roundtrip_bcs(game.override / "dw#mg100.bcs", game.override)
+        renewal, _ = _roundtrip_bcs(game.override / "dw#mg101.bcs", game.override)
+        chain, _ = _roundtrip_bcs(game.override / "dw#mg102.bcs", game.override)
+        self.assertNotIn("WIZARD_MOMENT_OF_PRESCIENCE", first_round)
+        self.assertNotIn("WIZARD_MOMENT_OF_PRESCIENCE", renewal)
+        self.assertNotIn("WIZARD_MOMENT_OF_PRESCIENCE", chain)
+        self.assertIn('ReallyForceSpellRES("dw#cc23",Myself)', chain)
+        self.assertIn("ReallyForceSpell(Myself,WIZARD_MANTLE)", chain)
+
+    def test_public_component_skips_absent_targets_and_noops_future_repairs(self) -> None:
+        cases = (
+            ("scs_absent", {"scs_installed": False, "scripts": False}, False),
+            ("sr_absent", {"sr_absent": True}, False),
+            ("future_improved_mantle", {"mop_layout": "future_true"}, True),
+        )
+        for name, kwargs, expect_install in cases:
+            with self.subTest(name=name):
+                game = self._game(**kwargs)
+                process = game.run("--force-install-list", "120")
+                transcript = game.transcript(process)
+                self.assertEqual(0, process.returncode, transcript)
+                if expect_install:
+                    self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+                    self.assertIn("metadata=0", transcript)
+                    self.assertIn("first-round=0", transcript)
+                    self.assertIn("renewal=0", transcript)
+                    self.assertIn("chain=0", transcript)
+                    self.assertRegex(game.active_weidu_log(), r"(?m)#0\s+#120\b")
+                else:
+                    self.assertNotIn("SUCCESSFULLY INSTALLED", transcript)
+                    self.assertIn("SKIPPING", transcript)
+                    self.assertNotRegex(game.active_weidu_log(), r"(?m)#0\s+#120\b")
+                self.assertEqual(
+                    _snapshot(
+                        game.override,
+                        exclude_harness=False,
+                        casefold_paths=True,
+                    ),
+                    game.before_override,
+                )
+                game.assert_stable_inputs(self)
+
+    def test_public_reinstall_is_stable_and_uninstall_restores_every_byte(self) -> None:
+        game = self._game()
+        self._install(game)
+        installed_tree = _snapshot(
+            game.override,
+            exclude_harness=False,
+            casefold_paths=True,
+        )
+
+        reinstalled = game.run(
+            "--force-uninstall-list",
+            "120",
+            "--force-install-list",
+            "120",
+        )
+        transcript = game.transcript(reinstalled)
+        self.assertEqual(0, reinstalled.returncode, transcript)
+        self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+        self.assertEqual(
+            _snapshot(
+                game.override,
+                exclude_harness=False,
+                casefold_paths=True,
+            ),
+            installed_tree,
+        )
+
+        removed = game.run("--force-uninstall-list", "120")
+        transcript = game.transcript(removed)
+        self.assertEqual(0, removed.returncode, transcript)
+        self.assertIn("SUCCESSFULLY REMOVED", transcript)
+        self.assertNotRegex(game.active_weidu_log(), r"(?m)#0\s+#120\b")
+        self.assertEqual(
+            _snapshot(
+                game.override,
+                exclude_harness=False,
+                casefold_paths=True,
+            ),
+            game.before_override,
+        )
+        game.assert_stable_inputs(self)
 
 
 if __name__ == "__main__":

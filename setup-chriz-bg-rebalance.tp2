@@ -16,6 +16,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/tempus_spec_apr.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/tempus_spec_apr_eeex.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/tempus_descriptions.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/scs_weapon_protection_semantics.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -199,6 +200,104 @@ COPY_EXISTING ~ribald.sto~ ~override~
     PATCH_PRINT ~cbr 101: Adventurer's Mart already sells scrl9z - nothing to do.~
   END
   BUT_ONLY
+
+BEGIN @120
+DESIGNATED 120
+GROUP @1100
+LABEL ~cbr_scs_sr_weapon_protection_semantics~
+
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9120
+REQUIRE_PREDICATE
+  (MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 6030)
+  @9121
+// SCS necessarily publishes its final SPELL.IDS to override. The production
+// library takes an explicit path so its exact parser is shared with the
+// hermetic fixture harness and never relies on a hardcoded SR resref.
+REQUIRE_PREDICATE
+  ((FILE_EXISTS_IN_GAME ~SPELL.IDS~) AND (FILE_EXISTS ~override/SPELL.IDS~))
+  @9122
+REQUIRE_PREDICATE
+  ((IDS_OF_SYMBOL (~spell~ ~WIZARD_PROTECTION_FROM_MAGIC_WEAPONS~) >= 2000)
+   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_PROTECTION_FROM_MAGIC_WEAPONS~) <= 2999)
+   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_MANTLE~) >= 2000)
+   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_MANTLE~) <= 2999)
+   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_MANTLE~) >= 2000)
+   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_MANTLE~) <= 2999)
+   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_MOMENT_OF_PRESCIENCE~) >= 2000)
+   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_MOMENT_OF_PRESCIENCE~) <= 2999)
+   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_ABSOLUTE_IMMUNITY~) >= 2000)
+   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_ABSOLUTE_IMMUNITY~) <= 2999)
+   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_BREACH~) >= 2000)
+   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_BREACH~) <= 2999)
+   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_DISPEL_MAGIC~) >= 2000)
+   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_DISPEL_MAGIC~) <= 2999))
+  @9123
+REQUIRE_PREDICATE
+  (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_MANTLE~)
+   = IDS_OF_SYMBOL (~spell~ ~WIZARD_MOMENT_OF_PRESCIENCE~))
+  @9125
+
+OUTER_SET cbr_120_pfmw_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_PROTECTION_FROM_MAGIC_WEAPONS~)
+OUTER_SET cbr_120_mantle_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_MANTLE~)
+OUTER_SET cbr_120_improved_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_MANTLE~)
+OUTER_SET cbr_120_mop_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_MOMENT_OF_PRESCIENCE~)
+OUTER_SET cbr_120_absolute_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_ABSOLUTE_IMMUNITY~)
+OUTER_SET cbr_120_breach_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_BREACH~)
+OUTER_SET cbr_120_dispel_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_DISPEL_MAGIC~)
+OUTER_SET cbr_120_pfmw_slot = cbr_120_pfmw_id - 2000
+OUTER_SET cbr_120_mantle_slot = cbr_120_mantle_id - 2000
+OUTER_SET cbr_120_improved_slot = cbr_120_improved_id - 2000
+OUTER_SET cbr_120_absolute_slot = cbr_120_absolute_id - 2000
+OUTER_SET cbr_120_breach_slot = cbr_120_breach_id - 2000
+OUTER_SET cbr_120_dispel_slot = cbr_120_dispel_id - 2000
+OUTER_SPRINT cbr_120_pfmw_resref ~SPWI%cbr_120_pfmw_slot%~
+OUTER_SPRINT cbr_120_mantle_resref ~SPWI%cbr_120_mantle_slot%~
+OUTER_SPRINT cbr_120_improved_resref ~SPWI%cbr_120_improved_slot%~
+OUTER_SPRINT cbr_120_absolute_resref ~SPWI%cbr_120_absolute_slot%~
+OUTER_SPRINT cbr_120_breach_resref ~SPWI%cbr_120_breach_slot%~
+OUTER_SPRINT cbr_120_dispel_resref ~SPWI%cbr_120_dispel_slot%~
+
+ACTION_IF !((FILE_EXISTS_IN_GAME ~%cbr_120_pfmw_resref%.SPL~)
+         AND (FILE_EXISTS_IN_GAME ~%cbr_120_mantle_resref%.SPL~)
+         AND (FILE_EXISTS_IN_GAME ~%cbr_120_improved_resref%.SPL~)
+         AND (FILE_EXISTS_IN_GAME ~%cbr_120_absolute_resref%.SPL~)
+         AND (FILE_EXISTS_IN_GAME ~%cbr_120_breach_resref%.SPL~)
+         AND (FILE_EXISTS_IN_GAME ~%cbr_120_dispel_resref%.SPL~)) BEGIN
+  FAIL @9124
+END
+
+// Materialize only the six classifier/counter roots. They are normally
+// already loose final resources after SR/SCS; COPY_EXISTING also makes the
+// public component work when one originates in a BIFF, while retaining
+// normal WeiDU backup and rollback behavior.
+ACTION_FOR_EACH cbr_120_root IN
+  ~%cbr_120_pfmw_resref%~
+  ~%cbr_120_mantle_resref%~
+  ~%cbr_120_improved_resref%~
+  ~%cbr_120_absolute_resref%~
+  ~%cbr_120_breach_resref%~
+  ~%cbr_120_dispel_resref%~
+BEGIN
+  COPY_EXISTING ~%cbr_120_root%.SPL~ ~override/%cbr_120_root%.SPL~
+END
+
+LAF cbr_apply_scs_weapon_protection_semantics
+  STR_VAR
+    resource_dir = ~override~
+    script_dir = ~override~
+    spell_ids = ~override/SPELL.IDS~
+    phase = ~full~
+  RET
+    cbr_120_mismatch = mismatch_detected
+    cbr_120_replacement = replacement_resref
+    cbr_120_metadata = metadata_removed
+    cbr_120_first = first_round_removed
+    cbr_120_renewal = renewal_removed
+    cbr_120_chain = chain_replaced
+    cbr_120_unknown = unknown_blocks
+END
+
+PRINT ~cbr 120: metadata=%cbr_120_metadata%; first-round=%cbr_120_first%; renewal=%cbr_120_renewal%; chain=%cbr_120_chain%; unknown=%cbr_120_unknown%; replacement=%cbr_120_replacement%.~
 
 // ============================================================
 // Class and kit revisions (400-499)

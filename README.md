@@ -28,6 +28,7 @@ reported upstream first (see `research/02-upstream-scs-report-draft.md`).
 |---|-------|-----------|--------|
 | 100 | SCS adjustments | Telekinetic Storm: restore save vs. spell for half damage (+ bypass Mirror Image) | ✅ implemented |
 | 101 | SCS adjustments | Restore five Freedom scrolls to the Adventurer's Mart | ✅ implemented |
+| 120 | SCS adjustments | Repair the SCS/SR false Improved Mantle weapon-protection semantics | ✅ implemented |
 | 2xx | SR adjustments | Cherry-picked Spell Revisions tweaks | 📋 planning (`docs/00-project-scope.md`) |
 | 3xx | Cross-cutting audits | e.g. generalized save-for-half audit | 📋 planning |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
@@ -47,6 +48,28 @@ ORs `save vs. spell (bit 0) + bypass mirror image (bit 24)` into the save-type f
 save-for-half damage effect, across all level-scaled ability headers. Idempotent.
 
 Full diagnosis: `research/01-telekinetic-storm-save-bug.md`.
+
+### Component 120 — SCS / Spell Revisions weapon-protection compatibility
+
+On the researched Spell Revisions install, both `WIZARD_IMPROVED_MANTLE` and
+`WIZARD_MOMENT_OF_PRESCIENCE` resolve to the same level-eight spell. Moment of Prescience
+does not grant weapon immunity, but SCS's generated common-mage scripts and detectable-spell
+metadata still treat that slot as if it did.
+
+Component 120 dynamically resolves the final `SPELL.IDS`, classifies the installed spells by
+their reachable opcode-120 effects, and repairs only three proven SCS contexts: false
+first-round and renewal choices are removed, while Chain Contingency keeps its generated
+helper and substitutes the closest lower genuine protection. Only the exact false metadata
+markers are removed; Moment of Prescience's real AC, saving-throw, duration, school, text,
+and other gameplay effects remain unchanged. Unknown script shapes are reported and left
+byte-identical.
+
+This is a compatibility repair, not a redesign of Moment of Prescience. If a later Spell
+Revisions version restores a genuine Improved Mantle at that mapping, the semantic
+classifier makes component 120 a byte-no-op. The compiled-block transformer is a small,
+namespaced adaptation of SCS v35.21's `alter_script.tph`; credit for the underlying AI and
+script system belongs to DavidW. Spell Revisions and Moment of Prescience are by Demivrgvs
+and the Gibberlings3 team.
 
 ### Components 401–403 — Cleric of Tempus Holy Power
 
@@ -80,8 +103,9 @@ target install's conventions) copy the WeiDU template as `Setup-chriz-bg-rebalan
 ./Setup-chriz-bg-rebalance.exe --force-install-list 401 --language 0 --no-exit-pause
 ```
 
-Use `100`, `101`, or exactly one of `401`/`402`/`403` as appropriate; the example selects the
-recommended Tempus mode.
+Use `100`, `101`, `120`, or exactly one of `401`/`402`/`403` as appropriate; the example
+selects the recommended Tempus mode. Install component 120 after the final Spell Revisions
+and SCS Smarter Mages components so it sees the effective spell and generated-script shapes.
 
 Always tail-install: append after the current last WeiDU.log entry. Never uninstall.
 

@@ -21,6 +21,13 @@ rationale, fully reversible, idempotent, testable without wrecking a live save.
   unintentional. Component restores the Adventurer's Mart five, idempotently; live saves
   with the store cached were patched directly (34 saves; backups kept). Diagnosis:
   `research/03`.
+- **120 — SCS / SR weapon-protection semantics** ✅ IMPLEMENTED, pending controlled live
+  deployment. On the researched SR install, `WIZARD_IMPROVED_MANTLE` aliases Moment of
+  Prescience, which has no weapon-immunity effect, while SCS metadata and three generated
+  common-mage contexts still treat it as physical protection. The component resolves final
+  spell symbols dynamically, classifies the actual SPL effects, removes only the false
+  metadata and proven first-round/renewal choices, and substitutes real Mantle in the proven
+  Chain Contingency shape. A future genuine Improved Mantle makes it a byte-no-op.
 - **Backlog:** catalog SCS components active in the target install + their balance
   touchpoints; identify small high-value tweaks. (Migrated from chriz-sod-rebalance "Part 3",
   which now points here.)
@@ -81,5 +88,7 @@ symbols; components idempotent + predicate-guarded. Follow CLAUDE.md.
 - [ ] SCS component catalog / touchpoint research (solo-able — see `docs/handover.md`)
 - [ ] SR wishlist session with user
 - [ ] Comp 100 formal tail-install into the live game (pending user sign-off)
+- [ ] Component 120 controlled tail-install and gameplay acceptance (implementation and
+      synthetic installer/uninstall verification complete; no active-game write yet)
 - [ ] Components 401–403 independent review and controlled live deployment (no active-game write
       has occurred during implementation)
