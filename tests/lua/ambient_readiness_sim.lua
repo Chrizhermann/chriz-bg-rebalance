@@ -612,6 +612,9 @@ end
 scenarios.runtime_legacy_missing_raw_time =
     scenarios.runtime_missing_game_time
 
+scenarios.runtime_v12_missing_method =
+    scenarios.runtime_missing_game_time
+
 scenarios.runtime_legacy_v011_surface = function()
     local sprite = newSprite({})
     memorize(sprite, "spwi408")
@@ -699,6 +702,9 @@ scenarios.runtime_missing_game_time_callbacks = function()
     importedLedger(import_sprite, { version = 1, spells = {} })
     out("import_aux_created", bool(auxBySprite[import_sprite] ~= nil))
 end
+
+scenarios.runtime_legacy_missing_raw_time_callbacks =
+    scenarios.runtime_missing_game_time_callbacks
 
 scenarios.runtime_shell = function()
     reloadRuntime()
@@ -1259,12 +1265,16 @@ elseif scenarioName == "runtime_missing_game_time"
 elseif scenarioName == "runtime_legacy_v011_surface"
         or scenarioName == "runtime_legacy_repeated_callbacks"
         or scenarioName == "runtime_legacy_marshal_exports"
-        or scenarioName == "runtime_legacy_missing_raw_time" then
+        or scenarioName == "runtime_legacy_missing_raw_time"
+        or scenarioName == "runtime_legacy_missing_raw_time_callbacks" then
     EEex_Opcode_AddDeferredListsResolvedListener = nil
     fakeWorldTime.GetCurrentTime = nil
-    if scenarioName == "runtime_legacy_missing_raw_time" then
+    if scenarioName == "runtime_legacy_missing_raw_time"
+            or scenarioName == "runtime_legacy_missing_raw_time_callbacks" then
         fakeWorldTime.m_gameTime = nil
     end
+elseif scenarioName == "runtime_v12_missing_method" then
+    fakeWorldTime.GetCurrentTime = nil
 end
 reloadRuntime()
 out("tick_listeners", #deferredTickListeners + #legacyTickListeners)

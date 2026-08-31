@@ -38,6 +38,20 @@ _G.CBR_RDY_STATE = _G.CBR_RDY_STATE or {
 local state = _G.CBR_RDY_STATE
 state.generation = flag(state.generation, 0) + 1
 
+-- EEex v1.2 coalesces ProcessEffectList callbacks through the deferred
+-- listener.  Older releases expose only the synchronous listener.  Select a
+-- single coherent listener/clock pair; never mix the old clock into v1.2.
+local tick_listener_mode
+local add_tick_listener
+if type(EEex_Opcode_AddDeferredListsResolvedListener) == "function" then
+    tick_listener_mode = "deferred"
+    add_tick_listener = EEex_Opcode_AddDeferredListsResolvedListener
+elseif type(EEex_Opcode_AddListsResolvedListener) == "function" then
+    tick_listener_mode = "legacy"
+    add_tick_listener = EEex_Opcode_AddListsResolvedListener
+end
+state.tick_listener_mode = tick_listener_mode or "unsupported"
+
 local function owner_has(bit)
     local value = flag(CBR_RDY_EXTERNAL_OWNER, 0)
     if EEex_BAnd then return EEex_BAnd(value, bit) ~= 0 end
@@ -199,11 +213,17 @@ local function game_time_ticks()
     local ok, value = pcall(function()
         local world_time =
             EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime
-        return world_time:GetCurrentTime()
+        if tick_listener_mode == "deferred" then
+            return world_time:GetCurrentTime()
+        end
+        if tick_listener_mode == "legacy" then
+            return world_time.m_gameTime
+        end
+        error("no supported EEex tick listener")
     end)
     local ticks = ok and tonumber(value) or nil
     if not ticks or ticks < 0 then
-        error("EEex v1.2 world-time binding is unavailable")
+        error("selected EEex world-time binding is unavailable")
     end
     return ticks
 end
@@ -859,6 +879,11 @@ local function invoke(layer, event, ...)
     if not ok then disable_layer(layer, traceback) end
 end
 
+local function marshal_export_result(value)
+    if tick_listener_mode == "legacy" and value == nil then return {} end
+    return value
+end
+
 _G.CBR_RDY_HANDLERS = {
     ambient_tick = ambient_tick,
     ambient_action = ambient_action,
@@ -884,16 +909,20 @@ _G.CBR_RDY_TRAMPOLINES = {
         invoke("urgent", "reset", sprite)
     end,
     export = function(sprite)
-        if not layer_enabled("ambient") then return nil end
+        if not layer_enabled("ambient") then
+            return marshal_export_result(nil)
+        end
         local handlers = _G.CBR_RDY_HANDLERS
         local callback = handlers and handlers.ambient_export
-        if type(callback) ~= "function" then return nil end
+        if type(callback) ~= "function" then
+            return marshal_export_result(nil)
+        end
         local result = nil
         local ok, traceback = xpcall(function()
             result = callback(sprite)
         end, debug.traceback)
         if not ok then disable_layer("ambient", traceback) end
-        return result
+        return marshal_export_result(result)
     end,
     import = function(sprite, saved)
         invoke("ambient", "import", sprite, saved)
@@ -908,8 +937,7 @@ local function apis_available(entries)
 end
 
 local shared_supported = apis_available({
-    { "EEex_Opcode_AddDeferredListsResolvedListener",
-        EEex_Opcode_AddDeferredListsResolvedListener },
+    { "selected EEex lists-resolved listener", add_tick_listener },
     { "EEex_Action_AddSpriteStartedActionListener", EEex_Action_AddSpriteStartedActionListener },
     { "EEex_GameObject_Get", EEex_GameObject_Get },
     { "EEex_GetUDAux", EEex_GetUDAux },
@@ -952,7 +980,7 @@ end
 
 if shared_supported and (ambient_supported or urgent_supported)
         and not _G.CBR_RDY_TICK_ACTION_LISTENERS_REGISTERED then
-    EEex_Opcode_AddDeferredListsResolvedListener(function(sprite)
+    add_tick_listener(function(sprite)
         local current = _G.CBR_RDY_TRAMPOLINES
         if current and current.tick then current.tick(sprite) end
     end)
@@ -973,7 +1001,7 @@ if ambient_supported and not _G.CBR_RDY_AMBIENT_STATE_LISTENERS_REGISTERED then
         function(sprite)
             local current = _G.CBR_RDY_TRAMPOLINES
             if current and current.export then return current.export(sprite) end
-            return nil
+            return marshal_export_result(nil)
         end,
         function(sprite, saved)
             local current = _G.CBR_RDY_TRAMPOLINES

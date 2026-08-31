@@ -535,6 +535,9 @@ BEGIN
     runtime_profile = {
         target_eeex_version = "1.2.0",
         primary_tick_listener = "EEex_Opcode_AddDeferredListsResolvedListener",
+        legacy_tick_listener = "EEex_Opcode_AddListsResolvedListener",
+        legacy_game_time_accessor = "m_worldTime.m_gameTime",
+        legacy_nil_marshal_export = "empty_table",
         game_time_unit = "engine_ticks",
         game_time_ticks_per_second = 15,
         source_verified_on = "2026-08-31",
@@ -710,6 +713,9 @@ BEGIN
     PATCH_IF (INDEX_BUFFER (~CBR_RDY_MANIFEST~) >= 0
            || INDEX_BUFFER (~schema_version = 1~) < 0
            || INDEX_BUFFER (~target_eeex_version = "1.2.0"~) < 0
+           || INDEX_BUFFER (~legacy_tick_listener = "EEex_Opcode_AddListsResolvedListener"~) < 0
+           || INDEX_BUFFER (~legacy_game_time_accessor = "m_worldTime.m_gameTime"~) < 0
+           || INDEX_BUFFER (~legacy_nil_marshal_export = "empty_table"~) < 0
            || INDEX_BUFFER (~project_image_resref = "~) < 0
            || INDEX_BUFFER (~ambient_spells = {~) < 0
            || INDEX_BUFFER (~urgent_candidates = {~) < 0
@@ -724,6 +730,9 @@ BEGIN
     PATCH_IF (INDEX_BUFFER (~CBR_RDY_MANIFEST~) >= 0
            || INDEX_BUFFER (~schema_version = 1~) < 0
            || INDEX_BUFFER (~target_eeex_version = "1.2.0"~) < 0
+           || INDEX_BUFFER (~legacy_tick_listener = "EEex_Opcode_AddListsResolvedListener"~) < 0
+           || INDEX_BUFFER (~legacy_game_time_accessor = "m_worldTime.m_gameTime"~) < 0
+           || INDEX_BUFFER (~legacy_nil_marshal_export = "empty_table"~) < 0
            || INDEX_BUFFER (~project_image_resref = "~) < 0) BEGIN
       PATCH_FAIL ~CBR ambient readiness shipped runtime failed post-write verification.~
     END

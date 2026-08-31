@@ -81,13 +81,13 @@
     {
       "id": 14,
       "subject": "Implement the capability-selected runtime and probe adapter",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [13]
     },
     {
       "id": 15,
       "subject": "Record evidence, review, and verify without installing",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [14]
     }
   ],

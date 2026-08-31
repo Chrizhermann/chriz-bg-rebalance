@@ -625,6 +625,18 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
         source = path.read_text(encoding="ascii")
         self.assertNotIn("%CBR_RDY_MANIFEST%", source)
         self.assertIn('target_eeex_version = "1.2.0"', source)
+        self.assertIn(
+            'primary_tick_listener = "EEex_Opcode_AddDeferredListsResolvedListener"',
+            source,
+        )
+        self.assertIn(
+            'legacy_tick_listener = "EEex_Opcode_AddListsResolvedListener"',
+            source,
+        )
+        self.assertIn(
+            'legacy_game_time_accessor = "m_worldTime.m_gameTime"', source
+        )
+        self.assertIn('legacy_nil_marshal_export = "empty_table"', source)
         self.assertNotIn("requires_base_component", source)
         self.assertNotIn("requires_luajit_component", source)
         self.assertIn('project_image_resref = "spwi703"', source)

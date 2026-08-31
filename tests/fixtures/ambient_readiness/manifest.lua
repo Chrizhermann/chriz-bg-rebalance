@@ -5,6 +5,16 @@
 -- every row from the target game's SPELL.IDS and instant-prebuff mapping.
 return {
     schema_version = 1,
+    runtime_profile = {
+        target_eeex_version = "1.2.0",
+        primary_tick_listener = "EEex_Opcode_AddDeferredListsResolvedListener",
+        legacy_tick_listener = "EEex_Opcode_AddListsResolvedListener",
+        legacy_game_time_accessor = "m_worldTime.m_gameTime",
+        legacy_nil_marshal_export = "empty_table",
+        game_time_unit = "engine_ticks",
+        game_time_ticks_per_second = 15,
+        source_verified_on = "2026-08-31",
+    },
     minimum_duration = 2400,
     maintenance_cadence_ticks = 15,
     contact_rearm_seconds = 6,

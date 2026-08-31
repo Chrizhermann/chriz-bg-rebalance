@@ -94,6 +94,12 @@ class AmbientReadinessAssetTests(unittest.TestCase):
         script = (
             f"local m=dofile([[{MANIFEST.resolve().as_posix()}]]);"
             "assert(m.schema_version==1);"
+            "assert(m.runtime_profile.target_eeex_version=='1.2.0');"
+            "assert(m.runtime_profile.legacy_tick_listener=="
+            "'EEex_Opcode_AddListsResolvedListener');"
+            "assert(m.runtime_profile.legacy_game_time_accessor=="
+            "'m_worldTime.m_gameTime');"
+            "assert(m.runtime_profile.legacy_nil_marshal_export=='empty_table');"
             "assert(m.defaults.ambient_enabled==1);"
             "assert(m.defaults.urgent_enabled==1);"
             "assert(m.defaults.external_owner==0);"
@@ -173,7 +179,7 @@ class AmbientReadinessAssetTests(unittest.TestCase):
         self.assertIn("EEex_Sprite_GetState(sprite)", source)
         self.assertIn('"project_image=" .. project_image_relation(sprite)', source)
 
-    def test_probe_uses_the_v12_world_time_binding_without_silent_fallback(self) -> None:
+    def test_probe_prefers_v12_and_uses_only_the_verified_legacy_fallback(self) -> None:
         source = PROBE.read_text(encoding="ascii")
         self.assertIn(
             "EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime", source
@@ -183,6 +189,10 @@ class AmbientReadinessAssetTests(unittest.TestCase):
         self.assertIn("time_ticks", source)
         self.assertIn("time_seconds", source)
         self.assertIn("EEex_Opcode_AddDeferredListsResolvedListener", source)
+        self.assertIn("EEex_Opcode_AddListsResolvedListener", source)
+        self.assertIn("return world_time.m_gameTime", source)
+        self.assertIn('tick_listener_mode == "deferred"', source)
+        self.assertIn('tick_listener_mode == "legacy"', source)
         self.assertNotIn("EEex_GameState_GetTime", source)
         self.assertNotIn("Infinity_GetGameTime", source)
         self.assertNotIn("os.clock()", source)
@@ -357,6 +367,14 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         self.assertEqual(seen["deferred_tick_listeners"], "1")
         self.assertEqual(seen["legacy_tick_listeners"], "0")
 
+    def test_current_listener_never_falls_back_to_the_legacy_clock_field(self) -> None:
+        seen = self._run("runtime_v12_missing_method")
+        self.assertEqual(seen["ambient_applications"], "0")
+        self.assertEqual(seen["ambient_available"], "1")
+        self.assertEqual(seen["urgent_queues"], "0")
+        self.assertEqual(seen["ambient_faulted"], "1")
+        self.assertEqual(seen["urgent_faulted"], "1")
+
     def test_legacy_surface_selects_one_old_listener_and_still_operates(self) -> None:
         seen = self._run(
             "runtime_legacy_v011_surface",
@@ -381,6 +399,17 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         self.assertEqual(seen["sprite_aux_created"], "0")
         self.assertEqual(seen["classification_cached"], "0")
         self.assertEqual(seen["ambient_session_cached"], "0")
+
+    def test_missing_legacy_raw_time_blocks_every_state_callback(self) -> None:
+        seen = self._run(
+            "runtime_legacy_missing_raw_time_callbacks",
+            expected_deferred_listeners="0",
+            expected_legacy_listeners="1",
+        )
+        self.assertEqual(seen["action_aux_created"], "0")
+        self.assertEqual(seen["reset_aux_created"], "0")
+        self.assertEqual(seen["export_aux_created"], "0")
+        self.assertEqual(seen["import_aux_created"], "0")
 
     def test_repeated_legacy_callbacks_do_not_repeat_mutations(self) -> None:
         seen = self._run(

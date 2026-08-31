@@ -23,15 +23,32 @@ probe.selected_casts = probe.selected_casts or {}
 
 local GAME_TIME_TICKS_PER_SECOND = 15
 
+local tick_listener_mode
+local add_tick_listener
+if type(EEex_Opcode_AddDeferredListsResolvedListener) == "function" then
+    tick_listener_mode = "deferred"
+    add_tick_listener = EEex_Opcode_AddDeferredListsResolvedListener
+elseif type(EEex_Opcode_AddListsResolvedListener) == "function" then
+    tick_listener_mode = "legacy"
+    add_tick_listener = EEex_Opcode_AddListsResolvedListener
+end
+probe.tick_listener_mode = tick_listener_mode or "unsupported"
+
 local function game_time_ticks()
     local ok, value = pcall(function()
         local world_time =
             EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime
-        return world_time:GetCurrentTime()
+        if tick_listener_mode == "deferred" then
+            return world_time:GetCurrentTime()
+        end
+        if tick_listener_mode == "legacy" then
+            return world_time.m_gameTime
+        end
+        error("no supported EEex tick listener")
     end)
     local ticks = ok and tonumber(value) or nil
     if not ticks or ticks < 0 then
-        error("EEex v1.2 world-time binding is unavailable")
+        error("selected EEex world-time binding is unavailable")
     end
     return ticks
 end
@@ -397,7 +414,7 @@ local function reset_callback(sprite)
 end
 
 function probe.install()
-    if not (EEex_Opcode_AddDeferredListsResolvedListener
+    if not (add_tick_listener
             and EEex_Action_AddSpriteStartedActionListener
             and EEex_Sprite_AddQuickListCountsResetListener) then
         return false, "required listener APIs unavailable"
@@ -410,7 +427,7 @@ function probe.install()
         probe.active = 1
     end
     if probe.listeners_registered ~= 1 then
-        EEex_Opcode_AddDeferredListsResolvedListener(function(sprite)
+        add_tick_listener(function(sprite)
             local ok, err = xpcall(function() tick_callback(sprite) end, debug.traceback)
             if not ok then log("tick_error", err) end
         end)
