@@ -75,10 +75,11 @@ but root-guarded, and `CBR_RDY_PROBE.teardown()` makes them inert. The probe kee
 and observations only in memory and exposes them through `dump()`; it has no file, resource,
 save, or installer write path.
 
-The checked-in probe has been corrected to require the v1.2 world timer and deferred
-listener before activation. The 2026-08-30 execution used the older `os.clock()` fallback;
-its numerical timestamps remain invalid even though the current file no longer contains
-that fallback.
+The checked-in probe now capability-selects one verified listener/clock pair before
+activation: v1.2 deferred + `GetCurrentTime()` first, or legacy synchronous + direct
+`m_gameTime` only when deferred is absent. The 2026-08-30 execution used the older
+`os.clock()` fallback; its numerical timestamps remain invalid even though the current file
+no longer contains that fallback.
 
 The only mutating helpers are explicit controlled experiments:
 
@@ -154,8 +155,9 @@ reimbursement, normal urgent casting and interruption, passive-only queue displa
 Project Image exclusion, bounded retry, contact rearm, hot reload, ownership flags, marshal
 shape, recycled engine-object IDs, incomplete effect-list fail-closed behavior, and
 independent fault fuses. The v1.2 path is source- and simulation-verified; live v1.2
-deployment and gameplay acceptance remain a separate user-approval checkpoint. Older-EEex
-listener fallback is a later task.
+deployment and gameplay acceptance remain a separate user-approval checkpoint. The
+source/simulator-verified older-EEex capability fallback is implemented, but its corrected
+live test remains a later, separately approved stage after v1.2 acceptance.
 
 ## 1. How SCS 35.21 pre-buffs in this install (verified)
 
@@ -242,8 +244,11 @@ Ambient-eligible ⇒ the "expect trouble" package is Stoneskin/Ironskins + MI + 
   `EEex_Trigger_EvalConditionalStringAsAIBase('See([PC])', sprite)` / `Detect`, objects via
   `EEex_Object_EvalStringAsAIBase`; in-range via `forAllOfTypeStringInRange('[PC]',448,…)`
   (**never pass CGameObjectType ints — hard crash**).
-- **Periodic:** `EEex_Opcode_AddListsResolvedListener` = once per AI tick per sprite (stats
-  rebuilt every 15th pass — `research/07`); keep per-tick work O(1) and absolute.
+- **Periodic:** old `EEex_Opcode_AddListsResolvedListener` fires synchronously for each
+  resolved effect-list occurrence and can repeat around one sprite AI pass; v1.2's
+  `EEex_Opcode_AddDeferredListsResolvedListener` coalesces that to at most once per sprite AI
+  tick. Stats are rebuilt only every 15th fast-path pass or on `m_newEffect` (`research/07`),
+  so keep callback work O(1), elapsed logic on raw game time, and mutations idempotent.
 - **Slot economy:** memorized lists are bound (`m_memorizedSpellsMage/Priest`, records with
   `m_flags` bit0 = available; `CheckQuickLists`). Decrement from Lua = clear bit0 +
   `CheckQuickLists(id,-1,0,0)` — **probable, untested on v0.11**. Alternative: queue

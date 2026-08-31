@@ -92,8 +92,9 @@ before gameplay mutation. That failed pass is diagnostic evidence, not acceptanc
 
 ## Implementation correction
 
-- Production and probe code now use the documented world-timer method with no silent clock
-  fallback.
+- The selected v1.2 production/probe path uses the documented world-timer method with no
+  silent rescue clock. A later legacy branch deliberately uses the separately source-verified
+  direct field only when the deferred listener is absent.
 - All duration seconds are converted to raw ticks at the comparison boundary.
 - v1.2's deferred listener is primary; the legacy listener is not registered on the current
   path.
@@ -113,9 +114,9 @@ schema remains version 1 because the old production runtime required the nonexis
 global in its registration gate: on a real EEex process it registered neither gameplay
 callbacks nor marshal handlers and therefore could not create or save a version-1 ledger.
 The failed disposable-lab pass confirmed that inert path. There is consequently no real-save
-seconds-based ledger to migrate. If an older-version fallback later introduces a genuinely
-deployable alternate clock contract, it must either preserve this raw-tick unit or bump the
-ledger schema before accepting saved records.
+seconds-based ledger to migrate. The later legacy fallback preserves the same raw-tick unit,
+so no schema bump is needed; its separate evidence is recorded in
+`research/12-eeex-legacy-readiness-fallback.md`.
 
 ## RED/GREEN evidence
 
@@ -149,7 +150,8 @@ advances at 15 ticks per gameplay second, and run the urgent/ambient matrix in t
 checklist. The old v0.11 callback and sticky fault state must not be hot-reloaded into that
 test.
 
-Older EEex support is second priority. Historical source suggests the world-time field is
-available, but versions without the v1.2 deferred listener require a separately tested
-fallback to `EEex_Opcode_AddListsResolvedListener`. That fallback is intentionally not part
-of the current v1.2-first change.
+Older EEex support remains second priority. A later capability adapter now selects
+`EEex_Opcode_AddListsResolvedListener` plus direct `m_worldTime.m_gameTime` only when the
+deferred listener is absent. It has official-source and fake-runtime coverage, including
+repeated synchronous callbacks and v0.11's table-only marshal exporter contract, but no
+corrected old-version live pass. The v1.2 stage above remains first.

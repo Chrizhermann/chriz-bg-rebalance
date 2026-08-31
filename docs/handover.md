@@ -9,7 +9,7 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-instal
 Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
 `docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `AGENTS.md`.
 
-## Status (2026-08-31) — component 121 corrected for EEex v1.2
+## Status (2026-08-31) — component 121 corrected v1.2-first, with legacy fallback
 
 - **The first manual laboratory pass correctly failed acceptance:** component 121 was
   installed on the disposable `C:\Games\BGSE-AOE-PREBUFF-LAB-20260830` copy, but nearby
@@ -31,14 +31,27 @@ Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Ap
   gameplay target. No game install, launch, or save mutation was performed for this fix.
   The next live pass needs a disposable SCS/SR install running EEex v1.2 and a full process
   restart so the old append-only callback/fault state cannot survive.
-- **Fresh verification:** all 61 component-121 suites and all 221 repository tests pass;
-  WeiDU 24900 parses the TP2 successfully and `git diff --check` is clean.
-- **Older-EEex fallback is deliberately deferred.** Official historical source shows the
-  same world-time field, but versions without the v1.2 deferred listener need a separately
-  tested listener fallback. Do not weaken the current v1.2 path to claim that support.
+- **Fresh verification:** all 68 component-121 suites and all 228 repository tests pass;
+  an independent 51-case runtime stress review found no Critical or Important issue; WeiDU
+  24900 parses the TP2 successfully, `git diff --check` is clean, and no Baldur/InfinityLoader
+  process remains.
+- **The older-EEex fallback is now implemented without weakening v1.2.** Runtime capability
+  selection prefers `EEex_Opcode_AddDeferredListsResolvedListener` plus
+  `m_worldTime:GetCurrentTime()`. Only when deferred is absent does it register
+  `EEex_Opcode_AddListsResolvedListener` and read the official historical
+  `m_worldTime.m_gameTime` field. It never registers both; a missing method on the current
+  path fails closed instead of borrowing the legacy field. Repeated synchronous callbacks
+  are regression-tested against duplicate application, debit, and urgent queueing. On v0.11,
+  inactive/faulted/external-owner marshal exports normalize to `{}` because that release
+  rejects non-table exporters.
+- **Legacy support is source/simulator evidence, not corrected live acceptance.** The old
+  laboratory pass ran the broken clock-gated build. Run the fresh v1.2 matrix first; only
+  after it passes and the user separately approves an old-version stage should the fallback
+  be tested in a fresh old-EEex process.
 
-See `research/11-eeex-v1.2-readiness-compatibility.md` for provenance, official references,
-and RED/GREEN evidence.
+See `research/11-eeex-v1.2-readiness-compatibility.md` and
+`research/12-eeex-legacy-readiness-fallback.md` for provenance, official references, and
+RED/GREEN evidence.
 
 ## Status (2026-08-30) — original offline implementation checkpoint
 
@@ -165,7 +178,7 @@ session — always `--exclude` them.
 
 ## Work queue
 
-0. **Finish component 121's EEex v1.2 acceptance before older-version fallback.** The
+0. **Finish component 121's EEex v1.2 acceptance before older-version live testing.** The
    complete staged evidence, rollback boundary, gameplay matrix, and process/IPC cleanup
    procedure is in `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`. Do not
    install, launch, mutate a save, or deploy either component without a fresh approval for

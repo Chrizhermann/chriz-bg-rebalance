@@ -87,9 +87,9 @@
     {
       "id": 15,
       "subject": "Record evidence, review, and verify without installing",
-      "status": "in_progress",
+      "status": "completed",
       "blockedBy": [14]
     }
   ],
-  "lastUpdated": "2026-08-31T17:44:00+09:00"
+  "lastUpdated": "2026-08-31T17:55:44+09:00"
 }

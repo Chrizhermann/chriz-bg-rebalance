@@ -8,8 +8,9 @@ game directory, components, installer commit, and throwaway save.
 Current acceptance target (2026-08-31): **EEex v1.2 first**. The earlier component-121
 manual pass on `C:\Games\BGSE-AOE-PREBUFF-LAB-20260830` used v0.11 and correctly failed—no
 readiness effects appeared because the runtime referenced a nonexistent clock API. Do not
-treat that pass or the old probe's `os.clock()` latency values as acceptance. Older-version
-fallback is a later stage after v1.2 passes.
+treat that pass or the old probe's `os.clock()` latency values as acceptance. A
+source/simulator-verified older-version fallback now exists, but its live stage remains
+strictly later than a successful v1.2 pass and needs separate approval.
 
 The active-game reference is
 `C:\Games\Baldur's Gate II Enhanced Edition modded\`. Existing WeiDU components are never
@@ -106,8 +107,10 @@ Before loading the throwaway save:
 
 1. inspect the stamped runtime and confirm `target_eeex_version = "1.2.0"`,
    `game_time_unit = "engine_ticks"`, and `game_time_ticks_per_second = 15`;
-2. confirm it registers `EEex_Opcode_AddDeferredListsResolvedListener` and contains neither
-   `EEex_GameState_GetTime`, `Infinity_GetGameTime`, nor `os.clock()`;
+2. confirm the fresh v1.2 process selects exactly one
+   `EEex_Opcode_AddDeferredListsResolvedListener`, reports
+   `CBR_RDY_STATE.tick_listener_mode == "deferred"`,
+   and contains neither `EEex_GameState_GetTime`, `Infinity_GetGameTime`, nor `os.clock()`;
 3. start a completely fresh InfinityLoader/game process—hot reload is insufficient after
    the old append-only callback or sticky fail-closed state has existed; and
 4. through the approved session probe, read
@@ -171,7 +174,31 @@ Also capture one controlled unsupported/fault case per layer if the approved tes
 do so safely. The affected layer must become inert and log at most one diagnostic/traceback;
 the sibling layer must continue. Do not inject faults into the active playthrough.
 
-## 5. After-state comparison and cleanup
+## 5. Stage C — separately approved older-EEex fallback
+
+Do not begin this stage merely because Stage B passed. Obtain separate approval for the exact
+old-EEex test directory and version, close the v1.2 process, and start a fresh old-EEex
+process. Never hot-reload between API surfaces.
+
+Before any slot-mutating case, prove and record:
+
+1. `EEex_Opcode_AddDeferredListsResolvedListener` is absent and
+   `EEex_Opcode_AddListsResolvedListener` is present;
+2. exactly one old listener is registered and
+   `CBR_RDY_STATE.tick_listener_mode == "legacy"`;
+3. `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime.m_gameTime` advances as raw
+   15-Hz gameplay ticks;
+4. removing/unavailable raw time fails closed before UDAux, ledger, effect, debit, or queue
+   mutation; and
+5. disabled, faulted, and externally owned ambient marshal exports are empty tables, never
+   `nil`.
+
+Then rerun the urgent and ambient matrices on a newly restored throwaway save. Include a
+repeated-callback observation and require exactly one first ambient application/debit and one
+urgent queue per contact episode. Record this as a separate legacy result; it cannot upgrade
+or replace the v1.2 result.
+
+## 6. After-state comparison and cleanup
 
 At the end of each stage, create a new timestamped after-manifest with the same scope as the
 before bundle and produce a path-by-path hash diff. Distinguish expected installer changes,
@@ -196,7 +223,7 @@ Do not delete evidence or an unexpected changed file to make the comparison clea
 target differs outside the approved mutation set, stop and report it with hashes. No rollback,
 uninstall, real-save repair, branch merge, or release follows implicitly from this checklist.
 
-## 6. Pass report and deployment boundary
+## 7. Pass report and deployment boundary
 
 The acceptance report must name the exact commit and include:
 

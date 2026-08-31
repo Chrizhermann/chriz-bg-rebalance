@@ -35,8 +35,10 @@ Spell Revisions, BG2:EE + EET.
 > target official EEex v1.2 first: use
 > `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime:GetCurrentTime()` as raw 15-Hz
 > engine ticks and `EEex_Opcode_AddDeferredListsResolvedListener` as the primary tick hook.
-> Runtime capability checks—not WeiDU component numbers—are authoritative. Older listener
-> fallback follows only after a successful v1.2 live pass. See `research/11-eeex-v1.2-readiness-compatibility.md`.
+> Runtime capability checks—not WeiDU component numbers—are authoritative. The older
+> listener fallback is a separate second implementation checkpoint after the v1.2
+> correction; live acceptance remains ordered v1.2 first and older EEex only afterwards.
+> See `research/11-eeex-v1.2-readiness-compatibility.md`.
 
 **Safety boundary:** The active game at
 `C:\Games\Baldur's Gate II Enhanced Edition modded\` is read-only throughout normal

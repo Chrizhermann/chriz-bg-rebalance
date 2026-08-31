@@ -676,6 +676,8 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
         source = self._runtime(game)
         self.assertIn("ambient=6", transcript)
         self.assertIn("urgent=4", transcript)
+        self.assertIn("EEex v1.2-first", transcript)
+        self.assertIn("legacy capability fallback enabled", transcript)
         self.assertEqual(
             self._urgent_genuine(source, "WIZARD_IMPROVED_MANTLE"), 0
         )

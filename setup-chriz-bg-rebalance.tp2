@@ -337,7 +337,7 @@ LAF cbr_install_ambient_readiness_runtime
     cbr_121_urgent_count = urgent_count
 END
 
-PRINT ~cbr 121: shipped M_CBRRDY.lua (ambient=%cbr_121_ambient_count%; urgent=%cbr_121_urgent_count%; targets EEex v1.2.0 APIs with runtime capability gates).~
+PRINT ~cbr 121: shipped M_CBRRDY.lua (ambient=%cbr_121_ambient_count%; urgent=%cbr_121_urgent_count%; EEex v1.2-first; legacy capability fallback enabled).~
 
 // ============================================================
 // Class and kit revisions (400-499)

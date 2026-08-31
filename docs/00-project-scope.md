@@ -28,14 +28,17 @@ rationale, fully reversible, idempotent, testable without wrecking a live save.
   spell symbols dynamically, classifies the actual SPL effects, removes only the false
   metadata and proven first-round/renewal choices, and substitutes real Mantle in the proven
   Chain Contingency shape. A future genuine Improved Mantle makes it a byte-no-op.
-- **121 — EEex ambient readiness bridge** ✅ IMPLEMENTED FOR EEex v1.2, pending controlled
-  v1.2 live acceptance. A stamped, hot-reload-safe EEex module gives recognized SCS casters honest
-  long-duration readiness (one real memorized copy per genuine spellbook reset) and one
-  normal, interruptible first-contact weapon-protection cast. Natural expiry can be
-  maintained only while safely out of combat; dispel/early loss suppresses maintenance.
-  Unknown queues and Project Image states fail closed. Ambient and urgent ownership can be
-  retired independently when the user's future full EEex AI takes over. Component 121
-  changes no SPL or BCS resource.
+- **121 — EEex ambient readiness bridge** ✅ IMPLEMENTED v1.2-FIRST WITH LEGACY FALLBACK,
+  pending controlled v1.2 live acceptance. A stamped, hot-reload-safe EEex module gives
+  recognized SCS casters honest long-duration readiness (one real memorized copy per genuine
+  spellbook reset) and one normal, interruptible first-contact weapon-protection cast.
+  Natural expiry can be maintained only while safely out of combat; dispel/early loss
+  suppresses maintenance. Unknown queues and Project Image states fail closed. The current
+  deferred-listener/method clock pair is authoritative; only its absence selects the
+  source-verified old listener/direct-field pair. Ambient and urgent ownership can be retired
+  independently when the user's future full EEex AI takes over. Component 121 changes no SPL
+  or BCS resource. Both API paths have simulator coverage, but corrected live acceptance is
+  still outstanding and must run on v1.2 first.
 - **Backlog:** catalog SCS components active in the target install + their balance
   touchpoints; identify small high-value tweaks. (Migrated from chriz-sod-rebalance "Part 3",
   which now points here.)
@@ -99,8 +102,10 @@ symbols; components idempotent + predicate-guarded. Follow CLAUDE.md.
 - [ ] Component 120 controlled tail-install and gameplay acceptance (implementation and
       synthetic installer/uninstall verification complete; no active-game write yet)
 - [ ] Component 121 controlled v1.2 tail-install and gameplay acceptance (implementation,
-      fake-EEex behavior, and synthetic installer/uninstall verification complete; the
-      earlier v0.11 laboratory install remained inert because it referenced a nonexistent
-      clock API; no component has been installed into the active playthrough game)
+      fake-EEex behavior, synthetic installer/uninstall verification, and a source/simulator-
+      verified older-EEex capability fallback are complete; the earlier v0.11 laboratory
+      install remained inert because it referenced a nonexistent clock API and did not test
+      the corrected fallback; no component has been installed into the active playthrough
+      game; old-version live acceptance is a later separately approved stage)
 - [ ] Components 401–403 independent review and controlled live deployment (no active-game write
       has occurred during implementation)
