@@ -609,6 +609,75 @@ scenarios.runtime_missing_game_time = function()
         bool(CBR_RDY_STATE.ambient_sessions[sprite.m_id] ~= nil))
 end
 
+scenarios.runtime_legacy_missing_raw_time =
+    scenarios.runtime_missing_game_time
+
+scenarios.runtime_legacy_v011_surface = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408")
+    memorize(sprite, "spwi611")
+    fireTick(sprite)
+    out("ambient_applications", applicationCount(sprite, "spwi408"))
+    out("ambient_available", countAvailable(sprite, "spwi408"))
+    out("urgent_queues", sprite.queueCount)
+end
+
+scenarios.runtime_legacy_repeated_callbacks = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408")
+    memorize(sprite, "spwi611")
+    for _ = 1, 8 do fireTick(sprite) end
+    out("ambient_applications", applicationCount(sprite, "spwi408"))
+    out("ambient_available", countAvailable(sprite, "spwi408"))
+    out("urgent_queues", sprite.queueCount)
+end
+
+local function isEmptyTable(value)
+    if type(value) ~= "table" then return false end
+    return next(value) == nil
+end
+
+scenarios.runtime_legacy_marshal_exports = function()
+    local normal = newSprite({ seeParty = false })
+    memorize(normal, "spwi408")
+    fireTick(normal)
+    local normalExport = exportedLedger(normal)
+    out("normal_export_type", type(normalExport))
+    out("normal_export_version", normalExport and normalExport.version or 0)
+
+    local inactive = newSprite({})
+    CBR_RDY_AMBIENT_ENABLED = 0
+    local disabledExport = exportedLedger(inactive)
+    out("disabled_export_type", type(disabledExport))
+    out("disabled_export_empty", bool(isEmptyTable(disabledExport)))
+    CBR_RDY_AMBIENT_ENABLED = 1
+
+    CBR_RDY_EXTERNAL_OWNER = 1
+    local ownedExport = exportedLedger(inactive)
+    out("owned_export_type", type(ownedExport))
+    out("owned_export_empty", bool(isEmptyTable(ownedExport)))
+    CBR_RDY_EXTERNAL_OWNER = 0
+
+    CBR_RDY_STATE.ambient_faulted = 1
+    local faultedExport = exportedLedger(inactive)
+    out("faulted_export_type", type(faultedExport))
+    out("faulted_export_empty", bool(isEmptyTable(faultedExport)))
+end
+
+scenarios.v12_inactive_marshal_exports = function()
+    local sprite = newSprite({})
+    CBR_RDY_AMBIENT_ENABLED = 0
+    out("disabled_export_type", type(exportedLedger(sprite)))
+    CBR_RDY_AMBIENT_ENABLED = 1
+
+    CBR_RDY_EXTERNAL_OWNER = 1
+    out("owned_export_type", type(exportedLedger(sprite)))
+    CBR_RDY_EXTERNAL_OWNER = 0
+
+    CBR_RDY_STATE.ambient_faulted = 1
+    out("faulted_export_type", type(exportedLedger(sprite)))
+end
+
 scenarios.runtime_missing_game_time_callbacks = function()
     local action_sprite = newSprite({})
     fireStarted(action_sprite, { m_actionID = 0, m_specificID = 0 })
@@ -1187,6 +1256,15 @@ elseif scenarioName == "runtime_missing_ambient_api" then
 elseif scenarioName == "runtime_missing_game_time"
         or scenarioName == "runtime_missing_game_time_callbacks" then
     EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime = nil
+elseif scenarioName == "runtime_legacy_v011_surface"
+        or scenarioName == "runtime_legacy_repeated_callbacks"
+        or scenarioName == "runtime_legacy_marshal_exports"
+        or scenarioName == "runtime_legacy_missing_raw_time" then
+    EEex_Opcode_AddDeferredListsResolvedListener = nil
+    fakeWorldTime.GetCurrentTime = nil
+    if scenarioName == "runtime_legacy_missing_raw_time" then
+        fakeWorldTime.m_gameTime = nil
+    end
 end
 reloadRuntime()
 out("tick_listeners", #deferredTickListeners + #legacyTickListeners)

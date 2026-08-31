@@ -221,6 +221,8 @@ class _RuntimeCase(unittest.TestCase):
         scenario: str,
         *,
         runtime: Path | None = None,
+        expected_deferred_listeners: str = "1",
+        expected_legacy_listeners: str = "0",
         expected_reset_listeners: str = "1",
         expected_marshal_handlers: str = "1",
     ) -> dict[str, str]:
@@ -243,9 +245,15 @@ class _RuntimeCase(unittest.TestCase):
                 observations[key] = value
         self.assertEqual(observations.get("tick_listeners"), "1", process.stdout)
         self.assertEqual(
-            observations.get("deferred_tick_listeners"), "1", process.stdout
+            observations.get("deferred_tick_listeners"),
+            expected_deferred_listeners,
+            process.stdout,
         )
-        self.assertEqual(observations.get("legacy_tick_listeners"), "0", process.stdout)
+        self.assertEqual(
+            observations.get("legacy_tick_listeners"),
+            expected_legacy_listeners,
+            process.stdout,
+        )
         self.assertEqual(observations.get("started_action_listeners"), "1", process.stdout)
         self.assertEqual(
             observations.get("reset_listeners"),
@@ -311,8 +319,10 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         source = PRODUCTION.read_text(encoding="ascii")
         for required in (
             "EEex_Opcode_AddDeferredListsResolvedListener",
+            "EEex_Opcode_AddListsResolvedListener",
             "EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime",
             ":GetCurrentTime()",
+            ".m_gameTime",
             "EEex_Sprite_AddQuickListCountsResetListener",
             "EEex_RunWithStackManager",
             'struct = "CAbilityId"',
@@ -341,6 +351,66 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         ):
             with self.subTest(obsolete=obsolete):
                 self.assertNotIn(obsolete, source)
+
+    def test_current_surface_prefers_the_v12_listener_and_clock(self) -> None:
+        seen = self._run("v12_world_time_units")
+        self.assertEqual(seen["deferred_tick_listeners"], "1")
+        self.assertEqual(seen["legacy_tick_listeners"], "0")
+
+    def test_legacy_surface_selects_one_old_listener_and_still_operates(self) -> None:
+        seen = self._run(
+            "runtime_legacy_v011_surface",
+            expected_deferred_listeners="0",
+            expected_legacy_listeners="1",
+        )
+        self.assertEqual(seen["ambient_applications"], "1")
+        self.assertEqual(seen["ambient_available"], "0")
+        self.assertEqual(seen["urgent_queues"], "1")
+
+    def test_missing_legacy_raw_time_fails_before_any_gameplay_mutation(self) -> None:
+        seen = self._run(
+            "runtime_legacy_missing_raw_time",
+            expected_deferred_listeners="0",
+            expected_legacy_listeners="1",
+        )
+        self.assertEqual(seen["ambient_applications"], "0")
+        self.assertEqual(seen["ambient_available"], "1")
+        self.assertEqual(seen["urgent_queues"], "0")
+        self.assertEqual(seen["ambient_faulted"], "1")
+        self.assertEqual(seen["urgent_faulted"], "1")
+        self.assertEqual(seen["sprite_aux_created"], "0")
+        self.assertEqual(seen["classification_cached"], "0")
+        self.assertEqual(seen["ambient_session_cached"], "0")
+
+    def test_repeated_legacy_callbacks_do_not_repeat_mutations(self) -> None:
+        seen = self._run(
+            "runtime_legacy_repeated_callbacks",
+            expected_deferred_listeners="0",
+            expected_legacy_listeners="1",
+        )
+        self.assertEqual(seen["ambient_applications"], "1")
+        self.assertEqual(seen["ambient_available"], "0")
+        self.assertEqual(seen["urgent_queues"], "1")
+
+    def test_v011_marshal_exports_are_always_tables(self) -> None:
+        legacy = self._run(
+            "runtime_legacy_marshal_exports",
+            expected_deferred_listeners="0",
+            expected_legacy_listeners="1",
+        )
+        self.assertEqual(legacy["normal_export_type"], "table")
+        self.assertEqual(legacy["normal_export_version"], "1")
+        self.assertEqual(legacy["disabled_export_type"], "table")
+        self.assertEqual(legacy["disabled_export_empty"], "1")
+        self.assertEqual(legacy["owned_export_type"], "table")
+        self.assertEqual(legacy["owned_export_empty"], "1")
+        self.assertEqual(legacy["faulted_export_type"], "table")
+        self.assertEqual(legacy["faulted_export_empty"], "1")
+
+        current = self._run("v12_inactive_marshal_exports")
+        self.assertEqual(current["disabled_export_type"], "nil")
+        self.assertEqual(current["owned_export_type"], "nil")
+        self.assertEqual(current["faulted_export_type"], "nil")
 
     def test_v12_world_time_ticks_are_converted_to_seconds(self) -> None:
         seen = self._run("v12_world_time_units")

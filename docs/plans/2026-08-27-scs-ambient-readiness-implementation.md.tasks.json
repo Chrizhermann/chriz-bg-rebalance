@@ -75,13 +75,13 @@
     {
       "id": 13,
       "subject": "Lock the legacy capability contract with failing tests",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [12]
     },
     {
       "id": 14,
       "subject": "Implement the capability-selected runtime and probe adapter",
-      "status": "pending",
+      "status": "in_progress",
       "blockedBy": [13]
     },
     {
@@ -91,5 +91,5 @@
       "blockedBy": [14]
     }
   ],
-  "lastUpdated": "2026-08-31T17:33:52+09:00"
+  "lastUpdated": "2026-08-31T17:44:00+09:00"
 }
