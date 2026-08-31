@@ -1,10 +1,20 @@
-# 10 — Installed EEex ambient-readiness timing/API spike
+# 10 — Historical installed EEex ambient-readiness probe
 
 **Date:** 2026-08-30  
 **Install:** BG2:EE/EET 2.6.6.0, EEex through `InfinityLoader.exe`, SCS 35.21,
 Spell Revisions 4.19  
-**Purpose:** close component 121's live-engine capability gate; this was not a component
-installation or acceptance test.
+**Purpose:** attempt to close component 121's live-engine capability gate; this was not a
+component installation or acceptance test, and the clock portion was later invalidated.
+
+> **Correction — 2026-08-31:** the probe did not close the clock/scheduling gate. Its
+> `timestamp()` helper tried the nonexistent globals `EEex_GameState_GetTime` and
+> `Infinity_GetGameTime`, then silently used `os.clock()`. Both guessed globals were absent,
+> so every value below labeled “engine time” was process CPU time, not the engine world
+> timer or reliable elapsed wall time. The quoted `+0.205`, `+0.570`, `+0.535`, `+0.871`, and
+> `+0.938` deltas are invalid as timing evidence and must not be used for acceptance or
+> tuning. The observed event ordering and independently inspected slot, action, effect,
+> reset-listener, and Project Image shapes remain useful. The replacement current-version
+> contract is documented in `research/11-eeex-v1.2-readiness-compatibility.md`.
 
 ## Safety envelope and cleanup
 
@@ -52,28 +62,29 @@ Representative stable hashes (pre/post equal):
 | `weidu_external/data/STRATAGEMS/instant_prebuff_spells.2da` | `3fb7654bcf68b567458132b60a9159413be98bb1576b6803b84f0ed4044999f4` |
 | sorted 585-file `dw#mg*.bcs` hash manifest | `ba1cf883b95c69f6490aa255dde0915c9bf9e351e67027cb899368bde7cbb2e7` |
 
-## Timing observations
+## Historical timing observations — invalidated
+
+This section is retained to make the mistaken evidence trail auditable. Its numeric values
+are `os.clock()` readings and do not establish real-time or engine-tick latency.
 
 ### Hostile-at-load baseline
 
-For the representative SCS mage, first observed `See([PC])` occurred at engine time
-`1582.426`. The SCS initialization label settled to `caster_label_ini=1` at `1582.631`
-(+0.205 s). `instantprep=1` / `inafight=1` was observed at `1582.996` (+0.570 s), with the
-long and short prebuff effects active. This confirms the user's reported vulnerability
-window: SCS's delivery is instant once selected, but selection is not synchronous with
-first visual contact.
+For the representative SCS mage, the historical log recorded first `See([PC])` at probe
+reading `1582.426`, `caster_label_ini=1` at `1582.631`, and `instantprep=1` /
+`inafight=1` with the long and short prebuff effects active at `1582.996`. These readings
+preserve event order only. Their differences have no valid time unit and do not quantify a
+vulnerability window.
 
 ### Neutral-to-hostile transition
 
 A neutral SCS caster (object `235015681`) could see the party while EA 128, but retained
-`caster_label_ini=0` and did not receive Stoneskin/preparation after 0.6 s. EA changed to
-255 at `3521.328`. The SCS batch began at `3521.863` (+0.535 s), cosmetic-free `DWSW408`
-was observed at `3522.199` (+0.871 s), and the snapshot recorded `instantprep=1` at
-`3522.266` (+0.938 s). The transition therefore adds a real, sub-round delay that a
-per-tick bridge can remove.
+`caster_label_ini=0` and did not receive Stoneskin/preparation during the initial observation.
+The historical log then recorded EA 255 at probe reading `3521.328`, the SCS batch at
+`3521.863`, cosmetic-free `DWSW408` at `3522.199`, and `instantprep=1` at `3522.266`.
+This proves the observed sequence, not the duration or a “sub-round” bound.
 
-These are engine observations, not benchmark promises. No separate archer-DPS benchmark
-was needed to prove the scheduling gap.
+The event order was observed, but the elapsed-time claims are withdrawn. A current-version
+live pass must measure the documented EEex world timer before making any scheduling claim.
 
 ## Capability verdicts
 
@@ -88,7 +99,7 @@ was needed to prove the scheduling gap.
 | Normal urgent cast | **Proven** | Queued `SpellRES("spwi708",Myself)` appeared as action 31, fired the started-action callback with exact resref, then consumed one slot, owned aura/casting time, and produced 13 `SPWI708` effects. |
 | Started then interrupted cast | **Proven** | `SPWI611` fired the exact started callback. Replacing its current action with parsed `NoAction` before completion left no `SPWI611` effects and the engine preserved the slot. The contact episode is nevertheless spent at confirmed start, as approved. |
 | Passive-only displacement | **Proven with allowlist** | Idle/no-action, RandomWalk 85, MoveToPoint 23, and their complete queued representation are inspectable. Attack 3, SpellRES 31, tactical/unknown actions, and any unknown queue are never cleared. |
-| Visibility rearm | **Proven** | Moving the actor out of sight changed `See([PC])` to false for >6 s; returning it changed the predicate to true. One full round can therefore be timed without persistent state. |
+| Visibility state | **Partially proven** | Moving the actor out of sight changed `See([PC])` to false and returning it changed the predicate to true. The claimed `>6 s` interval used the invalid clock and is not proven. A full-round rearm must be retested against the v1.2 world timer. |
 | Project Image relation | **Proven** | `WIZARD_PROJECT_IMAGE` resolves to `SPWI703` on this install. The clone carried opcode 237 with parameter 2 (`m_dWFlags`) 2 and `m_sourceId=214305989`, the owner's object ID. The owner had general state 48 plus `SPWI703` lock effects (opcode 233 p1=2/p2=127 and opcode 20). Production resolves and stamps the symbol from final `SPELL.IDS`, so clones and locked owners can both be skipped without name heuristics or a stock-slot assumption. |
 | Initial-SCS reimbursement | **Proven, narrow shape only** | Generic SCS prebuff is adjacent `ReallyForceSpellRES(delivery)` action 181 then `RemoveSpell(original)` action 147. The latter exposes the numeric spell ID in `m_specificID`. With two `SPWI212` copies, component debit 2→1 followed by the initial SCS pair changed 1→0 and activated `DWSW212`; restoring the component's exact debited record leaves the correct net one-copy spend. Free `_PRECAST` exceptions never enter this path. |
 | Cutscene gate | **Proven read-only predicate** | `Infinity_GetInCutsceneMode()` exists. Entering cutscene mode hid the world UI and suspended the remote watcher, which is itself strong reason never to mutate or clear actions there. Production only reads the predicate. |
@@ -117,15 +128,24 @@ net unavailable copy, regardless of which identical record SCS removed. Missing 
 wrong spell number, a renewal/combat episode, a free `_PRECAST` path, or any unobservable
 delta receives no reimbursement.
 
-## Implementation decision
+## Corrected implementation decision
 
-The installed EEex build supports both approved layers:
+The installed v0.11 spike proved many non-clock primitives needed by both approved layers:
 
 - ambient readiness can use a checked exact-record debit plus cosmetic-free SCS delivery,
   with the reset listener as the only charge reset; and
 - urgent readiness can clear only a fully proven passive current/queued action set, queue
-  one normal `SpellRES`, disarm on exact started-action confirmation, and rearm after a full
-  round out of sight.
+  one normal `SpellRES`, and disarm on exact started-action confirmation.
+
+It did **not** prove a supported clock, timed retry, timed natural-expiry decision, or
+full-round rearm. The later disposable component-121 gameplay pass produced no buffs because
+production required the invented clock global and retired itself. The runtime as a whole was
+therefore not validated by this spike.
+
+The current path instead targets EEex v1.2.0, using
+`EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime:GetCurrentTime()` and converting
+duration seconds to raw 15-Hz engine ticks. That path is source- and simulation-verified but
+still requires live v1.2 gameplay acceptance.
 
 The runtime remains a transitional bridge. Ambiguous dialogue state, an unknown action or
 queue, unresolved Project Image ownership, an unrecognized SCS reimbursement sequence, or

@@ -173,6 +173,21 @@ class AmbientReadinessAssetTests(unittest.TestCase):
         self.assertIn("EEex_Sprite_GetState(sprite)", source)
         self.assertIn('"project_image=" .. project_image_relation(sprite)', source)
 
+    def test_probe_uses_the_v12_world_time_binding_without_silent_fallback(self) -> None:
+        source = PROBE.read_text(encoding="ascii")
+        self.assertIn(
+            "EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime", source
+        )
+        self.assertIn(":GetCurrentTime()", source)
+        self.assertIn("GAME_TIME_TICKS_PER_SECOND", source)
+        self.assertIn("time_ticks", source)
+        self.assertIn("time_seconds", source)
+        self.assertIn("EEex_Opcode_AddDeferredListsResolvedListener", source)
+        self.assertNotIn("EEex_GameState_GetTime", source)
+        self.assertNotIn("Infinity_GetGameTime", source)
+        self.assertNotIn("os.clock()", source)
+        self.assertNotIn("time = timestamp()", source)
+
 
 class ProductionRuntimeGateTests(unittest.TestCase):
     def test_runtime_template_exists(self) -> None:
@@ -227,6 +242,10 @@ class _RuntimeCase(unittest.TestCase):
                 key, value = line.split("\t", 1)
                 observations[key] = value
         self.assertEqual(observations.get("tick_listeners"), "1", process.stdout)
+        self.assertEqual(
+            observations.get("deferred_tick_listeners"), "1", process.stdout
+        )
+        self.assertEqual(observations.get("legacy_tick_listeners"), "0", process.stdout)
         self.assertEqual(observations.get("started_action_listeners"), "1", process.stdout)
         self.assertEqual(
             observations.get("reset_listeners"),
@@ -291,6 +310,9 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
     def test_runtime_uses_the_proven_installed_binding_shapes(self) -> None:
         source = PRODUCTION.read_text(encoding="ascii")
         for required in (
+            "EEex_Opcode_AddDeferredListsResolvedListener",
+            "EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime",
+            ":GetCurrentTime()",
             "EEex_Sprite_AddQuickListCountsResetListener",
             "EEex_RunWithStackManager",
             'struct = "CAbilityId"',
@@ -308,6 +330,8 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
                 self.assertIn(required, source)
         self.assertNotIn('source == "spwi703"', source)
         for obsolete in (
+            "EEex_GameState_GetTime",
+            "Infinity_GetGameTime",
             "EEex_Sprite_GetSpellbookResetSerial",
             "m_actionQueue",
             "EEex_Sprite_IsInDialogue",
@@ -317,6 +341,29 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         ):
             with self.subTest(obsolete=obsolete):
                 self.assertNotIn(obsolete, source)
+
+    def test_v12_world_time_ticks_are_converted_to_seconds(self) -> None:
+        seen = self._run("v12_world_time_units")
+        self.assertEqual(seen["queues_before_two_seconds"], "1")
+        self.assertEqual(seen["queues_at_two_seconds"], "2")
+
+    def test_missing_v12_world_time_fails_before_any_gameplay_mutation(self) -> None:
+        seen = self._run("runtime_missing_game_time")
+        self.assertEqual(seen["ambient_applications"], "0")
+        self.assertEqual(seen["ambient_available"], "1")
+        self.assertEqual(seen["urgent_queues"], "0")
+        self.assertEqual(seen["ambient_faulted"], "1")
+        self.assertEqual(seen["urgent_faulted"], "1")
+        self.assertEqual(seen["sprite_aux_created"], "0")
+        self.assertEqual(seen["classification_cached"], "0")
+        self.assertEqual(seen["ambient_session_cached"], "0")
+
+    def test_missing_v12_world_time_blocks_every_state_callback(self) -> None:
+        seen = self._run("runtime_missing_game_time_callbacks")
+        self.assertEqual(seen["action_aux_created"], "0")
+        self.assertEqual(seen["reset_aux_created"], "0")
+        self.assertEqual(seen["export_aux_created"], "0")
+        self.assertEqual(seen["import_aux_created"], "0")
 
 
 class AmbientReadinessListenerTests(_RuntimeCase):

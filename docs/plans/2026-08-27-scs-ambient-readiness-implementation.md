@@ -22,12 +22,21 @@ per contact episode. The two runtime layers can be disabled independently or cla
 future EEex AI without uninstalling the component.
 
 **Tech stack:** WeiDU 24900 (`.tp2`, `.tpa`, SPL V1, BCS/BAF, IDS, 2DA), Python 3
-standard-library `unittest`, PowerShell, Lua 5.3 simulation, installed EEex/LuaJIT 5.1 APIs,
-SCS 35.21, Spell Revisions, BG2:EE + EET.
+standard-library `unittest`, PowerShell, Lua 5.3 simulation, EEex v1.2-first APIs, SCS 35.21,
+Spell Revisions, BG2:EE + EET.
 
 **Approved design:** `docs/plans/2026-08-27-scs-ambient-readiness-design.md`
 
 **Branch:** `codex/ambient-readiness-121`
+
+> **Correction addendum — 2026-08-31:** Task 6 did not prove its clock. The probe tried two
+> nonexistent EEex globals and then silently used `os.clock()`, so its numeric timing claims
+> and the original full-runtime acceptance conclusion are withdrawn. The repaired path must
+> target official EEex v1.2 first: use
+> `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime:GetCurrentTime()` as raw 15-Hz
+> engine ticks and `EEex_Opcode_AddDeferredListsResolvedListener` as the primary tick hook.
+> Runtime capability checks—not WeiDU component numbers—are authoritative. Older listener
+> fallback follows only after a successful v1.2 live pass. See `research/11-eeex-v1.2-readiness-compatibility.md`.
 
 **Safety boundary:** The active game at
 `C:\Games\Baldur's Gate II Enhanced Edition modded\` is read-only throughout normal
@@ -486,7 +495,11 @@ already installed remote-console mechanism for the current session.
 
 ### Step 3: Measure the unmodified SCS baseline
 
-For controlled caster/contact cases, record engine ticks and wall-clock timestamps for:
+First prove the exact clock source. On EEex v1.2, log
+`m_worldTime:GetCurrentTime()` directly, confirm that it advances in raw 15-Hz gameplay
+ticks, and reject the probe if any fallback clock would be used. Then, for controlled
+caster/contact cases, record those engine ticks and separately sourced wall-clock timestamps
+for:
 
 - first normal hostile `See([PC])`;
 - SCS's preparation block;
@@ -500,6 +513,9 @@ is evidence, not a benchmark promise; preserve raw logs.
 
 The spike must establish on the installed EEex version:
 
+- the exact documented world-time accessor, its 15-tick-per-gameplay-second unit, and
+  fail-closed behavior when it is unavailable;
+- registration through the v1.2 deferred lists-resolved listener in a fresh game process;
 - how to recognize a settled SCS caster, preferably the `caster_label_ini` local;
 - exact availability-bit mutation and `CheckQuickLists` behavior for mage and priest records;
 - the observable fingerprint of a genuine engine spellbook reset;
@@ -763,13 +779,14 @@ git commit -m "Add urgent first-contact defense bridge"
 ### Step 1: Add the public component and prerequisites
 
 Add component 121 with label `cbr_eeex_ambient_readiness`. Require BG2EE/EET, installed SCS
-Smarter Mages component 6030, the verified EEex component/version footprint, `M_*.lua`
-autoload support, and the SCS instant-prebuff mapping. Use `REQUIRE_PREDICATE` for missing mod
-prerequisites; use explicit preflight diagnostics for malformed recognized installs.
+Smarter Mages component 6030, `M_*.lua` autoload support, and the SCS instant-prebuff mapping.
+Do not hardcode EEex component numbers: v1.2 moved Main to component 1 and LuaJIT to 8, and
+the runtime does not itself use a LuaJIT-only primitive. Use `REQUIRE_PREDICATE` for missing
+mod prerequisites; use explicit preflight diagnostics for malformed recognized installs.
 
 A successful Task 6 capability profile is a development acceptance gate, not an installer
-predicate that can be rediscovered safely on another user's machine. Stamp the minimum
-supported profile/version into the module and recheck required API entry points at runtime;
+predicate that can be rediscovered safely on another user's machine. Stamp the v1.2 target
+profile into the module and recheck required API entry points and world-time access at runtime;
 if they are absent, the affected layer disables itself with one diagnostic.
 
 Component 121 may be installed with or without 120, but it imports the same classifier so its

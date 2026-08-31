@@ -29,7 +29,7 @@ reported upstream first (see `research/02-upstream-scs-report-draft.md`).
 | 100 | SCS adjustments | Telekinetic Storm: restore save vs. spell for half damage (+ bypass Mirror Image) | ✅ implemented |
 | 101 | SCS adjustments | Restore five Freedom scrolls to the Adventurer's Mart | ✅ implemented |
 | 120 | SCS adjustments | Repair the SCS/SR false Improved Mantle weapon-protection semantics | ✅ implemented |
-| 121 | SCS adjustments | EEex ambient caster readiness + one honest first-contact defense | ✅ implemented; pending live deployment |
+| 121 | SCS adjustments | EEex ambient caster readiness + one honest first-contact defense | ✅ implemented for EEex v1.2; pending live acceptance |
 | 2xx | SR adjustments | Cherry-picked Spell Revisions tweaks | 📋 planning (`docs/00-project-scope.md`) |
 | 3xx | Cross-cutting audits | e.g. generalized save-for-half audit | 📋 planning |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
@@ -78,10 +78,14 @@ This is an interim bridge for SCS casters, not the eventual full EEex AI overhau
 time it resolves the final `SPELL.IDS`, validates the installed spell effects, and imports
 SCS's own cosmetic-free prebuff mapping. It then ships one stamped `M_CBRRDY.lua`; it does
 not patch SCS combat scripts or spell mechanics. It requires BG2:EE/EET, SCS Smarter Mages
-6030, EEex base + LuaJIT components (verified on v0.11.0-alpha), the `M_*.lua` autoload
-bootstrap, and the final SCS prebuff map. Missing prerequisites skip cleanly; malformed
-recognized data fails before the override transaction is retained. Component 120 is
-independent, but installing 120 first is recommended on the currently researched SR setup.
+6030, EEex's `M_*.lua` autoload bootstrap, and the final SCS prebuff map. The current runtime
+targets EEex v1.2.0: it uses the deferred lists-resolved listener and the documented world
+timer's raw 15-Hz engine ticks, and it rechecks every required API before acting. It does not
+hardcode EEex WeiDU component numbers or impose a component-specific LuaJIT requirement.
+Missing prerequisites skip cleanly; malformed recognized data fails before the override
+transaction is retained. Component 120 is independent, but installing 120 first is
+recommended on the currently researched SR setup. The v1.2 path is source- and
+simulation-verified; a fresh v1.2 gameplay pass is still required.
 
 The ambient layer considers only recognized, settled SCS casters and conservative installed
 self-buffs lasting at least 2,400 seconds. A caster must really have the spell memorized. The

@@ -533,10 +533,11 @@ BEGIN
   OUTER_SPRINT cbr_rdy_manifest ~{
     schema_version = 1,
     runtime_profile = {
-        minimum_eeex_version = "0.11.0-alpha",
-        requires_base_component = 0,
-        requires_luajit_component = 1,
-        verified_on = "2026-08-30",
+        target_eeex_version = "1.2.0",
+        primary_tick_listener = "EEex_Opcode_AddDeferredListsResolvedListener",
+        game_time_unit = "engine_ticks",
+        game_time_ticks_per_second = 15,
+        source_verified_on = "2026-08-31",
     },
     minimum_duration = 2400,
     maintenance_cadence_ticks = 15,
@@ -708,7 +709,7 @@ BEGIN
     REPLACE_TEXTUALLY ~%CBR_RDY_MANIFEST%~ ~%cbr_rdy_runtime_manifest%~
     PATCH_IF (INDEX_BUFFER (~CBR_RDY_MANIFEST~) >= 0
            || INDEX_BUFFER (~schema_version = 1~) < 0
-           || INDEX_BUFFER (~minimum_eeex_version = "0.11.0-alpha"~) < 0
+           || INDEX_BUFFER (~target_eeex_version = "1.2.0"~) < 0
            || INDEX_BUFFER (~project_image_resref = "~) < 0
            || INDEX_BUFFER (~ambient_spells = {~) < 0
            || INDEX_BUFFER (~urgent_candidates = {~) < 0
@@ -722,7 +723,7 @@ BEGIN
   COPY ~%cbr_rdy_runtime_path%~ ~%cbr_rdy_runtime_path%~
     PATCH_IF (INDEX_BUFFER (~CBR_RDY_MANIFEST~) >= 0
            || INDEX_BUFFER (~schema_version = 1~) < 0
-           || INDEX_BUFFER (~minimum_eeex_version = "0.11.0-alpha"~) < 0
+           || INDEX_BUFFER (~target_eeex_version = "1.2.0"~) < 0
            || INDEX_BUFFER (~project_image_resref = "~) < 0) BEGIN
       PATCH_FAIL ~CBR ambient readiness shipped runtime failed post-write verification.~
     END

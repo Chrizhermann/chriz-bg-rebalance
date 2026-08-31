@@ -90,9 +90,7 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9125 = ~The installed WIZARD_IMPROVED_MANTLE mapping is not the known false Moment of Prescience weapon-protection mismatch — nothing to repair.~
 @9130 = ~The EEex ambient-readiness bridge supports BG2:EE / EET only.~
 @9131 = ~SCS Smarter Mages component 6030 is not installed — there are no recognized SCS casters for this bridge.~
-@9132 = ~The EEex base component is not installed. This bridge was verified on EEex v0.11.0-alpha and rechecks every required API at runtime.~
-@9133 = ~The EEex LuaJIT component is not installed. The verified ambient-readiness runtime requires EEex component 1.~
-@9134 = ~EEex's M_*.lua autoload bootstrap (M___EEex.lua) is missing.~
+@9134 = ~EEex's M_*.lua autoload bootstrap (M___EEex.lua) is missing. Component 121 targets the EEex v1.2.0 API surface and rechecks required APIs at runtime.~
 @9135 = ~The final loose SPELL.IDS is missing. Install SCS and spell revisions before this tail component.~
 @9136 = ~SCS's final instant-prebuff mapping is missing from weidu_external/data/stratagems.~
 @9400 = ~The Cleric of Tempus Holy Power component supports BG2:EE / EET only.~

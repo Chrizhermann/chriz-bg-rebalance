@@ -5,6 +5,12 @@ Status: **prepared only**. This document is not authorization to install compone
 `dialog.tlk`. Every live step below starts only after the user explicitly approves the exact
 game directory, components, installer commit, and throwaway save.
 
+Current acceptance target (2026-08-31): **EEex v1.2 first**. The earlier component-121
+manual pass on `C:\Games\BGSE-AOE-PREBUFF-LAB-20260830` used v0.11 and correctly failed—no
+readiness effects appeared because the runtime referenced a nonexistent clock API. Do not
+treat that pass or the old probe's `os.clock()` latency values as acceptance. Older-version
+fallback is a later stage after v1.2 passes.
+
 The active-game reference is
 `C:\Games\Baldur's Gate II Enhanced Edition modded\`. Existing WeiDU components are never
 uninstalled. If a newly appended 120/121 component needs rollback, stop and obtain separate
@@ -20,6 +26,8 @@ Before doing anything live, record all of the following in the acceptance log:
 - successful fresh output from the TP2 parse-check and full automated suite;
 - the exact game root, EET user-data root, and newly selected throwaway save;
 - the installed SCS, SR, EEex, and current chriz-bg-rebalance entries from `WeiDU.log`; and
+- `EEex/EEex.tp2` declaring v1.2.0 plus the presence of the SCS/SR resources needed by 121
+  in that same test copy (the clean v1.2 copy without SCS/SR is not sufficient); and
 - confirmation that `Baldur.exe` and `InfinityLoader.exe` are not running.
 
 The throwaway save must be a separately named copy/new disposable save. Never select an
@@ -93,6 +101,20 @@ Only after Stage A passes and the user separately approves continuation, append 
 `override/M_CBRRDY.lua`; it must not alter a SPL or BCS. Record the generated manifest's
 ambient rows, urgent semantic flags, EEex profile, and dynamically resolved Project Image
 resref.
+
+Before loading the throwaway save:
+
+1. inspect the stamped runtime and confirm `target_eeex_version = "1.2.0"`,
+   `game_time_unit = "engine_ticks"`, and `game_time_ticks_per_second = 15`;
+2. confirm it registers `EEex_Opcode_AddDeferredListsResolvedListener` and contains neither
+   `EEex_GameState_GetTime`, `Infinity_GetGameTime`, nor `os.clock()`;
+3. start a completely fresh InfinityLoader/game process—hot reload is insufficient after
+   the old append-only callback or sticky fail-closed state has existed; and
+4. through the approved session probe, read
+   `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime:GetCurrentTime()` twice while the
+   game advances. Record raw ticks and independently confirm the expected 15 ticks per
+   gameplay second before any slot-mutating test. If the binding is absent or the unit is
+   inconsistent, stop before testing gameplay behavior.
 
 ### 4.1 Urgent first-contact matrix
 

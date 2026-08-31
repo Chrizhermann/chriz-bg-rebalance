@@ -1,10 +1,10 @@
 # SCS ambient readiness and first-contact defense — components 120 / 121
 
-**Status:** Approved by the user on 2026-08-27; installed EEex primitives validated on
-2026-08-30. This is a transitional compatibility bridge for the current SCS-based install,
-not the end-state combat-AI architecture. The user is developing a broader EEex AI overhaul
-in parallel; this design must be easy for that future system to retire without uninstalling
-a WeiDU component.
+**Status:** Approved by the user on 2026-08-27; corrected for the official EEex v1.2 API
+surface on 2026-08-31, with v1.2 live acceptance still pending. This is a transitional
+compatibility bridge for the current SCS-based install, not the end-state combat-AI
+architecture. The user is developing a broader EEex AI overhaul in parallel; this design
+must be easy for that future system to retire without uninstalling a WeiDU component.
 
 Evidence base: `research/08-ambient-readiness.md`, the installed SCS 35.21 / Spell
 Revisions resources in the read-only game directory, the 2026-08-27 inspection summarized
@@ -12,14 +12,20 @@ below, and the separately authorized disposable-session spike in
 `research/10-ambient-readiness-spike.md`. No component was installed and no production save
 or game resource was changed by the spike.
 
+Compatibility addendum (2026-08-31): the spike's guessed time functions were not EEex APIs,
+and its fallback `os.clock()` invalidates every numeric latency claim. Component 121 now
+targets v1.2 first, registers `EEex_Opcode_AddDeferredListsResolvedListener`, and reads the
+documented world timer as raw ticks at 15 ticks per gameplay second. The runtime fails closed
+before mutation when that clock is unavailable. It does not hardcode EEex component numbers.
+Older-version listener fallback is explicitly deferred until after v1.2 gameplay acceptance.
+
 ## 1. Problem and confirmed evidence
 
 The current install already uses SCS's highest preparation tier. SCS's long/medium/short
 preparation batches are instant once their script blocks run, but most are gated on
-`See()`. Script cadence, an occupied action, and neutral-to-hostile transitions delay that
-evaluation. The installed spike observed 0.570 s from first `See([PC])` to the preparation
-marker for a hostile-at-load caster and 0.938 s from EA change to that marker for a
-neutral-to-hostile caster. PfMW, Mantle, and Absolute
+`See()`. The spike observed preparation after visual/hostility state changes, and the user
+has observed a vulnerable reaction window, but the old probe did not validly measure its
+duration. PfMW, Mantle, and Absolute
 Immunity are deliberately excluded from SCS's instant prebuff table and are normal first
 combat casts. A caster can therefore die to a fast archer or melee rush before beginning
 the defensive cast a competent mage would choose on seeing an attack.
@@ -198,9 +204,10 @@ or inconsistent spell identity or ownership information fails closed.
 
 ## 6. Runtime safety and failure policy
 
-- Component 120 requires recognized SCS/SR evidence; component 121 requires supported
-  EEex/LuaJIT APIs and recognized SCS caster data. Missing prerequisites no-op with one
-  clear diagnostic.
+- Component 120 requires recognized SCS/SR evidence; component 121 requires the EEex
+  autoload bootstrap, its v1.2-first runtime capability surface, and recognized SCS caster
+  data. Missing prerequisites no-op with one clear diagnostic. WeiDU component numbers are
+  not a compatibility contract.
 - EEex listeners register once through a root-level hot-reload-safe trampoline that looks
   up the current handler dynamically.
 - Runtime callbacks retain no engine userdata between calls. Object IDs are re-resolved and
@@ -246,8 +253,12 @@ Before shipping 121, use a session-scoped probe on a throwaway save to measure:
    dialogue/cutscene cases.
 
 The spike must also prove the selected slot-debit/quick-list path and cosmetic-free ambient
-delivery on the installed EEex version. The production game directory remains read-only
-unless the user explicitly authorizes the transient probe in that conversation.
+delivery on the installed EEex version. Before recording any timing, it must prove that the
+clock is `m_worldTime:GetCurrentTime()`, record its raw-tick values, and verify the 15-tick
+per gameplay-second conversion. The v1.2 deferred listener must be the registered path, and
+the game must start in a fresh process so append-only listeners or sticky fault state from a
+prior runtime cannot survive. The production game directory remains read-only unless the
+user explicitly authorizes the transient probe in that conversation.
 
 ### Acceptance criteria
 

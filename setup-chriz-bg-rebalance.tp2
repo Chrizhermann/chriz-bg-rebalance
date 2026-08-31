@@ -307,12 +307,6 @@ LABEL ~cbr_eeex_ambient_readiness~
 
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9130
 REQUIRE_PREDICATE
-  (MOD_IS_INSTALLED ~eeex/eeex.tp2~ 0)
-  @9132
-REQUIRE_PREDICATE
-  (MOD_IS_INSTALLED ~eeex/eeex.tp2~ 1)
-  @9133
-REQUIRE_PREDICATE
   (FILE_EXISTS_IN_GAME ~M___EEex.lua~)
   @9134
 REQUIRE_PREDICATE
@@ -343,7 +337,7 @@ LAF cbr_install_ambient_readiness_runtime
     cbr_121_urgent_count = urgent_count
 END
 
-PRINT ~cbr 121: shipped M_CBRRDY.lua (ambient=%cbr_121_ambient_count%; urgent=%cbr_121_urgent_count%; verified EEex profile v0.11.0-alpha with runtime API gates).~
+PRINT ~cbr 121: shipped M_CBRRDY.lua (ambient=%cbr_121_ambient_count%; urgent=%cbr_121_urgent_count%; targets EEex v1.2.0 APIs with runtime capability gates).~
 
 // ============================================================
 // Class and kit revisions (400-499)

@@ -28,8 +28,8 @@ rationale, fully reversible, idempotent, testable without wrecking a live save.
   spell symbols dynamically, classifies the actual SPL effects, removes only the false
   metadata and proven first-round/renewal choices, and substitutes real Mantle in the proven
   Chain Contingency shape. A future genuine Improved Mantle makes it a byte-no-op.
-- **121 — EEex ambient readiness bridge** ✅ IMPLEMENTED OFFLINE, pending controlled live
-  deployment. A stamped, hot-reload-safe EEex module gives recognized SCS casters honest
+- **121 — EEex ambient readiness bridge** ✅ IMPLEMENTED FOR EEex v1.2, pending controlled
+  v1.2 live acceptance. A stamped, hot-reload-safe EEex module gives recognized SCS casters honest
   long-duration readiness (one real memorized copy per genuine spellbook reset) and one
   normal, interruptible first-contact weapon-protection cast. Natural expiry can be
   maintained only while safely out of combat; dispel/early loss suppresses maintenance.
@@ -98,8 +98,9 @@ symbols; components idempotent + predicate-guarded. Follow CLAUDE.md.
 - [ ] Comp 100 formal tail-install into the live game (pending user sign-off)
 - [ ] Component 120 controlled tail-install and gameplay acceptance (implementation and
       synthetic installer/uninstall verification complete; no active-game write yet)
-- [ ] Component 121 controlled tail-install and gameplay acceptance (implementation,
-      fake-EEex behavior, and synthetic installer/uninstall verification complete; no
-      component has been installed into the active game)
+- [ ] Component 121 controlled v1.2 tail-install and gameplay acceptance (implementation,
+      fake-EEex behavior, and synthetic installer/uninstall verification complete; the
+      earlier v0.11 laboratory install remained inert because it referenced a nonexistent
+      clock API; no component has been installed into the active playthrough game)
 - [ ] Components 401–403 independent review and controlled live deployment (no active-game write
       has occurred during implementation)

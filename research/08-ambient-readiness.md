@@ -11,7 +11,7 @@ readers completed with file:line evidence (raw JSON kept in the session scratchp
 were stopped (token budget) and replaced by the direct checks in §2. The later, explicitly
 authorized live capability spike is recorded in `research/10-ambient-readiness-spike.md`.
 
-## 0. Reconciliation and current decision record (2026-08-29)
+## 0. Reconciliation and current decision record (updated 2026-08-31)
 
 This file was imported from the uncommitted source-checkout research at
 `C:\src\private\chriz-bg-rebalance\research\08-ambient-readiness.md` (22,651 bytes,
@@ -21,6 +21,12 @@ approved authority is
 `docs/plans/2026-08-27-scs-ambient-readiness-design.md`, followed by its implementation
 plan. In particular, the later decision supersedes §9's temporary lean toward a free first
 application.
+
+The 2026-08-30 probe's clock conclusion is also superseded. It guessed two EEex globals that
+do not exist and silently fell back to `os.clock()`. Its numeric latency values are not
+engine-time evidence. Non-clock observations remain usable only where independently checked;
+the current EEex v1.2 contract and provenance are in
+`research/11-eeex-v1.2-readiness-compatibility.md`.
 
 Current agreed contract:
 
@@ -46,19 +52,21 @@ Current agreed contract:
   order is Absolute Immunity, genuine Improved Mantle, Mantle, then PfMW, filtered by actual
   opcode semantics. The attempt is spent when casting starts; a contact episode rearms only
   after one full round without seeing any party member.
-- The separately authorized installed EEex spike is now complete. Exact-record debit and
+- The separately authorized installed EEex spike proved non-clock primitives. Exact-record debit and
   quick-list repair, engine reset notification, cosmetic-free SCS delivery, narrow initial
   SCS reimbursement, current/queued action inspection, normal `SpellRES`, start
-  confirmation/interruption, visibility rearm, and Project Image ownership are **proven**.
-  An independent global “dialogue active” boolean remains ambiguous and therefore receives
-  no speculative implementation. See `research/10-ambient-readiness-spike.md`.
+  confirmation/interruption, visibility state changes, and Project Image ownership were
+  observed. It did not prove elapsed timing, natural-expiry timing, retry timing, or the
+  full-round rearm interval. An independent global “dialogue active” boolean remains
+  ambiguous and therefore receives no speculative implementation. See the correction in
+  `research/10-ambient-readiness-spike.md`.
 
 Current read-only recheck on `2026-08-29` confirms SCS 35.21 component 6030 and 585 installed
 common-mage scripts. The authorized 2026-08-30 spike used only a disposable save and
 transient remote-console IPC; it installed nothing, saved nothing, and finished with the
 game closed and all hashed game inputs unchanged.
 
-### 0.1 Session-scoped Task 6 probe prepared (2026-08-30)
+### 0.1 Session-scoped Task 6 probe (corrected 2026-08-31)
 
 `research/scripts/ambient_readiness_probe.lua` is the reviewable, non-persistent probe for
 the remaining capability gate. Merely loading it defines `_G.CBR_RDY_PROBE`; registration is
@@ -66,6 +74,11 @@ an explicit `CBR_RDY_PROBE.install()` call. Its process-lifetime listeners are a
 but root-guarded, and `CBR_RDY_PROBE.teardown()` makes them inert. The probe keeps timestamps
 and observations only in memory and exposes them through `dump()`; it has no file, resource,
 save, or installer write path.
+
+The checked-in probe has been corrected to require the v1.2 world timer and deferred
+listener before activation. The 2026-08-30 execution used the older `os.clock()` fallback;
+its numerical timestamps remain invalid even though the current file no longer contains
+that fallback.
 
 The only mutating helpers are explicit controlled experiments:
 
@@ -82,14 +95,14 @@ unless restoration is independently confirmed or the save is reloaded. No produc
 choice is considered proven merely because the probe parses or because an action was queued;
 Task 6 must separately observe the started action and resulting engine state.
 
-### 0.2 Task 6 capability decision (2026-08-30)
+### 0.2 Corrected Task 6 capability decision (2026-08-31)
 
-The measured SCS gap is real: the hostile-at-load case took 0.570 s from first observed
-`See([PC])` to `instantprep=1`; the neutral-to-hostile case took 0.938 s from EA change to
-the completed preparation marker. Cosmetic-free `DWSW408` landed at +0.871 s in the latter
-case. These are representative scheduling observations rather than performance promises.
+The spike observed `See([PC])`, later SCS preparation, and a later cosmetic-free delivery in
+that order, but its `os.clock()` timestamps cannot measure the gaps. The exact 0.570 s,
+0.938 s, and 0.871 s claims are withdrawn. A current-version live pass must use the EEex
+world timer before component 121 receives timing acceptance.
 
-The production paths are now fixed to the proven installed contracts:
+The non-clock production paths remain fixed to the observed installed contracts:
 
 - mutate exactly one available mage/priest memorized record and rebuild quick lists with a
   real `CAbilityId` and change amount `-1` / `+1`;
@@ -111,15 +124,18 @@ The production paths are now fixed to the proven installed contracts:
 ordinary play), so the runtime does not reinterpret it. Dialogue/tactical actions remain
 outside the passive allowlist and uncertainty remains a no-action result.
 
-### 0.3 Offline implementation result (2026-08-30)
+### 0.3 Current EEex v1.2 implementation result (2026-08-31)
 
 Components 120 and 121 are implemented on `codex/ambient-readiness-121`; neither has been
-installed into the active game. Component 121's public WeiDU transaction requires BG2:EE/EET,
-SCS Smarter Mages 6030, EEex components 0 and 1, `M___EEex.lua`, final loose `SPELL.IDS`, and
-SCS's final `instant_prebuff_spells.2da`. The exact probed profile (EEex v0.11.0-alpha,
-2026-08-30) is stamped into the generated manifest, while the runtime independently checks
-every required API entry point and remains inert with one diagnostic if the profile is not
-actually available.
+installed into the active playthrough game. A disposable v0.11 laboratory installation of
+121 produced no readiness effects because production required the nonexistent
+`EEex_GameState_GetTime` global and correctly retired itself before mutation. Component
+121 now targets EEex v1.2.0. Its public WeiDU transaction requires BG2:EE/EET, SCS Smarter
+Mages 6030, `M___EEex.lua`, final loose `SPELL.IDS`, and SCS's final
+`instant_prebuff_spells.2da`; it does not hardcode EEex component numbers. The stamped
+profile records the v1.2 deferred listener and raw 15-Hz engine-time unit, while the runtime
+rechecks every required entry point and fails closed before gameplay mutation if world time
+or another required capability is unavailable.
 
 The install-time compiler resolves each candidate dynamically, validates both memorized and
 cosmetic-free delivery SPL semantics, and classifies urgent candidates by reachable genuine
@@ -130,15 +146,16 @@ stamped into the runtime rather than assuming the currently observed `SPWI703` s
 The public component publishes only `override/M_CBRRDY.lua` through WeiDU's backup-aware
 transaction and changes no SPL or BCS file.
 
-Hermetic coverage now includes absent SCS/EEex/LuaJIT/autoload/mapping prerequisites, current
+Hermetic coverage now includes absent SCS/EEex-autoload/mapping prerequisites, current
 SCS/SR, future genuine Improved Mantle, optional ambient omissions, malformed mapping
 rollback, deterministic reinstall, exact synthetic uninstall restoration, and stamped Lua
 syntax/token checks. The fake-EEex suite covers exact ambient debit/reset/maintenance and SCS
 reimbursement, normal urgent casting and interruption, passive-only queue displacement,
 Project Image exclusion, bounded retry, contact rearm, hot reload, ownership flags, marshal
 shape, recycled engine-object IDs, incomplete effect-list fail-closed behavior, and
-independent fault fuses. Live deployment and gameplay acceptance remain a separate
-user-approval checkpoint.
+independent fault fuses. The v1.2 path is source- and simulation-verified; live v1.2
+deployment and gameplay acceptance remain a separate user-approval checkpoint. Older-EEex
+listener fallback is a later task.
 
 ## 1. How SCS 35.21 pre-buffs in this install (verified)
 
@@ -200,7 +217,7 @@ user-approval checkpoint.
 Ambient-eligible ⇒ the "expect trouble" package is Stoneskin/Ironskins + MI + Spell Shield
 (arcane), AoF + Barkskin + Ironskins (divine) — all slot-consuming, so no infinite-slot problem.
 
-## 3. EEex v0.11.0-alpha hooks that matter (installed `override/EEex_*.lua`, verified)
+## 3. Historical EEex v0.11.0-alpha hook inventory
 
 - **Spawn:** `EEex_Sprite_AddLoadedListener(fn(sprite))` — from the `CGameSprite::Unmarshal`
   hook (`EEex_Sprite.lua:8-10, 1562-1577`; `EEex_Sprite_Patch.lua:213-219`): area load, save
@@ -251,8 +268,8 @@ Ambient-eligible ⇒ the "expect trouble" package is Stoneskin/Ironskins + MI + 
 2. **Priests:** no Detect path at all; Ironskins free only for SR druids; AoF/Barkskin are
    short-tier. A stealth opener on a cleric meets nothing.
 3. **Fighters/rogues:** nothing at spawn; potions need See().
-4. **Post-dialogue hostility:** fine for casters (instant buffs on first hostile pass) —
-   the only window is < 1 s.
+4. **Post-dialogue hostility:** fine for casters once the first hostile preparation pass
+   runs, but the probe did not validly measure that scheduling window.
 
 ## 5. Options
 

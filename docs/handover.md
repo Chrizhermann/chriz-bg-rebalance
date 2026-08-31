@@ -9,7 +9,38 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-instal
 Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
 `docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `AGENTS.md`.
 
-## Status (2026-08-30) — SCS ambient readiness offline implementation complete
+## Status (2026-08-31) — component 121 corrected for EEex v1.2
+
+- **The first manual laboratory pass correctly failed acceptance:** component 121 was
+  installed on the disposable `C:\Games\BGSE-AOE-PREBUFF-LAB-20260830` copy, but nearby
+  eligible casters received no readiness effects. The active playthrough was not used.
+- **Root cause:** `EEex_GameState_GetTime` was never an EEex API. It was introduced as a
+  guessed probe/test shim, the probe silently fell back to `os.clock()`, and production
+  later capability-gated on the invented name. Consequently the v0.11 laboratory runtime
+  disabled itself before applying an effect, debiting a slot, or queuing a cast. The spike's
+  numeric latency values are not engine-time evidence.
+- **Current implementation targets official EEex v1.2.0 first.** It reads
+  `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime:GetCurrentTime()`, treats the
+  result as raw engine ticks at 15 ticks per gameplay second, and registers the v1.2
+  `EEex_Opcode_AddDeferredListsResolvedListener`. Missing world time fails closed before
+  gameplay mutation. The installer gates on `M___EEex.lua` and runtime capabilities rather
+  than version-dependent EEex WeiDU component numbers.
+- **Current evidence is source plus automated behavior, not live acceptance.** The local
+  clean EEex reference at `C:\Games\Baldur's Gate II Enhanced Edition modded - Copy - Copy`
+  declares v1.2.0, but it has no SCS/SR and is therefore not by itself a valid component-121
+  gameplay target. No game install, launch, or save mutation was performed for this fix.
+  The next live pass needs a disposable SCS/SR install running EEex v1.2 and a full process
+  restart so the old append-only callback/fault state cannot survive.
+- **Fresh verification:** all 61 component-121 suites and all 221 repository tests pass;
+  WeiDU 24900 parses the TP2 successfully and `git diff --check` is clean.
+- **Older-EEex fallback is deliberately deferred.** Official historical source shows the
+  same world-time field, but versions without the v1.2 deferred listener need a separately
+  tested listener fallback. Do not weaken the current v1.2 path to claim that support.
+
+See `research/11-eeex-v1.2-readiness-compatibility.md` for provenance, official references,
+and RED/GREEN evidence.
+
+## Status (2026-08-30) — original offline implementation checkpoint
 
 - **Dragon work is being handled elsewhere and is out of scope for this branch.** Do not
   resume component 110 from this handover.
@@ -37,8 +68,9 @@ Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Ap
   recycled object IDs, required complete effect-list visibility, and replaced the stock
   Project Image resref assumption with final-`SPELL.IDS` resolution. WeiDU parse-check and
   all 216 repository tests passed in a clean process. Task 12's approval-gated procedure is
-  `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`. **No live component install
-  is authorized**; neither live gameplay acceptance nor deployment has been performed.
+  `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`. At this checkpoint no live
+  component install had yet been authorized; the later disposable-lab result and correction
+  are recorded in the 2026-08-31 status above.
 
 ## Status (2026-08-22)
 
@@ -133,10 +165,11 @@ session — always `--exclude` them.
 
 ## Work queue
 
-0. **Wait for explicit ambient-readiness live-deployment approval.** The complete staged
-   evidence, rollback boundary, gameplay matrix, and process/IPC cleanup procedure is in
-   `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`. Do not install, launch,
-   mutate a save, or deploy either component merely because the offline branch is ready.
+0. **Finish component 121's EEex v1.2 acceptance before older-version fallback.** The
+   complete staged evidence, rollback boundary, gameplay matrix, and process/IPC cleanup
+   procedure is in `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`. Do not
+   install, launch, mutate a save, or deploy either component without a fresh approval for
+   the exact v1.2 SCS/SR test target.
 1. **SR wishlist session** — *needs the user live*: walk Spell Revisions' changes, collect
    which to keep/revert/re-tune → `research/10-sr-wishlist.md` → design 200-series.
 2. **SCS component catalog** — solo-able: from the game install's WeiDU.log (414 entries;

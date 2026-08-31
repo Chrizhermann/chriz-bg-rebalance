@@ -379,10 +379,15 @@ class AmbientReadinessGame:
 
         log_lines: list[str] = []
         if eeex_base:
-            log_lines.append("~EEEX/EEEX.TP2~ #0 #0 // EEex: v0.11.0-alpha")
+            log_lines.extend(
+                (
+                    "~EEEX/EEEX.TP2~ #0 #0 // Quick Menu Core: v1.2.0",
+                    "~EEEX/EEEX.TP2~ #0 #1 // EEex: v1.2.0",
+                )
+            )
         if eeex_luajit:
             log_lines.append(
-                "~EEEX/EEEX.TP2~ #0 #1 // Experimental - Use LuaJIT: v0.11.0-alpha"
+                "~EEEX/EEEX.TP2~ #0 #8 // Experimental - Use LuaJIT: v1.2.0"
             )
         if scs_installed:
             log_lines.append(
@@ -619,9 +624,9 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
         self.assertTrue(path.is_file())
         source = path.read_text(encoding="ascii")
         self.assertNotIn("%CBR_RDY_MANIFEST%", source)
-        self.assertIn('minimum_eeex_version = "0.11.0-alpha"', source)
-        self.assertIn("requires_base_component = 0", source)
-        self.assertIn("requires_luajit_component = 1", source)
+        self.assertIn('target_eeex_version = "1.2.0"', source)
+        self.assertNotIn("requires_base_component", source)
+        self.assertNotIn("requires_luajit_component", source)
         self.assertIn('project_image_resref = "spwi703"', source)
         self.assertNotIn("CBR_TEST", source)
         self.assertNotIn("RDY_PROBE", source)
@@ -676,6 +681,15 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
             {"M_CBRRDY.LUA"},
         )
 
+    def test_v12_bootstrap_is_authoritative_not_version_specific_component_ids(self) -> None:
+        game = self._game(
+            eeex_base=False,
+            eeex_luajit=False,
+            autoload_marker=True,
+        )
+        self._install(game)
+        self._runtime(game)
+
     def test_future_genuine_improved_mantle_is_enabled_semantically(self) -> None:
         game = self._game(future_improved_mantle=True)
         self._install(game)
@@ -704,7 +718,6 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
                 },
                 "EEex",
             ),
-            ("luajit", {"eeex_luajit": False}, "LuaJIT"),
             ("autoload", {"autoload_marker": False}, "autoload"),
             ("mapping", {"prebuff_map": False}, "prebuff"),
         )
@@ -780,6 +793,7 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
         self.assertIsNotNone(block_120)
         self.assertIsNotNone(block_121, "intentional RED: public component 121 is absent")
         self.assertNotRegex(block_120.group(0), r"(?i)EEex|M___EEex")
+        self.assertNotRegex(block_121.group(0), r"(?i)MOD_IS_INSTALLED\s+~eeex/")
         self.assertNotIn("cbr_apply_scs_weapon_protection_semantics", block_121.group(0))
         self.assertNotRegex(block_121.group(0), r"(?i)COPY_EXISTING.*\.(?:SPL|BCS)")
 

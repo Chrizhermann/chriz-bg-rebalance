@@ -189,8 +189,23 @@ local function sees_party(sprite)
     return EEex_Trigger_EvalConditionalStringAsAIBase("See([PC])", sprite) and true or false
 end
 
-local function game_time()
-    return tonumber(EEex_GameState_GetTime()) or 0
+local GAME_TIME_TICKS_PER_SECOND = 15
+
+local function seconds_to_game_ticks(seconds)
+    return flag(seconds, 0) * GAME_TIME_TICKS_PER_SECOND
+end
+
+local function game_time_ticks()
+    local ok, value = pcall(function()
+        local world_time =
+            EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime
+        return world_time:GetCurrentTime()
+    end)
+    local ticks = ok and tonumber(value) or nil
+    if not ticks or ticks < 0 then
+        error("EEex v1.2 world-time binding is unavailable")
+    end
+    return ticks
 end
 
 local function sprite_nonce(sprite)
@@ -422,7 +437,7 @@ local function apply_delivery(sprite, id, record)
     return managed_effect_active(sprite, record)
 end
 
-local function apply_first(sprite, id, record, ledger, session)
+local function apply_first(sprite, id, record, ledger, session, now)
     local spell_record, token = find_available_record(sprite, record.resref)
     if not spell_record then return false end
     local before = available_count(sprite, record.resref)
@@ -451,7 +466,7 @@ local function apply_first(sprite, id, record, ledger, session)
         version = 1,
         resref = record.resref,
         charged = 1,
-        expected_expiry = game_time() + record.duration,
+        expected_expiry = now + seconds_to_game_ticks(record.duration),
         suppressed = 0,
     }
     session.reimbursement[record.resref] = {
@@ -461,18 +476,18 @@ local function apply_first(sprite, id, record, ledger, session)
     return true
 end
 
-local function maintain(sprite, id, record, ledger_record, visible)
+local function maintain(sprite, id, record, ledger_record, visible, now)
     if ledger_record.suppressed == 1 or managed_effect_active(sprite, record) then
         return
     end
-    local now = game_time()
-    if now + 6 < ledger_record.expected_expiry then
+    if now + seconds_to_game_ticks(6) < ledger_record.expected_expiry then
         ledger_record.suppressed = 1
         return
     end
     if visible or get_local(sprite, "inafight") ~= 0 then return end
     if apply_delivery(sprite, id, record) then
-        ledger_record.expected_expiry = now + record.duration
+        ledger_record.expected_expiry =
+            now + seconds_to_game_ticks(record.duration)
     else
         disable_spell(sprite, id, record, "maintenance delivery was not confirmed")
     end
@@ -481,6 +496,7 @@ end
 local function ambient_tick(sprite)
     local current, id = resolve_sprite(sprite)
     if not current then return end
+    local now = game_time_ticks()
     local classification = classify(current, id)
     if not classification then return end
     local session = session_for(current, id)
@@ -496,13 +512,13 @@ local function ambient_tick(sprite)
             if ledger_record and ledger_record.charged == 1 then
                 if maintenance_tick then
                     if visible == nil then visible = sees_party(current) end
-                    maintain(current, id, record, ledger_record, visible)
+                    maintain(current, id, record, ledger_record, visible, now)
                 end
             elseif session.checked[record.resref] ~= 1 then
                 session.checked[record.resref] = 1
                 local spell_record = find_available_record(current, record.resref)
                 if spell_record and not defensive_effect_active(current, record) then
-                    apply_first(current, id, record, ledger, session)
+                    apply_first(current, id, record, ledger, session, now)
                 end
             end
         end
@@ -520,6 +536,7 @@ end
 local function ambient_action(sprite, action)
     local current, id = resolve_sprite(sprite)
     if not current then return end
+    game_time_ticks()
     local session = session_for(current, id)
     local action_id = tonumber(action and action.m_actionID)
     local pending = session.pending
@@ -562,11 +579,13 @@ end
 local function ambient_reset(sprite)
     local current, id = resolve_sprite(sprite)
     if not current then return end
+    game_time_ticks()
     EEex_GetUDAux(current).CBR_RDY_LEDGER = new_ledger()
     state.ambient_sessions[id] = nil
 end
 
 local function copy_ledger(sprite)
+    game_time_ticks()
     local source = get_ledger(sprite)
     local result = new_ledger()
     for resref, record in pairs(source.spells) do
@@ -586,6 +605,7 @@ end
 local function import_ledger(sprite, saved)
     local current, id = resolve_sprite(sprite)
     if not current then return end
+    game_time_ticks()
     local result = new_ledger()
     if type(saved) == "table" and saved.version == 1
             and type(saved.spells) == "table" then
@@ -716,10 +736,11 @@ local function reset_contact(contact)
 end
 
 local function update_contact_visibility(contact, visible, now)
-    local rearm_seconds = flag(manifest.contact_rearm_seconds, 6)
+    local rearm_ticks = seconds_to_game_ticks(
+        flag(manifest.contact_rearm_seconds, 6))
     if visible then
         if contact.unseen_since >= 0
-                and now - contact.unseen_since >= rearm_seconds then
+                and now - contact.unseen_since >= rearm_ticks then
             reset_contact(contact)
         end
         contact.unseen_since = -1
@@ -728,7 +749,7 @@ local function update_contact_visibility(contact, visible, now)
     end
     if contact.unseen_since < 0 then contact.unseen_since = now end
     if contact.rearmed == 0
-            and now - contact.unseen_since >= rearm_seconds then
+            and now - contact.unseen_since >= rearm_ticks then
         reset_contact(contact)
         contact.rearmed = 1
     end
@@ -738,13 +759,13 @@ end
 local function urgent_tick(sprite)
     local current, id = resolve_sprite(sprite)
     if not current then return end
+    local now = game_time_ticks()
     local classification = classify(current, id)
     if not classification then return end
     local enemy_ally = current.m_typeAI
         and tonumber(current.m_typeAI.m_EnemyAlly)
     if enemy_ally ~= 255 then return end
     local visible = sees_party(current)
-    local now = game_time()
     local contact = contact_for(current)
     if not update_contact_visibility(contact, visible, now) then return end
     if contact.spent == 1 then return end
@@ -752,7 +773,7 @@ local function urgent_tick(sprite)
     if not project_image_safe(current) or weapon_immunity_active(current) then return end
 
     local retry = contact.pending_resref ~= ""
-    if retry and now - contact.queued_at < 2 then return end
+    if retry and now - contact.queued_at < seconds_to_game_ticks(2) then return end
     if retry and contact.attempts >= 2 then
         contact.spent = 1
         contact.pending_resref = ""
@@ -795,6 +816,7 @@ end
 local function urgent_action(sprite, action)
     local current = resolve_sprite(sprite)
     if not current then return end
+    game_time_ticks()
     local contact = contact_for(current)
     if contact.pending_resref ~= ""
             and tonumber(action and action.m_actionID) == 31
@@ -886,13 +908,13 @@ local function apis_available(entries)
 end
 
 local shared_supported = apis_available({
-    { "EEex_Opcode_AddListsResolvedListener", EEex_Opcode_AddListsResolvedListener },
+    { "EEex_Opcode_AddDeferredListsResolvedListener",
+        EEex_Opcode_AddDeferredListsResolvedListener },
     { "EEex_Action_AddSpriteStartedActionListener", EEex_Action_AddSpriteStartedActionListener },
     { "EEex_GameObject_Get", EEex_GameObject_Get },
     { "EEex_GetUDAux", EEex_GetUDAux },
     { "EEex_Sprite_GetLocalInt", EEex_Sprite_GetLocalInt },
     { "EEex_Trigger_EvalConditionalStringAsAIBase", EEex_Trigger_EvalConditionalStringAsAIBase },
-    { "EEex_GameState_GetTime", EEex_GameState_GetTime },
     { "EEex_Utility_IterateCPtrList", EEex_Utility_IterateCPtrList },
 })
 local ambient_supported = shared_supported and apis_available({
@@ -930,7 +952,7 @@ end
 
 if shared_supported and (ambient_supported or urgent_supported)
         and not _G.CBR_RDY_TICK_ACTION_LISTENERS_REGISTERED then
-    EEex_Opcode_AddListsResolvedListener(function(sprite)
+    EEex_Opcode_AddDeferredListsResolvedListener(function(sprite)
         local current = _G.CBR_RDY_TRAMPOLINES
         if current and current.tick then current.tick(sprite) end
     end)

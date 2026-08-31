@@ -144,6 +144,7 @@ local ambientDetection = {
 }
 
 local fakeClock = 1000
+local fakeGameTimeTicks = fakeClock * 15
 local nextSpriteID = 100
 local spritesByID = {}
 local auxBySprite = setmetatable({}, { __mode = "k" })
@@ -172,12 +173,28 @@ function EEex_GetUDAux(sprite)
     return aux
 end
 
-function EEex_GameState_GetTime()
-    return fakeClock
+-- EEex v1.2 exposes the engine's world-time field; it does not define
+-- EEex_GameState_GetTime() or Infinity_GetGameTime(). m_gameTime is measured
+-- in 1/15-second engine ticks.
+local fakeWorldTime = { m_gameTime = fakeGameTimeTicks }
+function fakeWorldTime:GetCurrentTime()
+    return self.m_gameTime
+end
+EngineGlobals = {
+    g_pBaldurChitin = {
+        m_pObjectGame = { m_worldTime = fakeWorldTime },
+    },
+}
+
+local function advanceClockTicks(ticks)
+    fakeGameTimeTicks = fakeGameTimeTicks + ticks
+    fakeClock = fakeGameTimeTicks / 15
+    EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime.m_gameTime =
+        fakeGameTimeTicks
 end
 
-function Infinity_GetGameTime()
-    return fakeClock
+local function advanceClockSeconds(seconds)
+    advanceClockTicks(seconds * 15)
 end
 
 local function countAvailable(sprite, resref)
@@ -401,13 +418,18 @@ end
 -- Listener registration and action engine
 -------------------------------------------------------------------------------
 
-local tickListeners = {}
+local deferredTickListeners = {}
+local legacyTickListeners = {}
 local startedActionListeners = {}
 local resetListeners = {}
 local marshalHandlers = {}
 
+function EEex_Opcode_AddDeferredListsResolvedListener(callback)
+    deferredTickListeners[#deferredTickListeners + 1] = callback
+end
+
 function EEex_Opcode_AddListsResolvedListener(callback)
-    tickListeners[#tickListeners + 1] = callback
+    legacyTickListeners[#legacyTickListeners + 1] = callback
 end
 
 function EEex_Action_AddSpriteStartedActionListener(callback)
@@ -467,7 +489,8 @@ function EEex_Action_QueueResponseStringOnAIBase(response, sprite)
 end
 
 local function fireTick(sprite)
-    for _, callback in ipairs(tickListeners) do callback(sprite) end
+    for _, callback in ipairs(deferredTickListeners) do callback(sprite) end
+    for _, callback in ipairs(legacyTickListeners) do callback(sprite) end
 end
 
 local function fireSpellbookReset(sprite)
@@ -569,9 +592,48 @@ end
 scenarios.runtime_missing_project_image_identity =
     scenarios.runtime_missing_urgent_api
 
+scenarios.runtime_missing_game_time = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408")
+    memorize(sprite, "spwi611")
+    fireTick(sprite)
+    out("ambient_applications", applicationCount(sprite, "spwi408"))
+    out("ambient_available", countAvailable(sprite, "spwi408"))
+    out("urgent_queues", sprite.queueCount)
+    out("ambient_faulted", CBR_RDY_STATE.ambient_faulted or 0)
+    out("urgent_faulted", CBR_RDY_STATE.urgent_faulted or 0)
+    out("sprite_aux_created", bool(auxBySprite[sprite] ~= nil))
+    out("classification_cached",
+        bool(CBR_RDY_STATE.classifications[sprite.m_id] ~= nil))
+    out("ambient_session_cached",
+        bool(CBR_RDY_STATE.ambient_sessions[sprite.m_id] ~= nil))
+end
+
+scenarios.runtime_missing_game_time_callbacks = function()
+    local action_sprite = newSprite({})
+    fireStarted(action_sprite, { m_actionID = 0, m_specificID = 0 })
+    out("action_aux_created", bool(auxBySprite[action_sprite] ~= nil))
+
+    CBR_RDY_STATE.ambient_faulted = 0
+    CBR_RDY_STATE.urgent_faulted = 0
+    local reset_sprite = newSprite({})
+    fireSpellbookReset(reset_sprite)
+    out("reset_aux_created", bool(auxBySprite[reset_sprite] ~= nil))
+
+    CBR_RDY_STATE.ambient_faulted = 0
+    local export_sprite = newSprite({})
+    exportedLedger(export_sprite)
+    out("export_aux_created", bool(auxBySprite[export_sprite] ~= nil))
+
+    CBR_RDY_STATE.ambient_faulted = 0
+    local import_sprite = newSprite({})
+    importedLedger(import_sprite, { version = 1, spells = {} })
+    out("import_aux_created", bool(auxBySprite[import_sprite] ~= nil))
+end
+
 scenarios.runtime_shell = function()
     reloadRuntime()
-    out("listeners_after_reload", #tickListeners)
+    out("listeners_after_reload", #deferredTickListeners + #legacyTickListeners)
     out("started_after_reload", #startedActionListeners)
     out("reset_after_reload", #resetListeners)
 
@@ -699,7 +761,7 @@ scenarios.ambient_first_debit_and_refresh = function()
     out("ledger_charged", record.charged or 0)
     out("quicklist_rebuilds", sprite.quickListRebuilds)
     removeActive(sprite, "spwi408")
-    fakeClock = fakeClock + 2400
+    advanceClockSeconds(2400)
     sprite.seeParty = false
     sprite.locals.inafight = 0
     for _ = 1, 15 do fireTick(sprite) end
@@ -712,7 +774,7 @@ scenarios.ambient_natural_expiry = function()
     memorize(sprite, "spwi408")
     fireTick(sprite)
     removeActive(sprite, "spwi408")
-    fakeClock = fakeClock + 2400
+    advanceClockSeconds(2400)
     sprite.seeParty = true
     for _ = 1, 15 do fireTick(sprite) end
     out("visible_blocked", bool(applicationCount(sprite, "spwi408") == 1))
@@ -730,7 +792,7 @@ scenarios.ambient_early_removal = function()
     memorize(sprite, "spwi408", 2)
     fireTick(sprite)
     removeActive(sprite, "spwi408")
-    fakeClock = fakeClock + 60
+    advanceClockSeconds(60)
     sprite.seeParty = false
     for _ = 1, 30 do fireTick(sprite) end
     local before = exportedLedger(sprite) or {}
@@ -752,7 +814,7 @@ scenarios.ambient_reset_boundaries = function()
     local sprite = newSprite({})
     memorize(sprite, "spwi408", 2)
     fireTick(sprite)
-    fakeClock = fakeClock + 10000
+    advanceClockSeconds(10000)
     fireTick(sprite)
     out("after_elapsed_time", applicationCount(sprite, "spwi408"))
     local saved = exportedLedger(sprite)
@@ -907,13 +969,13 @@ scenarios.ambient_runtime_safety = function()
     CBR_RDY_EXTERNAL_OWNER = 0
 
     reloadRuntime()
-    out("listeners_after_reload", #tickListeners)
+    out("listeners_after_reload", #deferredTickListeners + #legacyTickListeners)
 
     local fault = newSprite({ failVisibility = true })
     memorize(fault, "spwi408")
     fireTick(fault)
     removeActive(fault, "spwi408")
-    fakeClock = fakeClock + 2400
+    advanceClockSeconds(2400)
     for _ = 1, 30 do fireTick(fault) end
     out("ambient_tracebacks", countPrinted("ambient disabled"))
     out("ambient_inert_after_fault", bool(applicationCount(fault, "spwi408") == 1))
@@ -1044,11 +1106,11 @@ scenarios.urgent_never_started_retry = function()
     local sprite = newSprite({ autoStart = false })
     memorize(sprite, "spwi611")
     fireTick(sprite)
-    fakeClock = fakeClock + 2
+    advanceClockSeconds(2)
     fireTick(sprite)
-    fakeClock = fakeClock + 2
+    advanceClockSeconds(2)
     fireTick(sprite)
-    fakeClock = fakeClock + 20
+    advanceClockSeconds(20)
     for _ = 1, 30 do fireTick(sprite) end
     local state = EEex_GetUDAux(sprite).CBR_RDY_CONTACT or {}
     out("queues", sprite.queueCount)
@@ -1060,7 +1122,7 @@ scenarios.urgent_never_started_unsafe_queue = function()
     local sprite = newSprite({ autoStart = false, retainFailedQueue = true })
     memorize(sprite, "spwi611")
     fireTick(sprite)
-    fakeClock = fakeClock + 2
+    advanceClockSeconds(2)
     fireTick(sprite)
     local state = EEex_GetUDAux(sprite).CBR_RDY_CONTACT or {}
     out("queues", sprite.queueCount)
@@ -1075,18 +1137,30 @@ scenarios.urgent_contact_rearm = function()
     out("continuous_sight_queues", sprite.queueCount)
     sprite.seeParty = false
     fireTick(sprite)
-    fakeClock = fakeClock + 5
+    advanceClockSeconds(5)
     fireTick(sprite)
     sprite.seeParty = true
     fireTick(sprite)
     out("short_loss_queues", sprite.queueCount)
     sprite.seeParty = false
     fireTick(sprite)
-    fakeClock = fakeClock + 6
+    advanceClockSeconds(6)
     fireTick(sprite)
     sprite.seeParty = true
     fireTick(sprite)
     out("full_round_loss_queues", sprite.queueCount)
+end
+
+scenarios.v12_world_time_units = function()
+    local sprite = newSprite({ autoStart = false })
+    memorize(sprite, "spwi611")
+    fireTick(sprite)
+    advanceClockTicks(2)
+    fireTick(sprite)
+    out("queues_before_two_seconds", sprite.queueCount)
+    advanceClockTicks(28)
+    fireTick(sprite)
+    out("queues_at_two_seconds", sprite.queueCount)
 end
 
 scenarios.urgent_fault_fuse = function()
@@ -1110,9 +1184,14 @@ if scenarioName == "runtime_missing_urgent_api" then
     EEex_Sprite_GetState = nil
 elseif scenarioName == "runtime_missing_ambient_api" then
     EEex_GameObject_ApplyEffect = nil
+elseif scenarioName == "runtime_missing_game_time"
+        or scenarioName == "runtime_missing_game_time_callbacks" then
+    EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime = nil
 end
 reloadRuntime()
-out("tick_listeners", #tickListeners)
+out("tick_listeners", #deferredTickListeners + #legacyTickListeners)
+out("deferred_tick_listeners", #deferredTickListeners)
+out("legacy_tick_listeners", #legacyTickListeners)
 out("started_action_listeners", #startedActionListeners)
 out("reset_listeners", #resetListeners)
 local marshalCount = 0

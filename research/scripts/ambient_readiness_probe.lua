@@ -4,8 +4,9 @@
 -- CBR_RDY_PROBE.install() is called, and no slot is changed unless the caller
 -- explicitly invokes debit_once().  teardown() makes the append-only
 -- callbacks inert and attempts to restore every outstanding controlled debit.
--- Logs live only in this Lua process and are returned by dump(); this script
--- never writes a resource, save, or file.
+-- Logs live only in this Lua process and are returned by dump() as raw engine
+-- ticks, derived seconds, kind, and message; this script never writes a
+-- resource, save, or file.
 
 _G.CBR_RDY_PROBE = _G.CBR_RDY_PROBE or {}
 local probe = _G.CBR_RDY_PROBE
@@ -20,16 +21,19 @@ probe.watches = probe.watches or {}
 probe.debits = probe.debits or {}
 probe.selected_casts = probe.selected_casts or {}
 
-local function timestamp()
-    if EEex_GameState_GetTime then
-        local ok, value = pcall(EEex_GameState_GetTime)
-        if ok and type(value) == "number" then return value end
+local GAME_TIME_TICKS_PER_SECOND = 15
+
+local function game_time_ticks()
+    local ok, value = pcall(function()
+        local world_time =
+            EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime
+        return world_time:GetCurrentTime()
+    end)
+    local ticks = ok and tonumber(value) or nil
+    if not ticks or ticks < 0 then
+        error("EEex v1.2 world-time binding is unavailable")
     end
-    if Infinity_GetGameTime then
-        local ok, value = pcall(Infinity_GetGameTime)
-        if ok and type(value) == "number" then return value end
-    end
-    return os.clock()
+    return ticks
 end
 
 local function normalize(value)
@@ -46,8 +50,10 @@ local function object_id(sprite)
 end
 
 local function log(kind, message)
+    local ticks = game_time_ticks()
     probe.logs[#probe.logs + 1] = {
-        time = timestamp(),
+        time_ticks = ticks,
+        time_seconds = ticks / GAME_TIME_TICKS_PER_SECOND,
         kind = tostring(kind),
         message = tostring(message),
     }
@@ -309,9 +315,11 @@ function probe.queue_normal_cast(sprite, resref)
     local id = object_id(sprite)
     local normalized = normalize(resref)
     local before = probe.available_count(sprite, normalized)
+    local queued_ticks = game_time_ticks()
     probe.selected_casts[id] = {
         resref = normalized,
-        queued_at = timestamp(),
+        queued_at_ticks = queued_ticks,
+        queued_at_seconds = queued_ticks / GAME_TIME_TICKS_PER_SECOND,
         before = before,
         started = 0,
     }
@@ -329,8 +337,10 @@ end
 function probe.dump()
     local result = {}
     for index, entry in ipairs(probe.logs) do
-        result[index] = string.format("%.3f\t%s\t%s",
-            tonumber(entry.time) or -1, entry.kind, entry.message)
+        result[index] = string.format("%.0f\t%.3f\t%s\t%s",
+            tonumber(entry.time_ticks) or -1,
+            tonumber(entry.time_seconds) or -1,
+            entry.kind, entry.message)
     end
     return result
 end
@@ -368,8 +378,11 @@ local function started_action_callback(sprite, action)
         .. " queue=" .. queue_ids(sprite))
     local selected = current.selected_casts[id]
     if selected and selected.resref == resref then
+        local started_ticks = game_time_ticks()
         selected.started = 1
-        selected.started_at = timestamp()
+        selected.started_at_ticks = started_ticks
+        selected.started_at_seconds =
+            started_ticks / GAME_TIME_TICKS_PER_SECOND
         selected.after_start = probe.available_count(sprite, resref)
         log("selected_cast_started", "id=" .. id .. " resref=" .. resref
             .. " before=" .. tostring(selected.before)
@@ -384,18 +397,20 @@ local function reset_callback(sprite)
 end
 
 function probe.install()
-    if not (EEex_Opcode_AddListsResolvedListener
+    if not (EEex_Opcode_AddDeferredListsResolvedListener
             and EEex_Action_AddSpriteStartedActionListener
             and EEex_Sprite_AddQuickListCountsResetListener) then
         return false, "required listener APIs unavailable"
     end
+    local clock_ok = pcall(game_time_ticks)
+    if not clock_ok then return false, "world-time binding unavailable" end
     local activating = probe.active ~= 1
     if activating then
         probe.generation = probe.generation + 1
         probe.active = 1
     end
     if probe.listeners_registered ~= 1 then
-        EEex_Opcode_AddListsResolvedListener(function(sprite)
+        EEex_Opcode_AddDeferredListsResolvedListener(function(sprite)
             local ok, err = xpcall(function() tick_callback(sprite) end, debug.traceback)
             if not ok then log("tick_error", err) end
         end)
