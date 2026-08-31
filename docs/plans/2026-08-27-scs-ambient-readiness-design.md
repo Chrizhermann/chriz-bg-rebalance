@@ -17,7 +17,32 @@ and its fallback `os.clock()` invalidates every numeric latency claim. Component
 targets v1.2 first, registers `EEex_Opcode_AddDeferredListsResolvedListener`, and reads the
 documented world timer as raw ticks at 15 ticks per gameplay second. The runtime fails closed
 before mutation when that clock is unavailable. It does not hardcode EEex component numbers.
-Older-version listener fallback is explicitly deferred until after v1.2 gameplay acceptance.
+
+### Older-EEex fallback addendum (approved sequence, 2026-08-31)
+
+The user selected current-version support first and an older-version fallback second. Three
+implementation shapes were considered:
+
+1. **Capability-selected adapter (selected):** prefer the complete v1.2 path. Only when the
+   deferred listener is absent, select the legacy lists-resolved listener, read the exact
+   historical `m_worldTime.m_gameTime` field used by EEex itself, and normalize inactive
+   marshal exports to an empty table for v0.11.
+2. **WeiDU version/component detection (rejected):** component numbers changed between
+   v0.11 and v1.x, and install metadata cannot prove the live Lua surface.
+3. **A separate legacy component/runtime (rejected):** this duplicates behavior and allows
+   the old and current paths to drift.
+
+The adapter never registers both tick listeners and never lets the legacy field rescue a
+broken v1.2 method binding. v1.2 remains the primary target and keeps its documented method;
+the direct field is reachable only after the deferred listener is proven absent. Legacy
+callback cadence is synchronous and can repeat around effect-list resolution, so all existing
+idempotence gates remain authoritative and receive an explicit repeated-callback regression
+test. Pre-v1.0 marshal data keeps integer `0/1` values, and an inactive/faulted/externally
+owned ambient exporter returns `{}` rather than `nil` because v0.11 rejects nil exporters.
+
+Fallback acceptance is official-source plus fake-runtime behavior for v0.11/v1.0. It is not
+a claim that the corrected fallback has passed live gameplay; the existing v0.11 manual pass
+ran the broken clock-gated build. Current v1.2 gameplay acceptance remains first priority.
 
 ## 1. Problem and confirmed evidence
 
