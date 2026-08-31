@@ -918,3 +918,197 @@ branch/commit and wait for explicit live-install authorization.
 git add docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md
 git commit -m "Add SCS ambient readiness live checklist"
 ```
+
+---
+
+## 2026-08-31 addendum: source-verified older-EEex capability fallback
+
+The v1.2 correction at commit `87f9700` remains the primary implementation. The user then
+approved a second-priority fallback for old EEex releases. This addendum replaces the former
+version/component-number assumption with a capability-selected adapter verified against the
+official v0.11.0-alpha, v1.0.0, and v1.2.0 source trees. It does not authorize installation
+or turn source/simulator coverage into a live-game claim.
+
+## Task 13: Lock the legacy capability contract with failing tests
+
+**Files:**
+
+- Modify: `tests/test_ambient_readiness_listener.py`
+- Modify: `tests/lua/ambient_readiness_sim.lua`
+
+### Step 1: Add mutually exclusive listener-surface scenarios
+
+Extend the simulator so its default surface exposes both listeners but records them
+separately. Add `runtime_legacy_v011_surface`, which removes
+`EEex_Opcode_AddDeferredListsResolvedListener` and the world-timer method before loading the
+runtime while preserving `EEex_Opcode_AddListsResolvedListener` and `m_gameTime`.
+
+Require the current scenario to report exactly one deferred listener and zero legacy
+listeners. Require the legacy scenario to report zero deferred listeners and exactly one
+legacy listener. The legacy scenario must still apply one ambient buff with one debit and
+queue one normal urgent cast.
+
+### Step 2: Add clock fail-closed and repeated-callback regressions
+
+Add `runtime_legacy_missing_raw_time`, which also removes `m_gameTime`. Its first callback
+must retire before classification, UDAux creation, action queueing, spell application, debit,
+or marshal-ledger mutation.
+
+Add `runtime_legacy_repeated_callbacks`. Fire the synchronous old listener several times at
+the same raw game tick, then assert:
+
+```lua
+assert(sprite.debits == 1)
+assert(sprite.applications == 1)
+assert(#sprite.queuedResponses == 1)
+```
+
+This test treats callback count only as callback count; elapsed behavior continues to use raw
+engine ticks.
+
+### Step 3: Add the v0.11 marshal-export contract
+
+In the legacy surface, exercise ambient-disabled, ambient-faulted, and externally owned
+export paths. Each must return an empty table rather than `nil`, while an active normal
+legacy export must retain its versioned primitive-only ledger. Keep the v1.2 inactive export
+behavior unchanged.
+
+### Step 4: Run and preserve RED
+
+```powershell
+python -m unittest tests.test_ambient_readiness_listener.AmbientReadinessRuntimeShellTests -v
+python -m unittest tests.test_ambient_readiness_listener.AmbientReadinessListenerTests -v
+```
+
+Expected: the new legacy scenarios fail because production requires the deferred listener,
+uses only `GetCurrentTime()`, and can return `nil` from marshal exporters.
+
+```powershell
+git add tests/test_ambient_readiness_listener.py tests/lua/ambient_readiness_sim.lua
+git commit -m "Test older EEex readiness fallback"
+```
+
+## Task 14: Implement the capability-selected runtime and probe adapter
+
+**Files:**
+
+- Modify: `chriz-bg-rebalance/lua/M_CBRRDY.lua`
+- Modify: `research/scripts/ambient_readiness_probe.lua`
+- Modify: `chriz-bg-rebalance/lib/ambient_readiness.tpa`
+- Modify: `tests/test_ambient_readiness_installer.py`
+
+### Step 1: Select exactly one listener at module load
+
+Prefer the v1.2 deferred listener. Select the old listener only when the deferred symbol is
+absent; never register both:
+
+```lua
+local tick_listener_mode
+local add_tick_listener
+if type(EEex_Opcode_AddDeferredListsResolvedListener) == "function" then
+    tick_listener_mode = "deferred"
+    add_tick_listener = EEex_Opcode_AddDeferredListsResolvedListener
+elseif type(EEex_Opcode_AddListsResolvedListener) == "function" then
+    tick_listener_mode = "legacy"
+    add_tick_listener = EEex_Opcode_AddListsResolvedListener
+end
+```
+
+Use `add_tick_listener` in the shared capability gate and registration site. Expose the
+chosen primitive-only mode in runtime state for diagnostics, without persisting userdata or
+registering a second callback on hot reload.
+
+### Step 2: Keep v1.2 and legacy clocks deliberately separate
+
+Resolve `m_worldTime` once per read, then:
+
+```lua
+if tick_listener_mode == "deferred" then
+    return tonumber(world_time:GetCurrentTime())
+elseif tick_listener_mode == "legacy" then
+    return tonumber(world_time.m_gameTime)
+end
+error("no supported EEex tick listener")
+```
+
+Validate the result as a non-negative number. Do not use the legacy field to rescue a broken
+v1.2 method, and do not introduce `EEex_GameState_GetTime`, `Infinity_GetGameTime`,
+`os.clock()`, wall time, or callback counts.
+
+### Step 3: Normalize only legacy nil marshal exports
+
+Wrap every ambient exporter exit so legacy mode returns `{}` when the layer is inactive,
+externally owned, faulted, or its handler returns `nil`. Preserve normal ledgers and the
+current v1.2 return values. Keep booleans serialized as numeric `0/1`.
+
+### Step 4: Mirror the adapter in the session-only probe and stamped manifest
+
+Make the probe prefer the deferred/method pair and fall back to the legacy-listener/direct-
+field pair only when deferred is absent. Continue logging raw `time_ticks` and separately
+derived `time_seconds`.
+
+Keep `target_eeex_version = "1.2.0"` authoritative and add explicit legacy metadata for the
+fallback listener, clock field, and empty-table marshal convention. Extend installer tests
+to reject a stamped manifest that loses either the primary profile or fallback declaration.
+
+### Step 5: Make focused suites green and commit
+
+```powershell
+python -m unittest tests.test_ambient_readiness_listener -v
+python -m unittest tests.test_ambient_readiness_installer -v
+git diff --check
+```
+
+```powershell
+git add chriz-bg-rebalance/lua/M_CBRRDY.lua research/scripts/ambient_readiness_probe.lua chriz-bg-rebalance/lib/ambient_readiness.tpa tests
+git commit -m "Add older EEex readiness fallback"
+```
+
+## Task 15: Record evidence, review, and verify without installing
+
+**Files:**
+
+- Create: `research/12-eeex-legacy-readiness-fallback.md`
+- Modify: `README.md`
+- Modify: `docs/handover.md`
+- Modify: `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`
+- Modify outside repository: `C:/Users/chris/.agents/skills/bg-modding/references/gotchas.md`
+
+### Step 1: Record only official-source evidence
+
+Document the exact v0.11.0-alpha and v1.0.0 source links for `m_gameTime`, the old
+lists-resolved listener, its synchronous hook placement, and the marshal exporter contract.
+State explicitly that `EEex_GameState_GetTime` never existed in the inspected releases and
+that the old manual lab ran the broken build, so legacy live acceptance remains outstanding.
+
+### Step 2: Update user-facing compatibility and test guidance
+
+Describe v1.2 as the primary target and older support as source/simulator verified only.
+Keep the live checklist ordered: v1.2 acceptance first; an old-version test requires a fresh
+process and separate explicit approval afterwards. Do not install, launch, copy into a game,
+or mutate a save in this task.
+
+### Step 3: Request an independent review
+
+Review the final diff for listener exclusivity, current-path purity, pre-mutation clock
+failure, v0.11 marshal safety, repeated synchronous callbacks, hot reload, and absence of any
+invented clock. Fix every finding with a failing test first.
+
+### Step 4: Run final verification
+
+```powershell
+python -m unittest tests.test_ambient_readiness_listener tests.test_ambient_readiness_installer -v
+python -m unittest discover -v
+.\weidu.exe --parse-check TP2 setup-chriz-bg-rebalance.tp2 --nogame
+git diff --check
+Get-Process Baldur,InfinityLoader -ErrorAction SilentlyContinue
+```
+
+Expected: all suites and WeiDU parsing pass, the diff check is clean, and no game process is
+running. Report source/simulator coverage separately from the still-unrun corrected live
+tests.
+
+```powershell
+git add README.md docs research chriz-bg-rebalance tests
+git commit -m "Document older EEex readiness compatibility"
+```

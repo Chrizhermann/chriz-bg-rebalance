@@ -71,7 +71,25 @@
       "subject": "Prepare but do not perform the live deployment checkpoint",
       "status": "completed",
       "blockedBy": [11]
+    },
+    {
+      "id": 13,
+      "subject": "Lock the legacy capability contract with failing tests",
+      "status": "pending",
+      "blockedBy": [12]
+    },
+    {
+      "id": 14,
+      "subject": "Implement the capability-selected runtime and probe adapter",
+      "status": "pending",
+      "blockedBy": [13]
+    },
+    {
+      "id": 15,
+      "subject": "Record evidence, review, and verify without installing",
+      "status": "pending",
+      "blockedBy": [14]
     }
   ],
-  "lastUpdated": "2026-08-30T12:22:32+09:00"
+  "lastUpdated": "2026-08-31T17:33:52+09:00"
 }
