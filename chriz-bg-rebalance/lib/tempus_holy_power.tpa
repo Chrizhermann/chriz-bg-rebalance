@@ -435,8 +435,11 @@ BEGIN
       END ELSE BEGIN
         PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: ABILITY1 level %cbr_level% has an unrecognized Holy Power grant.~
       END
-    END ELSE PATCH_IF !(~%cbr_clab_cell%~ STR_EQ ~****~) BEGIN
-      PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: ABILITY1 level %cbr_level% must be empty.~
+    // Artisan's proficiency infrastructure may pack its per-level cleric
+    // permission grant into ABILITY1 wherever the Holy Power row is empty.
+    END ELSE PATCH_IF !(~%cbr_clab_cell%~ STR_EQ ~****~
+                     || ~%cbr_clab_cell%~ STR_EQ ~AP_C0PR#CL~) BEGIN
+      PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: ABILITY1 level %cbr_level% must be empty or grant AP_C0PR#CL.~
     END
   END
   PATCH_IF !((cbr_late_original = 5 && cbr_late_capped = 0) || (cbr_late_original = 0 && cbr_late_capped = 5)) BEGIN

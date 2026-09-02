@@ -182,6 +182,9 @@ materializes the six effective input resources at their canonical `override` pat
 WeiDU transaction, and then runs the same preflight-first transformation the fixture harness
 tests. WeiDU itself backs up, rolls back on failure, and exactly removes or restores every
 touched file on uninstall. It adds no game-facing strings and performs no `dialog.tlk` write.
+Artisan may pack its exact per-level cleric permission grant `AP_C0PR#CL` into otherwise empty
+`ABILITY1` cells; the validator recognizes and preserves that one known layout while keeping
+the Holy Power and level-25 cells strict. See `research/13-tempus-artisan-clab-packing.md`.
 
 Existing characters automatically use the patched `OHTMPS1` resource. Branwen at level 13
 already has the intended three uses, so this component needs no save edit for her. Characters

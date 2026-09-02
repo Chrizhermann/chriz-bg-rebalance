@@ -232,6 +232,29 @@ def _clear_clab_holy_power_grants(raw: bytes, levels: tuple[int, ...]) -> bytes:
     return b"".join(lines)
 
 
+def _pack_clab_ability1_with_artisan_permissions(raw: bytes) -> bytes:
+    lines = raw.splitlines(keepends=True)
+    ability1_count = 0
+    for line_index, line in enumerate(lines):
+        logical_line = line.rstrip(b"\r\n")
+        newline = line[len(logical_line):]
+        tokens = list(re.finditer(rb"\S+", logical_line))
+        if not tokens or tokens[0].group().upper() != b"ABILITY1":
+            continue
+        ability1_count += 1
+        for token in reversed(tokens[1:]):
+            if token.group() == b"****":
+                logical_line = (
+                    logical_line[:token.start()]
+                    + b"AP_C0PR#CL"
+                    + logical_line[token.end():]
+                )
+        lines[line_index] = logical_line + newline
+    if ability1_count != 1:
+        raise ValueError(f"OHTEMPUS ABILITY1 matched {ability1_count} rows")
+    return b"".join(lines)
+
+
 def _rename_spell_resources(spell: SplFile, old: str, new: str) -> SplFile:
     abilities = []
     for ability in spell.abilities:
@@ -1010,6 +1033,10 @@ def build_fixture(
         newline = b"\r\n" if b"\r\n" in raw else b"\n"
         lines.insert(3, b"// ABILITY1 decoy must remain byte-identical" + newline)
         clab_path.write_bytes(b"".join(lines))
+    elif clab_layout == "artisan_packed":
+        clab_path.write_bytes(
+            _pack_clab_ability1_with_artisan_permissions(clab_path.read_bytes())
+        )
     elif clab_layout != "original":
         raise ValueError(f"unknown CLAB fixture layout: {clab_layout}")
     base_states = tuple((value, f"FIXTURE_STATE_{value}") for value in range(32)) + (
@@ -2645,6 +2672,19 @@ class TempusHolyPowerTests(unittest.TestCase):
             after,
         )
         self.assertIn(b"// ABILITY1 decoy must remain byte-identical", after)
+
+    def test_clab_cap_preserves_artisan_permissions_packed_into_ability1(self) -> None:
+        result = self.run_case(phase="progression", clab_layout="artisan_packed")
+        self.assert_success(result)
+        before_bytes = (result.fixture.root / CLAB_NAME).read_bytes()
+        self.assertEqual(
+            _clear_clab_holy_power_grants(before_bytes, LATE_HOLY_POWER_LEVELS),
+            (result.output / CLAB_NAME).read_bytes(),
+            "CLAB patch changed Artisan permission grants or bytes outside the five late grants",
+        )
+        after = read_2da(result.output / CLAB_NAME)
+        for level in (2, 5, 7, 24, 27, 50):
+            self.assertEqual("AP_C0PR#CL", after.cell("ABILITY1", str(level)))
 
     def test_preserves_foreign_effects(self) -> None:
         result = self.run_case(phase="progression")
