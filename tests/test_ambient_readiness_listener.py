@@ -232,7 +232,7 @@ class _RuntimeCase(unittest.TestCase):
         *,
         runtime: Path | None = None,
         expected_deferred_listeners: str = "1",
-        expected_legacy_listeners: str = "0",
+        expected_legacy_listeners: str = "1",
         expected_reset_listeners: str = "1",
         expected_marshal_handlers: str = "1",
     ) -> dict[str, str]:
@@ -253,7 +253,12 @@ class _RuntimeCase(unittest.TestCase):
             if "\t" in line:
                 key, value = line.split("\t", 1)
                 observations[key] = value
-        self.assertEqual(observations.get("tick_listeners"), "1", process.stdout)
+        expected_total = str(
+            int(expected_deferred_listeners) + int(expected_legacy_listeners)
+        )
+        self.assertEqual(
+            observations.get("tick_listeners"), expected_total, process.stdout
+        )
         self.assertEqual(
             observations.get("deferred_tick_listeners"),
             expected_deferred_listeners,
@@ -288,17 +293,51 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
 
         missing_ambient = self._run(
             "runtime_missing_ambient_api",
-            expected_reset_listeners="0",
-            expected_marshal_handlers="0",
+            expected_legacy_listeners="0",
         )
         self.assertEqual(missing_ambient["urgent_live"], "1")
         self.assertEqual(missing_ambient["urgent_faulted"], "0")
         self.assertEqual(missing_ambient["ambient_faulted"], "1")
         self.assertEqual(missing_ambient["ambient_unsupported_logs"], "1")
+        self.assertEqual(missing_ambient["bookkeeping_roundtrip"], "1")
+        self.assertEqual(missing_ambient["bookkeeping_reset_cleared"], "1")
+
+        missing_confirmation = self._run(
+            "runtime_missing_confirmation_api",
+            expected_legacy_listeners="0",
+        )
+        self.assertEqual(missing_confirmation["ambient_applications"], "0")
+        self.assertEqual(missing_confirmation["ambient_available"], "1")
+        self.assertEqual(missing_confirmation["urgent_live"], "1")
+        self.assertEqual(missing_confirmation["ambient_faulted"], "1")
+        self.assertEqual(missing_confirmation["urgent_faulted"], "0")
+        self.assertEqual(missing_confirmation["ambient_unsupported_logs"], "1")
+        self.assertEqual(missing_confirmation["tick_listener_mode"], "deferred")
+        self.assertEqual(
+            missing_confirmation["confirmation_listener_mode"], "unsupported"
+        )
+        self.assertEqual(
+            missing_confirmation["confirmation_listener_registered"], "0"
+        )
+        self.assertEqual(missing_confirmation["bookkeeping_roundtrip"], "1")
+        self.assertEqual(missing_confirmation["bookkeeping_reset_cleared"], "1")
+
+        missing_try_aux = self._run(
+            "runtime_missing_try_aux",
+            expected_legacy_listeners="0",
+            expected_reset_listeners="0",
+            expected_marshal_handlers="0",
+        )
+        self.assertEqual(missing_try_aux["ambient_applications"], "0")
+        self.assertEqual(missing_try_aux["ambient_available"], "1")
+        self.assertEqual(missing_try_aux["urgent_live"], "1")
+        self.assertEqual(missing_try_aux["ambient_faulted"], "1")
+        self.assertEqual(missing_try_aux["urgent_faulted"], "0")
+        self.assertEqual(missing_try_aux["ambient_unsupported_logs"], "1")
 
     def test_hot_reload_flags_and_independent_fault_fuses(self) -> None:
         seen = self._run("runtime_shell")
-        self.assertEqual(seen["listeners_after_reload"], "1")
+        self.assertEqual(seen["listeners_after_reload"], "2")
         self.assertEqual(seen["started_after_reload"], "1")
         self.assertEqual(seen["reset_after_reload"], "1")
         self.assertEqual(seen["ambient_enable_gate"], "1")
@@ -309,6 +348,36 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         self.assertEqual(seen["ambient_tracebacks"], "1")
         self.assertEqual(seen["ambient_fused"], "1")
         self.assertEqual(seen["urgent_after_ambient_fault"], "1")
+
+    def test_v12_sync_observer_only_confirms_and_never_schedules(self) -> None:
+        seen = self._run("runtime_confirmation_observer_only")
+        self.assertEqual(seen["confirmation_calls"], "1")
+        self.assertEqual(seen["ambient_tick_calls"], "0")
+        self.assertEqual(seen["urgent_tick_calls"], "0")
+        self.assertEqual(seen["aux_created"], "0")
+        self.assertEqual(seen["session_created"], "0")
+        self.assertEqual(seen["applications"], "0")
+        self.assertEqual(seen["urgent_queues"], "0")
+
+    def test_v12_synchronous_phase_precedes_the_deferred_scheduler(self) -> None:
+        seen = self._run("runtime_v12_listener_phase_order")
+        self.assertEqual(seen["phase_order"], "synchronous,deferred")
+
+    def test_pending_observers_do_not_allocate_aux_for_a_recycled_id(self) -> None:
+        seen = self._run("runtime_pending_observers_do_not_allocate_recycled_aux")
+        self.assertEqual(seen["confirmation_aux_created"], "0")
+        self.assertEqual(seen["confirmation_stale_session_cleared"], "1")
+        self.assertEqual(seen["action_aux_created"], "0")
+        self.assertEqual(seen["action_stale_session_cleared"], "1")
+        self.assertEqual(seen["exact_action_without_ledger_aux_created"], "0")
+        self.assertEqual(seen["exact_action_without_ledger_session_created"], "0")
+
+    def test_hotpatch_adds_only_the_independent_confirmation_observer(self) -> None:
+        seen = self._run("runtime_existing_scheduler_hotpatch")
+        self.assertEqual(seen["deferred_after_hotpatch"], "1")
+        self.assertEqual(seen["sync_after_hotpatch"], "1")
+        self.assertEqual(seen["actions_after_hotpatch"], "1")
+        self.assertEqual(seen["confirmation_sentinel_after_hotpatch"], "1")
 
     def test_missing_project_image_manifest_identity_retires_only_urgent(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cbr-readiness-no-project-image-") as temporary:
@@ -349,6 +418,11 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
                 self.assertIn(required, source)
         self.assertNotIn(":GetCurrentTime()", source)
         self.assertNotIn('source == "spwi703"', source)
+        self.assertRegex(
+            source,
+            r"effectID\s*=\s*146[\s\S]*?dwFlags\s*=\s*1",
+        )
+        self.assertNotIn("action_epoch", source)
         for obsolete in (
             "EEex_GameState_GetTime",
             "Infinity_GetGameTime",
@@ -365,13 +439,20 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
     def test_current_surface_prefers_the_v12_listener_with_the_shared_clock(self) -> None:
         seen = self._run("v12_world_time_units")
         self.assertEqual(seen["deferred_tick_listeners"], "1")
-        self.assertEqual(seen["legacy_tick_listeners"], "0")
+        self.assertEqual(seen["legacy_tick_listeners"], "1")
+        self.assertEqual(seen["tick_listener_mode"], "deferred")
+        self.assertEqual(seen["confirmation_listener_mode"], "synchronous")
+        self.assertEqual(seen["confirmation_listener_registered"], "1")
+        self.assertEqual(seen["confirmation_listener_sentinel"], "1")
 
     def test_current_listener_uses_the_v12_world_time_field_without_a_timer_method(self) -> None:
         seen = self._run("runtime_v12_field_only")
         self.assertEqual(seen["ambient_applications"], "1")
         self.assertEqual(seen["ambient_available"], "0")
         self.assertEqual(seen["urgent_queues"], "1")
+        self.assertEqual(seen["confirmation_listener_mode"], "synchronous")
+        self.assertEqual(seen["confirmation_listener_registered"], "1")
+        self.assertEqual(seen["confirmation_listener_sentinel"], "1")
         self.assertEqual(seen["ambient_faulted"], "0")
         self.assertEqual(seen["urgent_faulted"], "0")
 
@@ -384,6 +465,9 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         self.assertEqual(seen["ambient_applications"], "1")
         self.assertEqual(seen["ambient_available"], "0")
         self.assertEqual(seen["urgent_queues"], "1")
+        self.assertEqual(seen["confirmation_listener_mode"], "not_required")
+        self.assertEqual(seen["confirmation_listener_registered"], "0")
+        self.assertEqual(seen["confirmation_listener_sentinel"], "0")
 
     def test_missing_legacy_raw_time_fails_before_any_gameplay_mutation(self) -> None:
         seen = self._run(
@@ -421,25 +505,28 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         self.assertEqual(seen["ambient_available"], "0")
         self.assertEqual(seen["urgent_queues"], "1")
 
-    def test_v011_marshal_exports_are_always_tables(self) -> None:
+    def test_marshal_export_preserves_charges_while_gameplay_is_gated(self) -> None:
         legacy = self._run(
             "runtime_legacy_marshal_exports",
             expected_deferred_listeners="0",
             expected_legacy_listeners="1",
         )
         self.assertEqual(legacy["normal_export_type"], "table")
-        self.assertEqual(legacy["normal_export_version"], "1")
+        self.assertEqual(legacy["normal_export_version"], "2")
         self.assertEqual(legacy["disabled_export_type"], "table")
-        self.assertEqual(legacy["disabled_export_empty"], "1")
+        self.assertEqual(legacy["disabled_export_charged"], "1")
         self.assertEqual(legacy["owned_export_type"], "table")
-        self.assertEqual(legacy["owned_export_empty"], "1")
+        self.assertEqual(legacy["owned_export_charged"], "1")
         self.assertEqual(legacy["faulted_export_type"], "table")
-        self.assertEqual(legacy["faulted_export_empty"], "1")
+        self.assertEqual(legacy["faulted_export_charged"], "1")
 
         current = self._run("v12_inactive_marshal_exports")
-        self.assertEqual(current["disabled_export_type"], "nil")
-        self.assertEqual(current["owned_export_type"], "nil")
-        self.assertEqual(current["faulted_export_type"], "nil")
+        self.assertEqual(current["disabled_export_type"], "table")
+        self.assertEqual(current["disabled_export_charged"], "1")
+        self.assertEqual(current["owned_export_type"], "table")
+        self.assertEqual(current["owned_export_charged"], "1")
+        self.assertEqual(current["faulted_export_type"], "table")
+        self.assertEqual(current["faulted_export_charged"], "1")
 
     def test_v12_world_time_ticks_are_converted_to_seconds(self) -> None:
         seen = self._run("v12_world_time_units")
@@ -463,6 +550,28 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         self.assertEqual(seen["reset_aux_created"], "0")
         self.assertEqual(seen["export_aux_created"], "0")
         self.assertEqual(seen["import_aux_created"], "0")
+
+    def test_missing_clock_precedes_pending_accounting_state_mutation(self) -> None:
+        seen = self._run("runtime_missing_game_time_pending_state")
+        self.assertEqual(seen["existing_session_unchanged"], "1")
+        self.assertEqual(seen["existing_ledger_unchanged"], "1")
+        self.assertEqual(seen["existing_nonce_unchanged"], "1")
+        self.assertEqual(seen["existing_slot_unchanged"], "1")
+        self.assertEqual(seen["existing_effects_unchanged"], "0")
+        self.assertEqual(seen["existing_queues_unchanged"], "0")
+        self.assertEqual(seen["lazy_session_absent"], "1")
+        self.assertEqual(seen["lazy_nonce_absent"], "1")
+        self.assertEqual(seen["lazy_ledger_unchanged"], "1")
+        self.assertEqual(seen["lazy_slot_unchanged"], "1")
+        self.assertEqual(seen["lazy_effects_unchanged"], "0")
+        self.assertEqual(seen["lazy_queues_unchanged"], "0")
+        self.assertEqual(seen["confirm_session_unchanged"], "1")
+        self.assertEqual(seen["confirm_nonce_unchanged"], "1")
+        self.assertEqual(seen["confirm_ledger_unchanged"], "1")
+        self.assertEqual(seen["confirm_slot_unchanged"], "1")
+        self.assertEqual(seen["confirm_effects_unchanged"], "0")
+        self.assertEqual(seen["confirm_queues_unchanged"], "0")
+        self.assertEqual(seen["clock_faulted"], "1")
 
 
 class AmbientReadinessListenerTests(_RuntimeCase):
@@ -512,6 +621,128 @@ class AmbientReadinessListenerTests(_RuntimeCase):
         self.assertEqual(seen["available_after_refresh"], "0")
         self.assertEqual(seen["applications"], "2")
 
+    def test_deferred_delivery_is_confirmed_before_the_single_debit(self) -> None:
+        seen = self._run("ambient_deferred_delivery_confirmation")
+        self.assertEqual(seen["active_before_publication"], "0")
+        self.assertEqual(seen["available_before_publication"], "1")
+        self.assertEqual(seen["ledger_empty_before_publication"], "1")
+        self.assertEqual(seen["active_after_publication"], "1")
+        self.assertEqual(seen["available_after_publication"], "0")
+        self.assertEqual(seen["available_after_later_tick"], "0")
+        self.assertEqual(seen["ledger_charged"], "1")
+        self.assertEqual(seen["disabled"], "0")
+        self.assertEqual(seen["applications"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "1")
+
+    def test_deferred_deliveries_are_tracked_independently_per_spell(self) -> None:
+        seen = self._run("ambient_deferred_multi_spell_confirmation")
+        self.assertEqual(seen["available_armor_before_confirmation"], "1")
+        self.assertEqual(seen["available_stoneskin_before_confirmation"], "1")
+        self.assertEqual(seen["direct_effects_before_confirmation"], "2")
+        self.assertEqual(seen["ledger_empty_before_confirmation"], "1")
+        self.assertEqual(seen["available_armor_after_confirmation"], "0")
+        self.assertEqual(seen["available_stoneskin_after_confirmation"], "0")
+        self.assertEqual(seen["armor_charged"], "1")
+        self.assertEqual(seen["stoneskin_charged"], "1")
+        self.assertEqual(seen["applications_armor"], "1")
+        self.assertEqual(seen["applications_stoneskin"], "1")
+        self.assertEqual(seen["direct_effects"], "2")
+        self.assertEqual(seen["quicklist_rebuilds"], "2")
+
+    def test_visible_exact_delivery_marker_is_confirmed_at_the_deadline(self) -> None:
+        seen = self._run("ambient_deferred_late_marker")
+        self.assertEqual(seen["effect_active"], "1")
+        self.assertEqual(seen["available_after"], "0")
+        self.assertEqual(seen["ledger_charged"], "1")
+        self.assertEqual(seen["disabled"], "0")
+        self.assertEqual(seen["reason"], "")
+        self.assertEqual(seen["direct_effects"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "1")
+
+    def test_deferred_confirmation_rejects_an_odd_to_odd_flags_change(self) -> None:
+        seen = self._run("ambient_deferred_flags_change")
+        self.assertEqual(seen["flags_after"], "3")
+        self.assertEqual(seen["available_after"], "1")
+        self.assertEqual(seen["ledger_charged"], "0")
+        self.assertEqual(seen["disabled"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "0")
+
+    def test_import_discards_an_in_flight_delivery_transaction(self) -> None:
+        seen = self._run("ambient_deferred_import_boundary")
+        self.assertEqual(seen["effect_active"], "1")
+        self.assertEqual(seen["available_after"], "1")
+        self.assertEqual(seen["ledger_charged"], "0")
+        self.assertEqual(seen["direct_effects"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "0")
+
+    def test_deferred_confirmation_never_debits_after_the_slot_changes(self) -> None:
+        seen = self._run("ambient_deferred_slot_change")
+        self.assertEqual(seen["available_after"], "1")
+        self.assertEqual(seen["ledger_charged"], "0")
+        self.assertEqual(seen["disabled"], "1")
+        self.assertEqual(seen["applications"], "1")
+        self.assertEqual(seen["direct_effects"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "0")
+
+    def test_confirmed_scs_pair_reimburses_only_after_remove_mutates(self) -> None:
+        seen = self._run("ambient_deferred_scs_reimbursement_race")
+        self.assertEqual(seen["stage_after_delivery"], "delivery_started")
+        self.assertEqual(seen["stage_at_remove_start"], "remove_started")
+        self.assertEqual(seen["available_at_remove_start"], "1")
+        self.assertEqual(seen["available_after_engine_remove"], "0")
+        self.assertEqual(seen["available_after"], "1")
+        self.assertEqual(seen["ledger_charged"], "1")
+        self.assertEqual(seen["disabled"], "0")
+        self.assertEqual(seen["applications"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "2")
+        self.assertEqual(seen["reimbursement_remaining"], "0")
+
+    def test_scs_marker_before_component_publication_satisfies_single_charge(self) -> None:
+        seen = self._run("ambient_deferred_scs_pair_before_confirmation")
+        self.assertEqual(seen["available_after_scs_marker"], "2")
+        self.assertEqual(seen["ledger_before_remove"], "0")
+        self.assertEqual(seen["stage_before_remove"], "preconfirm_delivery_started")
+        self.assertEqual(seen["stage_after_remove"], "remove_started")
+        self.assertEqual(seen["available_after"], "1")
+        self.assertEqual(seen["ledger_charged"], "1")
+        self.assertEqual(seen["disabled"], "0")
+        self.assertEqual(seen["applications"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "0")
+        self.assertEqual(seen["available_after_late_component_child"], "1")
+        self.assertEqual(seen["ledger_after_late_component_child"], "1")
+        self.assertEqual(seen["reimbursement_after_late_component_child"], "0")
+        self.assertEqual(seen["quicklists_after_late_component_child"], "0")
+
+    def test_nonadjacent_scs_pair_is_not_reimbursed_after_confirmation(self) -> None:
+        seen = self._run("ambient_deferred_scs_nonadjacent")
+        self.assertEqual(seen["available_after"], "0")
+        self.assertEqual(seen["ledger_charged"], "1")
+        self.assertEqual(seen["applications"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "1")
+
+    def test_component_owned_delivery_action_does_not_arm_scs_reimbursement(self) -> None:
+        seen = self._run("ambient_component_delivery_is_not_scs")
+        self.assertEqual(seen["candidate_after_component"], "0")
+        self.assertEqual(seen["component_started_actions"], "0")
+        self.assertEqual(seen["available_after"], "0")
+        self.assertEqual(seen["ledger_charged"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "1")
+
+    def test_started_but_canceled_scs_remove_never_restores_a_slot(self) -> None:
+        seen = self._run("ambient_scs_remove_canceled")
+        self.assertEqual(seen["available_after_timeout"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "1")
+        self.assertEqual(seen["available_after_unrelated_debit"], "0")
+
+    def test_deferred_maintenance_confirmation_remains_free(self) -> None:
+        seen = self._run("ambient_deferred_maintenance")
+        self.assertEqual(seen["available_after"], "0")
+        self.assertEqual(seen["ledger_charged"], "1")
+        self.assertEqual(seen["expiry_advanced"], "1")
+        self.assertEqual(seen["disabled"], "0")
+        self.assertEqual(seen["applications"], "2")
+        self.assertEqual(seen["quicklist_rebuilds"], "1")
+
     def test_natural_expiry_refreshes_only_when_safe(self) -> None:
         seen = self._run("ambient_natural_expiry")
         self.assertEqual(seen["visible_blocked"], "1")
@@ -533,6 +764,62 @@ class AmbientReadinessListenerTests(_RuntimeCase):
         self.assertEqual(seen["after_party_rest_only"], "1")
         self.assertEqual(seen["after_engine_reset"], "2")
 
+    def test_reimbursement_metadata_survives_save_load_and_is_consumed_once(self) -> None:
+        seen = self._run("ambient_persisted_reimbursement")
+        self.assertEqual(seen["saved_schema"], "2")
+        self.assertEqual(seen["saved_available"], "1")
+        self.assertEqual(seen["saved_reimbursement"], "1")
+        self.assertEqual(seen["loaded_available_before_scs"], "1")
+        self.assertEqual(seen["loaded_component_applications"], "0")
+        self.assertEqual(seen["loaded_available_after_remove"], "0")
+        self.assertEqual(seen["loaded_available_after_reconcile"], "1")
+        self.assertEqual(seen["ledger_still_charged"], "1")
+        self.assertEqual(seen["persisted_reimbursement_consumed"], "1")
+        self.assertEqual(seen["loaded_quicklist_rebuilds"], "1")
+
+    def test_imported_reimbursement_works_before_the_first_scheduler_tick(self) -> None:
+        seen = self._run("ambient_persisted_reimbursement_before_first_tick")
+        self.assertEqual(seen["session_before_scs"], "0")
+        self.assertEqual(seen["session_recovered_at_181"], "1")
+        self.assertEqual(seen["available_after"], "1")
+        self.assertEqual(seen["reimbursement_consumed"], "1")
+
+    def test_hot_reload_reimbursement_works_before_the_first_scheduler_tick(self) -> None:
+        seen = self._run("ambient_hot_reload_reimbursement_before_first_tick")
+        self.assertEqual(seen["session_after_reload"], "0")
+        self.assertEqual(seen["session_recovered_at_181"], "1")
+        self.assertEqual(seen["available_after"], "1")
+        self.assertEqual(seen["reimbursement_consumed"], "1")
+
+    def test_marshal_bookkeeping_ignores_gameplay_gates(self) -> None:
+        seen = self._run("ambient_gate_independent_bookkeeping")
+        for gate in ("disabled", "owned", "faulted"):
+            with self.subTest(gate=gate):
+                self.assertEqual(seen[f"{gate}_export_charged"], "1")
+                self.assertEqual(seen[f"{gate}_import_available"], "1")
+
+    def test_spellbook_reset_clears_charge_while_gameplay_is_gated(self) -> None:
+        seen = self._run("ambient_gated_spellbook_reset_clears_charge")
+        for gate in ("disabled", "owned", "faulted"):
+            with self.subTest(gate=gate):
+                self.assertEqual(seen[f"{gate}_available_after_reset"], "1")
+
+    def test_reimbursement_requires_the_exact_component_debited_flags(self) -> None:
+        seen = self._run("ambient_reimbursement_exact_flags")
+        self.assertEqual(seen["component_flags_after"], "6")
+        self.assertEqual(seen["available_after"], "0")
+        self.assertEqual(seen["disabled"], "1")
+        self.assertEqual(seen["reimbursement_consumed"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "1")
+
+    def test_failed_reimbursement_quicklist_update_rolls_back_exact_flags(self) -> None:
+        seen = self._run("ambient_reimbursement_quicklist_rollback")
+        self.assertEqual(seen["component_flags_after"], "0")
+        self.assertEqual(seen["available_after"], "0")
+        self.assertEqual(seen["disabled"], "1")
+        self.assertEqual(seen["reimbursement_consumed"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "1")
+
     def test_only_exact_initial_scs_prebuff_is_reimbursed(self) -> None:
         seen = self._run("ambient_scs_reimbursement")
         self.assertEqual(seen["exact_initial_reimbursed"], "1")
@@ -544,29 +831,50 @@ class AmbientReadinessListenerTests(_RuntimeCase):
         self.assertEqual(seen["apply_availability_restored"], "1")
         self.assertEqual(seen["apply_disabled"], "1")
         self.assertEqual(seen["apply_attempts"], "1")
+        self.assertEqual(seen["apply_reason"], "first delivery confirmation timed out")
+        self.assertEqual(seen["apply_effect_calls"], "1")
         self.assertEqual(seen["quick_availability_restored"], "1")
         self.assertEqual(seen["quick_disabled"], "1")
         self.assertEqual(seen["quick_attempts"], "1")
+        self.assertEqual(seen["quick_reason"], "slot debit failed and was restored")
 
     def test_malformed_saved_record_disables_only_that_spell(self) -> None:
         seen = self._run("ambient_malformed_ledger")
         self.assertEqual(seen["malformed_spell_disabled"], "0")
         self.assertEqual(seen["other_spell_continues"], "1")
         self.assertEqual(seen["legacy_discarded"], "1")
+        self.assertEqual(seen["uncharged_record_disabled"], "1")
+        self.assertEqual(seen["uncharged_record_applications"], "0")
+        self.assertEqual(seen["uncharged_record_available"], "1")
+
+    def test_v1_charged_records_migrate_without_guessing_reimbursement(self) -> None:
+        seen = self._run("ambient_v1_ledger_migration")
+        self.assertEqual(seen["schema_version"], "2")
+        self.assertEqual(seen["charged"], "1")
+        self.assertEqual(seen["reimbursement_eligible"], "0")
+        self.assertEqual(seen["component_applications"], "0")
+        self.assertEqual(seen["available_after_scs"], "0")
 
     def test_marshaled_ledger_is_versioned_and_primitive_only(self) -> None:
         seen = self._run("ambient_marshal")
-        self.assertEqual(seen["schema_version"], "1")
+        self.assertEqual(seen["schema_version"], "2")
         self.assertEqual(seen["primitive_only"], "1")
         self.assertEqual(seen["has_userdata"], "0")
         self.assertEqual(seen["has_object_id"], "0")
         self.assertEqual(seen["record_fields_exact"], "1")
+        self.assertEqual(seen["reimbursement_eligible"], "1")
+        self.assertEqual(seen["token_field"], "m_memorizedSpellsMage")
+        self.assertEqual(seen["token_level"], "3")
+        self.assertEqual(seen["token_ordinal"], "1")
+        self.assertEqual(seen["token_resref"], "spwi408")
+        self.assertEqual(seen["original_flags"], "1")
+        self.assertEqual(seen["debited_flags"], "0")
 
     def test_retirement_hot_reload_and_fault_fuses(self) -> None:
         seen = self._run("ambient_runtime_safety")
         self.assertEqual(seen["ambient_disabled_inert"], "1")
         self.assertEqual(seen["ambient_owner_inert"], "1")
-        self.assertEqual(seen["listeners_after_reload"], "1")
+        self.assertEqual(seen["listeners_after_reload"], "2")
         self.assertEqual(seen["ambient_tracebacks"], "1")
         self.assertEqual(seen["ambient_inert_after_fault"], "1")
 
@@ -629,6 +937,9 @@ class UrgentReadinessListenerTests(_RuntimeCase):
     def test_normal_cast_owns_slot_aura_time_and_interruption(self) -> None:
         seen = self._run("urgent_normal_cast")
         self.assertEqual(seen["queued_spellres"], "1")
+        self.assertEqual(seen["clear_actions_boolean"], "1")
+        self.assertEqual(seen["clear_actions_preserved_flagged"], "0")
+        self.assertEqual(seen["urgent_faulted"], "0")
         self.assertEqual(seen["direct_effects"], "0")
         self.assertEqual(seen["engine_slot_debits"], "1")
         self.assertEqual(seen["engine_aura"], "1")

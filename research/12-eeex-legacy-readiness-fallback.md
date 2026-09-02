@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-02
 **Status:** EEex v1.2 remains the primary target; v0.11.0-alpha/v1.0.0 fallback has
-official-source and simulator evidence only; corrected legacy gameplay acceptance pending
+official-source, focused simulator, and full-suite evidence; corrected legacy gameplay
+acceptance remains pending
 **Scope:** component 121 clock, lists-resolved listener, and marshal-export compatibility
 
 ## Decision
@@ -16,10 +17,11 @@ local ticks = EngineGlobals.g_pBaldurChitin.m_pObjectGame
     .m_worldTime.m_gameTime
 
 EEex_Opcode_AddDeferredListsResolvedListener(callback)
+EEex_Opcode_AddListsResolvedListener(ambient_confirmation_only_callback)
 ```
 
 Only when the deferred listener is absent and
-`EEex_Opcode_AddListsResolvedListener` is present does the runtime select the legacy pair:
+`EEex_Opcode_AddListsResolvedListener` is present does the runtime select the legacy path:
 
 ```lua
 local ticks = EngineGlobals.g_pBaldurChitin.m_pObjectGame
@@ -28,13 +30,16 @@ local ticks = EngineGlobals.g_pBaldurChitin.m_pObjectGame
 EEex_Opcode_AddListsResolvedListener(callback)
 ```
 
-The runtime registers exactly one lists-resolved listener and never registers both. Both
-listener modes use the same field. A missing or non-numeric value fails closed before an
-effect, spell-slot debit, or queued cast.
+The runtime registers exactly one scheduler in either mode. On v1.2 it deliberately also
+registers the synchronous API as an ambient-only pending-confirmation observer: one deferred
+scheduler plus one synchronous observer (`1/1`, total 2). Legacy registers one synchronous
+full scheduler (`0/1`, total 1). Both modes use the same field. A missing or non-numeric value
+fails closed before an effect, spell-slot debit, or queued cast. If the synchronous API is
+missing on the v1.2 path, ambient fails closed while urgent may keep the deferred scheduler.
 
 This is a narrow compatibility fix, not a change to the prebuff design. The shared field
-returns raw world-time ticks, so the existing ledger schema and conversion at 15 ticks per
-gameplay second remain shared.
+returns raw world-time ticks, so schema-2 ledgers and the conversion at 15 ticks per gameplay
+second remain shared.
 
 ## Clock provenance
 
@@ -111,10 +116,11 @@ deferred callback as firing at most once per sprite AI tick. That is why it rema
 primary path.
 
 The legacy callback is synchronous with effect-list resolution and is not an exact clock.
-Repeated effect-list resolutions can produce repeated callbacks, so component 121 continues
-to derive elapsed time from `m_gameTime` and keep each mutation idempotent. Simulator cases
-exercise repeated legacy callbacks and require that they do not duplicate the spell-slot
-debit, effect application, or queued urgent cast.
+On v1.2 that property makes it the pending-confirmation observer; on legacy it is the full
+scheduler. Repeated effect-list resolutions can produce repeated callbacks, so component 121
+continues to derive elapsed time from `m_gameTime` and keep each mutation idempotent.
+Simulator cases exercise repeated callbacks and require that they do not duplicate the
+spell-slot debit, effect application, or queued urgent cast.
 
 ## Marshal-export difference
 
@@ -130,15 +136,19 @@ but their exporter contracts differ:
 - v1.2.0 retains the v1.0 behavior verbatim
   ([`EEex_Sprite.lua`, lines 1268–1293](https://github.com/Bubb13/EEex/blob/v1.2.0/EEex/copy/EEex_scripts/EEex_Sprite.lua#L1268-L1293)).
 
-Consequently, an inactive, faulted, or externally owned ambient layer exports `nil` on the
-selected v1.2 path but an empty table on the legacy path. A real ledger remains a table on
-both. Returning `{}` is the smallest cross-compatible “no data” representation for v0.11
-and is also accepted by v1.0. The saved ledger continues to use primitive numbers, strings,
-and tables, including numeric `0`/`1` flags.
+Consequently, an inactive, faulted, or externally owned ambient layer with no ledger exports
+`nil` on the selected v1.2 path but an empty table on the legacy path. An existing valid
+ledger remains a table and is exported/imported on both paths regardless of those gameplay
+gates; retirement must not silently lose a real charge. Genuine quick-list-reset bookkeeping
+is likewise gate-independent so a retired layer cannot retain a stale charge after a real
+spellbook reset. Returning `{}` is the smallest cross-compatible “no data” representation
+for v0.11 and is also accepted by v1.0. The saved schema-2 ledger continues to use primitive
+numbers, strings, and tables, including numeric `0`/`1` flags.
 
 ## Remaining capability gate
 
-The legacy fallback changes only the listener and inactive marshal result.
+The legacy fallback changes only the listener topology and no-ledger marshal result; valid
+ledger lifecycle bookkeeping remains shared and gate-independent.
 Official v0.11 and v1.0 sources also contain the other EEex globals required by component
 121:
 
@@ -190,7 +200,8 @@ six assertions for the intended reasons: no legacy listener registered, no direc
 branch existed, the legacy surface performed no readiness work, and inactive legacy marshal
 exports were `nil`. The existing v1.2 cases stayed green.
 
-After implementation, fresh verification on 2026-08-31 produced:
+The original listener-adapter implementation produced the following historical verification
+on 2026-08-31:
 
 ```text
 python -m unittest tests.test_ambient_readiness_listener tests.test_ambient_readiness_installer -v
@@ -206,13 +217,16 @@ TP2 parsed successfully with WeiDU 24900
 An independent review also ran the 68 focused tests, the complete 228-test suite, and a
 51-case runtime stress subset. It found no Critical or Important issue after stale
 documentation and installer wording were corrected. `git diff --check` was clean, and the
-final process check found no `Baldur.exe` or `InfinityLoader.exe` process.
+final process check found no `Baldur.exe` or `InfinityLoader.exe` process. Those runs predate
+the v1.2 delivery-accounting redesign and remain evidence for the legacy adapter only, not a
+current live result. The corrected build now has 76 focused tests and all 253 repository tests
+passing; corrected legacy gameplay remains untested.
 
 ## Acceptance boundary
 
-EEex v1.2 is the supported primary target. Its deferred-listener/direct-field path must remain
-independent of the legacy-listener fallback, and its gameplay acceptance status remains the one
-recorded in research 11.
+EEex v1.2 is the supported primary target. Its deferred scheduler and synchronous
+confirmation observer must remain distinct from the legacy single-scheduler fallback, and
+its gameplay acceptance status remains the one recorded in research 11.
 
 The v0.11.0-alpha/v1.0.0 fallback currently has official-source evidence and local simulator
 coverage only. The simulator selects one legacy listener, reads raw `m_gameTime`, verifies

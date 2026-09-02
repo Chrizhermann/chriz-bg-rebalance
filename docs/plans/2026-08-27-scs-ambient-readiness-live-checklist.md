@@ -1,9 +1,10 @@
 # SCS ambient readiness live-deployment checklist
 
-Status: **prepared only**. This document is not authorization to install component 120 or
-121, launch the game, mutate `override`, touch a playthrough save, or change `WeiDU.log` /
-`dialog.tlk`. Every live step below starts only after the user explicitly approves the exact
-game directory, components, installer commit, and throwaway save.
+Status: **v1.2 ambient accounting and the neutral-to-hostile urgent path passed in the approved
+disposable lab; the broader matrices and legacy live stage remain pending; no additional action
+is authorized by this document**. It does not authorize another install/hotfix, launch, save or
+active-playthrough mutation, or change to `WeiDU.log` / `dialog.tlk`. Every remaining live
+step starts only after the user approves its exact game directory, build, and throwaway save.
 
 Current acceptance target (2026-09-02): **EEex v1.2 first**. The earlier component-121
 manual pass on `C:\Games\BGSE-AOE-PREBUFF-LAB-20260830` used v0.11 and correctly failed—no
@@ -12,7 +13,17 @@ treat that pass or the old probe's `os.clock()` latency values as acceptance. Th
 pass in `C:\Games\Baldur's Gate II Enhanced Edition modded - CBR Ambient Readiness v1.2 Test`
 also failed diagnostically: the assumed `m_worldTime:GetCurrentTime()` method was nil, while
 the direct `m_gameTime` field existed, and both readiness layers faulted before mutation. A
-corrected fresh-process rerun is required. A
+clock-corrected fresh process then delivered the expected Vigil buffs, which the user
+confirmed visually, but a paused read-only inspection found unchanged memorized counts,
+empty ledgers, and per-spell failures. That second result exposed the deferred opcode-146
+child-publication bug. The corrected build has 76 focused tests and all 253 repository tests
+passing; its audited one-file hotfix subsequently passed fresh-process ambient delivery and
+exact one-slot accounting on all four neutral Vigil casters. The first urgent attempt exposed
+a missing required Boolean on `virtual_ClearActions`; after the passive-only path was corrected
+to pass `false`, Brother Pol's neutral-to-hostile retest passed with exact normal-cast start,
+one Mantle slot spent, active opcode-120 protection, one spent contact attempt, and no urgent
+fault. The attack order itself correctly did nothing while he remained neutral; eligibility
+began only after the first hit changed hostility. A
 source/simulator-verified older-version fallback now exists, but its live stage remains
 strictly later than a successful v1.2 pass and needs separate approval.
 
@@ -122,9 +133,12 @@ Before loading the throwaway save:
    `os.clock()`;
 2. start a completely fresh InfinityLoader/game process—hot reload is insufficient after
    the old append-only callback or sticky fail-closed state has existed;
-3. confirm the fresh v1.2 process selects exactly one
-   `EEex_Opcode_AddDeferredListsResolvedListener`, reports
-   `CBR_RDY_STATE.tick_listener_mode == "deferred"`; and
+3. confirm the fresh v1.2 process reports exactly one deferred scheduler and one synchronous
+   pending-confirmation observer (`1/1`, total 2), with
+   `CBR_RDY_STATE.tick_listener_mode == "deferred"` and the confirmation mode reported as
+   synchronous. Confirm that the synchronous callback does no classification, scheduling,
+   or urgent work. If the synchronous API is unavailable, ambient must fail closed while the
+   urgent layer may retain the one deferred scheduler; and
 4. through the approved session probe, confirm the embedded userdata has no callable
    `GetCurrentTime()` method, then read
    `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime.m_gameTime` twice while the
@@ -153,6 +167,13 @@ effect. A queued response without a matching start is not success.
 The chosen spell must follow installed semantic order: Absolute Immunity, genuine Improved
 Mantle if present, Mantle, then PfMW. Current SR Moment of Prescience must never be selected.
 
+Executed v1.2 subset (2026-09-02): the neutral-to-hostile Brother Pol case passed. The exact
+started-action/contact record proves component-owned `SpellRES("SPWI708",Myself)` started;
+the spellbook fell from one available copy to zero, exact `SPWI708` opcode-120 effects were
+active, and `urgent_faulted` stayed zero. The generic Vigil mage was already on non-passive
+action 22 and was correctly left alone. The remaining matrix rows above were not promoted to
+live-tested status by that single encounter; their automated coverage remains separate.
+
 ### 4.2 Ambient one-slot-per-reset matrix
 
 Exercise every baseline row actually stamped by the install (currently Armor, Non-Detection,
@@ -160,16 +181,36 @@ Stoneskin, Mind Blank, Ironskins, and Impervious Sanctity of Mind) on a caster t
 an available memorized copy. For each row, verify and record:
 
 1. the first confirmed ambient application consumes exactly one correct memorized record;
-2. SCS's later initial prebuff pair does not produce a second net debit;
-3. natural expiry refreshes only out of combat with no party member visible and spends no
+2. if exact SCS action 181 starts during first-delivery pending and the immediately following
+   matching action 147 spends one slot, a later callback records that SCS debit as the one
+   charge without a component debit or reimbursement;
+3. after an ordinary component debit, one later exact SCS `181 -> 147` pair restores only the
+   exact schema-2 component-debited record and only after a later callback observes SCS's
+   exact one-slot loss; a canceled 147, unchanged count through the deadline, intervening
+   action, wrong flags/token, or other delta does not reimburse;
+4. a component child that publishes after an SCS-paid commit causes no component debit,
+   ledger replacement, or maintenance entitlement;
+5. natural expiry refreshes only out of combat with no party member visible and spends no
    additional copy;
-4. early dispel/removal suppresses free maintenance through save/load;
-5. save/load preserves the ledger and does not charge or apply a second first-use copy; and
-6. a genuine engine spellbook refresh/rest clears the cycle, after which the next successful
+6. early dispel/removal suppresses free maintenance through save/load;
+7. save/load after a committed charge preserves the ledger and does not charge or apply a
+   second first-use copy;
+8. before the first deferred tick after save/load or hot reload, exact action 181 plus known
+   delivery can reconstruct only ephemeral session state from an existing valid
+   charged/reimbursable schema-2 UDAux record, without allocating UDAux, and still perform
+   strict later reimbursement;
+9. a request/import boundary may leave at most one already-queued finite child effect without
+   debit or ledger; it must not be retroactively charged or receive maintenance; and
+10. a genuine engine spellbook refresh/rest clears the cycle, after which the next successful
    application consumes exactly one newly available copy.
 
 Do not infer execution from a successful EEex call. Wait for engine ticks and independently
-check the memorized record, quick-list count, ledger, and active effect. Never repeat a
+check the memorized record, quick-list count, ledger, and active effect. On v1.2, a visible
+buff proves only that the queued opcode-146 child published. Briefly unpause long enough for
+that publication, pause again, and require the active marker, exact one-slot delta, and
+`charged=1` ledger entry together. The synchronous confirmation observer should reconcile at
+child-effect resolution; a separate later deferred scheduler pass is not the acceptance
+mechanism. Never repeat a
 slot-mutating experiment on the same disposable actor unless its exact state was independently
 restored or the throwaway save was reloaded.
 
@@ -182,6 +223,10 @@ In session-scoped tests, prove each control independently and restore it after o
 - external-owner bit 1 retires ambient only;
 - external-owner bit 2 retires urgent only; and
 - external-owner value 3 retires both.
+
+Repeat export/import and a genuine quick-list reset with ambient disabled, externally owned,
+and faulted. An existing valid ledger must still be exported/imported, while the real reset
+must still clear its charge; retirement may stop gameplay work but not accounting lifecycle.
 
 Also capture one controlled unsupported/fault case per layer if the approved test method can
 do so safely. The affected layer must become inert and log at most one diagnostic/traceback;
@@ -197,14 +242,14 @@ Before any slot-mutating case, prove and record:
 
 1. `EEex_Opcode_AddDeferredListsResolvedListener` is absent and
    `EEex_Opcode_AddListsResolvedListener` is present;
-2. exactly one old listener is registered and
+2. exactly one synchronous full scheduler is registered (`0/1`, total 1) and
    `CBR_RDY_STATE.tick_listener_mode == "legacy"`;
 3. `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime.m_gameTime` advances as raw
    15-Hz gameplay ticks;
 4. removing/unavailable raw time fails closed before UDAux, ledger, effect, debit, or queue
    mutation; and
-5. disabled, faulted, and externally owned ambient marshal exports are empty tables, never
-   `nil`.
+5. disabled, faulted, and externally owned ambient marshal exports with no ledger are empty
+   tables, never `nil`; any existing valid ledger remains a table and is preserved.
 
 Then rerun the urgent and ambient matrices on a newly restored throwaway save. Include a
 repeated-callback observation and require exactly one first ambient application/debit and one

@@ -9,52 +9,103 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-instal
 Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
 `docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `AGENTS.md`.
 
-## Status (2026-09-02) — live v1.2 clock correction; fresh-process rerun pending
+## Status (2026-09-02) — v1.2 ambient + neutral-to-hostile urgent live PASS
 
 - **The approved v1.2 laboratory now exists:**
   `C:\Games\Baldur's Gate II Enhanced Edition modded - CBR Ambient Readiness v1.2 Test`
   combines the audited SCS/SR EET snapshot with the exact EEex v1.2 runtime. Components 120
-  and 121 are at the WeiDU tail. Its installed `M_CBRRDY.lua` has now received the audited
-  lab-only clock hotfix; do not force-reinstall or uninstall 121. The active playthrough
-  remains untouched.
+  and 121 are at the WeiDU tail. Its installed `M_CBRRDY.lua` now contains the verified
+  accounting and urgent binding corrections (SHA-256 `9957348E...B3D08`) as audited one-file
+  lab hotfixes.
+  Do not force-reinstall or uninstall 121. The active playthrough
+  remains untouched. Recheck `Baldur.exe` and `InfinityLoader.exe` immediately before any
+  further lab write rather than relying on an earlier process observation.
 - **The first v1.2 pass found a real component-121 blocker.** In the loaded process,
   `type(m_worldTime.GetCurrentTime)` was `nil`, direct `m_worldTime.m_gameTime` returned a
   numeric raw tick value, and the userdata metatable exposed the field but no method. Both
   readiness layers consequently faulted closed before any effect, slot debit, or queued cast.
-- **The corrected current-version contract is deferred listener plus direct field.** EEex
-  v1.2's own `B3TimeStep.lua` reads `m_worldTime.m_gameTime`; component 121 and its probe now
-  do the same. The simulator no longer invents a `GetCurrentTime` method, and source tests
-  reject that call. Missing/non-numeric time still fails closed before gameplay mutation.
+- **The clock-corrected rerun passed delivery but failed accounting.** The user visually
+  confirmed the expected Vigil buffs. A paused read-only diagnostic then found the exact
+  `DWSW408` / `DWSP735` effects, but all four memorized counts were unchanged, all component
+  ledgers were empty, and every relevant spell had failed. This is a visual delivery PASS and
+  one-slot accounting FAIL. The neutral actors did not exercise urgent first-contact casting.
+- **The final corrected runtime passed fresh-process ambient acceptance.** In paused `AR3000`,
+  exact runtime SHA-256 `EF38A1A0BF942A2B3AB294FAE48DA2548E9413DBD5FE7CB255406C413E06DD3D`
+  reported `ambient_faulted=0` and `urgent_faulted=0`. All four subjects were neutral with
+  `instantprep=0` and `inafight=0`; every exact marker and schema-2 charged ledger was present,
+  with no ambient failure. `SHUGMG01` had one of two `SPWI408` copies available (`[0,1]`),
+  while `SHUPOL01` had zero of one `SPWI408` and `SHUGAR01` / `SHUGOD01` each had zero of one
+  `SPPR735` (`[0]`). This is the agreed one-slot accounting PASS, not urgent evidence.
+- **The corrected neutral-to-hostile urgent path passed.** The first attempt faulted because
+  EEex v1.2 requires the Boolean argument to `virtual_ClearActions`; exact binding and engine
+  disassembly established `false` as the full-clear branch after the existing passive-only
+  action gate. Runtime `9957348E...B3D08` then kept `urgent_faulted=0`. An attack order alone
+  correctly did nothing while Brother Pol was neutral; after the first hit made him hostile,
+  his exact normal `SPWI708` start spent one contact attempt and the sole Mantle slot, and the
+  exact opcode-120 effects were active. The generic mage's non-passive action 22 was not
+  displaced. This accepts the primary current-version path, not every broader matrix row.
+- **The corrected current-version contract uses one scheduler and one confirmation observer.**
+  EEex v1.2 registers one deferred callback as the sole scheduler and one synchronous
+  lists-resolved callback as an ambient-only pending-confirmation observer (`1/1`, total 2).
+  Legacy registers only one synchronous full scheduler (`0/1`, total 1). If the synchronous
+  observer API is missing on v1.2, ambient fails closed while urgent may remain on the
+  deferred scheduler. Both modes read direct `m_worldTime.m_gameTime` raw ticks.
+- **Opcode-146 delivery does not explain away an SCS action 181.** Exact BG2EE 2.6.6
+  disassembly proves `dwFlags=1` publishes the child through `CMessageFireSpell` /
+  `CGameAIBase::FireSpell` and does not create action 181. Therefore an exact SCS `181 -> 147`
+  sequence during first-delivery pending can supply the one charge after a later callback
+  observes its exact slot loss and marker. After an ordinary component debit, schema 2 keeps
+  the exact locator/original/debited flags so one later exact SCS pair can restore only that
+  component-debited record, again only after post-action delta proof.
+- **Persisted accounting survives gameplay retirement.** Existing ledger export/import and a
+  real quick-list reset run independently of enable, external-owner, and fault gates. Generic
+  callbacks require an existing session, but exact action 181 plus known delivery may rebuild
+  ephemeral state from an existing valid charged/reimbursable schema-2 UDAux ledger, without
+  allocating UDAux, so save/load or hot reload before the first deferred tick cannot defeat
+  reimbursement.
 - **The staged lich route was wrong.** The save's `AR3019` one-time spawn locals are already
-  exhausted and neither lich exists in any saved area. The live save is in `AR3000`, where
+  exhausted and neither lich exists in any saved area. The staged lab save is in `AR3000`, where
   the Vigil group provides better subjects: the generic mage and Brother Pol have ambient
   Stoneskin plus urgent PfMW/Mantle respectively. While neutral (`EA=128`) their urgent layer
   is correctly inactive; deliberately making the group hostile gives a visible urgent test.
-- **Automated correction evidence:** the regression first failed with zero applications and
-  both fuses faulted, then all 68 focused component-121 tests and all 228 repository tests
-  passed after the direct-field change. WeiDU 24900 parses the TP2 and `git diff --check`
-  passes. The corrected gameplay rerun remains the acceptance boundary.
-- **Existing-lab deployment used an audited direct override hotfix.** Both game processes
-  were absent; only the disposable lab's `M_CBRRDY.lua` changed from SHA-256 `6835A6FD...`
-  to `42191F62...`, while `WeiDU.log` remained `6C988DE3...`. The old runtime is preserved
-  in the evidence directory and the corrected file parses with the bundled Lua interpreter.
+- **Automated and live evidence are deliberately split:** the earlier `68 focused / 228 repository`
+  result proves only the clock-field correction. The accounting redesign now has 76 focused
+  tests and all 253 repository tests passing. The fresh-process ambient delivery/accounting
+  rerun and the later corrected neutral-to-hostile urgent path now pass. Full legacy live
+  acceptance and the unexercised rows of the broader current-version matrix remain explicit.
+- **Existing-lab deployment used audited direct override hotfixes.** With both game processes
+  absent, the disposable lab's clock-only runtime (`42191F62...`) was preserved, the reviewed
+  accounting candidate (`870B4C6F...`) was preserved, and the verified ambient runtime was
+  deployed as `EF38A1A0...`; the later one-line urgent binding correction produced final
+  stamped runtime `9957348E...B3D08`. `WeiDU.log` remained byte-identical at `6C988DE3...`;
+  the final runtime parses with the bundled Lua interpreter and matches the production suffix
+  exactly.
+  Evidence is under `C:\Users\chris\Documents\Codex\2026-09-02\cbr-ambient-v12-accounting-hotfix-20260902-215413`.
   This avoided uninstalling an entry or relying on `--force-install-list 121`, which is a
-  silent no-op for an already installed component. A fresh normal installation gets the
-  corrected component-121 bytes from this repository.
-- **Older EEex differs only at the listener/marshal boundary.** When the deferred listener is
-  absent, the runtime selects `EEex_Opcode_AddListsResolvedListener`; both modes use the same
-  direct clock field. v0.11 inactive/faulted/external-owner marshal exports normalize to `{}`.
-  Legacy live acceptance remains separately pending after v1.2 succeeds.
+  silent no-op for an already installed component. Ambient accounting and the primary urgent
+  path have cleared their live gates; do not deploy into the active playthrough without
+  separate explicit approval.
+- **Transient lifecycle ambiguity is bounded and fail-closed.** Reset/import or sprite
+  replacement discards pending delivery. A narrow boundary can leave one already-queued
+  finite child effect without debit or ledger; the generic marker cannot prove ownership, so
+  it is not retroactively charged and never receives free maintenance. If a queued component
+  child instead arrives after an SCS-paid ledger commit, it is likewise a bounded redundant
+  finite effect and causes no debit or new entitlement.
+- **Older EEex remains second priority.** Its one synchronous callback is the full scheduler,
+  it shares the direct clock field, and v0.11 inactive/faulted/external-owner no-ledger
+  marshal exports normalize to `{}` while valid existing ledgers remain tables. Corrected
+  legacy live acceptance remains separately pending.
 
 See `research/11-eeex-v1.2-readiness-compatibility.md` and
 `research/12-eeex-legacy-readiness-fallback.md` for provenance, official references, and
 RED/GREEN evidence.
 
-## Status (2026-08-30) — original offline implementation checkpoint
+## Status (2026-08-30) — superseded original offline implementation checkpoint
 
 - **Dragon work is being handled elsewhere and is out of scope for this branch.** Do not
   resume component 110 from this handover.
-- **Components 120 + 121 are approved, implemented, and fully reviewed offline** on branch
+- **Historical claim, superseded by the v1.2 accounting failure above:** components 120 + 121
+  were considered approved, implemented, and fully reviewed offline on branch
   `codex/ambient-readiness-121`. The authoritative design is
   `docs/plans/2026-08-27-scs-ambient-readiness-design.md` (commit `ae71422`); the executable
   plan is `docs/plans/2026-08-27-scs-ambient-readiness-implementation.md` (commit `b68b22c`).
@@ -80,7 +131,7 @@ RED/GREEN evidence.
   all 216 repository tests passed in a clean process. Task 12's approval-gated procedure is
   `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`. At this checkpoint no live
   component install had yet been authorized; the later disposable-lab result and correction
-  are recorded in the 2026-08-31 status above.
+  are superseded by the 2026-09-02 status above.
 
 ## Status (2026-08-22)
 
@@ -175,11 +226,16 @@ session — always `--exclude` them.
 
 ## Work queue
 
-0. **Finish component 121's EEex v1.2 acceptance before older-version live testing.** The
-   complete staged evidence, rollback boundary, gameplay matrix, and process/IPC cleanup
-   procedure is in `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`. Do not
-   install, launch, mutate a save, or deploy either component without a fresh approval for
-   the exact v1.2 SCS/SR test target.
+0. **Current-version ambient accounting and the primary urgent path are accepted; legacy
+   gameplay remains.**
+   Offline verification is green (76 focused / 253 repository), and the fresh-process `AR3000`
+   ambient test passed exact markers, one-slot deltas, and schema-2 ledgers on all four Vigil
+   casters. Brother Pol's corrected neutral-to-hostile path also passed exact normal-cast start,
+   contact, slot, effect, and fuse checks. The broader unrun matrix and the corrected legacy
+   path remain optional later acceptance work. The full procedure is in
+   `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`. No additional install,
+   launch, save mutation, or deployment follows from this handover without the required
+   approval for that exact step and target.
 1. **SR wishlist session** — *needs the user live*: walk Spell Revisions' changes, collect
    which to keep/revert/re-tune → `research/10-sr-wishlist.md` → design 200-series.
 2. **SCS component catalog** — solo-able: from the game install's WeiDU.log (414 entries;

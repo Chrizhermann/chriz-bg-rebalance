@@ -1,10 +1,9 @@
 -- Fake EEex surface for component 121 (M_CBRRDY.lua).
 --
 -- usage: lua ambient_readiness_sim.lua <stamped-runtime.lua> <scenario>
--- Output is one key<TAB>value observation per line.  This fake models only
--- the state transitions named by the approved design.  Task 6 updates the
--- binding shapes to the exact installed EEex capability profile before the
--- production runtime is implemented.
+-- Output is one key<TAB>value observation per line.  The fake models the
+-- binary-backed opcode-146 direct-message path, synchronous effect-list
+-- publication, and the later v1.2 deferred ProcessAI scheduler phase.
 
 local runtimePath = arg[1]
 local scenarioName = arg[2]
@@ -173,6 +172,10 @@ function EEex_GetUDAux(sprite)
     return aux
 end
 
+function EEex_TryGetUDAux(sprite)
+    return auxBySprite[sprite]
+end
+
 -- EEex v1.2 exposes the engine's m_worldTime userdata with a direct m_gameTime
 -- field. The live v1.2 userdata has no GetCurrentTime method. m_gameTime is
 -- measured in 1/15-second engine ticks.
@@ -276,6 +279,12 @@ local function newSprite(options)
         autoStart = options.autoStart ~= false,
         retainFailedQueue = options.retainFailedQueue == true,
         failApply = options.failApply == true,
+        -- EEex v1.2 publishes an opcode-146 child only after the deferred
+        -- scheduler returns.  Make that ordering the default; individual
+        -- tests may opt into the old synchronous fake with deferApply=false.
+        deferApply = options.deferApply ~= false,
+        holdDeferredDeliveries = options.holdDeferredDeliveries == true,
+        deferredDeliveries = {},
         failQuickList = options.failQuickList == true,
         failVisibility = options.failVisibility == true,
     }
@@ -290,7 +299,11 @@ local function newSprite(options)
         self.quickListRebuilds = self.quickListRebuilds + 1
         self.lastQuickListArgs = { abilityID, changeAmount, remove, unknown }
     end
-    function sprite:virtual_ClearActions()
+    function sprite:virtual_ClearActions(skipFlagged)
+        if type(skipFlagged) ~= "boolean" then
+            error("virtual_ClearActions requires a boolean argument")
+        end
+        self.clearActionsSkipFlagged = skipFlagged
         self.m_curAction = { m_actionID = 0 }
         self.m_queuedActions = newPtrList({})
         self.actionsCleared = (self.actionsCleared or 0) + 1
@@ -372,6 +385,14 @@ function EEex_GameObject_ApplyEffect(sprite, args)
     end
     local delivered = lower(args.res or args.m_sourceRes)
     local managed = deliveryToSpell[delivered] or delivered
+    if sprite.deferApply then
+        sprite.deferredDeliveries[#sprite.deferredDeliveries + 1] = {
+            delivered = delivered,
+            managed = managed,
+        }
+        sprite.applications[managed] = (sprite.applications[managed] or 0) + 1
+        return
+    end
     sprite.active[managed] = {
         appliedAt = fakeClock,
         expectedExpiry = fakeClock + (ambientDurations[managed] or 0),
@@ -485,9 +506,32 @@ function EEex_Action_QueueResponseStringOnAIBase(response, sprite)
     sprite.m_curAction = { m_actionID = 0 }
 end
 
+local function flushDeferredDeliveries(sprite)
+    for _, delivery in ipairs(sprite.deferredDeliveries) do
+        local managed = delivery.managed
+        sprite.active[managed] = {
+            appliedAt = fakeClock,
+            expectedExpiry = fakeClock + (ambientDurations[managed] or 0),
+        }
+        local marker = ambientDetection[managed]
+        if marker then
+            sprite.m_timedEffectList.values[#sprite.m_timedEffectList.values + 1] = {
+                m_effectId = marker[1],
+                m_dWFlags = marker[2],
+                m_sourceRes = newResRef(delivery.delivered),
+            }
+        end
+        for _, callback in ipairs(legacyTickListeners) do callback(sprite) end
+    end
+    sprite.deferredDeliveries = {}
+end
+
 local function fireTick(sprite)
-    for _, callback in ipairs(deferredTickListeners) do callback(sprite) end
     for _, callback in ipairs(legacyTickListeners) do callback(sprite) end
+    for _, callback in ipairs(deferredTickListeners) do callback(sprite) end
+    if not sprite.holdDeferredDeliveries then
+        flushDeferredDeliveries(sprite)
+    end
 end
 
 local function fireSpellbookReset(sprite)
@@ -544,6 +588,31 @@ local function addActiveDefense(sprite, resref, source)
     }
 end
 
+local function publishSCSDelivery(sprite, resref, delivery)
+    fireStarted(sprite, {
+        m_actionID = 181,
+        m_string1 = newCString(delivery),
+    })
+    addActiveDefense(sprite, resref, delivery)
+    -- The v1.2 synchronous listener runs at the exact marker-publication
+    -- boundary, before SCS advances to its following RemoveSpell action.
+    for _, callback in ipairs(legacyTickListeners) do callback(sprite) end
+    sprite.m_curAction = { m_actionID = 0 }
+end
+
+local function startSCSRemove(sprite, resref, spellNumber, consume)
+    fireStarted(sprite, {
+        m_actionID = 147,
+        m_specificID = spellNumber,
+    })
+    local consumed = nil
+    if consume ~= false then
+        consumed = setFirstAvailable(sprite, resref, 0)
+    end
+    sprite.m_curAction = { m_actionID = 0 }
+    return consumed
+end
+
 local function applicationCount(sprite, resref)
     return sprite.applications[lower(resref)] or 0
 end
@@ -566,6 +635,36 @@ end
 
 local scenarios = {}
 
+local function exerciseUnavailableGameplayBookkeeping(sprite)
+    local saved = {
+        version = 2,
+        spells = {
+            spwi408 = {
+                version = 2,
+                resref = "spwi408",
+                charged = 1,
+                expected_expiry = fakeGameTimeTicks + 36000,
+                suppressed = 0,
+                reimbursement_eligible = 1,
+                token_field = "m_memorizedSpellsMage",
+                token_level = 3,
+                token_ordinal = 1,
+                token_resref = "spwi408",
+                original_flags = 1,
+                debited_flags = 0,
+            },
+        },
+    }
+    importedLedger(sprite, saved)
+    local roundTrip = exportedLedger(sprite) or {}
+    out("bookkeeping_roundtrip",
+        (((roundTrip.spells or {}).spwi408 or {}).charged or 0))
+    fireSpellbookReset(sprite)
+    local afterReset = exportedLedger(sprite) or {}
+    out("bookkeeping_reset_cleared",
+        bool(next(afterReset.spells or {}) == nil))
+end
+
 scenarios.runtime_missing_urgent_api = function()
     local sprite = newSprite({ seeParty = false })
     memorize(sprite, "spwi408")
@@ -578,13 +677,33 @@ end
 
 scenarios.runtime_missing_ambient_api = function()
     local sprite = newSprite({})
+    memorize(sprite, "spwi408", 1, 0)
+    memorize(sprite, "spwi408", 1, 1)
     memorize(sprite, "spwi611")
     fireTick(sprite)
     out("urgent_live", bool(sprite.queueCount == 1))
     out("urgent_faulted", CBR_RDY_STATE.urgent_faulted or 0)
     out("ambient_faulted", CBR_RDY_STATE.ambient_faulted or 0)
     out("ambient_unsupported_logs", countPrinted("ambient disabled: required EEex API"))
+    exerciseUnavailableGameplayBookkeeping(sprite)
 end
+
+scenarios.runtime_missing_confirmation_api = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408", 1, 0)
+    memorize(sprite, "spwi408", 1, 1)
+    memorize(sprite, "spwi611")
+    fireTick(sprite)
+    out("ambient_applications", applicationCount(sprite, "spwi408"))
+    out("ambient_available", countAvailable(sprite, "spwi408"))
+    out("urgent_live", bool(sprite.queueCount == 1))
+    out("ambient_faulted", CBR_RDY_STATE.ambient_faulted or 0)
+    out("urgent_faulted", CBR_RDY_STATE.urgent_faulted or 0)
+    out("ambient_unsupported_logs", countPrinted("ambient disabled: required EEex API"))
+    exerciseUnavailableGameplayBookkeeping(sprite)
+end
+
+scenarios.runtime_missing_try_aux = scenarios.runtime_missing_confirmation_api
 
 scenarios.runtime_missing_project_image_identity =
     scenarios.runtime_missing_urgent_api
@@ -632,11 +751,6 @@ scenarios.runtime_legacy_repeated_callbacks = function()
     out("urgent_queues", sprite.queueCount)
 end
 
-local function isEmptyTable(value)
-    if type(value) ~= "table" then return false end
-    return next(value) == nil
-end
-
 scenarios.runtime_legacy_marshal_exports = function()
     local normal = newSprite({ seeParty = false })
     memorize(normal, "spwi408")
@@ -645,37 +759,50 @@ scenarios.runtime_legacy_marshal_exports = function()
     out("normal_export_type", type(normalExport))
     out("normal_export_version", normalExport and normalExport.version or 0)
 
-    local inactive = newSprite({})
     CBR_RDY_AMBIENT_ENABLED = 0
-    local disabledExport = exportedLedger(inactive)
+    local disabledExport = exportedLedger(normal)
     out("disabled_export_type", type(disabledExport))
-    out("disabled_export_empty", bool(isEmptyTable(disabledExport)))
+    out("disabled_export_charged",
+        (((disabledExport or {}).spells or {}).spwi408 or {}).charged or 0)
     CBR_RDY_AMBIENT_ENABLED = 1
 
     CBR_RDY_EXTERNAL_OWNER = 1
-    local ownedExport = exportedLedger(inactive)
+    local ownedExport = exportedLedger(normal)
     out("owned_export_type", type(ownedExport))
-    out("owned_export_empty", bool(isEmptyTable(ownedExport)))
+    out("owned_export_charged",
+        (((ownedExport or {}).spells or {}).spwi408 or {}).charged or 0)
     CBR_RDY_EXTERNAL_OWNER = 0
 
     CBR_RDY_STATE.ambient_faulted = 1
-    local faultedExport = exportedLedger(inactive)
+    local faultedExport = exportedLedger(normal)
     out("faulted_export_type", type(faultedExport))
-    out("faulted_export_empty", bool(isEmptyTable(faultedExport)))
+    out("faulted_export_charged",
+        (((faultedExport or {}).spells or {}).spwi408 or {}).charged or 0)
 end
 
 scenarios.v12_inactive_marshal_exports = function()
     local sprite = newSprite({})
+    memorize(sprite, "spwi408")
+    fireTick(sprite)
     CBR_RDY_AMBIENT_ENABLED = 0
-    out("disabled_export_type", type(exportedLedger(sprite)))
+    local disabledExport = exportedLedger(sprite)
+    out("disabled_export_type", type(disabledExport))
+    out("disabled_export_charged",
+        (((disabledExport or {}).spells or {}).spwi408 or {}).charged or 0)
     CBR_RDY_AMBIENT_ENABLED = 1
 
     CBR_RDY_EXTERNAL_OWNER = 1
-    out("owned_export_type", type(exportedLedger(sprite)))
+    local ownedExport = exportedLedger(sprite)
+    out("owned_export_type", type(ownedExport))
+    out("owned_export_charged",
+        (((ownedExport or {}).spells or {}).spwi408 or {}).charged or 0)
     CBR_RDY_EXTERNAL_OWNER = 0
 
     CBR_RDY_STATE.ambient_faulted = 1
-    out("faulted_export_type", type(exportedLedger(sprite)))
+    local faultedExport = exportedLedger(sprite)
+    out("faulted_export_type", type(faultedExport))
+    out("faulted_export_charged",
+        (((faultedExport or {}).spells or {}).spwi408 or {}).charged or 0)
 end
 
 scenarios.runtime_missing_game_time_callbacks = function()
@@ -698,6 +825,126 @@ scenarios.runtime_missing_game_time_callbacks = function()
     local import_sprite = newSprite({})
     importedLedger(import_sprite, { version = 1, spells = {} })
     out("import_aux_created", bool(auxBySprite[import_sprite] ~= nil))
+end
+
+scenarios.runtime_missing_game_time_pending_state = function()
+    CBR_RDY_URGENT_ENABLED = 0
+
+    local existing = newSprite({})
+    memorize(existing, "spwi408", 1, 0)
+    memorize(existing, "spwi408", 1, 1)
+    local existingAux = EEex_GetUDAux(existing)
+    existingAux.CBR_RDY_SESSION_NONCE = 11
+    existingAux.CBR_RDY_LEDGER = {
+        version = 1,
+        spells = {
+            spwi408 = {
+                version = 1,
+                resref = "spwi408",
+                charged = 1,
+                expected_expiry = fakeGameTimeTicks + 36000,
+                suppressed = 0,
+            },
+        },
+    }
+    local existingLedger = existingAux.CBR_RDY_LEDGER
+    local existingSession = {
+        nonce = 11,
+        tick = 0,
+        checked = {},
+        delivery_pending = {},
+        pending = nil,
+    }
+    CBR_RDY_STATE.ambient_sessions[existing.m_id] = existingSession
+    fireStarted(existing, { m_actionID = 23 })
+    out("existing_session_unchanged",
+        bool(CBR_RDY_STATE.ambient_sessions[existing.m_id] == existingSession))
+    out("existing_ledger_unchanged",
+        bool(existingAux.CBR_RDY_LEDGER == existingLedger
+            and existingAux.CBR_RDY_LEDGER.version == 1))
+    out("existing_nonce_unchanged",
+        bool(existingAux.CBR_RDY_SESSION_NONCE == 11))
+    out("existing_slot_unchanged", countAvailable(existing, "spwi408"))
+    out("existing_effects_unchanged", existing.directEffects)
+    out("existing_queues_unchanged", existing.queueCount)
+
+    CBR_RDY_STATE.ambient_faulted = 0
+    local lazy = newSprite({})
+    memorize(lazy, "spwi408", 1, 0)
+    memorize(lazy, "spwi408", 1, 1)
+    local lazyAux = EEex_GetUDAux(lazy)
+    lazyAux.CBR_RDY_LEDGER = {
+        version = 2,
+        spells = {
+            spwi408 = {
+                version = 2,
+                resref = "spwi408",
+                charged = 1,
+                expected_expiry = fakeGameTimeTicks + 36000,
+                suppressed = 0,
+                reimbursement_eligible = 1,
+                token_field = "m_memorizedSpellsMage",
+                token_level = 3,
+                token_ordinal = 1,
+                token_resref = "spwi408",
+                original_flags = 1,
+                debited_flags = 0,
+            },
+        },
+    }
+    local lazyLedger = lazyAux.CBR_RDY_LEDGER
+    fireStarted(lazy, {
+        m_actionID = 181,
+        m_string1 = newCString("dwsw408"),
+    })
+    out("lazy_session_absent",
+        bool(CBR_RDY_STATE.ambient_sessions[lazy.m_id] == nil))
+    out("lazy_nonce_absent", bool(lazyAux.CBR_RDY_SESSION_NONCE == nil))
+    out("lazy_ledger_unchanged", bool(lazyAux.CBR_RDY_LEDGER == lazyLedger))
+    out("lazy_slot_unchanged", countAvailable(lazy, "spwi408"))
+    out("lazy_effects_unchanged", lazy.directEffects)
+    out("lazy_queues_unchanged", lazy.queueCount)
+
+    CBR_RDY_STATE.ambient_faulted = 0
+    local confirming = newSprite({})
+    memorize(confirming, "spwi408", 1, 0)
+    memorize(confirming, "spwi408", 1, 1)
+    local confirmingAux = EEex_GetUDAux(confirming)
+    confirmingAux.CBR_RDY_SESSION_NONCE = 22
+    confirmingAux.CBR_RDY_LEDGER = {
+        version = 1,
+        spells = {
+            spwi408 = {
+                version = 1,
+                resref = "spwi408",
+                charged = 1,
+                expected_expiry = fakeGameTimeTicks + 36000,
+                suppressed = 0,
+            },
+        },
+    }
+    local confirmingLedger = confirmingAux.CBR_RDY_LEDGER
+    local confirmingSession = {
+        nonce = 21,
+        tick = 0,
+        checked = {},
+        delivery_pending = { spwi408 = {} },
+        pending = nil,
+    }
+    CBR_RDY_STATE.ambient_sessions[confirming.m_id] = confirmingSession
+    for _, callback in ipairs(legacyTickListeners) do callback(confirming) end
+    out("confirm_session_unchanged",
+        bool(CBR_RDY_STATE.ambient_sessions[confirming.m_id]
+            == confirmingSession))
+    out("confirm_nonce_unchanged",
+        bool(confirmingAux.CBR_RDY_SESSION_NONCE == 22))
+    out("confirm_ledger_unchanged",
+        bool(confirmingAux.CBR_RDY_LEDGER == confirmingLedger
+            and confirmingAux.CBR_RDY_LEDGER.version == 1))
+    out("confirm_slot_unchanged", countAvailable(confirming, "spwi408"))
+    out("confirm_effects_unchanged", confirming.directEffects)
+    out("confirm_queues_unchanged", confirming.queueCount)
+    out("clock_faulted", CBR_RDY_STATE.ambient_faulted or 0)
 end
 
 scenarios.runtime_legacy_missing_raw_time_callbacks =
@@ -737,6 +984,83 @@ scenarios.runtime_shell = function()
     out("ambient_tracebacks", countPrinted("ambient disabled"))
     out("ambient_fused", CBR_RDY_STATE.ambient_faulted or 0)
     out("urgent_after_ambient_fault", bool(urgentCalls == 4))
+end
+
+scenarios.runtime_confirmation_observer_only = function()
+    local ambientTicks = 0
+    local urgentTicks = 0
+    local confirmations = 0
+    CBR_RDY_HANDLERS.ambient_tick = function() ambientTicks = ambientTicks + 1 end
+    CBR_RDY_HANDLERS.urgent_tick = function() urgentTicks = urgentTicks + 1 end
+    CBR_RDY_HANDLERS.ambient_confirm = function() confirmations = confirmations + 1 end
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408")
+    for _, callback in ipairs(legacyTickListeners) do callback(sprite) end
+    out("confirmation_calls", confirmations)
+    out("ambient_tick_calls", ambientTicks)
+    out("urgent_tick_calls", urgentTicks)
+    out("aux_created", bool(auxBySprite[sprite] ~= nil))
+    out("session_created",
+        bool(CBR_RDY_STATE.ambient_sessions[sprite.m_id] ~= nil))
+    out("applications", applicationCount(sprite, "spwi408"))
+    out("urgent_queues", sprite.queueCount)
+end
+
+scenarios.runtime_v12_listener_phase_order = function()
+    local phases = {}
+    CBR_RDY_URGENT_ENABLED = 0
+    CBR_RDY_HANDLERS.ambient_confirm = function()
+        phases[#phases + 1] = "synchronous"
+    end
+    CBR_RDY_HANDLERS.ambient_tick = function()
+        phases[#phases + 1] = "deferred"
+    end
+    fireTick(newSprite({}))
+    out("phase_order", table.concat(phases, ","))
+end
+
+scenarios.runtime_pending_observers_do_not_allocate_recycled_aux = function()
+    local confirmationSprite = newSprite({ id = 7101 })
+    CBR_RDY_STATE.ambient_sessions[confirmationSprite.m_id] = {
+        nonce = 1,
+        delivery_pending = { spwi408 = {} },
+    }
+    for _, callback in ipairs(legacyTickListeners) do
+        callback(confirmationSprite)
+    end
+    out("confirmation_aux_created",
+        bool(auxBySprite[confirmationSprite] ~= nil))
+    out("confirmation_stale_session_cleared",
+        bool(CBR_RDY_STATE.ambient_sessions[confirmationSprite.m_id] == nil))
+
+    local actionSprite = newSprite({ id = 7102 })
+    CBR_RDY_STATE.ambient_sessions[actionSprite.m_id] = {
+        nonce = 1,
+        delivery_pending = {},
+    }
+    CBR_RDY_URGENT_ENABLED = 0
+    fireStarted(actionSprite, { m_actionID = 23 })
+    out("action_aux_created", bool(auxBySprite[actionSprite] ~= nil))
+    out("action_stale_session_cleared",
+        bool(CBR_RDY_STATE.ambient_sessions[actionSprite.m_id] == nil))
+
+    local exactActionSprite = newSprite({ id = 7103 })
+    fireStarted(exactActionSprite, {
+        m_actionID = 181,
+        m_string1 = newCString("dwsw408"),
+    })
+    out("exact_action_without_ledger_aux_created",
+        bool(auxBySprite[exactActionSprite] ~= nil))
+    out("exact_action_without_ledger_session_created",
+        bool(CBR_RDY_STATE.ambient_sessions[exactActionSprite.m_id] ~= nil))
+end
+
+scenarios.runtime_existing_scheduler_hotpatch = function()
+    out("deferred_after_hotpatch", #deferredTickListeners)
+    out("sync_after_hotpatch", #legacyTickListeners)
+    out("actions_after_hotpatch", #startedActionListeners)
+    out("confirmation_sentinel_after_hotpatch",
+        CBR_RDY_AMBIENT_CONFIRMATION_LISTENER_REGISTERED or 0)
 end
 
 scenarios.ambient_classification = function()
@@ -841,6 +1165,256 @@ scenarios.ambient_first_debit_and_refresh = function()
     out("applications", applicationCount(sprite, "spwi408"))
 end
 
+scenarios.ambient_deferred_delivery_confirmation = function()
+    local sprite = newSprite({ holdDeferredDeliveries = true })
+    memorize(sprite, "spwi408")
+    fireTick(sprite)
+    out("active_before_publication", active(sprite, "spwi408"))
+    out("available_before_publication", countAvailable(sprite, "spwi408"))
+    local before = exportedLedger(sprite) or {}
+    out("ledger_empty_before_publication", bool(next(before.spells or {}) == nil))
+    flushDeferredDeliveries(sprite)
+    out("active_after_publication", active(sprite, "spwi408"))
+    out("available_after_publication", countAvailable(sprite, "spwi408"))
+    fireTick(sprite)
+    local ledger = exportedLedger(sprite) or {}
+    local record = ledger.spells and ledger.spells.spwi408 or {}
+    local failures = (CBR_RDY_STATE.ambient_failures[sprite.m_id] or {}).spells or {}
+    out("available_after_later_tick", countAvailable(sprite, "spwi408"))
+    out("ledger_charged", record.charged or 0)
+    out("disabled", (failures.spwi408 or {}).disabled or 0)
+    out("applications", applicationCount(sprite, "spwi408"))
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+end
+
+scenarios.ambient_deferred_multi_spell_confirmation = function()
+    local sprite = newSprite({
+        holdDeferredDeliveries = true,
+    })
+    memorize(sprite, "spwi102")
+    memorize(sprite, "spwi408")
+    fireTick(sprite)
+    for _ = 1, 60 do fireTick(sprite) end
+    out("available_armor_before_confirmation", countAvailable(sprite, "spwi102"))
+    out("available_stoneskin_before_confirmation", countAvailable(sprite, "spwi408"))
+    out("direct_effects_before_confirmation", sprite.directEffects)
+    local before = exportedLedger(sprite) or {}
+    out("ledger_empty_before_confirmation", bool(next(before.spells or {}) == nil))
+    flushDeferredDeliveries(sprite)
+    fireTick(sprite)
+    local ledger = exportedLedger(sprite) or {}
+    local spells = ledger.spells or {}
+    out("available_armor_after_confirmation", countAvailable(sprite, "spwi102"))
+    out("available_stoneskin_after_confirmation", countAvailable(sprite, "spwi408"))
+    out("armor_charged", (spells.spwi102 or {}).charged or 0)
+    out("stoneskin_charged", (spells.spwi408 or {}).charged or 0)
+    out("applications_armor", applicationCount(sprite, "spwi102"))
+    out("applications_stoneskin", applicationCount(sprite, "spwi408"))
+    out("direct_effects", sprite.directEffects)
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+end
+
+scenarios.ambient_deferred_late_marker = function()
+    local sprite = newSprite({
+        holdDeferredDeliveries = true,
+    })
+    memorize(sprite, "spwi408")
+    fireTick(sprite)
+    advanceClockSeconds(2)
+    flushDeferredDeliveries(sprite)
+    fireTick(sprite)
+    local ledger = exportedLedger(sprite) or {}
+    local failures = (CBR_RDY_STATE.ambient_failures[sprite.m_id] or {}).spells or {}
+    out("effect_active", active(sprite, "spwi408"))
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("ledger_charged", ((ledger.spells or {}).spwi408 or {}).charged or 0)
+    out("disabled", (failures.spwi408 or {}).disabled or 0)
+    out("reason", (failures.spwi408 or {}).reason or "")
+    out("direct_effects", sprite.directEffects)
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+end
+
+scenarios.ambient_deferred_flags_change = function()
+    local sprite = newSprite({ holdDeferredDeliveries = true })
+    memorize(sprite, "spwi408")
+    fireTick(sprite)
+    local memorized = setFirstAvailable(sprite, "spwi408", 1)
+    memorized.m_flags = 3
+    flushDeferredDeliveries(sprite)
+    fireTick(sprite)
+    local ledger = exportedLedger(sprite) or {}
+    local failures = (CBR_RDY_STATE.ambient_failures[sprite.m_id] or {}).spells or {}
+    out("flags_after", memorized.m_flags)
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("ledger_charged", ((ledger.spells or {}).spwi408 or {}).charged or 0)
+    out("disabled", (failures.spwi408 or {}).disabled or 0)
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+end
+
+scenarios.ambient_deferred_import_boundary = function()
+    local sprite = newSprite({
+        holdDeferredDeliveries = true,
+    })
+    memorize(sprite, "spwi408")
+    fireTick(sprite)
+    importedLedger(sprite, { version = 1, spells = {} })
+    flushDeferredDeliveries(sprite)
+    fireTick(sprite)
+    local ledger = exportedLedger(sprite) or {}
+    out("effect_active", active(sprite, "spwi408"))
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("ledger_charged", ((ledger.spells or {}).spwi408 or {}).charged or 0)
+    out("direct_effects", sprite.directEffects)
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+end
+
+scenarios.ambient_deferred_slot_change = function()
+    local sprite = newSprite({ holdDeferredDeliveries = true })
+    memorize(sprite, "spwi408", 2)
+    fireTick(sprite)
+    setFirstAvailable(sprite, "spwi408", 0)
+    flushDeferredDeliveries(sprite)
+    fireTick(sprite)
+    local ledger = exportedLedger(sprite) or {}
+    local failures = (CBR_RDY_STATE.ambient_failures[sprite.m_id] or {}).spells or {}
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("ledger_charged", ((ledger.spells or {}).spwi408 or {}).charged or 0)
+    out("disabled", (failures.spwi408 or {}).disabled or 0)
+    out("applications", applicationCount(sprite, "spwi408"))
+    out("direct_effects", sprite.directEffects)
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+end
+
+scenarios.ambient_deferred_scs_reimbursement_race = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408", 2)
+    fireTick(sprite)
+    publishSCSDelivery(sprite, "spwi408", "dwsw408")
+    local session = CBR_RDY_STATE.ambient_sessions[sprite.m_id] or {}
+    out("stage_after_delivery", (session.pending or {}).stage or "")
+    fireStarted(sprite, { m_actionID = 147, m_specificID = 2408 })
+    out("stage_at_remove_start", (session.pending or {}).stage or "")
+    out("available_at_remove_start", countAvailable(sprite, "spwi408"))
+    setFirstAvailable(sprite, "spwi408", 0)
+    sprite.m_curAction = { m_actionID = 0 }
+    out("available_after_engine_remove", countAvailable(sprite, "spwi408"))
+    fireTick(sprite)
+    local ledger = exportedLedger(sprite) or {}
+    local failures = (CBR_RDY_STATE.ambient_failures[sprite.m_id] or {}).spells or {}
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("ledger_charged", ((ledger.spells or {}).spwi408 or {}).charged or 0)
+    out("disabled", (failures.spwi408 or {}).disabled or 0)
+    out("applications", applicationCount(sprite, "spwi408"))
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+    out("reimbursement_remaining",
+        ((ledger.spells or {}).spwi408 or {}).reimbursement_eligible or 0)
+end
+
+scenarios.ambient_deferred_scs_pair_before_confirmation = function()
+    local sprite = newSprite({
+        holdDeferredDeliveries = true,
+    })
+    memorize(sprite, "spwi408", 2)
+    fireTick(sprite)
+    publishSCSDelivery(sprite, "spwi408", "dwsw408")
+    local session = CBR_RDY_STATE.ambient_sessions[sprite.m_id] or {}
+    local before = exportedLedger(sprite) or {}
+    out("available_after_scs_marker", countAvailable(sprite, "spwi408"))
+    out("ledger_before_remove",
+        ((before.spells or {}).spwi408 or {}).charged or 0)
+    out("stage_before_remove", (session.pending or {}).stage or "")
+    startSCSRemove(sprite, "spwi408", 2408, true)
+    out("stage_after_remove", (session.pending or {}).stage or "")
+    fireTick(sprite)
+    local ledger = exportedLedger(sprite) or {}
+    local failures = (CBR_RDY_STATE.ambient_failures[sprite.m_id] or {}).spells or {}
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("ledger_charged", ((ledger.spells or {}).spwi408 or {}).charged or 0)
+    out("disabled", (failures.spwi408 or {}).disabled or 0)
+    out("applications", applicationCount(sprite, "spwi408"))
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+    flushDeferredDeliveries(sprite)
+    local afterLateChild = exportedLedger(sprite) or {}
+    local afterLateRecord = (afterLateChild.spells or {}).spwi408 or {}
+    out("available_after_late_component_child",
+        countAvailable(sprite, "spwi408"))
+    out("ledger_after_late_component_child", afterLateRecord.charged or 0)
+    out("reimbursement_after_late_component_child",
+        afterLateRecord.reimbursement_eligible or 0)
+    out("quicklists_after_late_component_child", sprite.quickListRebuilds)
+end
+
+scenarios.ambient_deferred_scs_nonadjacent = function()
+    local sprite = newSprite({
+        holdDeferredDeliveries = true,
+    })
+    memorize(sprite, "spwi408", 2)
+    fireTick(sprite)
+    publishSCSDelivery(sprite, "spwi408", "dwsw408")
+    fireStarted(sprite, { m_actionID = 23 })
+    flushDeferredDeliveries(sprite)
+    startSCSRemove(sprite, "spwi408", 2408, true)
+    fireTick(sprite)
+    local ledger = exportedLedger(sprite) or {}
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("ledger_charged", ((ledger.spells or {}).spwi408 or {}).charged or 0)
+    out("applications", applicationCount(sprite, "spwi408"))
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+end
+
+scenarios.ambient_component_delivery_is_not_scs = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408", 2)
+    fireTick(sprite)
+    local session = CBR_RDY_STATE.ambient_sessions[sprite.m_id] or {}
+    out("candidate_after_component", bool(session.pending ~= nil))
+    out("component_started_actions", sprite.starts)
+    startSCSRemove(sprite, "spwi408", 2408, true)
+    fireTick(sprite)
+    local ledger = exportedLedger(sprite) or {}
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("ledger_charged", ((ledger.spells or {}).spwi408 or {}).charged or 0)
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+end
+
+scenarios.ambient_scs_remove_canceled = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408", 2)
+    fireTick(sprite)
+    publishSCSDelivery(sprite, "spwi408", "dwsw408")
+    startSCSRemove(sprite, "spwi408", 2408, false)
+    advanceClockSeconds(2)
+    fireTick(sprite)
+    out("available_after_timeout", countAvailable(sprite, "spwi408"))
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+    setFirstAvailable(sprite, "spwi408", 0)
+    fireTick(sprite)
+    out("available_after_unrelated_debit", countAvailable(sprite, "spwi408"))
+end
+
+scenarios.ambient_deferred_maintenance = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408")
+    fireTick(sprite)
+    local before = exportedLedger(sprite) or {}
+    local beforeExpiry = ((before.spells or {}).spwi408 or {}).expected_expiry or 0
+    removeActive(sprite, "spwi408")
+    sprite.deferApply = true
+    advanceClockSeconds(2400)
+    sprite.seeParty = false
+    sprite.locals.inafight = 0
+    for _ = 1, 15 do fireTick(sprite) end
+    local after = exportedLedger(sprite) or {}
+    local afterRecord = (after.spells or {}).spwi408 or {}
+    local failures = (CBR_RDY_STATE.ambient_failures[sprite.m_id] or {}).spells or {}
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("ledger_charged", afterRecord.charged or 0)
+    out("expiry_advanced", bool((afterRecord.expected_expiry or 0) > beforeExpiry))
+    out("disabled", (failures.spwi408 or {}).disabled or 0)
+    out("applications", applicationCount(sprite, "spwi408"))
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+end
+
 scenarios.ambient_natural_expiry = function()
     local sprite = newSprite({})
     memorize(sprite, "spwi408")
@@ -916,14 +1490,199 @@ scenarios.ambient_reset_boundaries = function()
     out("after_engine_reset", applicationCount(sprite, "spwi408") + applicationCount(loaded, "spwi408"))
 end
 
+scenarios.ambient_persisted_reimbursement = function()
+    local source = newSprite({})
+    memorize(source, "spwi408", 2)
+    fireTick(source)
+    local saved = exportedLedger(source) or {}
+    local savedRecord = (saved.spells or {}).spwi408 or {}
+    out("saved_schema", saved.version or 0)
+    out("saved_available", countAvailable(source, "spwi408"))
+    out("saved_reimbursement", savedRecord.reimbursement_eligible or 0)
+
+    local loaded = newSprite({})
+    memorize(loaded, "spwi408", 1, savedRecord.debited_flags)
+    memorize(loaded, "spwi408", 1, 1)
+    loaded.active.spwi408 = source.active.spwi408
+    for _, effect in ipairs(source.m_timedEffectList.values) do
+        loaded.m_timedEffectList.values[#loaded.m_timedEffectList.values + 1] = effect
+    end
+    importedLedger(loaded, saved)
+    fireTick(loaded)
+    out("loaded_available_before_scs", countAvailable(loaded, "spwi408"))
+    out("loaded_component_applications", applicationCount(loaded, "spwi408"))
+
+    publishSCSDelivery(loaded, "spwi408", "dwsw408")
+    startSCSRemove(loaded, "spwi408", 2408, true)
+    out("loaded_available_after_remove", countAvailable(loaded, "spwi408"))
+    fireTick(loaded)
+    local after = exportedLedger(loaded) or {}
+    local afterRecord = (after.spells or {}).spwi408 or {}
+    out("loaded_available_after_reconcile", countAvailable(loaded, "spwi408"))
+    out("ledger_still_charged", afterRecord.charged or 0)
+    out("persisted_reimbursement_consumed",
+        bool((afterRecord.reimbursement_eligible or 0) == 0))
+    out("loaded_quicklist_rebuilds", loaded.quickListRebuilds)
+end
+
+scenarios.ambient_persisted_reimbursement_before_first_tick = function()
+    local source = newSprite({})
+    memorize(source, "spwi408", 2)
+    fireTick(source)
+    local saved = exportedLedger(source) or {}
+    local savedRecord = (saved.spells or {}).spwi408 or {}
+
+    local loaded = newSprite({})
+    memorize(loaded, "spwi408", 1, savedRecord.debited_flags)
+    memorize(loaded, "spwi408", 1, 1)
+    loaded.active.spwi408 = source.active.spwi408
+    for _, effect in ipairs(source.m_timedEffectList.values) do
+        loaded.m_timedEffectList.values[#loaded.m_timedEffectList.values + 1] = effect
+    end
+    importedLedger(loaded, saved)
+    out("session_before_scs",
+        bool(CBR_RDY_STATE.ambient_sessions[loaded.m_id] ~= nil))
+    publishSCSDelivery(loaded, "spwi408", "dwsw408")
+    out("session_recovered_at_181",
+        bool(CBR_RDY_STATE.ambient_sessions[loaded.m_id] ~= nil))
+    startSCSRemove(loaded, "spwi408", 2408, true)
+    fireTick(loaded)
+    local after = exportedLedger(loaded) or {}
+    local afterRecord = (after.spells or {}).spwi408 or {}
+    out("available_after", countAvailable(loaded, "spwi408"))
+    out("reimbursement_consumed",
+        bool((afterRecord.reimbursement_eligible or 0) == 0))
+end
+
+scenarios.ambient_hot_reload_reimbursement_before_first_tick = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408", 2)
+    fireTick(sprite)
+    reloadRuntime()
+    out("session_after_reload",
+        bool(CBR_RDY_STATE.ambient_sessions[sprite.m_id] ~= nil))
+    publishSCSDelivery(sprite, "spwi408", "dwsw408")
+    out("session_recovered_at_181",
+        bool(CBR_RDY_STATE.ambient_sessions[sprite.m_id] ~= nil))
+    startSCSRemove(sprite, "spwi408", 2408, true)
+    fireTick(sprite)
+    local after = exportedLedger(sprite) or {}
+    local afterRecord = (after.spells or {}).spwi408 or {}
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("reimbursement_consumed",
+        bool((afterRecord.reimbursement_eligible or 0) == 0))
+end
+
+scenarios.ambient_gate_independent_bookkeeping = function()
+    local function setGate(kind, enabled)
+        if kind == "disabled" then
+            CBR_RDY_AMBIENT_ENABLED = enabled and 0 or 1
+        elseif kind == "owned" then
+            CBR_RDY_EXTERNAL_OWNER = enabled and 1 or 0
+        elseif kind == "faulted" then
+            CBR_RDY_STATE.ambient_faulted = enabled and 1 or 0
+        end
+    end
+
+    for _, kind in ipairs({ "disabled", "owned", "faulted" }) do
+        local source = newSprite({})
+        memorize(source, "spwi408", 2)
+        fireTick(source)
+        local baselineSaved = exportedLedger(source) or {}
+        removeActive(source, "spwi408")
+        setGate(kind, true)
+        local gatedExport = exportedLedger(source) or {}
+
+        local loaded = newSprite({})
+        memorize(loaded, "spwi408", 1, 0)
+        memorize(loaded, "spwi408", 1, 1)
+        importedLedger(loaded, baselineSaved)
+        setGate(kind, false)
+        fireTick(loaded)
+
+        out(kind .. "_export_charged",
+            (((gatedExport.spells or {}).spwi408 or {}).charged or 0))
+        out(kind .. "_import_available",
+            countAvailable(loaded, "spwi408"))
+    end
+end
+
+scenarios.ambient_gated_spellbook_reset_clears_charge = function()
+    local function setGate(kind, enabled)
+        if kind == "disabled" then
+            CBR_RDY_AMBIENT_ENABLED = enabled and 0 or 1
+        elseif kind == "owned" then
+            CBR_RDY_EXTERNAL_OWNER = enabled and 1 or 0
+        elseif kind == "faulted" then
+            CBR_RDY_STATE.ambient_faulted = enabled and 1 or 0
+        end
+    end
+
+    for _, kind in ipairs({ "disabled", "owned", "faulted" }) do
+        local sprite = newSprite({})
+        memorize(sprite, "spwi408", 2)
+        fireTick(sprite)
+        removeActive(sprite, "spwi408")
+        for _, list in pairs(sprite.m_memorizedSpellsMage.levels) do
+            for _, record in ipairs(list.values) do restoreRecord(record) end
+        end
+        setGate(kind, true)
+        fireSpellbookReset(sprite)
+        setGate(kind, false)
+        fireTick(sprite)
+        out(kind .. "_available_after_reset",
+            countAvailable(sprite, "spwi408"))
+    end
+end
+
+scenarios.ambient_reimbursement_exact_flags = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408", 2, 5)
+    fireTick(sprite)
+    local componentRecord =
+        sprite.m_memorizedSpellsMage:getReference(3).values[1]
+    publishSCSDelivery(sprite, "spwi408", "dwsw408")
+    startSCSRemove(sprite, "spwi408", 2408, true)
+    componentRecord.m_flags = 6
+    fireTick(sprite)
+    local ledger = exportedLedger(sprite) or {}
+    local record = (ledger.spells or {}).spwi408 or {}
+    local failures = (CBR_RDY_STATE.ambient_failures[sprite.m_id] or {}).spells or {}
+    out("component_flags_after", componentRecord.m_flags)
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("disabled", (failures.spwi408 or {}).disabled or 0)
+    out("reimbursement_consumed", bool((record.reimbursement_eligible or 0) == 0))
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+end
+
+scenarios.ambient_reimbursement_quicklist_rollback = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408", 2)
+    fireTick(sprite)
+    local componentRecord =
+        sprite.m_memorizedSpellsMage:getReference(3).values[1]
+    publishSCSDelivery(sprite, "spwi408", "dwsw408")
+    startSCSRemove(sprite, "spwi408", 2408, true)
+    sprite.failQuickList = true
+    fireTick(sprite)
+    local ledger = exportedLedger(sprite) or {}
+    local record = (ledger.spells or {}).spwi408 or {}
+    local failures = (CBR_RDY_STATE.ambient_failures[sprite.m_id] or {}).spells or {}
+    out("component_flags_after", componentRecord.m_flags)
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("disabled", (failures.spwi408 or {}).disabled or 0)
+    out("reimbursement_consumed", bool((record.reimbursement_eligible or 0) == 0))
+    out("quicklist_rebuilds", sprite.quickListRebuilds)
+end
+
 scenarios.ambient_scs_reimbursement = function()
     local exact = newSprite({})
     memorize(exact, "spwi408", 2)
     fireTick(exact)
     local before = countAvailable(exact, "spwi408")
-    fireStarted(exact, { m_actionID = 181, m_string1 = newCString("dwsw408") })
-    setFirstAvailable(exact, "spwi408", 0)
-    fireStarted(exact, { m_actionID = 147, m_specificID = 2408 })
+    publishSCSDelivery(exact, "spwi408", "dwsw408")
+    startSCSRemove(exact, "spwi408", 2408, true)
+    fireTick(exact)
     out("exact_initial_reimbursed", bool(countAvailable(exact, "spwi408") == before))
 
     local combat = newSprite({})
@@ -936,9 +1695,9 @@ scenarios.ambient_scs_reimbursement = function()
     local renewal = newSprite({ instantprep = 1 })
     memorize(renewal, "spwi408", 2)
     fireTick(renewal)
-    fireStarted(renewal, { m_actionID = 181, m_string1 = newCString("dwsw408") })
-    setFirstAvailable(renewal, "spwi408", 0)
-    fireStarted(renewal, { m_actionID = 147, m_specificID = 2408 })
+    publishSCSDelivery(renewal, "spwi408", "dwsw408")
+    startSCSRemove(renewal, "spwi408", 2408, true)
+    fireTick(renewal)
     out("renewal_reimbursed", bool(countAvailable(renewal, "spwi408") > 0))
 end
 
@@ -946,20 +1705,25 @@ scenarios.ambient_transaction_failure = function()
     local apply = newSprite({ failApply = true })
     memorize(apply, "spwi408")
     fireTick(apply)
+    advanceClockSeconds(2)
     for _ = 1, 60 do fireTick(apply) end
     local applyFailures = (CBR_RDY_STATE.ambient_failures[apply.m_id] or {}).spells or {}
     out("apply_availability_restored", countAvailable(apply, "spwi408"))
     out("apply_disabled", (applyFailures.spwi408 or {}).disabled or 0)
     out("apply_attempts", (applyFailures.spwi408 or {}).attempts or 0)
+    out("apply_reason", (applyFailures.spwi408 or {}).reason or "")
+    out("apply_effect_calls", apply.directEffects)
 
-    local quick = newSprite({ failQuickList = true })
+    local quick = newSprite({ failQuickList = true, deferApply = true })
     memorize(quick, "spwi408")
+    fireTick(quick)
     fireTick(quick)
     for _ = 1, 60 do fireTick(quick) end
     local quickFailures = (CBR_RDY_STATE.ambient_failures[quick.m_id] or {}).spells or {}
     out("quick_availability_restored", countAvailable(quick, "spwi408"))
     out("quick_disabled", (quickFailures.spwi408 or {}).disabled or 0)
     out("quick_attempts", (quickFailures.spwi408 or {}).attempts or 0)
+    out("quick_reason", (quickFailures.spwi408 or {}).reason or "")
 end
 
 scenarios.ambient_malformed_ledger = function()
@@ -984,6 +1748,67 @@ scenarios.ambient_malformed_ledger = function()
     importedLedger(legacy, { version = 0, spells = {} })
     fireTick(legacy)
     out("legacy_discarded", active(legacy, "spwi408"))
+
+    local uncharged = newSprite({})
+    memorize(uncharged, "spwi408")
+    importedLedger(uncharged, {
+        version = 2,
+        spells = {
+            spwi408 = {
+                version = 2,
+                resref = "spwi408",
+                charged = 0,
+                expected_expiry = fakeGameTimeTicks + 36000,
+                suppressed = 0,
+                reimbursement_eligible = 0,
+                token_field = "",
+                token_level = -1,
+                token_ordinal = 0,
+                token_resref = "",
+                original_flags = 0,
+                debited_flags = 0,
+            },
+        },
+    })
+    fireTick(uncharged)
+    local unchargedFailures =
+        (CBR_RDY_STATE.ambient_failures[uncharged.m_id] or {}).spells or {}
+    out("uncharged_record_disabled",
+        (unchargedFailures.spwi408 or {}).disabled or 0)
+    out("uncharged_record_applications",
+        applicationCount(uncharged, "spwi408"))
+    out("uncharged_record_available",
+        countAvailable(uncharged, "spwi408"))
+end
+
+scenarios.ambient_v1_ledger_migration = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408", 2)
+    setFirstAvailable(sprite, "spwi408", 0)
+    addActiveDefense(sprite, "spwi408", "dwsw408")
+    importedLedger(sprite, {
+        version = 1,
+        spells = {
+            spwi408 = {
+                version = 1,
+                resref = "spwi408",
+                charged = 1,
+                expected_expiry = fakeGameTimeTicks + 36000,
+                suppressed = 0,
+            },
+        },
+    })
+    fireTick(sprite)
+    local migrated = exportedLedger(sprite) or {}
+    local migratedRecord = (migrated.spells or {}).spwi408 or {}
+    out("schema_version", migrated.version or 0)
+    out("charged", migratedRecord.charged or 0)
+    out("reimbursement_eligible", migratedRecord.reimbursement_eligible or 0)
+    out("component_applications", applicationCount(sprite, "spwi408"))
+    publishSCSDelivery(sprite, "spwi408", "dwsw408")
+    startSCSRemove(sprite, "spwi408", 2408, true)
+    fireTick(sprite)
+    out("available_after_scs", countAvailable(sprite, "spwi408"))
 end
 
 local function primitiveOnly(value, seen)
@@ -1013,6 +1838,9 @@ scenarios.ambient_marshal = function()
     local allowed = {
         version = true, resref = true, charged = true,
         expected_expiry = true, suppressed = true,
+        reimbursement_eligible = true,
+        token_field = true, token_level = true, token_ordinal = true,
+        token_resref = true, original_flags = true, debited_flags = true,
     }
     local exact = true
     for key in pairs(record) do
@@ -1022,6 +1850,13 @@ scenarios.ambient_marshal = function()
         if record[key] == nil then exact = false end
     end
     out("record_fields_exact", bool(exact))
+    out("reimbursement_eligible", record.reimbursement_eligible or 0)
+    out("token_field", record.token_field or "")
+    out("token_level", record.token_level or -1)
+    out("token_ordinal", record.token_ordinal or 0)
+    out("token_resref", record.token_resref or "")
+    out("original_flags", record.original_flags or 0)
+    out("debited_flags", record.debited_flags or -1)
 end
 
 scenarios.ambient_runtime_safety = function()
@@ -1155,6 +1990,9 @@ end
 scenarios.urgent_normal_cast = function()
     local sprite = urgentResult({}, { "spwi611" })
     out("queued_spellres", bool(queuedResref(sprite) == "spwi611"))
+    out("clear_actions_boolean", bool(type(sprite.clearActionsSkipFlagged) == "boolean"))
+    out("clear_actions_preserved_flagged", bool(sprite.clearActionsSkipFlagged == true))
+    out("urgent_faulted", CBR_RDY_STATE.urgent_faulted or 0)
     out("direct_effects", sprite.directEffects)
     out("engine_slot_debits", sprite.engineSlotDebits)
     out("engine_aura", sprite.engineAura)
@@ -1256,8 +2094,18 @@ if scenarioName == "runtime_missing_urgent_api" then
     EEex_Sprite_GetState = nil
 elseif scenarioName == "runtime_missing_ambient_api" then
     EEex_GameObject_ApplyEffect = nil
+elseif scenarioName == "runtime_missing_confirmation_api" then
+    EEex_Opcode_AddListsResolvedListener = nil
+elseif scenarioName == "runtime_missing_try_aux" then
+    EEex_TryGetUDAux = nil
+elseif scenarioName == "runtime_existing_scheduler_hotpatch" then
+    deferredTickListeners[1] = function() end
+    startedActionListeners[1] = function() end
+    CBR_RDY_TICK_ACTION_LISTENERS_REGISTERED = 1
+    CBR_RDY_LISTENERS_REGISTERED = 1
 elseif scenarioName == "runtime_missing_game_time"
-        or scenarioName == "runtime_missing_game_time_callbacks" then
+        or scenarioName == "runtime_missing_game_time_callbacks"
+        or scenarioName == "runtime_missing_game_time_pending_state" then
     EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime = nil
 elseif scenarioName == "runtime_legacy_v011_surface"
         or scenarioName == "runtime_legacy_repeated_callbacks"
@@ -1279,6 +2127,12 @@ out("reset_listeners", #resetListeners)
 local marshalCount = 0
 for _ in pairs(marshalHandlers) do marshalCount = marshalCount + 1 end
 out("marshal_handlers", marshalCount)
+out("tick_listener_mode", CBR_RDY_STATE.tick_listener_mode or "")
+out("confirmation_listener_mode", CBR_RDY_STATE.confirmation_listener_mode or "")
+out("confirmation_listener_registered",
+    CBR_RDY_STATE.confirmation_listener_registered or 0)
+out("confirmation_listener_sentinel",
+    CBR_RDY_AMBIENT_CONFIRMATION_LISTENER_REGISTERED or 0)
 local scenario = scenarios[scenarioName]
 assert(scenario, "unknown scenario " .. tostring(scenarioName))
 scenario()

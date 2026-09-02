@@ -28,17 +28,28 @@ rationale, fully reversible, idempotent, testable without wrecking a live save.
   spell symbols dynamically, classifies the actual SPL effects, removes only the false
   metadata and proven first-round/renewal choices, and substitutes real Mantle in the proven
   Chain Contingency shape. A future genuine Improved Mantle makes it a byte-no-op.
-- **121 — EEex ambient readiness bridge** ✅ IMPLEMENTED v1.2-FIRST WITH LEGACY FALLBACK,
-  pending controlled v1.2 live acceptance. A stamped, hot-reload-safe EEex module gives
+- **121 — EEex ambient readiness bridge** 🚧 V1.2 AMBIENT + NEUTRAL-TO-HOSTILE URGENT PATH
+  LIVE ACCEPTED; LEGACY LIVE TEST PENDING. A stamped, hot-reload-safe EEex module gives
   recognized SCS casters honest long-duration readiness (one real memorized copy per genuine
   spellbook reset) and one normal, interruptible first-contact weapon-protection cast.
   Natural expiry can be maintained only while safely out of combat; dispel/early loss
-  suppresses maintenance. Unknown queues and Project Image states fail closed. The current
-  deferred listener is authoritative; only its absence selects the source-verified old
-  listener. Both modes read the direct `m_worldTime.m_gameTime` field. Ambient and urgent ownership can be retired
-  independently when the user's future full EEex AI takes over. Component 121 changes no SPL
-  or BCS resource. Both API paths have simulator coverage; the first v1.2 pass diagnosed a
-  bad method assumption, and a corrected fresh-process rerun is still outstanding.
+  suppresses maintenance. Unknown queues and Project Image states fail closed. On v1.2 one
+  deferred callback is the scheduler and one synchronous callback is an ambient-only pending
+  confirmation observer (`1/1`, total 2); legacy uses one synchronous full scheduler (`0/1`,
+  total 1). Missing synchronous confirmation support retires ambient only, so urgent can keep
+  the deferred scheduler. Both modes read the direct `m_worldTime.m_gameTime` field. Ambient
+  and urgent ownership can be retired independently when the user's future full EEex AI takes
+  over, while existing ledger export/import and real-reset accounting remain active so
+  retirement cannot lose or retain a stale charge. Component 121 changes no SPL or BCS
+  resource. The earlier clock-only v1.2 lab build passed visual delivery but failed one-slot
+  accounting. The corrected build has 76 focused tests and all 253 repository tests passing;
+  its fresh-process `AR3000` diagnostic then passed exact-marker delivery, schema-2 charging,
+  and the expected one-slot delta on all four neutral Vigil casters. A later urgent attempt
+  exposed the EEex requirement for an explicit Boolean argument to `virtual_ClearActions`.
+  With `false` supplied after the passive-only gate, the retest passed: the attack order did
+  nothing while Brother Pol remained neutral; the first hit made him hostile, after which the
+  exact normal Mantle cast started, spent one contact attempt and its slot, applied the expected
+  opcode-120 effects, and left the urgent fuse clear.
 - **Backlog:** catalog SCS components active in the target install + their balance
   touchpoints; identify small high-value tweaks. (Migrated from chriz-sod-rebalance "Part 3",
   which now points here.)
@@ -101,9 +112,12 @@ symbols; components idempotent + predicate-guarded. Follow CLAUDE.md.
 - [ ] Comp 100 formal tail-install into the live game (pending user sign-off)
 - [ ] Component 120 controlled tail-install and gameplay acceptance (implementation and
       synthetic installer/uninstall verification complete; no active-game write yet)
-- [ ] Component 121 controlled v1.2 tail-install and gameplay acceptance (implementation,
-      fake-EEex behavior, synthetic installer/uninstall verification, and a source/simulator-
-      verified older-EEex capability fallback are complete; the earlier v0.11 laboratory
+- [ ] Component 121 controlled v1.2 tail-install and gameplay acceptance (the clock-corrected
+      disposable-lab build historically passed visual delivery but failed one-slot
+      accounting; the corrected runtime has 76 focused tests and all 253 repository tests
+      passing, its fresh-process ambient delivery/accounting test passed on all four
+      neutral Vigil casters, and the corrected neutral-to-hostile urgent path passed on Brother
+      Pol with exact cast-start/contact, slot, effect, and fuse evidence; the earlier v0.11 laboratory
       install remained inert because it referenced a nonexistent clock API and did not test
       the corrected fallback; no component has been installed into the active playthrough
       game; old-version live acceptance is a later separately approved stage)

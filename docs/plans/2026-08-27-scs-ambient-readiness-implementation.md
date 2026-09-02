@@ -41,6 +41,26 @@ Spell Revisions, BG2:EE + EET.
 > listener fallback is a separate second implementation checkpoint after the v1.2
 > correction; live acceptance remains ordered v1.2 first and older EEex only afterwards.
 > See `research/11-eeex-v1.2-readiness-compatibility.md`.
+>
+> **Deferred-delivery addendum — updated 2026-09-02:** The corrected-clock v1.2 run
+> delivered the expected ambient effects but left all slots unchanged. Exact EEex source
+> and BG2EE 2.6.6 disassembly show why: opcode 146 with `dwFlags=1` publishes its child
+> through `CMessageFireSpell` / `CGameAIBase::FireSpell` after the deferred scheduler and
+> does not create action 181. Task 8 incorrectly assumed the child marker was synchronously
+> visible. The corrected v1.2 topology is one deferred scheduler plus one synchronous,
+> ambient-only pending-confirmation observer (`1/1`, total 2); legacy remains one synchronous
+> full scheduler (`0/1`, total 1). First use and maintenance share a per-resref transaction.
+> Exact SCS `181 -> 147` sequences use post-action reconciliation, with separate handling for
+> an SCS-paid race before component confirmation and strict restoration after a component
+> debit. Existing ledger marshal/reset bookkeeping is gate-independent; only an exact
+> action-181/known-delivery shape may reconstruct ephemeral state from a valid v2 ledger,
+> without allocating UDAux. A component child arriving after an SCS-paid commit is finite
+> redundancy only. The corrected build has 76 focused tests and all 253 repository tests
+> passing. Fresh-process ambient delivery/accounting passed. The later urgent live path exposed
+> one binding mismatch: `virtual_ClearActions` requires an explicit Boolean. The production and
+> simulator now require `false` after the passive-only gate, and the neutral-to-hostile Brother
+> Pol retest passed with exact normal-cast, slot, effect, contact, and fuse evidence. Corrected
+> legacy live acceptance remains outstanding.
 
 **Safety boundary:** The active game at
 `C:\Games\Baldur's Gate II Enhanced Edition modded\` is read-only throughout normal
@@ -519,7 +539,8 @@ The spike must establish on the installed EEex version:
 
 - the exact documented world-time accessor, its 15-tick-per-gameplay-second unit, and
   fail-closed behavior when it is unavailable;
-- registration through the v1.2 deferred lists-resolved listener in a fresh game process;
+- registration through one v1.2 deferred scheduler plus one synchronous ambient
+  confirmation observer in a fresh game process;
 - how to recognize a settled SCS caster, preferably the `caster_label_ini` local;
 - exact availability-bit mutation and `CheckQuickLists` behavior for mage and priest records;
 - the observable fingerprint of a genuine engine spellbook reset;
@@ -630,9 +651,11 @@ git commit -m "Compile ambient readiness runtime manifest"
 
 ### Step 1: Add the hot-reload-safe, fail-closed shell
 
-Implement one root-level registration sentinel and a dynamic trampoline. Keep current
-handlers and state tables in namespaced `_G` entries so reloading replaces logic without
-adding an active duplicate. Check enable and external-owner flags inside every callback.
+Implement one root-level registration sentinel and dynamic trampoline per registered
+scheduler/observer. Keep current handlers and state tables in namespaced `_G` entries so
+reloading replaces logic without adding an active duplicate. The v1.2 synchronous observer
+dispatches only the ambient pending-confirmation handler; it performs no classification,
+scheduling, or urgent work. Check enable and external-owner flags inside every callback.
 
 Wrap each layer separately with `xpcall`. On the first fatal error, disable that layer and
 log one full traceback. Do not let repeated AI ticks produce repeated exceptions. Make the
@@ -655,27 +678,36 @@ sprite each callback. Make classification/grade tests green and commit.
 
 ### Step 3: Implement versioned marshal ledger and reset recognition
 
-Persist per-spell records containing only schema version, normalized resref, charged integer,
-expected-expiry number, and suppression integer. Migrate or safely discard recognized older
-schemas; disable only the actor/spell on malformed state.
+Persist schema-2 per-spell records containing only normalized resref, charged integer,
+expected-expiry number, suppression integer, exact primitive spellbook locator, and original
+and component-debited flags. Migrate or safely discard recognized older schemas; disable only
+the actor/spell on malformed state.
 
 Reset charges only from the exact engine spellbook-refresh signal/fingerprint proven in Task
-6. Elapsed time, load, area transition, or party action alone is not a reset. Make save/load
-and real-reset tests green.
+6. Marshal export/import of an existing ledger and genuine quick-list-reset bookkeeping must
+run independently of ambient enable, external-owner, and fault gates: retirement cannot lose
+a valid charge or retain one across a real spellbook reset. Elapsed time, load, area
+transition, or party action alone is not a reset. Make save/load and real-reset tests green.
 
 ### Step 4: Implement checked first application and debit
 
 For each eligible manifest record:
 
-1. revalidate one available memorized record;
-2. apply the validated cosmetic-free SCS prebuff delivery;
-3. confirm the managed active effect using the proven detection path;
-4. debit exactly one availability bit and rebuild quick lists through the proven API; and
-5. commit the ledger record only after both effect and debit are confirmed.
+1. revalidate one available memorized record and retain its exact primitive locator,
+   original flags/count, and bounded deadline;
+2. apply the validated cosmetic-free SCS prebuff delivery once;
+3. on v1.2, let the synchronous confirmation-only observer detect the exact child marker at
+   effect-list resolution; never assume it is visible to the requesting deferred callback;
+4. re-resolve the same record and require the exact original flags, unchanged count, and
+   empty ledger before clearing one availability bit and rebuilding quick lists; and
+5. commit the schema-2 ledger only after both effect and debit are confirmed.
 
-Use the safe ordering/rollback method proven by the spike. If exact restoration cannot be
-confirmed, stop maintenance for that actor/spell and report once. Never retry/debit every
-tick and never leave a silently unlimited maintained buff.
+Check a visible marker before the no-marker timeout. If exact confirmation or restoration
+cannot be proved, stop maintenance for that actor/spell and report once. Reset/import and
+sprite replacement discard transient pending state. This can leave one already-queued finite
+child effect without a debit or ledger; never infer ownership, charge it retroactively, or
+grant maintenance from the generic marker. Never retry/debit every tick and never leave a
+silently unlimited maintained buff.
 
 Make first-debit and transaction-failure tests green, then commit.
 
@@ -685,10 +717,28 @@ Maintenance runs on a cheap cadence, only out of combat with no party visible. N
 may receive a free refresh before the next reset. Materially early disappearance marks the
 record suppressed until reset.
 
-Implement SCS double-charge prevention only if Task 6 proved the complete fingerprint: exact
-managed resref, charged ledger record, active managed effect, and initial-prebuff window.
-Reimburse only that exact availability transition. If any condition is uncertain, do
-nothing. Never reimburse later combat casts or renewal.
+Implement both exact SCS double-charge orderings. Opcode-146 `dwFlags=1` creates no action
+181, so an exact SCS action 181 during first-delivery pending is distinguishable. With
+`instantprep == 0` and the baseline unchanged, arm it; only an immediately following action
+147 for the same numeric spell advances it. Because the action listener fires before the
+engine mutation, reconcile later: exact `available_before - 1` plus the exact child marker
+commits SCS's debit as the one charge without component debit/reimbursement; unchanged waits
+to a bounded deadline; another delta fails closed. If the component's already-queued child
+publishes after that SCS-paid commit, it is a bounded redundant finite effect only: do not
+debit, replace the ledger, or create maintenance entitlement.
+
+After an ordinary component debit, allow one later exact SCS `181 -> 147` candidate only for
+the schema-2 charged record and while current `instantprep == 0` at both starts. A later
+callback must observe SCS's exact one-slot loss, resolve the same token, require current flags
+to equal the captured component-debited flags, restore the exact original flags, repair quick
+lists, and verify the baseline. If restoration verification fails, roll back when exact and
+disable. Canceled, non-adjacent, combat, renewal, or ambiguous shapes never reimburse.
+
+Generic confirmation and action handling require an existing session. Add only one narrow
+reconstruction path: an exact action 181 plus known delivery may rebuild ephemeral session
+state from an already-existing valid, charged/reimbursable schema-2 UDAux ledger, without
+allocating UDAux. This preserves strict reimbursement across save/load or hot reload before
+the first deferred scheduler tick. Never reconstruct transient delivery-pending state.
 
 Make the remaining ambient tests green and commit:
 
@@ -940,19 +990,22 @@ or turn source/simulator coverage into a live-game claim.
 - Modify: `tests/test_ambient_readiness_listener.py`
 - Modify: `tests/lua/ambient_readiness_sim.lua`
 
-### Step 1: Add mutually exclusive listener-surface scenarios
+### Step 1: Add scheduler/observer topology scenarios
 
-Extend the simulator so its default surface exposes both listeners but records them
+Extend the simulator so its default surface exposes both listeners and records them
 separately. Add `runtime_legacy_v011_surface`, which removes
 `EEex_Opcode_AddDeferredListsResolvedListener` before loading the runtime while preserving
 `EEex_Opcode_AddListsResolvedListener` and `m_gameTime`.
 
-Require the current scenario to report exactly one deferred listener and zero legacy
-listeners. Require the legacy scenario to report zero deferred listeners and exactly one
-legacy listener. The legacy scenario must still apply one ambient buff with one debit and
-queue one normal urgent cast.
+Require the current scenario to report exactly one deferred scheduler and exactly one
+synchronous pending-confirmation observer (`1/1`, total 2). Require the legacy scenario to
+report zero deferred listeners and exactly one synchronous full scheduler (`0/1`, total 1).
+No topology may register two schedulers, and hot reload must not increase either count. The
+legacy scenario must still apply one ambient buff with one debit and queue one normal urgent
+cast. Add a current-surface scenario with the synchronous API removed: it must retain the one
+deferred scheduler for urgent while ambient fails closed before delivery or debit.
 
-### Step 2: Add clock fail-closed and repeated-callback regressions
+### Step 2: Add clock, publication-order, and repeated-callback regressions
 
 Add `runtime_legacy_missing_raw_time`, which also removes `m_gameTime`. Its first callback
 must retire before classification, UDAux creation, action queueing, spell application, debit,
@@ -970,12 +1023,24 @@ assert(#sprite.queuedResponses == 1)
 This test treats callback count only as callback count; elapsed behavior continues to use raw
 engine ticks.
 
+Default v1.2 delivery simulation must defer the opcode-146 child until after the requesting
+scheduler returns, then publish the marker and invoke synchronous observers immediately.
+It must not synthesize action 181 for component delivery. Started-action simulation fires
+before the corresponding action mutates spellbook state; post-147 reconciliation runs only
+on a later callback. Cover independently held deliveries, marker-before-timeout, same-time
+reentry, component/SCS attribution, the pre-confirm SCS-paid race, ordinary post-debit
+reimbursement, canceled 147, intervening actions, exact flag restoration, and lifecycle
+discard. Also cover gate-independent ledger export/import and real reset, v2-ledger-only
+session reconstruction without UDAux allocation, and a late component child after an
+SCS-paid commit producing no debit or entitlement.
+
 ### Step 3: Add the v0.11 marshal-export contract
 
 In the legacy surface, exercise ambient-disabled, ambient-faulted, and externally owned
-export paths. Each must return an empty table rather than `nil`, while an active normal
-legacy export must retain its versioned primitive-only ledger. Keep the v1.2 inactive export
-behavior unchanged.
+export paths with no ledger. Each must return an empty table rather than `nil`. Repeat every
+gate state with an existing valid ledger and require it to export/import unchanged; gameplay
+retirement cannot erase accounting. A genuine quick-list reset must still clear the charge.
+Keep the v1.2 no-ledger `nil` convention, while likewise preserving any existing ledger.
 
 ### Step 4: Run and preserve RED
 
@@ -1001,26 +1066,33 @@ git commit -m "Test older EEex readiness fallback"
 - Modify: `chriz-bg-rebalance/lib/ambient_readiness.tpa`
 - Modify: `tests/test_ambient_readiness_installer.py`
 
-### Step 1: Select exactly one listener at module load
+### Step 1: Select exactly one scheduler and the required v1.2 observer
 
-Prefer the v1.2 deferred listener. Select the old listener only when the deferred symbol is
-absent; never register both:
+Prefer the v1.2 deferred API as the sole scheduler. When it is selected, also require and
+register the old synchronous API as an ambient-only pending-confirmation observer. If the
+synchronous API is absent, retire ambient while allowing urgent to keep the deferred
+scheduler. Select the synchronous API as the single legacy full scheduler only when the
+deferred symbol is absent:
 
 ```lua
 local tick_listener_mode
-local add_tick_listener
+local add_tick_scheduler
+local add_ambient_confirmation_listener
 if type(EEex_Opcode_AddDeferredListsResolvedListener) == "function" then
     tick_listener_mode = "deferred"
-    add_tick_listener = EEex_Opcode_AddDeferredListsResolvedListener
+    add_tick_scheduler = EEex_Opcode_AddDeferredListsResolvedListener
+    if type(EEex_Opcode_AddListsResolvedListener) == "function" then
+        add_ambient_confirmation_listener = EEex_Opcode_AddListsResolvedListener
+    end
 elseif type(EEex_Opcode_AddListsResolvedListener) == "function" then
     tick_listener_mode = "legacy"
-    add_tick_listener = EEex_Opcode_AddListsResolvedListener
+    add_tick_scheduler = EEex_Opcode_AddListsResolvedListener
 end
 ```
 
-Use `add_tick_listener` in the shared capability gate and registration site. Expose the
-chosen primitive-only mode in runtime state for diagnostics, without persisting userdata or
-registering a second callback on hot reload.
+Use independent root sentinels and dynamic trampolines for the scheduler and confirmation
+observer. Expose primitive-only scheduler and confirmation modes in runtime state for
+diagnostics, without persisting userdata or registering duplicate callbacks on hot reload.
 
 ### Step 2: Use the source-proven world-time field in both listener modes
 
@@ -1035,8 +1107,9 @@ return tonumber(world_time.m_gameTime)
 
 Validate the result as a non-negative number. Do not introduce `GetCurrentTime`,
 `EEex_GameState_GetTime`, `Infinity_GetGameTime`, `os.clock()`, wall time, or callback
-counts. Listener selection and clock access are independent: v1.2 still uses only the
-deferred listener, while the exact direct field is shared.
+counts. Scheduler selection and clock access are independent: v1.2 uses the deferred API for
+scheduling and the synchronous API only for ambient pending confirmation, while the exact
+direct field is shared.
 
 ### Step 3: Normalize only legacy nil marshal exports
 
@@ -1046,13 +1119,16 @@ current v1.2 return values. Keep booleans serialized as numeric `0/1`.
 
 ### Step 4: Mirror the adapter in the session-only probe and stamped manifest
 
-Make the probe prefer the deferred listener and fall back to the legacy listener only when
-deferred is absent. Use the direct field with either listener. Continue logging raw
-`time_ticks` and separately derived `time_seconds`.
+Keep the session-only timing probe's one-listener selection explicitly separate from the
+production topology: the probe may prefer deferred and fall back to synchronous because it
+does not own ambient delivery transactions. Production must record both its scheduler and
+confirmation-observer modes. Use the direct field with either scheduler. Continue logging
+raw `time_ticks` and separately derived `time_seconds`.
 
 Keep `target_eeex_version = "1.2.0"` authoritative and add explicit metadata for the shared
-clock field, legacy fallback listener, and empty-table marshal convention. Extend installer tests
-to reject a stamped manifest that loses either the primary profile or fallback declaration.
+clock field, deferred scheduler, synchronous confirmation observer, legacy full scheduler,
+and empty-table marshal convention. Extend installer tests to reject a stamped manifest that
+loses either the primary profile or fallback declaration.
 
 ### Step 5: Make focused suites green and commit
 
@@ -1093,9 +1169,10 @@ or mutate a save in this task.
 
 ### Step 3: Request an independent review
 
-Review the final diff for listener exclusivity, current-path purity, pre-mutation clock
-failure, v0.11 marshal safety, repeated synchronous callbacks, hot reload, and absence of any
-invented clock. Fix every finding with a failing test first.
+Review the final diff for scheduler exclusivity, exact `1/1` current and `0/1` legacy listener
+counts, confirmation-only observer scope, current-path purity, pre-mutation clock failure,
+v0.11 marshal safety, repeated synchronous callbacks, hot reload, and absence of any invented
+clock. Fix every finding with a failing test first.
 
 ### Step 4: Run final verification
 

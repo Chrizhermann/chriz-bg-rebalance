@@ -79,7 +79,8 @@ The checked-in probe now capability-selects one listener before activation: v1.2
 first, or the legacy synchronous listener only when deferred is absent. Both modes read the
 direct `m_worldTime.m_gameTime` field used by EEex v1.2 itself. The 2026-08-30 execution used the older
 `os.clock()` fallback; its numerical timestamps remain invalid even though the current file
-no longer contains that fallback.
+no longer contains that fallback. This is the session probe's listener selection, not the
+production ambient runtime's two-callback v1.2 architecture described in §0.3.
 
 The only mutating helpers are explicit controlled experiments:
 
@@ -115,28 +116,34 @@ The non-clock production paths remain fixed to the observed installed contracts:
   debits its slot;
 - identify a Project Image clone by opcode 237, parameter 2 equal to 2, and `m_sourceId`
   pointing to its engine-disabled owner; both clone and locked owner skip; and
-- reimburse only the exact initial generic SCS delivery-181 / adjacent RemoveSpell-147
-  sequence for the ledger-paid spell, after confirming its numeric `m_specificID`, delivery
-  effect, and availability delta. Free `_PRECAST`, renewal, combat, non-adjacent, and unknown
-  shapes never reimburse.
+- recognize only an exact initial SCS delivery-181 / immediately adjacent RemoveSpell-147
+  sequence for the same numeric `m_specificID`, with `instantprep == 0`, the exact delivery
+  effect, and unchanged spellbook baseline. A started-action callback occurs before the
+  action's mutation, so a later callback must observe the exact one-slot delta. Free
+  `_PRECAST`, renewal, combat, non-adjacent, canceled, and unknown shapes never reimburse.
 
 `Infinity_GetInCutsceneMode()` is a proven cutscene predicate. The available
 `GetInControlOfDialog()` observation is not a dialogue-active predicate (it was true during
 ordinary play), so the runtime does not reinterpret it. Dialogue/tactical actions remain
 outside the passive allowlist and uncertainty remains a no-action result.
 
-### 0.3 Current EEex v1.2 implementation result (2026-08-31)
+### 0.3 Current EEex v1.2 implementation result (updated 2026-09-02)
 
-Components 120 and 121 are implemented on `codex/ambient-readiness-121`; neither has been
-installed into the active playthrough game. A disposable v0.11 laboratory installation of
-121 produced no readiness effects because production required the nonexistent
+Component 120 is implemented on `codex/ambient-readiness-121`; component 121's corrected
+accounting build passes focused/full-repository verification and fresh-process ambient live
+acceptance, and its corrected neutral-to-hostile urgent path passed live. Neither has been installed into the active playthrough game. A
+disposable v0.11 laboratory installation of 121 produced no readiness effects because production required the nonexistent
 `EEex_GameState_GetTime` global and correctly retired itself before mutation. Component
 121 now targets EEex v1.2.0. Its public WeiDU transaction requires BG2:EE/EET, SCS Smarter
 Mages 6030, `M___EEex.lua`, final loose `SPELL.IDS`, and SCS's final
 `instant_prebuff_spells.2da`; it does not hardcode EEex component numbers. The stamped
-profile records the v1.2 deferred listener and raw 15-Hz engine-time unit, while the runtime
-rechecks every required entry point and fails closed before gameplay mutation if world time
-or another required capability is unavailable.
+profile records the v1.2 deferred scheduler, synchronous pending-confirmation observer, and
+raw 15-Hz engine-time unit, while the runtime rechecks every required entry point and fails
+closed before gameplay mutation if world time or another required capability is unavailable.
+On v1.2 the expected callback counts are one deferred scheduler plus one synchronous
+ambient-only observer (`1/1`, total 2). Legacy uses one synchronous full scheduler (`0/1`,
+total 1). If the synchronous observer API is missing on the current path, ambient fails
+closed while urgent may continue on the deferred scheduler.
 
 The install-time compiler resolves each candidate dynamically, validates both memorized and
 cosmetic-free delivery SPL semantics, and classifies urgent candidates by reachable genuine
@@ -147,17 +154,79 @@ stamped into the runtime rather than assuming the currently observed `SPWI703` s
 The public component publishes only `override/M_CBRRDY.lua` through WeiDU's backup-aware
 transaction and changes no SPL or BCS file.
 
-Hermetic coverage now includes absent SCS/EEex-autoload/mapping prerequisites, current
+Hermetic coverage includes absent SCS/EEex-autoload/mapping prerequisites, current
 SCS/SR, future genuine Improved Mantle, optional ambient omissions, malformed mapping
 rollback, deterministic reinstall, exact synthetic uninstall restoration, and stamped Lua
 syntax/token checks. The fake-EEex suite covers exact ambient debit/reset/maintenance and SCS
 reimbursement, normal urgent casting and interruption, passive-only queue displacement,
 Project Image exclusion, bounded retry, contact rearm, hot reload, ownership flags, marshal
 shape, recycled engine-object IDs, incomplete effect-list fail-closed behavior, and
-independent fault fuses. The v1.2 path is source- and simulation-verified; live v1.2
-deployment and gameplay acceptance remain a separate user-approval checkpoint. The
-source/simulator-verified older-EEex capability fallback is implemented, but its corrected
-live test remains a later, separately approved stage after v1.2 acceptance.
+independent fault fuses. The corrected build has 76 focused tests and all 253 repository tests
+passing; automated coverage alone is not gameplay acceptance.
+
+The first v1.2 lab run found the invalid `m_worldTime:GetCurrentTime()` assumption. After
+switching to the direct field and restarting, the user visually confirmed ambient defenses
+on the neutral Vigil casters. A read-only state inspection then showed the expected
+`DWSW408` / `DWSP735` effects but unchanged spell slots, empty ledgers, and per-spell failure
+fuses. Exact v1.2 source and BG2EE 2.6.6 disassembly explain the split result: immediate
+opcode 146 with `dwFlags=1` resolves the outer effect, then publishes its child spell through
+`CMessageFireSpell` / `CGameAIBase::FireSpell` after the deferred callback. It does not create
+action 181. The old runtime tried to confirm the child on the next Lua line and disabled the
+spell before debit; the simulator had incorrectly materialized that child synchronously.
+
+The corrected v1.2 architecture registers one deferred callback as the sole scheduler and
+one synchronous lists-resolved callback as an O(1), pending-only ambient confirmation
+observer. The scheduler requests each delivery once and retains a primitive exact spellbook
+locator, original flags/count, and deadline. When the child marker resolves, the synchronous
+observer revalidates the exact effect, locator, unchanged flags/count, and empty ledger before
+clearing one availability bit and committing. A no-marker timeout does not retry or touch a
+slot; marker confirmation is checked before timeout. Maintenance uses the same observer but
+never debits. Legacy mode registers only one synchronous full scheduler.
+
+Because opcode 146 itself does not create action 181, an exact SCS 181 that starts during the
+first-delivery pending window is attributable. With `instantprep == 0` and an unchanged
+baseline it arms a candidate; only the immediately next matching action 147 advances it.
+After that pre-mutation callback, a later reconciliation that sees the exact one-slot loss
+and exact child marker records SCS's debit as the cycle's one charge, without a component
+debit or reimbursement. An unchanged count waits only to the bounded deadline; another
+delta fails closed. After an ordinary component debit, the marshaled version-2 ledger keeps
+the exact locator plus original and debited flags. One later exact SCS `181 -> 147` pair can
+restore only that component-debited record, and only when a later callback observes SCS's
+exact one-slot loss; canceled or ambiguous sequences do nothing. If the component's queued
+child publishes after an SCS-paid commit, it is only a bounded redundant finite effect: it
+does not debit or create a second ledger/maintenance entitlement.
+
+Reset/import, recycled sprites, changed flags/counts, and quick-list failures invalidate
+transient pending state. A narrow lifecycle boundary can therefore leave one already-queued,
+finite child effect without a debit or ledger. It is deliberately not charged after import
+from the generic SCS marker, whose ownership is ambiguous, and it never gains free
+maintenance. Existing ledger export/import and genuine quick-list-reset bookkeeping remain
+active independently of enable, external-owner, and fault gates so retirement neither loses
+a valid charge nor retains one after a real reset. Generic confirmation/action handling
+requires an existing session, except that exact action 181 plus known delivery may reconstruct
+ephemeral state from an existing valid charged/reimbursable schema-2 UDAux record without
+allocating UDAux. All transient pending state remains discarded. Failure reasons remain
+available in session state. The corrected transaction has passed broad verification and a
+fresh-process v1.2 ambient delivery/accounting rerun. In paused `AR3000`, runtime
+SHA-256 `EF38A1A0BF942A2B3AB294FAE48DA2548E9413DBD5FE7CB255406C413E06DD3D` had both fault
+fuses clear. Exact markers and charged schema-2 ledgers were present on all four neutral Vigil
+casters: `SHUGMG01` retained one of two `SPWI408` copies (`[0,1]`), while `SHUPOL01` retained
+zero of one `SPWI408` and `SHUGAR01` / `SHUGOD01` each retained zero of one `SPPR735` (`[0]`).
+There were no ambient failures. This is ambient delivery plus one-slot accounting acceptance.
+The later urgent test first faulted because the production call omitted the Boolean required by
+`virtual_ClearActions`. Exact EEex v1.2/BG2EE disassembly proved `false` is the full-clear branch;
+it remains guarded by the existing current-and-queued passive-action allowlist. With that fix
+deployed at stamped runtime SHA-256
+`9957348E7DB69EE24CA149787887B9AD36012B0F34A2D665CE041611F32B3D08`, Brother Pol's
+neutral-to-hostile path passed: the attack order alone left `EA=128` and did nothing, the first
+hit changed hostility, then the exact normal `SPWI708` cast started, the contact became
+`attempts=1, spent=1`, the one available slot became zero, exact opcode-120 effects were active,
+and `urgent_faulted=0`. A generic mage on non-passive action 22 was correctly not displaced.
+The exact report is
+`C:\Users\chris\Documents\Codex\2026-09-02\cbr-ambient-v12-accounting-hotfix-20260902-215413\live-ambient-acceptance-report.md`.
+Urgent evidence is in `live-urgent-acceptance-report.md` beside it.
+The source/simulator-verified older-EEex capability fallback is implemented, but its corrected
+live test remains a later, separately approved stage.
 
 ## 1. How SCS 35.21 pre-buffs in this install (verified)
 
@@ -225,11 +294,13 @@ Ambient-eligible ⇒ the "expect trouble" package is Stoneskin/Ironskins + MI + 
   hook (`EEex_Sprite.lua:8-10, 1562-1577`; `EEex_Sprite_Patch.lua:213-219`): area load, save
   load, transitions, clones; name/EA/area may be **unsettled at fire time** → act on the first
   `ListsResolved` pass. No construct/destruct Lua listener.
-- **Instant, slot-free, cast-time-free effects with any source resref:**
+- **Direct outer-effect application, with nested-delivery caveat:**
   `EEex_GameObject_ApplyEffect(sprite,{effectID=…,res=…,m_sourceRes=…,sourceID=…})`
   (`EEex_GameObject.lua:257-323`). `ReallyForceSpellRES` via the instant action path is
-  unreliable (skill doc: silent no-op) — queue it, or use ApplyEffect (op146 with p2=1 for a
-  silent self-cast: speculative, untested).
+  unreliable (skill doc: silent no-op). Direct application resolves the outer effect during
+  the call, but verified opcode 146 with `dwFlags=1` publishes its child through
+  `CMessageFireSpell` / `CGameAIBase::FireSpell` only after the invoking deferred callback;
+  the child is not observable on the next Lua line and no action 181 is created.
 - **No damage/attacked listener.** The op12 hooks exist but are dead unless `CONCENTR.2DA
   CHECK_MODE=EEex-LuaFunction=…` (this install: 0) and enabling them hijacks concentration
   checks. Substitutes: `EEex_Sprite_AddBlockWeaponHitListener(fn(ctx))` — fires in
@@ -248,7 +319,10 @@ Ambient-eligible ⇒ the "expect trouble" package is Stoneskin/Ironskins + MI + 
   resolved effect-list occurrence and can repeat around one sprite AI pass; v1.2's
   `EEex_Opcode_AddDeferredListsResolvedListener` coalesces that to at most once per sprite AI
   tick. Stats are rebuilt only every 15th fast-path pass or on `m_newEffect` (`research/07`),
-  so keep callback work O(1), elapsed logic on raw game time, and mutations idempotent.
+  so keep callback work O(1), elapsed logic on raw game time, and mutations idempotent. A
+  v1.2 runtime may deliberately use the deferred hook as its only scheduler and the old
+  synchronous hook as a separate pending-confirmation observer; that is two callbacks but
+  still only one scheduler.
 - **Slot economy:** memorized lists are bound (`m_memorizedSpellsMage/Priest`, records with
   `m_flags` bit0 = available; `CheckQuickLists`). Decrement from Lua = clear bit0 +
   `CheckQuickLists(id,-1,0,0)` — **probable, untested on v0.11**. Alternative: queue

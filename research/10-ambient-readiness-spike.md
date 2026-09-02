@@ -145,9 +145,11 @@ therefore not validated by this spike.
 
 The current path instead targets EEex v1.2.0, using
 `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime.m_gameTime` and converting
-duration seconds to raw 15-Hz engine ticks. That path is source- and simulation-verified but
-still requires a fresh-process live v1.2 gameplay rerun after the first v1.2 pass exposed the
-absence of the previously assumed `GetCurrentTime()` method.
+duration seconds to raw 15-Hz engine ticks. Its corrected ambient accounting and
+neutral-to-hostile urgent path later passed fresh-process v1.2 gameplay. The urgent pass also
+corrected the spike's permissive mock: EEex requires an explicit Boolean argument to
+`virtual_ClearActions`, so the passive-only replacement path uses
+`virtual_ClearActions(false)`. Corrected legacy gameplay remains untested.
 
 The runtime remains a transitional bridge. Ambiguous dialogue state, an unknown action or
 queue, unresolved Project Image ownership, an unrecognized SCS reimbursement sequence, or

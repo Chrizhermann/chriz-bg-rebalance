@@ -1,7 +1,10 @@
 # SCS ambient readiness and first-contact defense — components 120 / 121
 
-**Status:** Approved by the user on 2026-08-27; corrected against the live EEex v1.2 API
-surface on 2026-09-02, with a fresh-process v1.2 gameplay rerun still pending. This is a transitional
+**Status:** Approved by the user on 2026-08-27; corrected against the live EEex v1.2 API,
+BG2EE 2.6.6 opcode-146 dispatch, deferred-delivery ordering, and the
+`virtual_ClearActions(Boolean)` binding on 2026-09-02. The corrected build has 76 focused
+tests and all 253 repository tests passing; fresh-process v1.2 ambient accounting and the
+neutral-to-hostile urgent path passed live. Legacy live acceptance remains pending. This is a transitional
 compatibility bridge for the current SCS-based install, not the end-state combat-AI
 architecture. The user is developing a broader EEex AI overhaul in parallel; this design
 must be easy for that future system to retire without uninstalling a WeiDU component.
@@ -13,28 +16,47 @@ below, and the separately authorized disposable-session spike in
 or game resource was changed by the spike.
 
 Compatibility addendum (updated 2026-09-02): the spike's guessed time functions were not EEex APIs,
-and its fallback `os.clock()` invalidates every numeric latency claim. Component 121 now
-targets v1.2 first, registers `EEex_Opcode_AddDeferredListsResolvedListener`, and reads the
-direct `m_worldTime.m_gameTime` field used by EEex v1.2 itself as raw ticks at 15 ticks per
-gameplay second. A live v1.2 probe proved that this userdata has no callable
-`GetCurrentTime()` method. The runtime fails closed
-before mutation when that clock is unavailable. It does not hardcode EEex component numbers.
+and its fallback `os.clock()` invalidates every numeric latency claim. Component 121 targets
+v1.2 first. It registers one `EEex_Opcode_AddDeferredListsResolvedListener` callback as its
+sole scheduler and one `EEex_Opcode_AddListsResolvedListener` callback as an ambient-only,
+pending-confirmation observer (`1/1`, total 2). Legacy uses one synchronous full scheduler
+(`0/1`, total 1). If the synchronous observer is unavailable on the current path, ambient
+fails closed while urgent can remain on the deferred scheduler. Both modes read the direct
+`m_worldTime.m_gameTime` field used by EEex itself as raw ticks at 15 ticks per gameplay
+second. A live v1.2 probe proved that this userdata has no callable `GetCurrentTime()` method.
+The runtime fails closed before mutation when its clock is unavailable. It does not hardcode
+EEex component numbers.
+
+The corrected-clock live rerun exposed a second v1.2 boundary: an immediate opcode-146
+request resolves its outer effect but queues its child spell after the deferred scheduler
+returns, so the delivery marker cannot be required on the same Lua line. Exact BG2EE 2.6.6
+disassembly proves that `dwFlags=1` publishes the child through `CMessageFireSpell` /
+`CGameAIBase::FireSpell` and does not create action 181. Ambient application therefore uses
+a per-spell pending transaction. The deferred scheduler requests once; the synchronous
+observer confirms the marker at child-effect resolution, revalidates the original primitive
+spellbook locator/flags/count, and only then debits and commits. The same observer confirms
+free maintenance. Exact SCS initial-prebuff action interleavings are handled by a bounded
+post-action state machine; non-adjacent or ambiguous actions never reimburse.
 
 ### Older-EEex fallback addendum (approved sequence, 2026-08-31)
 
 The user selected current-version support first and an older-version fallback second. Three
 implementation shapes were considered:
 
-1. **Capability-selected adapter (selected):** prefer the v1.2 deferred listener. Only when
-   it is absent, select the legacy lists-resolved listener. Both modes read the exact
-   `m_worldTime.m_gameTime` field used by EEex itself; legacy mode also normalizes inactive
-   marshal exports to an empty table for v0.11.
+1. **Capability-selected adapter (selected):** prefer the v1.2 deferred scheduler and add the
+   synchronous pending observer required by ambient accounting. Only when the deferred API
+   is absent, select one synchronous callback as the legacy full scheduler. Both modes read
+   the exact `m_worldTime.m_gameTime` field used by EEex itself; legacy mode also normalizes
+   inactive no-ledger marshal exports to an empty table for v0.11 while preserving any valid
+   existing ledger.
 2. **WeiDU version/component detection (rejected):** component numbers changed between
    v0.11 and v1.x, and install metadata cannot prove the live Lua surface.
 3. **A separate legacy component/runtime (rejected):** this duplicates behavior and allows
    the old and current paths to drift.
 
-The adapter never registers both tick listeners. A live v1.2 process proved that its embedded
+The adapter never registers two schedulers. On v1.2 it deliberately registers both APIs, but
+the synchronous callback is confirmation-only and does no classification, scheduling, or
+urgent work. A live v1.2 process proved that its embedded
 `m_worldTime` userdata has no callable `GetCurrentTime()` method, while EEex v1.2's own
 `B3TimeStep.lua` reads `m_gameTime` directly. v1.2 therefore remains the primary listener
 path and shares that field with the fallback. Legacy
@@ -45,7 +67,8 @@ owned ambient exporter returns `{}` rather than `nil` because v0.11 rejects nil 
 
 Fallback acceptance is official-source plus fake-runtime behavior for v0.11/v1.0. It is not
 a claim that the corrected fallback has passed live gameplay; the existing v0.11 manual pass
-ran the broken clock-gated build. Current v1.2 gameplay acceptance remains first priority.
+ran the broken clock-gated build. Current v1.2 ambient and neutral-to-hostile urgent acceptance
+has passed; legacy live acceptance remains a separate later stage.
 
 ## 1. Problem and confirmed evidence
 
@@ -157,9 +180,19 @@ release.
 ### One-slot-per-rest accounting
 
 For each managed spell, the first successful ambient application in a rest cycle consumes
-exactly one available memorized record. The ledger stores the charged resref, expected
-expiry, suppression state, and schema version in namespaced marshal data using only
-supported primitive values.
+exactly one available memorized record. The version-2 ledger stores the charged resref,
+expected expiry, suppression state, exact primitive spellbook locator, original and
+component-debited flags, and schema version in namespaced marshal data using only supported
+primitive values.
+
+Delivery and debit form a cross-callback transaction on EEex v1.2. The deferred scheduler
+records only primitive identity and baseline values and requests the cosmetic-free spell
+once. When its exact child marker resolves, the synchronous confirmation observer re-resolves
+the memorized record and requires the exact original flags, unchanged availability count,
+and empty ledger before clearing one availability bit. Missing or ambiguous confirmation
+times out without retrying or touching another slot; marker confirmation is checked before
+timeout. Engine reset, marshal import, sprite replacement, or changed spellbook state
+invalidates the transient transaction.
 
 Subsequent maintenance refreshes before the next genuine spellbook reset are free. This
 avoids the waiting exploit in which five or forty real minutes make the caster weaker than
@@ -168,14 +201,25 @@ party-only rest command: the ledger resets only when the actor actually receives
 spell-count refresh. The next successful ambient application consumes one newly available
 copy.
 
-The runtime must also prevent SCS's later sight-triggered prebuff batch from charging the
-same already-active ambient spell a second time. Reimbursement is limited to a ledger-paid
-spell while `instantprep` was initially 0, its exact manifest delivery effect being active,
-and the observed adjacent SCS action pair: delivery action 181 followed by RemoveSpell 147
-whose `m_specificID` is the same resolved spell number and whose availability delta is one.
-Only the component's own debited record is restored, leaving one net copy spent. Free
-`_PRECAST` blocks, non-adjacent/unknown shapes, genuine combat casts, and renewals are never
-reimbursed.
+The runtime must also prevent SCS's sight-triggered prebuff batch from charging the same spell
+twice. Because component opcode 146 does not create action 181, an exact SCS action 181 that
+starts during first-delivery pending is distinguishable. With `instantprep == 0` and the
+baseline unchanged, it arms a candidate; only an immediately following RemoveSpell action
+147 with the same resolved spell number advances it. The action-start callback occurs before
+the engine mutation, so a later reconciliation must observe both the exact child marker and
+an exact one-slot loss. That SCS-paid race commits the ledger without any component debit or
+reimbursement. An unchanged count waits only to a bounded deadline; another delta fails
+closed. If the component's already-queued child publishes after this SCS-paid commit, it is
+a bounded redundant finite effect only: it causes no component debit and creates no new
+ledger or maintenance entitlement.
+
+After an ordinary component debit, one later exact SCS `181 -> 147` sequence, with current
+`instantprep == 0` at both action starts, may reimburse only the exact component-debited
+record stored in ledger schema 2. A later callback must
+observe SCS's exact one-slot loss, resolve the same token, require the current flags to equal
+the captured debited flags, restore the exact original flags, repair quick lists, and verify
+the baseline. Free `_PRECAST` blocks, canceled removals, non-adjacent/unknown shapes, genuine
+combat casts, and renewals are never reimbursed.
 
 ### Maintenance and counterplay
 
@@ -189,8 +233,22 @@ before its expected expiry, especially after combat or dispelling, is marked sup
 until the next real spellbook reset. The component therefore cannot undo successful player
 counterplay for free.
 
-Save/load preserves the ambient ledger and expected expiry, preventing a second charge.
-No EEex userdata, transient object ID, or contact state is saved.
+Save/load preserves a committed ambient ledger and expected expiry, preventing a second
+charge. No EEex userdata, transient object ID, or contact state is saved. A narrow lifecycle
+boundary after request can leave one already-queued finite child effect after transient state
+is discarded. The runtime deliberately does not infer ownership or charge it from the generic
+SCS marker, and without a ledger it receives no free maintenance. Eliminating that bounded
+tradeoff would require pre-debit plus marshaled pending state, which is outside this design.
+
+Ledger lifecycle bookkeeping is gate-independent. An existing valid ledger is exported and
+imported, and a genuine quick-list reset clears its charge, even while ambient gameplay is
+disabled, externally owned, or faulted; retirement must neither lose a real charge nor retain
+one across a real spellbook reset. Generic confirmation/action callbacks require an existing
+session. The sole reconstruction exception is an exact SCS action 181 plus known delivery
+against an already-existing valid, charged/reimbursable schema-2 UDAux record. It may rebuild
+only ephemeral session state, without allocating UDAux, so a save/load or hot reload before
+the first deferred scheduler tick cannot defeat strict reimbursement. All transient pending
+transactions remain discarded.
 
 ## 5. Component 121: urgent first-contact reaction
 
@@ -236,18 +294,21 @@ or inconsistent spell identity or ownership information fails closed.
   autoload bootstrap, its v1.2-first runtime capability surface, and recognized SCS caster
   data. Missing prerequisites no-op with one clear diagnostic. WeiDU component numbers are
   not a compatibility contract.
-- EEex listeners register once through a root-level hot-reload-safe trampoline that looks
-  up the current handler dynamically.
+- Each EEex scheduler/observer registers once through its own root-level hot-reload-safe
+  sentinel and dynamic trampoline. Reloading replaces handlers without increasing counts.
 - Runtime callbacks retain no engine userdata between calls. Object IDs are re-resolved and
   validated and are never persisted across saves.
 - Callback errors are contained at the outer boundary. The affected layer is disabled and
   one full traceback is logged; the engine is not subjected to repeated exceptions.
 - Marshal state is versioned and uses integer `0/1` flags rather than unsupported boolean
   assumptions.
+- Marshal import/export and genuine quick-list-reset accounting bypass gameplay
+  enable/owner/fault gates; valid charges survive retirement, and real resets clear them.
 - Ambient application and slot debit are treated as a checked transaction. If both cannot
-  be confirmed, that caster/spell stops maintenance; exact slot state is restored where
-  safely possible. The system never loops, repeatedly charges, or silently maintains an
-  unlimited buff after a bookkeeping failure.
+  be confirmed, that caster/spell stops maintenance. Restoration is allowed only for the
+  exact persisted token whose current flags equal its captured component-debited flags; the
+  original flags and quick-list baseline must then be verified. The system never loops,
+  repeatedly charges, or silently maintains an unlimited buff after a bookkeeping failure.
 - Per-tick work is O(1) for a previously classified eligible caster. There is no repeated
   area-wide spell or creature scan.
 
@@ -265,10 +326,13 @@ or inconsistent spell identity or ownership information fails closed.
 
 ### Fake-EEex tests
 
-Cover settled-load classification, grade/exclusion selection, first debit, free natural
-refresh, early-removal suppression, save/load, real spellbook reset, duplicate SCS charge
-prevention, external-AI retirement flags, hot reload, visibility/contact debounce, safe
-and unsafe action queues, cast start, interruption, bounded retry, and rearming.
+Cover settled-load classification, grade/exclusion selection, synchronous pending
+confirmation, first debit, free natural refresh, early-removal suppression, committed-ledger
+save/load, the finite-free-effect lifecycle boundary, real spellbook reset, component/SCS
+delivery attribution, pre-confirm SCS-paid charging, post-action strict reimbursement,
+canceled and non-adjacent removals, external-AI retirement flags, hot reload listener counts,
+visibility/contact debounce, safe and unsafe action queues, cast start, interruption, bounded
+retry, and rearming.
 
 ### Timing and engine-semantics spike
 
@@ -283,10 +347,11 @@ Before shipping 121, use a session-scoped probe on a throwaway save to measure:
 The spike must also prove the selected slot-debit/quick-list path and cosmetic-free ambient
 delivery on the installed EEex version. Before recording any timing, it must prove that the
 clock is `m_worldTime.m_gameTime`, record its raw-tick values, and verify the 15-tick
-per gameplay-second conversion. The v1.2 deferred listener must be the registered path, and
-the game must start in a fresh process so append-only listeners or sticky fault state from a
-prior runtime cannot survive. The production game directory remains read-only unless the
-user explicitly authorizes the transient probe in that conversation.
+per gameplay-second conversion. The v1.2 process must report exactly one deferred scheduler
+and one synchronous pending-confirmation observer, with no second scheduler. The game must
+start in a fresh process so append-only listeners or sticky fault state from a prior runtime
+cannot survive. The production game directory remains read-only unless the user explicitly
+authorizes the transient probe in that conversation.
 
 ### Acceptance criteria
 

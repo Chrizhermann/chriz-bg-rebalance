@@ -29,7 +29,7 @@ reported upstream first (see `research/02-upstream-scs-report-draft.md`).
 | 100 | SCS adjustments | Telekinetic Storm: restore save vs. spell for half damage (+ bypass Mirror Image) | ✅ implemented |
 | 101 | SCS adjustments | Restore five Freedom scrolls to the Adventurer's Mart | ✅ implemented |
 | 120 | SCS adjustments | Repair the SCS/SR false Improved Mantle weapon-protection semantics | ✅ implemented |
-| 121 | SCS adjustments | EEex ambient caster readiness + one honest first-contact defense | ✅ v1.2-first + legacy fallback; pending live acceptance |
+| 121 | SCS adjustments | EEex ambient caster readiness + one honest first-contact defense | 🚧 v1.2 ambient + neutral-to-hostile urgent path live accepted; legacy live pending |
 | 2xx | SR adjustments | Cherry-picked Spell Revisions tweaks | 📋 planning (`docs/00-project-scope.md`) |
 | 3xx | Cross-cutting audits | e.g. generalized save-for-half audit | 📋 planning |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
@@ -79,26 +79,72 @@ time it resolves the final `SPELL.IDS`, validates the installed spell effects, a
 SCS's own cosmetic-free prebuff mapping. It then ships one stamped `M_CBRRDY.lua`; it does
 not patch SCS combat scripts or spell mechanics. It requires BG2:EE/EET, SCS Smarter Mages
 6030, EEex's `M_*.lua` autoload bootstrap, and the final SCS prebuff map. EEex v1.2.0 is the
-primary target: when its deferred lists-resolved listener exists, the runtime uses that
-listener and the world timer's direct `m_gameTime` field, as used by EEex v1.2 itself. The
-field contains raw 15-Hz engine ticks. Only when the deferred listener is absent does the
-runtime select the historical synchronous listener; both listener modes use the same
-source-verified field. It never registers both. It does not hardcode EEex WeiDU component numbers or
-impose a component-specific LuaJIT requirement. Missing prerequisites skip cleanly; malformed
-recognized data fails before the override transaction is retained. Component 120 is
-independent, but installing 120 first is recommended on the currently researched SR setup.
-Both paths are source- and simulation-verified. The first v1.2 live pass exposed and diagnosed
-a bad `GetCurrentTime()` assumption; a fresh-process gameplay rerun of the corrected field
-access is still required, and the legacy fallback has no corrected live-game pass yet.
+primary target. It uses one deferred lists-resolved callback as the sole scheduler and one
+synchronous lists-resolved callback as an ambient pending-confirmation observer; the latter
+does no classification, scheduling, or urgent work. Legacy EEex instead uses one synchronous
+callback as the full scheduler. The expected listener counts are therefore `1 deferred + 1
+synchronous = 2` on v1.2 and `0 + 1 = 1` on legacy. If the synchronous observer API is
+missing on the current path, ambient readiness fails closed while the urgent layer may keep
+using the deferred scheduler. Both modes read the direct `m_worldTime.m_gameTime` field used
+by EEex itself as raw 15-Hz engine ticks. The component does not hardcode EEex WeiDU
+component numbers or impose a component-specific LuaJIT requirement. Missing prerequisites
+skip cleanly; malformed recognized data fails before the override transaction is retained.
+Component 120 is independent, but installing 120 first is recommended on the currently
+researched SR setup.
+
+The first v1.2 live pass exposed a bad `GetCurrentTime()` assumption. The corrected-clock
+rerun delivered the expected Vigil buffs, but a read-only inspection found every memorized
+count unchanged and every component ledger empty. Exact EEex v1.2 source and BG2EE 2.6.6
+disassembly explain the split result: immediate opcode 146 with `dwFlags=1` resolves the
+outer effect, then publishes its child spell through `CMessageFireSpell` /
+`CGameAIBase::FireSpell` after the deferred scheduler returns. It does not create action 181.
+The accounting correction has 76 focused automated tests passing, and the full repository
+suite passes 253 tests. A fresh-process `AR3000` diagnostic against runtime SHA-256
+`EF38A1A0BF942A2B3AB294FAE48DA2548E9413DBD5FE7CB255406C413E06DD3D` then passed ambient
+delivery and one-slot accounting on all four neutral Vigil casters: every exact marker and
+schema-2 charged ledger was present, with the expected `2 -> 1` or `1 -> 0` slot delta and no
+ambient failure. The first urgent attempt exposed a second EEex binding correction:
+`virtual_ClearActions` requires an explicit Boolean. After changing the passive-only replacement
+path to `virtual_ClearActions(false)`, the stamped lab runtime SHA-256
+`9957348E7DB69EE24CA149787887B9AD36012B0F34A2D665CE041611F32B3D08` passed the retest.
+An attack order alone correctly left the neutral Vigil group ineligible; after the first hit
+made Brother Pol hostile, the component started his exact normal `SPWI708` cast, spent its one
+contact attempt and one Mantle slot, left the opcode-120 protection active, and kept
+`urgent_faulted=0`. A generic mage already executing non-passive action 22 was not displaced.
+The legacy fallback still has no corrected live gameplay pass.
 
 The ambient layer considers only recognized, settled SCS casters and conservative installed
 self-buffs lasting at least 2,400 seconds. A caster must really have the spell memorized. The
-first confirmed application spends exactly one memorized copy; only an actual engine
-spellbook reset (normally rest) opens that charge again. Natural expiry may be maintained for
-free while the caster is safe, out of combat, and cannot see the party. Dispel, early removal,
-or suspicious early loss suppresses maintenance until the next real reset. Save/load, area
-change, and elapsed time are not treated as rests, and the narrow initial SCS-prebuff
-reimbursement prevents a second charge for the same managed spell.
+deferred scheduler requests delivery once and retains only an exact primitive spellbook
+locator, original flags/count, and deadline. When the child marker resolves, the synchronous
+observer revalidates those baselines before spending one copy and committing the ledger.
+Only an actual engine spellbook reset (normally rest) opens that charge again. Natural expiry
+may be maintained for free while the caster is safe, out of combat, and cannot see the party.
+Dispel, early removal, or suspicious early loss suppresses maintenance until the next real
+reset. Save/load, area change, and elapsed time are not treated as rests.
+
+Two narrow SCS races are accounted explicitly. If exact SCS action 181 starts while the first
+delivery is still pending, the immediately following matching action 147 may supply the one
+real charge; a later callback must observe the exact one-slot loss and child marker before the
+ledger is committed, without a component debit. After an ordinary component debit, the
+marshaled version-2 ledger retains its exact locator plus original/debited flags; one later
+exact SCS `181 -> 147` pair, with `instantprep == 0` at both starts, can restore only that
+component-debited record, and only after a later callback observes SCS's exact one-slot loss.
+Canceled, non-adjacent, renewed, combat, or ambiguous sequences do not reimburse. A queued
+component child that arrives after an SCS-paid commit is merely a bounded redundant finite
+effect; it does not debit or create another entitlement. Transient delivery state is
+deliberately discarded on import/reset or sprite replacement. In the narrow boundary where
+a queued child survives that discard, one finite free effect can remain, but it receives
+neither a ledger nor free maintenance; retroactively charging from a generic SCS marker would
+not prove ownership.
+
+Existing ledger export/import and genuine spellbook-reset bookkeeping remain active even
+when ambient gameplay is disabled, externally owned, or faulted, so retirement neither loses
+a valid charge nor retains one across a real reset. Generic action/confirmation handling does
+not create sessions. Only an exact SCS action 181 plus known delivery may reconstruct
+ephemeral state from an existing valid charged/reimbursable version-2 UDAux ledger, without
+allocating UDAux, to preserve reimbursement across save/load or hot reload before the first
+deferred tick.
 
 The urgent layer gives a hostile caster one fast but ordinary self-cast on clear first
 contact. It may replace only proven idle/wander/movement work, never attacks, casts,
@@ -107,7 +153,10 @@ slot, aura, casting time, visuals, and interruption. Candidates are Absolute Imm
 genuine Improved Mantle, Mantle, then Protection from Magical Weapons, filtered by installed
 opcode-120 semantics and actual memorization. The episode is spent when casting starts and
 rearms only after a full round without seeing the party. Players can therefore bait or
-interrupt the response, but continuous sight cannot farm repeated casts.
+interrupt the response, but continuous sight cannot farm repeated casts. The passive-only
+replacement uses `virtual_ClearActions(false)`; the Boolean is required by the EEex binding,
+and the call is unreachable unless the current and every queued action passed the conservative
+allowlist.
 
 The two layers can be retired independently without uninstalling the component:
 
