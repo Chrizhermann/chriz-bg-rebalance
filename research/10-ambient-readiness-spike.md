@@ -84,7 +84,8 @@ The historical log then recorded EA 255 at probe reading `3521.328`, the SCS bat
 This proves the observed sequence, not the duration or a “sub-round” bound.
 
 The event order was observed, but the elapsed-time claims are withdrawn. A current-version
-live pass must measure the documented EEex world timer before making any scheduling claim.
+live pass must measure the source- and live-verified world-time field before making any
+scheduling claim.
 
 ## Capability verdicts
 
@@ -143,9 +144,10 @@ production required the invented clock global and retired itself. The runtime as
 therefore not validated by this spike.
 
 The current path instead targets EEex v1.2.0, using
-`EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime:GetCurrentTime()` and converting
+`EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime.m_gameTime` and converting
 duration seconds to raw 15-Hz engine ticks. That path is source- and simulation-verified but
-still requires live v1.2 gameplay acceptance.
+still requires a fresh-process live v1.2 gameplay rerun after the first v1.2 pass exposed the
+absence of the previously assumed `GetCurrentTime()` method.
 
 The runtime remains a transitional bridge. Ambiguous dialogue state, an unknown action or
 queue, unresolved Project Image ownership, an unrecognized SCS reimbursement sequence, or

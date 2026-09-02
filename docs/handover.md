@@ -9,45 +9,41 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-instal
 Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
 `docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `AGENTS.md`.
 
-## Status (2026-08-31) — component 121 corrected v1.2-first, with legacy fallback
+## Status (2026-09-02) — live v1.2 clock correction; fresh-process rerun pending
 
-- **The first manual laboratory pass correctly failed acceptance:** component 121 was
-  installed on the disposable `C:\Games\BGSE-AOE-PREBUFF-LAB-20260830` copy, but nearby
-  eligible casters received no readiness effects. The active playthrough was not used.
-- **Root cause:** `EEex_GameState_GetTime` was never an EEex API. It was introduced as a
-  guessed probe/test shim, the probe silently fell back to `os.clock()`, and production
-  later capability-gated on the invented name. Consequently the v0.11 laboratory runtime
-  disabled itself before applying an effect, debiting a slot, or queuing a cast. The spike's
-  numeric latency values are not engine-time evidence.
-- **Current implementation targets official EEex v1.2.0 first.** It reads
-  `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime:GetCurrentTime()`, treats the
-  result as raw engine ticks at 15 ticks per gameplay second, and registers the v1.2
-  `EEex_Opcode_AddDeferredListsResolvedListener`. Missing world time fails closed before
-  gameplay mutation. The installer gates on `M___EEex.lua` and runtime capabilities rather
-  than version-dependent EEex WeiDU component numbers.
-- **Current evidence is source plus automated behavior, not live acceptance.** The local
-  clean EEex reference at `C:\Games\Baldur's Gate II Enhanced Edition modded - Copy - Copy`
-  declares v1.2.0, but it has no SCS/SR and is therefore not by itself a valid component-121
-  gameplay target. No game install, launch, or save mutation was performed for this fix.
-  The next live pass needs a disposable SCS/SR install running EEex v1.2 and a full process
-  restart so the old append-only callback/fault state cannot survive.
-- **Fresh verification:** all 68 component-121 suites and all 228 repository tests pass;
-  an independent 51-case runtime stress review found no Critical or Important issue; WeiDU
-  24900 parses the TP2 successfully, `git diff --check` is clean, and no Baldur/InfinityLoader
-  process remains.
-- **The older-EEex fallback is now implemented without weakening v1.2.** Runtime capability
-  selection prefers `EEex_Opcode_AddDeferredListsResolvedListener` plus
-  `m_worldTime:GetCurrentTime()`. Only when deferred is absent does it register
-  `EEex_Opcode_AddListsResolvedListener` and read the official historical
-  `m_worldTime.m_gameTime` field. It never registers both; a missing method on the current
-  path fails closed instead of borrowing the legacy field. Repeated synchronous callbacks
-  are regression-tested against duplicate application, debit, and urgent queueing. On v0.11,
-  inactive/faulted/external-owner marshal exports normalize to `{}` because that release
-  rejects non-table exporters.
-- **Legacy support is source/simulator evidence, not corrected live acceptance.** The old
-  laboratory pass ran the broken clock-gated build. Run the fresh v1.2 matrix first; only
-  after it passes and the user separately approves an old-version stage should the fallback
-  be tested in a fresh old-EEex process.
+- **The approved v1.2 laboratory now exists:**
+  `C:\Games\Baldur's Gate II Enhanced Edition modded - CBR Ambient Readiness v1.2 Test`
+  combines the audited SCS/SR EET snapshot with the exact EEex v1.2 runtime. Components 120
+  and 121 are at the WeiDU tail. Its installed `M_CBRRDY.lua` still has the diagnosed old
+  bytes until the running game is closed and the audited lab-only hotfix is applied. Do not
+  force-reinstall or uninstall 121. The active playthrough remains untouched.
+- **The first v1.2 pass found a real component-121 blocker.** In the loaded process,
+  `type(m_worldTime.GetCurrentTime)` was `nil`, direct `m_worldTime.m_gameTime` returned a
+  numeric raw tick value, and the userdata metatable exposed the field but no method. Both
+  readiness layers consequently faulted closed before any effect, slot debit, or queued cast.
+- **The corrected current-version contract is deferred listener plus direct field.** EEex
+  v1.2's own `B3TimeStep.lua` reads `m_worldTime.m_gameTime`; component 121 and its probe now
+  do the same. The simulator no longer invents a `GetCurrentTime` method, and source tests
+  reject that call. Missing/non-numeric time still fails closed before gameplay mutation.
+- **The staged lich route was wrong.** The save's `AR3019` one-time spawn locals are already
+  exhausted and neither lich exists in any saved area. The live save is in `AR3000`, where
+  the Vigil group provides better subjects: the generic mage and Brother Pol have ambient
+  Stoneskin plus urgent PfMW/Mantle respectively. While neutral (`EA=128`) their urgent layer
+  is correctly inactive; deliberately making the group hostile gives a visible urgent test.
+- **Automated correction evidence:** the regression first failed with zero applications and
+  both fuses faulted, then all 68 focused component-121 tests and all 228 repository tests
+  passed after the direct-field change. WeiDU 24900 parses the TP2 and `git diff --check`
+  passes. The corrected gameplay rerun remains the acceptance boundary.
+- **Existing-lab deployment is an audited direct override hotfix.** Once both Baldur and
+  InfinityLoader are confirmed absent, replace only the disposable lab's `M_CBRRDY.lua`,
+  retain its pre-hotfix snapshot, record before/after hashes, and prove `WeiDU.log` unchanged.
+  This avoids uninstalling an entry or relying on `--force-install-list 121`, which is a
+  silent no-op for an already installed component. A fresh normal installation gets the
+  corrected component-121 bytes from this repository.
+- **Older EEex differs only at the listener/marshal boundary.** When the deferred listener is
+  absent, the runtime selects `EEex_Opcode_AddListsResolvedListener`; both modes use the same
+  direct clock field. v0.11 inactive/faulted/external-owner marshal exports normalize to `{}`.
+  Legacy live acceptance remains separately pending after v1.2 succeeds.
 
 See `research/11-eeex-v1.2-readiness-compatibility.md` and
 `research/12-eeex-legacy-readiness-fallback.md` for provenance, official references, and

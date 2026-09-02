@@ -38,13 +38,11 @@ local function game_time_ticks()
     local ok, value = pcall(function()
         local world_time =
             EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime
-        if tick_listener_mode == "deferred" then
-            return world_time:GetCurrentTime()
+        if tick_listener_mode ~= "deferred"
+                and tick_listener_mode ~= "legacy" then
+            error("no supported EEex tick listener")
         end
-        if tick_listener_mode == "legacy" then
-            return world_time.m_gameTime
-        end
-        error("no supported EEex tick listener")
+        return world_time.m_gameTime
     end)
     local ticks = ok and tonumber(value) or nil
     if not ticks or ticks < 0 then

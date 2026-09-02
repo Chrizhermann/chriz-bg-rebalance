@@ -75,9 +75,9 @@ but root-guarded, and `CBR_RDY_PROBE.teardown()` makes them inert. The probe kee
 and observations only in memory and exposes them through `dump()`; it has no file, resource,
 save, or installer write path.
 
-The checked-in probe now capability-selects one verified listener/clock pair before
-activation: v1.2 deferred + `GetCurrentTime()` first, or legacy synchronous + direct
-`m_gameTime` only when deferred is absent. The 2026-08-30 execution used the older
+The checked-in probe now capability-selects one listener before activation: v1.2 deferred
+first, or the legacy synchronous listener only when deferred is absent. Both modes read the
+direct `m_worldTime.m_gameTime` field used by EEex v1.2 itself. The 2026-08-30 execution used the older
 `os.clock()` fallback; its numerical timestamps remain invalid even though the current file
 no longer contains that fallback.
 

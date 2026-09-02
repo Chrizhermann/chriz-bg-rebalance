@@ -634,8 +634,9 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
             source,
         )
         self.assertIn(
-            'legacy_game_time_accessor = "m_worldTime.m_gameTime"', source
+            'game_time_accessor = "m_worldTime.m_gameTime"', source
         )
+        self.assertNotIn("legacy_game_time_accessor", source)
         self.assertIn('legacy_nil_marshal_export = "empty_table"', source)
         self.assertNotIn("requires_base_component", source)
         self.assertNotIn("requires_luajit_component", source)

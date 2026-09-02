@@ -80,15 +80,16 @@ SCS's own cosmetic-free prebuff mapping. It then ships one stamped `M_CBRRDY.lua
 not patch SCS combat scripts or spell mechanics. It requires BG2:EE/EET, SCS Smarter Mages
 6030, EEex's `M_*.lua` autoload bootstrap, and the final SCS prebuff map. EEex v1.2.0 is the
 primary target: when its deferred lists-resolved listener exists, the runtime uses that
-listener and the documented world timer's `GetCurrentTime()` raw 15-Hz engine ticks. Only
-when the deferred listener is absent does it select the historical synchronous listener and
-the official old source's direct `m_gameTime` field. It never registers both or lets the old
-field rescue a broken current binding. It does not hardcode EEex WeiDU component numbers or
+listener and the world timer's direct `m_gameTime` field, as used by EEex v1.2 itself. The
+field contains raw 15-Hz engine ticks. Only when the deferred listener is absent does the
+runtime select the historical synchronous listener; both listener modes use the same
+source-verified field. It never registers both. It does not hardcode EEex WeiDU component numbers or
 impose a component-specific LuaJIT requirement. Missing prerequisites skip cleanly; malformed
 recognized data fails before the override transaction is retained. Component 120 is
 independent, but installing 120 first is recommended on the currently researched SR setup.
-Both paths are source- and simulation-verified; fresh v1.2 gameplay acceptance is still
-required first, and the legacy fallback has no corrected live-game pass yet.
+Both paths are source- and simulation-verified. The first v1.2 live pass exposed and diagnosed
+a bad `GetCurrentTime()` assumption; a fresh-process gameplay rerun of the corrected field
+access is still required, and the legacy fallback has no corrected live-game pass yet.
 
 The ambient layer considers only recognized, settled SCS casters and conservative installed
 self-buffs lasting at least 2,400 seconds. A caster must really have the spell memorized. The

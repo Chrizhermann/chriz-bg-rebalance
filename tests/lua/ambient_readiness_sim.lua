@@ -173,13 +173,10 @@ function EEex_GetUDAux(sprite)
     return aux
 end
 
--- EEex v1.2 exposes the engine's world-time field; it does not define
--- EEex_GameState_GetTime() or Infinity_GetGameTime(). m_gameTime is measured
--- in 1/15-second engine ticks.
+-- EEex v1.2 exposes the engine's m_worldTime userdata with a direct m_gameTime
+-- field. The live v1.2 userdata has no GetCurrentTime method. m_gameTime is
+-- measured in 1/15-second engine ticks.
 local fakeWorldTime = { m_gameTime = fakeGameTimeTicks }
-function fakeWorldTime:GetCurrentTime()
-    return self.m_gameTime
-end
 EngineGlobals = {
     g_pBaldurChitin = {
         m_pObjectGame = { m_worldTime = fakeWorldTime },
@@ -612,7 +609,7 @@ end
 scenarios.runtime_legacy_missing_raw_time =
     scenarios.runtime_missing_game_time
 
-scenarios.runtime_v12_missing_method =
+scenarios.runtime_v12_field_only =
     scenarios.runtime_missing_game_time
 
 scenarios.runtime_legacy_v011_surface = function()
@@ -1268,13 +1265,10 @@ elseif scenarioName == "runtime_legacy_v011_surface"
         or scenarioName == "runtime_legacy_missing_raw_time"
         or scenarioName == "runtime_legacy_missing_raw_time_callbacks" then
     EEex_Opcode_AddDeferredListsResolvedListener = nil
-    fakeWorldTime.GetCurrentTime = nil
     if scenarioName == "runtime_legacy_missing_raw_time"
             or scenarioName == "runtime_legacy_missing_raw_time_callbacks" then
         fakeWorldTime.m_gameTime = nil
     end
-elseif scenarioName == "runtime_v12_missing_method" then
-    fakeWorldTime.GetCurrentTime = nil
 end
 reloadRuntime()
 out("tick_listeners", #deferredTickListeners + #legacyTickListeners)

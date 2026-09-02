@@ -5,10 +5,14 @@ Status: **prepared only**. This document is not authorization to install compone
 `dialog.tlk`. Every live step below starts only after the user explicitly approves the exact
 game directory, components, installer commit, and throwaway save.
 
-Current acceptance target (2026-08-31): **EEex v1.2 first**. The earlier component-121
+Current acceptance target (2026-09-02): **EEex v1.2 first**. The earlier component-121
 manual pass on `C:\Games\BGSE-AOE-PREBUFF-LAB-20260830` used v0.11 and correctly failed—no
 readiness effects appeared because the runtime referenced a nonexistent clock API. Do not
-treat that pass or the old probe's `os.clock()` latency values as acceptance. A
+treat that pass or the old probe's `os.clock()` latency values as acceptance. The first v1.2
+pass in `C:\Games\Baldur's Gate II Enhanced Edition modded - CBR Ambient Readiness v1.2 Test`
+also failed diagnostically: the assumed `m_worldTime:GetCurrentTime()` method was nil, while
+the direct `m_gameTime` field existed, and both readiness layers faulted before mutation. A
+corrected fresh-process rerun is required. A
 source/simulator-verified older-version fallback now exists, but its live stage remains
 strictly later than a successful v1.2 pass and needs separate approval.
 
@@ -103,18 +107,27 @@ Only after Stage A passes and the user separately approves continuation, append 
 ambient rows, urgent semantic flags, EEex profile, and dynamically resolved Project Image
 resref.
 
+If the approved disposable lab already has the diagnosed component 121 at the WeiDU tail,
+never uninstall it and do not use `--force-install-list 121` alone (it is a silent no-op for
+an installed component). With the game and loader fully closed, preserve the old runtime and
+apply a recorded direct hotfix to only `override/M_CBRRDY.lua`; record before/after hashes and
+prove `WeiDU.log` unchanged. This exception is for the disposable acceptance lab, not the
+normal installation path.
+
 Before loading the throwaway save:
 
 1. inspect the stamped runtime and confirm `target_eeex_version = "1.2.0"`,
-   `game_time_unit = "engine_ticks"`, and `game_time_ticks_per_second = 15`;
-2. confirm the fresh v1.2 process selects exactly one
+   `game_time_unit = "engine_ticks"`, `game_time_ticks_per_second = 15`, and the file
+   contains neither `GetCurrentTime`, `EEex_GameState_GetTime`, `Infinity_GetGameTime`, nor
+   `os.clock()`;
+2. start a completely fresh InfinityLoader/game process—hot reload is insufficient after
+   the old append-only callback or sticky fail-closed state has existed;
+3. confirm the fresh v1.2 process selects exactly one
    `EEex_Opcode_AddDeferredListsResolvedListener`, reports
-   `CBR_RDY_STATE.tick_listener_mode == "deferred"`,
-   and contains neither `EEex_GameState_GetTime`, `Infinity_GetGameTime`, nor `os.clock()`;
-3. start a completely fresh InfinityLoader/game process—hot reload is insufficient after
-   the old append-only callback or sticky fail-closed state has existed; and
-4. through the approved session probe, read
-   `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime:GetCurrentTime()` twice while the
+   `CBR_RDY_STATE.tick_listener_mode == "deferred"`; and
+4. through the approved session probe, confirm the embedded userdata has no callable
+   `GetCurrentTime()` method, then read
+   `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime.m_gameTime` twice while the
    game advances. Record raw ticks and independently confirm the expected 15 ticks per
    gameplay second before any slot-mutating test. If the binding is absent or the unit is
    inconsistent, stop before testing gameplay behavior.

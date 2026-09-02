@@ -40,7 +40,7 @@ state.generation = flag(state.generation, 0) + 1
 
 -- EEex v1.2 coalesces ProcessEffectList callbacks through the deferred
 -- listener.  Older releases expose only the synchronous listener.  Select a
--- single coherent listener/clock pair; never mix the old clock into v1.2.
+-- single listener; both modes read the source- and live-verified world-time field.
 local tick_listener_mode
 local add_tick_listener
 if type(EEex_Opcode_AddDeferredListsResolvedListener) == "function" then
@@ -213,13 +213,11 @@ local function game_time_ticks()
     local ok, value = pcall(function()
         local world_time =
             EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime
-        if tick_listener_mode == "deferred" then
-            return world_time:GetCurrentTime()
+        if tick_listener_mode ~= "deferred"
+                and tick_listener_mode ~= "legacy" then
+            error("no supported EEex tick listener")
         end
-        if tick_listener_mode == "legacy" then
-            return world_time.m_gameTime
-        end
-        error("no supported EEex tick listener")
+        return world_time.m_gameTime
     end)
     local ticks = ok and tonumber(value) or nil
     if not ticks or ticks < 0 then

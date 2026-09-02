@@ -34,11 +34,11 @@ rationale, fully reversible, idempotent, testable without wrecking a live save.
   spellbook reset) and one normal, interruptible first-contact weapon-protection cast.
   Natural expiry can be maintained only while safely out of combat; dispel/early loss
   suppresses maintenance. Unknown queues and Project Image states fail closed. The current
-  deferred-listener/method clock pair is authoritative; only its absence selects the
-  source-verified old listener/direct-field pair. Ambient and urgent ownership can be retired
+  deferred listener is authoritative; only its absence selects the source-verified old
+  listener. Both modes read the direct `m_worldTime.m_gameTime` field. Ambient and urgent ownership can be retired
   independently when the user's future full EEex AI takes over. Component 121 changes no SPL
-  or BCS resource. Both API paths have simulator coverage, but corrected live acceptance is
-  still outstanding and must run on v1.2 first.
+  or BCS resource. Both API paths have simulator coverage; the first v1.2 pass diagnosed a
+  bad method assumption, and a corrected fresh-process rerun is still outstanding.
 - **Backlog:** catalog SCS components active in the target install + their balance
   touchpoints; identify small high-value tweaks. (Migrated from chriz-sod-rebalance "Part 3",
   which now points here.)

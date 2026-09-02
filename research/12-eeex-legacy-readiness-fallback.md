@@ -1,6 +1,6 @@
 # 12 — EEex legacy ambient-readiness fallback
 
-**Date:** 2026-08-31
+**Date:** 2026-09-02
 **Status:** EEex v1.2 remains the primary target; v0.11.0-alpha/v1.0.0 fallback has
 official-source and simulator evidence only; corrected legacy gameplay acceptance pending
 **Scope:** component 121 clock, lists-resolved listener, and marshal-export compatibility
@@ -13,7 +13,7 @@ its primary path:
 
 ```lua
 local ticks = EngineGlobals.g_pBaldurChitin.m_pObjectGame
-    .m_worldTime:GetCurrentTime()
+    .m_worldTime.m_gameTime
 
 EEex_Opcode_AddDeferredListsResolvedListener(callback)
 ```
@@ -28,18 +28,17 @@ local ticks = EngineGlobals.g_pBaldurChitin.m_pObjectGame
 EEex_Opcode_AddListsResolvedListener(callback)
 ```
 
-The runtime registers exactly one lists-resolved listener. It never registers both and it
-never falls back from a selected v1.2 listener to the legacy clock field. A missing or
-non-numeric value on the selected clock path fails closed before an effect, spell-slot debit,
-or queued cast.
+The runtime registers exactly one lists-resolved listener and never registers both. Both
+listener modes use the same field. A missing or non-numeric value fails closed before an
+effect, spell-slot debit, or queued cast.
 
-This is a narrow compatibility fix, not a change to the prebuff design. Both clock paths
-return raw world-time ticks, so the existing ledger schema and conversion at 15 ticks per
+This is a narrow compatibility fix, not a change to the prebuff design. The shared field
+returns raw world-time ticks, so the existing ledger schema and conversion at 15 ticks per
 gameplay second remain shared.
 
 ## Clock provenance
 
-The direct legacy field is not inferred from the simulator. All three inspected official
+The direct field is not inferred from the simulator. All three inspected official
 EEex releases read and write the identical engine path in `B3TimeStep.lua`:
 
 - [v0.11.0-alpha, lines 48–53](https://github.com/Bubb13/EEex/blob/v0.11.0-alpha/EEex/copy/B3TimeStep.lua#L48-L53)
@@ -50,11 +49,11 @@ Each tagged function returns
 `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime.m_gameTime`. The separately
 maintained official binding documentation defines
 [`timer:GetCurrentTime()`](https://github.com/Bubb13/EEex-Docs/blob/master/source/EE%20Game%20Lua%20Functions/timer/timer_GetCurrentTime.rst),
-which remains the preferred v1.2 accessor. The v0.11 and v1.0 tagged Lua sources prove the
-field path but do not themselves prove that the embedded `m_worldTime` userdata had that
-documented method binding in those releases. The narrowest source-proven legacy fallback is
-therefore the direct `m_gameTime` field, not a speculative method call and not the private,
-optional-module helper `B3TimeStep_Private_GetGameTime()`.
+but the 2026-09-02 live v1.2 process exposed no such method on its embedded `m_worldTime`
+userdata. Its metatable exposed `m_gameTime`, and the field returned a numeric raw tick value.
+The narrowest source- and live-proven accessor is therefore the direct field, not a
+speculative method call and not the private, optional-module helper
+`B3TimeStep_Private_GetGameTime()`.
 
 The Infinity Engine timing expression is `Gametime(ticks) + 15 * Duration(seconds)`
 ([IESDP EFF timing-mode formula](https://gibberlings3.github.io/iesdp/file_formats/ie_formats/eff_v1.htm#effv1_Header_0xC_0)).
@@ -139,7 +138,7 @@ and tables, including numeric `0`/`1` flags.
 
 ## Remaining capability gate
 
-The legacy fallback changes only the listener, clock accessor, and inactive marshal result.
+The legacy fallback changes only the listener and inactive marshal result.
 Official v0.11 and v1.0 sources also contain the other EEex globals required by component
 121:
 
@@ -211,8 +210,8 @@ final process check found no `Baldur.exe` or `InfinityLoader.exe` process.
 
 ## Acceptance boundary
 
-EEex v1.2 is the supported primary target. Its deferred-listener/method path must remain
-independent of the legacy field fallback, and its gameplay acceptance status remains the one
+EEex v1.2 is the supported primary target. Its deferred-listener/direct-field path must remain
+independent of the legacy-listener fallback, and its gameplay acceptance status remains the one
 recorded in research 11.
 
 The v0.11.0-alpha/v1.0.0 fallback currently has official-source evidence and local simulator

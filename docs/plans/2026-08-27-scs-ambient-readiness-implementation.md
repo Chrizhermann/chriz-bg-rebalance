@@ -29,12 +29,14 @@ Spell Revisions, BG2:EE + EET.
 
 **Branch:** `codex/ambient-readiness-121`
 
-> **Correction addendum — 2026-08-31:** Task 6 did not prove its clock. The probe tried two
+> **Correction addendum — updated 2026-09-02:** Task 6 did not prove its clock. The probe tried two
 > nonexistent EEex globals and then silently used `os.clock()`, so its numeric timing claims
 > and the original full-runtime acceptance conclusion are withdrawn. The repaired path must
 > target official EEex v1.2 first: use
-> `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime:GetCurrentTime()` as raw 15-Hz
+> `EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime.m_gameTime` as raw 15-Hz
 > engine ticks and `EEex_Opcode_AddDeferredListsResolvedListener` as the primary tick hook.
+> A 2026-09-02 live v1.2 probe proved that the embedded `m_worldTime` userdata has no
+> callable `GetCurrentTime()` method; EEex v1.2's own `B3TimeStep.lua` uses the direct field.
 > Runtime capability checks—not WeiDU component numbers—are authoritative. The older
 > listener fallback is a separate second implementation checkpoint after the v1.2
 > correction; live acceptance remains ordered v1.2 first and older EEex only afterwards.
@@ -498,7 +500,7 @@ already installed remote-console mechanism for the current session.
 ### Step 3: Measure the unmodified SCS baseline
 
 First prove the exact clock source. On EEex v1.2, log
-`m_worldTime:GetCurrentTime()` directly, confirm that it advances in raw 15-Hz gameplay
+`m_worldTime.m_gameTime` directly, confirm that it advances in raw 15-Hz gameplay
 ticks, and reject the probe if any fallback clock would be used. Then, for controlled
 caster/contact cases, record those engine ticks and separately sourced wall-clock timestamps
 for:
@@ -942,8 +944,8 @@ or turn source/simulator coverage into a live-game claim.
 
 Extend the simulator so its default surface exposes both listeners but records them
 separately. Add `runtime_legacy_v011_surface`, which removes
-`EEex_Opcode_AddDeferredListsResolvedListener` and the world-timer method before loading the
-runtime while preserving `EEex_Opcode_AddListsResolvedListener` and `m_gameTime`.
+`EEex_Opcode_AddDeferredListsResolvedListener` before loading the runtime while preserving
+`EEex_Opcode_AddListsResolvedListener` and `m_gameTime`.
 
 Require the current scenario to report exactly one deferred listener and zero legacy
 listeners. Require the legacy scenario to report zero deferred listeners and exactly one
@@ -982,8 +984,8 @@ python -m unittest tests.test_ambient_readiness_listener.AmbientReadinessRuntime
 python -m unittest tests.test_ambient_readiness_listener.AmbientReadinessListenerTests -v
 ```
 
-Expected: the new legacy scenarios fail because production requires the deferred listener,
-uses only `GetCurrentTime()`, and can return `nil` from marshal exporters.
+Expected: the new legacy scenarios fail because production requires the deferred listener
+and can return `nil` from marshal exporters.
 
 ```powershell
 git add tests/test_ambient_readiness_listener.py tests/lua/ambient_readiness_sim.lua
@@ -1020,22 +1022,21 @@ Use `add_tick_listener` in the shared capability gate and registration site. Exp
 chosen primitive-only mode in runtime state for diagnostics, without persisting userdata or
 registering a second callback on hot reload.
 
-### Step 2: Keep v1.2 and legacy clocks deliberately separate
+### Step 2: Use the source-proven world-time field in both listener modes
 
 Resolve `m_worldTime` once per read, then:
 
 ```lua
-if tick_listener_mode == "deferred" then
-    return tonumber(world_time:GetCurrentTime())
-elseif tick_listener_mode == "legacy" then
-    return tonumber(world_time.m_gameTime)
+if tick_listener_mode ~= "deferred" and tick_listener_mode ~= "legacy" then
+    error("no supported EEex tick listener")
 end
-error("no supported EEex tick listener")
+return tonumber(world_time.m_gameTime)
 ```
 
-Validate the result as a non-negative number. Do not use the legacy field to rescue a broken
-v1.2 method, and do not introduce `EEex_GameState_GetTime`, `Infinity_GetGameTime`,
-`os.clock()`, wall time, or callback counts.
+Validate the result as a non-negative number. Do not introduce `GetCurrentTime`,
+`EEex_GameState_GetTime`, `Infinity_GetGameTime`, `os.clock()`, wall time, or callback
+counts. Listener selection and clock access are independent: v1.2 still uses only the
+deferred listener, while the exact direct field is shared.
 
 ### Step 3: Normalize only legacy nil marshal exports
 
@@ -1045,12 +1046,12 @@ current v1.2 return values. Keep booleans serialized as numeric `0/1`.
 
 ### Step 4: Mirror the adapter in the session-only probe and stamped manifest
 
-Make the probe prefer the deferred/method pair and fall back to the legacy-listener/direct-
-field pair only when deferred is absent. Continue logging raw `time_ticks` and separately
-derived `time_seconds`.
+Make the probe prefer the deferred listener and fall back to the legacy listener only when
+deferred is absent. Use the direct field with either listener. Continue logging raw
+`time_ticks` and separately derived `time_seconds`.
 
-Keep `target_eeex_version = "1.2.0"` authoritative and add explicit legacy metadata for the
-fallback listener, clock field, and empty-table marshal convention. Extend installer tests
+Keep `target_eeex_version = "1.2.0"` authoritative and add explicit metadata for the shared
+clock field, legacy fallback listener, and empty-table marshal convention. Extend installer tests
 to reject a stamped manifest that loses either the primary profile or fallback declaration.
 
 ### Step 5: Make focused suites green and commit
@@ -1078,7 +1079,7 @@ git commit -m "Add older EEex readiness fallback"
 
 ### Step 1: Record only official-source evidence
 
-Document the exact v0.11.0-alpha and v1.0.0 source links for `m_gameTime`, the old
+Document the exact v0.11.0-alpha, v1.0.0, and v1.2.0 source links for `m_gameTime`, the old
 lists-resolved listener, its synchronous hook placement, and the marshal exporter contract.
 State explicitly that `EEex_GameState_GetTime` never existed in the inspected releases and
 that the old manual lab ran the broken build, so legacy live acceptance remains outstanding.

@@ -97,7 +97,7 @@ class AmbientReadinessAssetTests(unittest.TestCase):
             "assert(m.runtime_profile.target_eeex_version=='1.2.0');"
             "assert(m.runtime_profile.legacy_tick_listener=="
             "'EEex_Opcode_AddListsResolvedListener');"
-            "assert(m.runtime_profile.legacy_game_time_accessor=="
+            "assert(m.runtime_profile.game_time_accessor=="
             "'m_worldTime.m_gameTime');"
             "assert(m.runtime_profile.legacy_nil_marshal_export=='empty_table');"
             "assert(m.defaults.ambient_enabled==1);"
@@ -179,20 +179,20 @@ class AmbientReadinessAssetTests(unittest.TestCase):
         self.assertIn("EEex_Sprite_GetState(sprite)", source)
         self.assertIn('"project_image=" .. project_image_relation(sprite)', source)
 
-    def test_probe_prefers_v12_and_uses_only_the_verified_legacy_fallback(self) -> None:
+    def test_probe_uses_the_verified_world_time_field_with_both_listeners(self) -> None:
         source = PROBE.read_text(encoding="ascii")
         self.assertIn(
             "EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime", source
         )
-        self.assertIn(":GetCurrentTime()", source)
+        self.assertNotIn(":GetCurrentTime()", source)
         self.assertIn("GAME_TIME_TICKS_PER_SECOND", source)
         self.assertIn("time_ticks", source)
         self.assertIn("time_seconds", source)
         self.assertIn("EEex_Opcode_AddDeferredListsResolvedListener", source)
         self.assertIn("EEex_Opcode_AddListsResolvedListener", source)
         self.assertIn("return world_time.m_gameTime", source)
-        self.assertIn('tick_listener_mode == "deferred"', source)
-        self.assertIn('tick_listener_mode == "legacy"', source)
+        self.assertIn('tick_listener_mode = "deferred"', source)
+        self.assertIn('tick_listener_mode = "legacy"', source)
         self.assertNotIn("EEex_GameState_GetTime", source)
         self.assertNotIn("Infinity_GetGameTime", source)
         self.assertNotIn("os.clock()", source)
@@ -331,7 +331,6 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
             "EEex_Opcode_AddDeferredListsResolvedListener",
             "EEex_Opcode_AddListsResolvedListener",
             "EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime",
-            ":GetCurrentTime()",
             ".m_gameTime",
             "EEex_Sprite_AddQuickListCountsResetListener",
             "EEex_RunWithStackManager",
@@ -348,6 +347,7 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         ):
             with self.subTest(required=required):
                 self.assertIn(required, source)
+        self.assertNotIn(":GetCurrentTime()", source)
         self.assertNotIn('source == "spwi703"', source)
         for obsolete in (
             "EEex_GameState_GetTime",
@@ -362,18 +362,18 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
             with self.subTest(obsolete=obsolete):
                 self.assertNotIn(obsolete, source)
 
-    def test_current_surface_prefers_the_v12_listener_and_clock(self) -> None:
+    def test_current_surface_prefers_the_v12_listener_with_the_shared_clock(self) -> None:
         seen = self._run("v12_world_time_units")
         self.assertEqual(seen["deferred_tick_listeners"], "1")
         self.assertEqual(seen["legacy_tick_listeners"], "0")
 
-    def test_current_listener_never_falls_back_to_the_legacy_clock_field(self) -> None:
-        seen = self._run("runtime_v12_missing_method")
-        self.assertEqual(seen["ambient_applications"], "0")
-        self.assertEqual(seen["ambient_available"], "1")
-        self.assertEqual(seen["urgent_queues"], "0")
-        self.assertEqual(seen["ambient_faulted"], "1")
-        self.assertEqual(seen["urgent_faulted"], "1")
+    def test_current_listener_uses_the_v12_world_time_field_without_a_timer_method(self) -> None:
+        seen = self._run("runtime_v12_field_only")
+        self.assertEqual(seen["ambient_applications"], "1")
+        self.assertEqual(seen["ambient_available"], "0")
+        self.assertEqual(seen["urgent_queues"], "1")
+        self.assertEqual(seen["ambient_faulted"], "0")
+        self.assertEqual(seen["urgent_faulted"], "0")
 
     def test_legacy_surface_selects_one_old_listener_and_still_operates(self) -> None:
         seen = self._run(

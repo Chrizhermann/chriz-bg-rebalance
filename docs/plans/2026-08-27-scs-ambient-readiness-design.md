@@ -1,7 +1,7 @@
 # SCS ambient readiness and first-contact defense — components 120 / 121
 
-**Status:** Approved by the user on 2026-08-27; corrected for the official EEex v1.2 API
-surface on 2026-08-31, with v1.2 live acceptance still pending. This is a transitional
+**Status:** Approved by the user on 2026-08-27; corrected against the live EEex v1.2 API
+surface on 2026-09-02, with a fresh-process v1.2 gameplay rerun still pending. This is a transitional
 compatibility bridge for the current SCS-based install, not the end-state combat-AI
 architecture. The user is developing a broader EEex AI overhaul in parallel; this design
 must be easy for that future system to retire without uninstalling a WeiDU component.
@@ -12,10 +12,12 @@ below, and the separately authorized disposable-session spike in
 `research/10-ambient-readiness-spike.md`. No component was installed and no production save
 or game resource was changed by the spike.
 
-Compatibility addendum (2026-08-31): the spike's guessed time functions were not EEex APIs,
+Compatibility addendum (updated 2026-09-02): the spike's guessed time functions were not EEex APIs,
 and its fallback `os.clock()` invalidates every numeric latency claim. Component 121 now
 targets v1.2 first, registers `EEex_Opcode_AddDeferredListsResolvedListener`, and reads the
-documented world timer as raw ticks at 15 ticks per gameplay second. The runtime fails closed
+direct `m_worldTime.m_gameTime` field used by EEex v1.2 itself as raw ticks at 15 ticks per
+gameplay second. A live v1.2 probe proved that this userdata has no callable
+`GetCurrentTime()` method. The runtime fails closed
 before mutation when that clock is unavailable. It does not hardcode EEex component numbers.
 
 ### Older-EEex fallback addendum (approved sequence, 2026-08-31)
@@ -23,18 +25,19 @@ before mutation when that clock is unavailable. It does not hardcode EEex compon
 The user selected current-version support first and an older-version fallback second. Three
 implementation shapes were considered:
 
-1. **Capability-selected adapter (selected):** prefer the complete v1.2 path. Only when the
-   deferred listener is absent, select the legacy lists-resolved listener, read the exact
-   historical `m_worldTime.m_gameTime` field used by EEex itself, and normalize inactive
+1. **Capability-selected adapter (selected):** prefer the v1.2 deferred listener. Only when
+   it is absent, select the legacy lists-resolved listener. Both modes read the exact
+   `m_worldTime.m_gameTime` field used by EEex itself; legacy mode also normalizes inactive
    marshal exports to an empty table for v0.11.
 2. **WeiDU version/component detection (rejected):** component numbers changed between
    v0.11 and v1.x, and install metadata cannot prove the live Lua surface.
 3. **A separate legacy component/runtime (rejected):** this duplicates behavior and allows
    the old and current paths to drift.
 
-The adapter never registers both tick listeners and never lets the legacy field rescue a
-broken v1.2 method binding. v1.2 remains the primary target and keeps its documented method;
-the direct field is reachable only after the deferred listener is proven absent. Legacy
+The adapter never registers both tick listeners. A live v1.2 process proved that its embedded
+`m_worldTime` userdata has no callable `GetCurrentTime()` method, while EEex v1.2's own
+`B3TimeStep.lua` reads `m_gameTime` directly. v1.2 therefore remains the primary listener
+path and shares that field with the fallback. Legacy
 callback cadence is synchronous and can repeat around effect-list resolution, so all existing
 idempotence gates remain authoritative and receive an explicit repeated-callback regression
 test. Pre-v1.0 marshal data keeps integer `0/1` values, and an inactive/faulted/externally
@@ -279,7 +282,7 @@ Before shipping 121, use a session-scoped probe on a throwaway save to measure:
 
 The spike must also prove the selected slot-debit/quick-list path and cosmetic-free ambient
 delivery on the installed EEex version. Before recording any timing, it must prove that the
-clock is `m_worldTime:GetCurrentTime()`, record its raw-tick values, and verify the 15-tick
+clock is `m_worldTime.m_gameTime`, record its raw-tick values, and verify the 15-tick
 per gameplay-second conversion. The v1.2 deferred listener must be the registered path, and
 the game must start in a fresh process so append-only listeners or sticky fault state from a
 prior runtime cannot survive. The production game directory remains read-only unless the
