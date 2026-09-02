@@ -174,15 +174,24 @@ gameplay pass.
 
 ## Remaining acceptance boundary
 
-The first v1.2 gameplay attempt is a diagnosed failure, not acceptance. After the corrected
-runtime is placed in the same approved disposable lab with the game fully closed, start a
-fresh InfinityLoader process, confirm the raw field advances at 15 ticks per gameplay second,
-and rerun the urgent/ambient matrix. Because component 121 is already installed at the tail,
+The first v1.2 gameplay attempt is a diagnosed failure, not acceptance. The corrected runtime
+is now placed in the same approved disposable lab with the game fully closed. Start a fresh
+InfinityLoader process, confirm the raw field advances at 15 ticks per gameplay second, and
+rerun the urgent/ambient matrix. Because component 121 is already installed at the tail,
 do not uninstall it and do not rely on `--force-install-list 121`, which would be a silent
 no-op. For this disposable lab, use a recorded direct-override hotfix of only
 `override/M_CBRRDY.lua`, preserving the prior bytes and proving `WeiDU.log` unchanged. Fresh
 installs receive the corrected runtime through component 121 normally. The old append-only
 callback and sticky fault state must not be hot-reloaded into the rerun.
+
+That lab-only deployment is now complete. With both game processes absent, the installed
+runtime changed from SHA-256
+`6835A6FD80B8716D357A5D2923F23DB8AF4001E8A53646FD0E55D588A88AC15D` to
+`42191F6215E4DACD53CB9D998849A0BB35A018E8BCA2300138D89FBA7AE075E5`; `WeiDU.log`
+remained byte-identical at
+`6C988DE31A47812C692EEFBB7108D3B7A826FDD9CEA3DFC29A546C5A7132C2C0`. The patched file
+parsed with the lab's bundled Lua interpreter. Gameplay acceptance is still pending the
+fresh process and user-visible test.
 
 Older EEex support remains second priority. A later capability adapter now selects
 `EEex_Opcode_AddListsResolvedListener` plus direct `m_worldTime.m_gameTime` only when the

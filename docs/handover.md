@@ -14,9 +14,9 @@ Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Ap
 - **The approved v1.2 laboratory now exists:**
   `C:\Games\Baldur's Gate II Enhanced Edition modded - CBR Ambient Readiness v1.2 Test`
   combines the audited SCS/SR EET snapshot with the exact EEex v1.2 runtime. Components 120
-  and 121 are at the WeiDU tail. Its installed `M_CBRRDY.lua` still has the diagnosed old
-  bytes until the running game is closed and the audited lab-only hotfix is applied. Do not
-  force-reinstall or uninstall 121. The active playthrough remains untouched.
+  and 121 are at the WeiDU tail. Its installed `M_CBRRDY.lua` has now received the audited
+  lab-only clock hotfix; do not force-reinstall or uninstall 121. The active playthrough
+  remains untouched.
 - **The first v1.2 pass found a real component-121 blocker.** In the loaded process,
   `type(m_worldTime.GetCurrentTime)` was `nil`, direct `m_worldTime.m_gameTime` returned a
   numeric raw tick value, and the userdata metatable exposed the field but no method. Both
@@ -34,10 +34,11 @@ Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Ap
   both fuses faulted, then all 68 focused component-121 tests and all 228 repository tests
   passed after the direct-field change. WeiDU 24900 parses the TP2 and `git diff --check`
   passes. The corrected gameplay rerun remains the acceptance boundary.
-- **Existing-lab deployment is an audited direct override hotfix.** Once both Baldur and
-  InfinityLoader are confirmed absent, replace only the disposable lab's `M_CBRRDY.lua`,
-  retain its pre-hotfix snapshot, record before/after hashes, and prove `WeiDU.log` unchanged.
-  This avoids uninstalling an entry or relying on `--force-install-list 121`, which is a
+- **Existing-lab deployment used an audited direct override hotfix.** Both game processes
+  were absent; only the disposable lab's `M_CBRRDY.lua` changed from SHA-256 `6835A6FD...`
+  to `42191F62...`, while `WeiDU.log` remained `6C988DE3...`. The old runtime is preserved
+  in the evidence directory and the corrected file parses with the bundled Lua interpreter.
+  This avoided uninstalling an entry or relying on `--force-install-list 121`, which is a
   silent no-op for an already installed component. A fresh normal installation gets the
   corrected component-121 bytes from this repository.
 - **Older EEex differs only at the listener/marshal boundary.** When the deferred listener is
