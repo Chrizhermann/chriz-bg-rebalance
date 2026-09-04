@@ -9,7 +9,7 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-instal
 Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
 `docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `AGENTS.md`.
 
-## Status (2026-09-03) — v1.2 ambient/urgent PASS; Tempus CLAB compatibility fix pending release
+## Status (2026-09-04) — v1.2 ambient/urgent PASS; Tempus CLAB compatibility fix ready in v0.3.1
 
 - **Component 401's first clean curated-stack install exposed one narrow validator gap.**
   Artisan's Kitpack legitimately packs `AP_C0PR#CL` into otherwise empty `ABILITY1` cells
@@ -17,8 +17,8 @@ Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Ap
   at ordinary levels and still clears only the five late Holy Power grants. See
   `research/13-tempus-artisan-clab-packing.md`. All 68 Holy Power tests pass, and the
   isolated release candidate installed `401` with no warning/error and verified every
-  resulting CLAB invariant. The source fix remains local and needs a successor release to
-  v0.3.0 before the public collection can pin it.
+  resulting CLAB invariant. It is included in v0.3.1, the successor release the public
+  collection should pin instead of v0.3.0.
 
 - **The approved v1.2 laboratory now exists:**
   `C:\Games\Baldur's Gate II Enhanced Edition modded - CBR Ambient Readiness v1.2 Test`

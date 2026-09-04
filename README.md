@@ -99,7 +99,7 @@ disassembly explain the split result: immediate opcode 146 with `dwFlags=1` reso
 outer effect, then publishes its child spell through `CMessageFireSpell` /
 `CGameAIBase::FireSpell` after the deferred scheduler returns. It does not create action 181.
 The accounting correction has 76 focused automated tests passing, and the full repository
-suite passes 253 tests. A fresh-process `AR3000` diagnostic against runtime SHA-256
+suite passes 254 tests. A fresh-process `AR3000` diagnostic against runtime SHA-256
 `EF38A1A0BF942A2B3AB294FAE48DA2548E9413DBD5FE7CB255406C413E06DD3D` then passed ambient
 delivery and one-slot accounting on all four neutral Vigil casters: every exact marker and
 schema-2 charged ledger was present, with the expected `2 -> 1` or `1 -> 0` slot delta and no
