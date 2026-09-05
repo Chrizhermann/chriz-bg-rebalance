@@ -1,0 +1,60 @@
+// Isolated --nogame harness for component 301's file-backed transformation.
+//
+// argv[0]  = production TPA
+// argv[1]  = fixture resource directory
+// argv[2]  = output resource directory
+// argv[3]  = Courage resref
+// argv[4]  = Hope resref
+// argv[5]  = Fear resref
+// argv[6]  = Horror resref
+// argv[7]  = innate Horror resref
+// argv[8]  = Hopelessness resref
+// argv[9]  = Symbol, Hopelessness resref
+// argv[10] = optional Courage SPLSTATE value (-1 means absent)
+// argv[11] = optional Hope SPLSTATE value (-1 means absent)
+// argv[12] = new Courage name strref
+// argv[13] = new Courage description strref
+// argv[14] = new Hope name strref
+// argv[15] = new Hope description strref
+
+BACKUP ~backup~
+AUTHOR ~chriz-bg-rebalance test harness~
+
+BEGIN ~Emotion Hope/Courage harness: file transformation~
+DESIGNATED 0
+
+// The production function operates only on this explicit tree.  In
+// particular, this hermetic harness never resolves resources through a game
+// KEY and never touches the process-local override directory.
+COPY ~%argv[1]%~ ~%argv[2]%~
+
+INCLUDE ~%argv[0]%~
+
+OUTER_SET cbr_harness_courage_state = %argv[10]%
+OUTER_SET cbr_harness_hope_state = %argv[11]%
+OUTER_SET cbr_harness_courage_name = %argv[12]%
+OUTER_SET cbr_harness_courage_desc = %argv[13]%
+OUTER_SET cbr_harness_hope_name = %argv[14]%
+OUTER_SET cbr_harness_hope_desc = %argv[15]%
+
+LAF cbr_apply_emotion_hope_courage
+  INT_VAR
+    courage_spell_state = cbr_harness_courage_state
+    hope_spell_state    = cbr_harness_hope_state
+    courage_name_strref = cbr_harness_courage_name
+    courage_desc_strref = cbr_harness_courage_desc
+    hope_name_strref    = cbr_harness_hope_name
+    hope_desc_strref    = cbr_harness_hope_desc
+  STR_VAR
+    resource_dir        = ~%argv[2]%~
+    courage_resref      = ~%argv[3]%~
+    hope_resref         = ~%argv[4]%~
+    fear_resref         = ~%argv[5]%~
+    horror_resref       = ~%argv[6]%~
+    innate_horror_resref = ~%argv[7]%~
+    hopelessness_resref = ~%argv[8]%~
+    symbol_resref       = ~%argv[9]%~
+END
+
+// A completion marker is emitted only after the action function returns.
+COPY ~%argv[1]%/CBR_INPUT.OK~ ~%argv[2]%/CBR_TEST.OK~

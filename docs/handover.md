@@ -9,6 +9,41 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-instal
 Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
 `docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `CLAUDE.md`.
 
+## Status (2026-08-30)
+
+- **Component 301 (Emotion, Courage / Emotion, Hope): IMPLEMENTED and automated-verified;
+  real delivery and mutual exclusion live-verified; status-list correction awaiting one manual
+  retest.** It owns the final dynamically resolved spell resources and English
+  descriptions, makes the beneficial Emotions mutually exclusive per creature, preserves the
+  save/MR-coupled Fear/Symbol removers, the unconditional Emotion, Hopelessness remover, and SCS
+  state markers. It supplies dynamically allocated fallback spells with original blue IWDEE
+  spell icons, independently extracted 13x13 IWDEE heart status icons, dynamic `STATDESC.2DA`
+  rows/opcode 142, a private IWDEE allies-only projectile/animation/sound graph, and clean
+  point-target CBR scrolls when the symbols are absent. Standalone store distribution mirrors the live donor
+  entries dynamically; fixed area, CRE, spellbook, and save edits are excluded. Install after
+  IWDification, SCS, SR, and other spell/scroll/store overhauls. Evidence:
+  `research/11-emotion-hope-courage.md`; design:
+  `docs/plans/2026-08-30-emotion-hope-courage-design.md`.
+- **The earlier controlled result did not validate delivery.** Direct EEex effect-block tests in
+  `CBR301 DISPOSABLE TEST 20260830 R2` bypassed the spell projectile. The later UI pass correctly
+  found that the former HOLD projectile filtered out allies and that the donor-cloned Courage
+  scroll could not target the ground. The corrected IWDEE projectile and clean scroll build pass
+  automated binary/install tests and were installed once into the fresh disposable
+  `CBR301 CORRECTED TEST 20260830` copy. Its first save load crashed because that clean host was
+  missing the EEex/BuffBot runtime required by the `bfbt-test` save, not because of a decoded
+  component resource defect. A compatible fresh `CBR301 CORRECTED UI TEST R2 20260830` host now
+  has the exact old EEex/BuffBot/Remote Console order, English TLK, isolated profile, referenced
+  test resources, and corrected component 301 last; launch it only through `InfinityLoader.exe`.
+  The later real UI casts delivered both complete buff sequences and confirmed Hope/Courage
+  replacement, but showed no character-sheet status entry because the fallback SPLs had no
+  opcode 142 and the clone had no matching `STATDESC.2DA` rows. The repository correction now
+  generates both. A fresh `CBR301 STATUS UI TEST R3 20260830` host and matching isolated profile
+  are installed and binary-audited: Courage/Hope resolve to `SPWI422`/`SPWI426`, their status
+  rows are 207/208, and both one-frame 13x13 D BAMs match the native IWDEE hashes. Launch only
+  that host's `InfinityLoader.exe`; only the visible status-list result still needs manual
+  confirmation. The production game and active playthrough stayed read-only. Full evidence:
+  `research/11-emotion-hope-courage.md`.
+
 ## Status (2026-08-22)
 
 - **Component 407 (EEex spec-APR listener) was LIVE-BROKEN — fixed, shipped as 409.** The

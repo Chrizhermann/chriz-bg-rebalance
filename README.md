@@ -9,8 +9,9 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 
 ## Credits — stand on the shoulders of giants
 
-This mod exists *because* of two outstanding open-source mods, and it only makes sense installed
-on top of them:
+This mod grew out of three outstanding open-source mods, and many components are designed to be
+installed on top of them. Component 301 can also supply its own Hope and Courage spells on a
+plain BG2:EE/EET spell set:
 
 - **[Sword Coast Stratagems (SCS)](https://github.com/Gibberlings3/SwordCoastStratagems)** by
   DavidW — the gold standard for Infinity Engine AI and tactics. Install it. This mod merely
@@ -18,9 +19,16 @@ on top of them:
 - **[Spell Revisions (SR)](https://github.com/Gibberlings3/SpellRevisions)** by Demivrgvs & the
   Gibberlings3 team — a thoughtful, comprehensive spell rebalance. Most of its changes are
   excellent; this mod adjusts the handful that don't fit my table.
+- **[IWDification](https://github.com/Gibberlings3/iwdification)** by CamDawg and contributors —
+  the established Icewind Dale spell port whose spell allocation, detectable-state, and
+  donor-scroll distribution precedents informed component 301.
 
-Code patterns in this repo are frequently adapted from SCS (open source). Bugs found here are
-reported upstream first (see `research/02-upstream-scs-report-draft.md`).
+Code patterns in this repo are frequently adapted from SCS (open source). Component 301 uses
+original CBR code and English text informed by the PnP/IWD spell concepts and read-only study of
+the installed IWDification/SCS implementations. Its standalone presentation files are original
+IWDEE game assets extracted from a pristine user-owned installation and credited in
+`chriz-bg-rebalance/resources/emotion_iwdee/README.md`; no IWDification or SCS binary was copied.
+Bugs found here are reported upstream first (see `research/02-upstream-scs-report-draft.md`).
 
 ## Components
 
@@ -29,7 +37,7 @@ reported upstream first (see `research/02-upstream-scs-report-draft.md`).
 | 100 | SCS adjustments | Telekinetic Storm: restore save vs. spell for half damage (+ bypass Mirror Image) | ✅ implemented |
 | 101 | SCS adjustments | Restore five Freedom scrolls to the Adventurer's Mart | ✅ implemented |
 | 2xx | SR adjustments | Cherry-picked Spell Revisions tweaks | 📋 planning (`docs/00-project-scope.md`) |
-| 3xx | Cross-cutting audits | e.g. generalized save-for-half audit | 📋 planning |
+| 301 | Cross-cutting audits | Emotion, Courage / Emotion, Hope: mutually exclusive beneficial emotions | ✅ implemented and automated-verified; delivery/mutual exclusion live-verified, status-entry retest pending |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 
 ### Component 100 — Telekinetic Storm save fix
@@ -47,6 +55,51 @@ ORs `save vs. spell (bit 0) + bypass mirror image (bit 24)` into the save-type f
 save-for-half damage effect, across all level-scaled ability headers. Idempotent.
 
 Full diagnosis: `research/01-telekinetic-storm-save-bug.md`.
+
+### Component 301 — Emotion, Courage / Emotion, Hope
+
+Component 301 owns the final level-four wizard spells at their dynamically resolved
+`SPELL.IDS` slots. The last beneficial Emotion applied wins on each creature, while recasting
+the same spell refreshes it. Courage grants +1 THAC0, +3 damage, and +5 Hit Points and ends fear
+and morale failure. Hope grants +2 morale, +2 THAC0, +2 damage, and +2 to all saving throws and
+ends Emotion, Hopelessness and Symbol, Hopelessness. Fear and Symbol, Hopelessness remove their
+matching benefit in the hostile mechanic's save/MR domain. Emotion, Hopelessness retains its
+established unconditional Hope removal before its separately saved hostile effects.
+
+**Compatibility notice:** Component 301 deliberately overwrites the effective Emotion,
+Courage and Emotion, Hope mechanics and English descriptions. Install it after IWDification,
+SCS, Spell Revisions, and other spell, scroll, or store overhauls. A spell mod installed later
+can overwrite component 301 again.
+
+When the symbols already exist, the component retains their allocated slots, valid installed
+visual/audio references, and existing learn-scroll placement. When either symbol is missing,
+it allocates the missing spell dynamically in a normal level-four wizard slot and creates a
+private CBR learn-scroll. The standalone spells use the original blue IWDEE A/B/C icons,
+independently extracted 13x13 IWDEE heart status icons, and a privately namespaced copy of
+IWDEE's allies-only Emotion projectile, VVC, animation, and sounds. Each fallback receives a
+dynamic `STATDESC.2DA` row and one 300-second opcode-142 entry, so `Courage` or `Hope` appears
+in the character-sheet status list. The scrolls are constructed cleanly from the same contract
+as IWDification: point targeting, range 50, opcode 148 at caster level 10, followed by a
+separate opcode-147 learning ability.
+
+The dynamically discovered Enchanted Weapon and Emotion, Hopelessness scrolls are distribution
+anchors only; their item abilities, icons, and other bytes are not cloned. Component 301 mirrors
+their store entries while preserving each store's quantities, charges, flags, and ordering.
+Those donor scrolls remain guarded requirements for the initial standalone distribution path;
+a missing or ambiguous donor aborts the WeiDU transaction. An existing spell with no
+discoverable learn-scroll is left without one in this initial compatibility pass. The component
+does not add fixed area, creature, save, or spellbook edits, so a store already cached in an
+active save may not acquire a new entry without separate save work.
+
+The first disposable UI pass exposed an enemy-only HOLD projectile and a donor-cloned Courage
+scroll in the earlier build; that build could not apply either buff and was discarded. The
+corrected UI test then confirmed real spell delivery, the complete stat sequences, and
+Hope/Courage replacement, but exposed one remaining presentation defect: the fallback spells
+had no character-sheet status entry. Regression tests now require the IWDEE allies-only
+projectile, blue icons, point-target scroll contract, dynamic STATDESC rows, D-icons, and
+opcode 142. A final manual status-list retest remains. Full binary evidence, provenance, and
+the controlled-test boundary are in
+`research/11-emotion-hope-courage.md`.
 
 ### Components 401–403 — Cleric of Tempus Holy Power
 
@@ -77,11 +130,11 @@ Copy `chriz-bg-rebalance/` + `setup-chriz-bg-rebalance.tp2` into the game dir, t
 target install's conventions) copy the WeiDU template as `Setup-chriz-bg-rebalance.exe` and run:
 
 ```
-./Setup-chriz-bg-rebalance.exe --force-install-list 401 --language 0 --no-exit-pause
+./Setup-chriz-bg-rebalance.exe --force-install-list 401 301 --language 0 --no-exit-pause
 ```
 
-Use `100`, `101`, or exactly one of `401`/`402`/`403` as appropriate; the example selects the
-recommended Tempus mode.
+Use `100`, `101`, `301`, or exactly one of `401`/`402`/`403` as appropriate. The example selects
+the recommended Tempus mode and installs component 301 last, after every spell overhaul.
 
 Always tail-install: append after the current last WeiDU.log entry. Never uninstall.
 
