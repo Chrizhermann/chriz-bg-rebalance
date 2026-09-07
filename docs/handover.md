@@ -9,7 +9,19 @@ SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-instal
 Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
 `docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `AGENTS.md`.
 
-## Status (2026-09-04) — v1.2 ambient/urgent PASS; Tempus CLAB compatibility fix ready in v0.3.1
+## Status (2026-09-07) — v0.3.2 Tempus Holy Power compatibility
+
+- Component 401 now recognizes validated single-hop Improved Haste doubling and
+  the original non-SR Divine Power exclusion prefix. SCS and Spell Revisions are
+  optional for this component family. Unsafe or ambiguous layouts still fail.
+- All 281 automated tests pass, including actual base-game and SCS/no-SR inputs,
+  source preservation, idempotence and exact rollback in isolated synthetic games.
+  See `research/14-tempus-delegated-haste.md` and `CHANGELOG.md`.
+- The collection task owns the new artifact pin, frozen-record reconciliation and
+  controlled recovery of failed component 401. This release work does not modify
+  either installed game or certify the earlier live rollback.
+
+## Previous status (2026-09-04) — v1.2 ambient/urgent PASS; v0.3.1 CLAB fix
 
 - **Component 401's first clean curated-stack install exposed one narrow validator gap.**
   Artisan's Kitpack legitimately packs `AP_C0PR#CL` into otherwise empty `ABILITY1` cells
@@ -17,8 +29,7 @@ Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Ap
   at ordinary levels and still clears only the five late Holy Power grants. See
   `research/13-tempus-artisan-clab-packing.md`. All 68 Holy Power tests pass, and the
   isolated release candidate installed `401` with no warning/error and verified every
-  resulting CLAB invariant. It is included in v0.3.1, the successor release the public
-  collection should pin instead of v0.3.0.
+  resulting CLAB invariant. It first shipped in v0.3.1 and remains in v0.3.2.
 
 - **The approved v1.2 laboratory now exists:**
   `C:\Games\Baldur's Gate II Enhanced Edition modded - CBR Ambient Readiness v1.2 Test`

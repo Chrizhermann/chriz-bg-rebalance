@@ -9,8 +9,8 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 
 ## Credits — stand on the shoulders of giants
 
-This mod exists *because* of two outstanding open-source mods, and it only makes sense installed
-on top of them:
+This mod draws on two outstanding open-source mods. Its Tempus Holy Power components also work
+without them; other components declare their own prerequisites:
 
 - **[Sword Coast Stratagems (SCS)](https://github.com/Gibberlings3/SwordCoastStratagems)** by
   DavidW — the gold standard for Infinity Engine AI and tactics. Install it. This mod merely

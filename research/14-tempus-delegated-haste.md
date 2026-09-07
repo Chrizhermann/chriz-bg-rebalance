@@ -151,12 +151,11 @@ release and collection artifact/checksum pin are required before that recovery.
 
 ## Release and collection handoff
 
-This work is based on the installed v0.3.1 commit `d31fda2` and is an unreleased
-fix on `codex/tempus-delegated-haste`. Before collection recovery:
+This work is based on the installed v0.3.1 commit `d31fda2`; implementation commit
+`e79e775` is included in v0.3.2. Release and collection recovery requirements:
 
-1. Integrate the fix into the release branch, bump `VERSION` in
-   `setup-chriz-bg-rebalance.tp2`, and publish a new immutable release/tag (next
-   patch candidate: v0.3.2). Do not replace the existing v0.3.1 archive.
+1. Publish the integrated fix and synchronized `VERSION` as a new immutable v0.3.2
+   release/tag. Do not replace the existing v0.3.1 archive.
 2. Verify the published package contains this library and record its exact URL,
    version/ref and SHA-256. Update the collection source pin through its normal
    lock/freeze workflow; local working-tree files are not a reproducible pin.
