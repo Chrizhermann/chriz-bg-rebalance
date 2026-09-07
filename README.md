@@ -176,8 +176,9 @@ uses automatic semantic detection and is the recommended choice. Components 402 
 advanced overrides that force true-doubling or additive Improved Haste compatibility; they still
 validate the final spell before changing it.
 
-Install after Spell Revisions, SCS, The Artisan's Kitpack, and any other mod that changes spells
-or cleric kits. The installer resolves Divine Power and Improved Haste through `SPELL.IDS`,
+Spell Revisions and SCS are optional. Install after either when present, and after The Artisan's
+Kitpack and other mods that change spells or cleric kits. The installer resolves Divine Power
+and Improved Haste through `SPELL.IDS`,
 materializes the six effective input resources at their canonical `override` paths inside the
 WeiDU transaction, and then runs the same preflight-first transformation the fixture harness
 tests. WeiDU itself backs up, rolls back on failure, and exactly removes or restores every
@@ -185,6 +186,14 @@ touched file on uninstall. It adds no game-facing strings and performs no `dialo
 Artisan may pack its exact per-level cleric permission grant `AP_C0PR#CL` into otherwise empty
 `ABILITY1` cells; the validator recognizes and preserves that one known layout while keeping
 the Holy Power and level-25 cells strict. See `research/13-tempus-artisan-clab-packing.md`.
+
+Improved Haste supports direct additive APR (SR), direct doubling, and a validated single
+opcode-146 hop to a doubling spell. Every caster-level header must agree. SCS conditional
+message helpers are checked to contain only display-string effects; missing, malformed,
+conditional haste, nested, or ambiguous delivery still aborts. Delegated additive effects are
+unsupported because their APR bridge needs a different transformation. The original non-SR
+Divine Power exclusion is recognized and upgraded to the same cleanup used by the SR branch.
+See `research/14-tempus-delegated-haste.md` for captured inputs and isolated test evidence.
 
 Existing characters automatically use the patched `OHTMPS1` resource. Branwen at level 13
 already has the intended three uses, so this component needs no save edit for her. Characters

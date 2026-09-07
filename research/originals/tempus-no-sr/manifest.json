@@ -1,0 +1,129 @@
+{
+  "captured_utc": "2026-09-07T07:51:10.281012+00:00",
+  "game_root": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game",
+  "source_policy": "Read-only Python byte reads; no WeiDU run in installation; pristine means pre-fix effective bytes, not vanilla game bytes.",
+  "resources": [
+    {
+      "file": "SPWI613.SPL",
+      "source": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\override\\SPWI613.SPL",
+      "source_mtime_utc": "2026-09-07T07:39:08.966721+00:00",
+      "size": 3930,
+      "sha256": "4a589516945f11085e6a4d23b5ca756a42e0842d771c4b237a289154dd379e28"
+    },
+    {
+      "file": "SPWI613A.SPL",
+      "source": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\override\\SPWI613A.SPL",
+      "source_mtime_utc": "2026-09-07T06:49:42.570156+00:00",
+      "size": 4362,
+      "sha256": "8a761ca90b637acf71c0c902208a4526b6611cfb399f7ae6334f557ba161d5c5"
+    },
+    {
+      "file": "OHTMPS1.SPL",
+      "source": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\override\\OHTMPS1.SPL",
+      "source_mtime_utc": "2026-09-07T07:39:09.585751+00:00",
+      "size": 13394,
+      "sha256": "91a9965ed945d33e802fd7925d2e093667b3ac0cc61d82a0a01eef2d22610a6c"
+    },
+    {
+      "file": "SPPR412.SPL",
+      "source": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\override\\SPPR412.SPL",
+      "source_mtime_utc": "2026-09-07T07:39:08.965211+00:00",
+      "size": 9410,
+      "sha256": "559902095da30ae8d0d66b96c9a830791d83502d24d13d02ed8935b4371abeaa"
+    },
+    {
+      "file": "OHTEMPUS.2DA",
+      "source": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\override\\OHTEMPUS.2DA",
+      "source_mtime_utc": "2026-09-07T07:39:09.460405+00:00",
+      "size": 5444,
+      "sha256": "f23d2c73ac5b3a8ed41c13f1101e2b0b286aefce80664bb9e4e976e893be4857"
+    },
+    {
+      "file": "SPELL.IDS",
+      "source": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\override\\SPELL.IDS",
+      "source_mtime_utc": "2026-09-07T07:26:54.919782+00:00",
+      "size": 30755,
+      "sha256": "cdd0f9ac66cb7736b8911df7cf53fc3d18e955481a2d2f2d8a566a6b35ccf3e2"
+    },
+    {
+      "file": "SPLSTATE.IDS",
+      "source": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\override\\SPLSTATE.IDS",
+      "source_mtime_utc": "2026-09-07T07:39:09.542890+00:00",
+      "size": 4223,
+      "sha256": "c11524e6ce6011711ce07ff690d605e85f63cd735d6f4e805f74fba2595187ec"
+    },
+    {
+      "file": "SPLPROT.2DA",
+      "source": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\override\\SPLPROT.2DA",
+      "source_mtime_utc": "2026-09-07T07:39:08.969255+00:00",
+      "size": 79105,
+      "sha256": "b30cf16a3d0efe9fcfdd73c26ce921919ed06196faa0f5d1a3d307f10fab12a2"
+    },
+    {
+      "file": "DW_NEG40.SPL",
+      "source": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\override\\DW_NEG40.SPL",
+      "source_mtime_utc": "2026-09-07T06:49:33.086667+00:00",
+      "size": 202,
+      "sha256": "9932e4c0d36ff75592631318b8f0ca952a6fa53f14ca84fa4de6c8e496f70b47"
+    }
+  ],
+  "evidence": {
+    "debug": {
+      "source": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\SETUP-CHRIZ-BG-REBALANCE.DEBUG",
+      "sha256": "9bc149f9d2d98881599a7b720040c942ca95b3c17d3452296b7e7e6cf7b64ce0",
+      "line": 2065,
+      "error": "CBR Improved Haste SPWI613 header 0 has an unsafe opcode/probability layout for mode auto: opcode1 additive=0 deterministic=0; opcode16/317 double=0 deterministic=0; require timed probability 100/0."
+    },
+    "attempt": {
+      "path": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\.chriz\\attempts\\attempt-e6b6f3a5aacc11891051\\steps\\0106-fab86e09514d1f0a\\attempt-0001",
+      "files": [
+        {
+          "name": "after.log",
+          "sha256": "d7d7eda47b886c03f5efff59764eddf32745f43621067277bb2a2202f493f699"
+        },
+        {
+          "name": "before.log",
+          "sha256": "276e7099180190ffd76ec53015ab36e46ca705c3848837a011fecca3a1597208"
+        },
+        {
+          "name": "invocation.json",
+          "sha256": "4ace06fc58bf8763636692d2b105ba58f9cbce17cc142f96103603c1646c48b4"
+        },
+        {
+          "name": "process-output.log",
+          "sha256": "574fdd7b9675cbe796aeb47ff408e27c6e1c0554aef2749c8a4a663bdd159485"
+        },
+        {
+          "name": "process-result.json",
+          "sha256": "400187e390edccdd3f066a9311f0c080fe00dc0531bc2f724b09b89ff3d40b9f"
+        },
+        {
+          "name": "prompt-results.jsonl",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "stderr.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "stdout.log",
+          "sha256": "574fdd7b9675cbe796aeb47ff408e27c6e1c0554aef2749c8a4a663bdd159485"
+        },
+        {
+          "name": "weidu.debug.log",
+          "sha256": "44fee7c5151a1c3ed5e1cfa30e88002c2899a03551903dc845ed25939572751e"
+        }
+      ]
+    },
+    "weidu_log": {
+      "source": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\WeiDU.log",
+      "size": 38383,
+      "sha256": "d7d7eda47b886c03f5efff59764eddf32745f43621067277bb2a2202f493f699"
+    }
+  },
+  "read_only_verification": {
+    "verified_utc": "2026-09-07T07:59:47.470597+00:00",
+    "checked_source_files": 20,
+    "result": "Every captured source resource, setup DEBUG, WeiDU.log, and attempt-owned evidence file matches the recorded SHA-256. No live installer operation was performed."
+  }
+}

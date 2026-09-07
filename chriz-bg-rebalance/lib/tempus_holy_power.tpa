@@ -3,9 +3,9 @@
 // This file is deliberately self-contained.  It does not INCLUDE SCS, Spell
 // Revisions, or Artisan's Kitpack at install time.  The SPL V1 table walk uses
 // the empirical nFx@0x1e / firstFxIdx@0x20 layout recorded in research/04.
-// Improved Haste classification follows the final SR direct-opcode pattern
-// documented there, but validates every reachable header instead of assuming
-// a particular resref such as SPWI613.
+// Improved Haste classification supports direct SR/additive and vanilla/double
+// effects plus the single-hop non-SR cast-spell wrapper captured in research/14.
+// All caster-level headers are validated; no SCS/SR presence flag selects a mode.
 
 DEFINE_PATCH_FUNCTION cbr_validate_spl_v1
   STR_VAR
@@ -86,9 +86,12 @@ BEGIN
 END
 
 DEFINE_PATCH_FUNCTION cbr_classify_improved_haste
+  INT_VAR
+    delegated = 0
   STR_VAR
     improved_haste_resref = ~~
     compatibility_mode    = ~auto~
+    resource_dir          = ~~
   RET
     classification
 BEGIN
@@ -108,6 +111,7 @@ BEGIN
   END
 
   SET cbr_ih_detected = 0
+  SET cbr_ih_delivery = "-1"
   SET cbr_ih_previous_level = 0
 
   FOR (cbr_header = 0; cbr_header < cbr_ih_ability_count; ++cbr_header) BEGIN
@@ -115,6 +119,14 @@ BEGIN
     READ_SHORT (cbr_header_offset + 0x10) cbr_header_level
     READ_SHORT (cbr_header_offset + 0x1e) cbr_header_effect_count
     READ_SHORT (cbr_header_offset + 0x20) cbr_header_first_effect
+
+    PATCH_IF (delegated != 0) BEGIN
+      READ_BYTE (cbr_header_offset + 0x0c) cbr_ih_child_target
+      READ_SHORT (cbr_header_offset + 0x26) cbr_ih_child_projectile
+      PATCH_IF (cbr_ih_child_target != 1 || cbr_ih_child_projectile != 1) BEGIN
+        PATCH_FAIL ~CBR Improved Haste %improved_haste_resref% header %cbr_header% has unsupported delegated target/projectile; require single-target delivery.~
+      END
+    END
 
     PATCH_IF (cbr_header_level < 1 || (cbr_header > 0 && cbr_header_level <= cbr_ih_previous_level)) BEGIN
       PATCH_FAIL ~CBR Improved Haste %improved_haste_resref% header %cbr_header% is not a uniquely reachable caster-level header; inspect header levels and opcode layout.~
@@ -125,11 +137,15 @@ BEGIN
     SET cbr_additive_deterministic = 0
     SET cbr_double_count = 0
     SET cbr_double_deterministic = 0
+    SET cbr_mechanic_count = 0
+    SET cbr_delegate_count = 0
+    SPRINT cbr_delegate_resref ~~
 
     FOR (cbr_effect = 0; cbr_effect < cbr_header_effect_count; ++cbr_effect) BEGIN
       SET cbr_effect_index = cbr_header_first_effect + cbr_effect
       SET cbr_effect_offset = cbr_ih_effect_offset + (cbr_effect_index * 0x30)
       READ_SHORT (cbr_effect_offset + 0x00) cbr_opcode
+      READ_BYTE  (cbr_effect_offset + 0x02) cbr_target
       READ_LONG  (cbr_effect_offset + 0x04) cbr_parameter1
       READ_LONG  (cbr_effect_offset + 0x08) cbr_parameter2
       READ_BYTE  (cbr_effect_offset + 0x0c) cbr_timing
@@ -143,6 +159,28 @@ BEGIN
       READ_LONG  (cbr_effect_offset + 0x24) cbr_save_type
       READ_LONG  (cbr_effect_offset + 0x28) cbr_save_bonus
       READ_LONG  (cbr_effect_offset + 0x2c) cbr_special
+
+      PATCH_IF (cbr_opcode = 1 || cbr_opcode = 16 || cbr_opcode = 317) BEGIN
+        ++cbr_mechanic_count
+      END
+
+      PATCH_IF (cbr_opcode = 146) BEGIN
+        ++cbr_delegate_count
+        PATCH_IF (delegated != 0) BEGIN
+          PATCH_FAIL ~CBR Improved Haste %improved_haste_resref% header %cbr_header% has nested or cyclic opcode146 delegation; only one haste delivery hop is supported.~
+        END
+        // p2=1 casts instantly at caster level, so every child header must
+        // agree. Other casting modes/targets/gates need their own proof.
+        PATCH_IF !(cbr_target = 2 && cbr_parameter1 = 0 && cbr_parameter2 = 1
+                && cbr_timing = 1 && cbr_duration = 0
+                && ((cbr_resist_dispel BAND 2) = 2)
+                && cbr_probability1 = 100 && cbr_probability2 = 0
+                && cbr_dice_number = 0 && cbr_dice_size = 0
+                && cbr_save_type = 0 && cbr_save_bonus = 0 && cbr_special = 0) BEGIN
+          PATCH_FAIL ~CBR Improved Haste %improved_haste_resref% header %cbr_header% has unsafe opcode146 delegation: require immediate ungated target-2 caster-level delivery with probability 100/0.~
+        END
+        SPRINT cbr_delegate_resref ~%cbr_resource%~
+      END
 
       PATCH_IF (cbr_opcode = 1 && cbr_parameter1 = 1 && cbr_parameter2 = 0) BEGIN
         ++cbr_additive_count
@@ -166,11 +204,31 @@ BEGIN
         PATCH_IF ((cbr_timing = 0 || cbr_timing = 3) && cbr_duration > 0 && cbr_probability1 = 100 && cbr_probability2 = 0) BEGIN
           ++cbr_double_deterministic
         END
+        PATCH_IF (delegated != 0
+               && !(cbr_target = 2 && cbr_parameter1 = 0 && cbr_timing = 0
+                 && ((cbr_resist_dispel BAND 2) = 2)
+                 && ~%cbr_resource%~ STR_EQ ~~
+                 && cbr_dice_number = 0 && cbr_dice_size = 0
+                 && cbr_save_type = 0 && cbr_save_bonus = 0 && cbr_special = 0)) BEGIN
+          PATCH_FAIL ~CBR Improved Haste %improved_haste_resref% header %cbr_header% has unsafe delegated doubling effect fields.~
+        END
       END
     END
 
     SET cbr_header_semantics = 0
-    PATCH_IF (cbr_additive_count = 1 && cbr_additive_deterministic = 1 && cbr_double_count = 0) BEGIN
+    SET cbr_header_delivery = 0
+    PATCH_IF (cbr_delegate_count > 0) BEGIN
+      PATCH_IF (cbr_delegate_count != 1 || cbr_mechanic_count != 0) BEGIN
+        PATCH_FAIL ~CBR Improved Haste %improved_haste_resref% header %cbr_header% has ambiguous delegation: require exactly one opcode146 and no direct APR/haste effects.~
+      END
+      INNER_ACTION BEGIN
+        LAF cbr_read_improved_haste_dependency
+          STR_VAR resource_dir = EVAL ~%resource_dir%~ dependency = EVAL ~%cbr_delegate_resref%~ parent = EVAL ~%improved_haste_resref%~ kind = ~double~
+        END
+      END
+      SET cbr_header_semantics = 2
+      SET cbr_header_delivery = 1
+    END ELSE PATCH_IF (cbr_additive_count = 1 && cbr_additive_deterministic = 1 && cbr_double_count = 0) BEGIN
       SET cbr_header_semantics = 1
     END ELSE PATCH_IF (cbr_double_count = 1 && cbr_double_deterministic = 1 && cbr_additive_count = 0) BEGIN
       SET cbr_header_semantics = 2
@@ -178,10 +236,35 @@ BEGIN
       PATCH_FAIL ~CBR Improved Haste %improved_haste_resref% header %cbr_header% has an unsafe opcode/probability layout for mode %compatibility_mode%: opcode1 additive=%cbr_additive_count% deterministic=%cbr_additive_deterministic%; opcode16/317 double=%cbr_double_count% deterministic=%cbr_double_deterministic%; require timed probability 100/0.~
     END
 
+    PATCH_IF (delegated != 0 && (cbr_header_semantics != 2 || cbr_mechanic_count != 1)) BEGIN
+      PATCH_FAIL ~CBR Improved Haste %improved_haste_resref% header %cbr_header% has unsupported delegated additive or ambiguous APR semantics; require one doubling effect.~
+    END
+    PATCH_IF (cbr_ih_delivery = "-1") BEGIN
+      SET cbr_ih_delivery = cbr_header_delivery
+    END ELSE PATCH_IF (cbr_ih_delivery != cbr_header_delivery) BEGIN
+      PATCH_FAIL ~CBR Improved Haste %improved_haste_resref% mixes direct and delegated header delivery.~
+    END
+
+    PATCH_IF (delegated != 0 || cbr_header_delivery = 1) BEGIN
+      LPF cbr_validate_improved_haste_auxiliary
+        INT_VAR effect_offset = cbr_ih_effect_offset first_effect = cbr_header_first_effect count = cbr_header_effect_count allow_haste = 1 allow_delegate = cbr_header_delivery
+        STR_VAR resource_dir = EVAL ~%resource_dir%~ resource_name = EVAL ~%improved_haste_resref%~
+      END
+    END
+
     PATCH_IF (cbr_ih_detected = 0) BEGIN
       SET cbr_ih_detected = cbr_header_semantics
     END ELSE PATCH_IF (cbr_ih_detected != cbr_header_semantics) BEGIN
       PATCH_FAIL ~CBR Improved Haste %improved_haste_resref% is header-inconsistent at header %cbr_header%: additive and opcode16/317 doubling semantics differ; mode %compatibility_mode%.~
+    END
+  END
+
+  PATCH_IF (delegated != 0 || cbr_ih_delivery = 1) BEGIN
+    READ_SHORT 0x6e cbr_ih_casting_first
+    READ_SHORT 0x70 cbr_ih_casting_count
+    LPF cbr_validate_improved_haste_auxiliary
+      INT_VAR effect_offset = cbr_ih_effect_offset first_effect = cbr_ih_casting_first count = cbr_ih_casting_count
+      STR_VAR resource_dir = EVAL ~%resource_dir%~ resource_name = EVAL ~%improved_haste_resref% casting effects~
     END
   END
 
@@ -201,24 +284,118 @@ BEGIN
   END
 END
 
+// No arbitrary graph traversal: opcode326 may reference a terminal, message-only
+// SPL (SCS's DW_NEG40 in the capture). Its resref and condition are not assumed.
+// Other indirect effect producers cannot silently hide a second APR mechanic.
+DEFINE_PATCH_FUNCTION cbr_validate_improved_haste_auxiliary
+  INT_VAR effect_offset = 0 first_effect = 0 count = 0 allow_haste = 0 allow_delegate = 0
+  STR_VAR resource_dir = ~~ resource_name = ~~
+BEGIN
+  FOR (cbr_aux_i = 0; cbr_aux_i < count; ++cbr_aux_i) BEGIN
+    SET cbr_aux_offset = effect_offset + ((first_effect + cbr_aux_i) * 0x30)
+    READ_SHORT cbr_aux_offset cbr_aux_opcode
+    PATCH_IF (cbr_aux_opcode = 326) BEGIN
+      READ_ASCII (cbr_aux_offset + 0x14) cbr_aux_resource (8) NULL
+      INNER_ACTION BEGIN
+        LAF cbr_read_improved_haste_dependency
+          STR_VAR resource_dir = EVAL ~%resource_dir%~ dependency = EVAL ~%cbr_aux_resource%~ parent = EVAL ~%resource_name%~ kind = ~feedback~
+        END
+      END
+    END ELSE PATCH_IF !((allow_haste = 1 && (cbr_aux_opcode = 1 || cbr_aux_opcode = 16 || cbr_aux_opcode = 317))
+                    || (allow_delegate = 1 && cbr_aux_opcode = 146)
+                    // Explicit non-delivery effects: AC/THAC0, visuals/sounds,
+                    // movement, immunities and spell-state bookkeeping. Keeping
+                    // this list closed also excludes future/EEex dispatchers.
+                    || cbr_aux_opcode = 0 || cbr_aux_opcode = 50 || cbr_aux_opcode = 54
+                    || cbr_aux_opcode = 61 || cbr_aux_opcode = 101 || cbr_aux_opcode = 139
+                    || cbr_aux_opcode = 141 || cbr_aux_opcode = 142 || cbr_aux_opcode = 174
+                    || cbr_aux_opcode = 176 || cbr_aux_opcode = 206 || cbr_aux_opcode = 215
+                    || cbr_aux_opcode = 221 || cbr_aux_opcode = 318 || cbr_aux_opcode = 324
+                    || cbr_aux_opcode = 328) BEGIN
+      PATCH_FAIL ~CBR Improved Haste %resource_name% has unsupported auxiliary/casting opcode %cbr_aux_opcode% in delegated delivery.~
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_validate_improved_haste_dependency
+  STR_VAR resource_dir = ~~ dependency = ~~ kind = ~~
+BEGIN
+  PATCH_IF (~%kind%~ STR_EQ ~double~) BEGIN
+    LPF cbr_classify_improved_haste
+      INT_VAR delegated = 1
+      STR_VAR resource_dir = EVAL ~%resource_dir%~ improved_haste_resref = EVAL ~%dependency%~ compatibility_mode = ~force_double~
+    END
+  END ELSE BEGIN
+    LPF cbr_validate_spl_v1
+      STR_VAR resource_name = EVAL ~Improved Haste feedback %dependency%~
+      RET cbr_feedback_offset = effect_offset cbr_feedback_count = effect_count
+    END
+    PATCH_IF (cbr_feedback_count < 1) BEGIN
+      PATCH_FAIL ~CBR Improved Haste feedback %dependency% is empty; require a terminal message-only SPL.~
+    END
+    FOR (cbr_feedback_i = 0; cbr_feedback_i < cbr_feedback_count; ++cbr_feedback_i) BEGIN
+      READ_SHORT (cbr_feedback_offset + (cbr_feedback_i * 0x30)) cbr_feedback_opcode
+      PATCH_IF (cbr_feedback_opcode != 139) BEGIN
+        PATCH_FAIL ~CBR Improved Haste feedback %dependency% contains opcode %cbr_feedback_opcode%; require a terminal message-only SPL, with no additional haste or delegation.~
+      END
+    END
+  END
+END
+
+// Read dependencies without publishing them. Explicit fixture files take
+// precedence; in a game, COPY_EXISTING resolves override/KEY normally. Every
+// patch here is read-only and BUT_ONLY leaves even BIFF-only children unstaged.
+DEFINE_ACTION_FUNCTION cbr_read_improved_haste_dependency
+  STR_VAR resource_dir = ~~ dependency = ~~ parent = ~~ kind = ~~
+BEGIN
+  ACTION_IF (!(~%dependency%~ STRING_MATCHES_REGEXP ~^[A-Za-z0-9_#!-]+$~ = 0)
+          || STRING_LENGTH ~%dependency%~ > 8) BEGIN
+    FAIL ~CBR Improved Haste %parent% has invalid delegation resource '%dependency%'; expected a nonempty SPL resref of at most eight characters.~
+  END
+  ACTION_IF (~%dependency%~ STR_EQ ~%parent%~) BEGIN
+    FAIL ~CBR Improved Haste %parent% has cyclic delegation to itself.~
+  END
+  ACTION_IF (FILE_EXISTS ~%resource_dir%/%dependency%.SPL~) BEGIN
+    COPY ~%resource_dir%/%dependency%.SPL~ ~%resource_dir%/%dependency%.SPL~
+      LPF cbr_validate_improved_haste_dependency
+        STR_VAR resource_dir = EVAL ~%resource_dir%~ dependency = EVAL ~%dependency%~ kind = EVAL ~%kind%~
+      END
+    BUT_ONLY
+  END ELSE ACTION_IF (FILE_EXISTS ~chitin.key~) BEGIN
+    ACTION_IF !(FILE_EXISTS_IN_GAME ~%dependency%.SPL~) BEGIN
+      FAIL ~CBR Improved Haste %parent% delegation is missing %dependency%.SPL in the game.~
+    END
+    COPY_EXISTING ~%dependency%.SPL~ ~override/%dependency%.SPL~
+      LPF cbr_validate_improved_haste_dependency
+        STR_VAR resource_dir = EVAL ~%resource_dir%~ dependency = EVAL ~%dependency%~ kind = EVAL ~%kind%~
+      END
+    BUT_ONLY
+  END ELSE BEGIN
+    FAIL ~CBR Improved Haste %parent% delegation is missing %dependency%.SPL in %resource_dir%.~
+  END
+END
+
 // Read an explicit file without consulting the game KEY.  INNER_ACTION lifts
 // the pure patch result to the action caller; the COPY is source=destination
 // and BUT_ONLY guarantees that classification cannot rewrite the SPL.
 DEFINE_ACTION_FUNCTION cbr_classify_improved_haste_file
   STR_VAR
     resource_path           = ~~
+    resource_dir            = ~~
     improved_haste_resref   = ~~
     compatibility_mode      = ~auto~
   RET
     semantics
 BEGIN
   OUTER_SPRINT resource_path         EVALUATE_BUFFER ~%resource_path%~
+  OUTER_SPRINT resource_dir          EVALUATE_BUFFER ~%resource_dir%~
   OUTER_SPRINT improved_haste_resref EVALUATE_BUFFER ~%improved_haste_resref%~
   OUTER_SPRINT compatibility_mode    EVALUATE_BUFFER ~%compatibility_mode%~
   OUTER_SPRINT semantics ~~
   COPY ~%resource_path%~ ~%resource_path%~
     LPF cbr_classify_improved_haste
       STR_VAR
+        resource_dir          = EVAL ~%resource_dir%~
         improved_haste_resref = EVAL ~%improved_haste_resref%~
         compatibility_mode    = EVAL ~%compatibility_mode%~
       RET cbr_patch_semantics = classification
@@ -2461,8 +2638,10 @@ DEFINE_PATCH_FUNCTION cbr_validate_tempus_divine_cleanup_graph
     strength_set_21 = ~CBRST21~
   RET
     cleanup_status
+    legacy_cleanup
 BEGIN
   SET cleanup_status = "-1"
+  SET legacy_cleanup = 0
   LPF cbr_validate_spl_v1
     STR_VAR resource_name = EVAL ~resolved Divine Power %divine_power_resref%~
     RET
@@ -2479,6 +2658,9 @@ BEGIN
     READ_SHORT (cbr_divine_header_offset + 0x20) cbr_divine_header_first
     SET cbr_divine_owned_count = 0
     SET cbr_divine_owned_invalid = 0
+    SET cbr_divine_legacy_cross = 0
+    SET cbr_divine_legacy_self = 0
+    SET cbr_divine_self_count = 0
     FOR (cbr_divine_effect = 0; cbr_divine_effect < cbr_divine_header_count; ++cbr_divine_effect) BEGIN
       SET cbr_divine_fx = cbr_divine_effect_offset + ((cbr_divine_header_first + cbr_divine_effect) * 0x30)
       READ_SHORT cbr_divine_fx cbr_divine_opcode
@@ -2497,6 +2679,30 @@ BEGIN
       READ_LONG  (cbr_divine_fx + 0x24) cbr_divine_save_type
       READ_LONG  (cbr_divine_fx + 0x28) cbr_divine_save_bonus
       READ_LONG  (cbr_divine_fx + 0x2c) cbr_divine_special
+      // The captured non-SR spell already excludes Holy Power and refreshes
+      // itself. Recognize its exact original pair independently of CBR's
+      // five-record prefix; a partial modern prefix must still fail closed.
+      PATCH_IF (cbr_divine_opcode = 321
+             && ~%cbr_divine_resource%~ STR_EQ ~%divine_power_resref%~) BEGIN
+        ++cbr_divine_self_count
+      END
+      PATCH_IF (cbr_divine_opcode = 321
+             && cbr_divine_target = 1 && cbr_divine_power = 4
+             && cbr_divine_parameter1 = 0 && cbr_divine_parameter2 = 0
+             && cbr_divine_timing = 1 && cbr_divine_dr = 3
+             && cbr_divine_duration = 0
+             && cbr_divine_probability1 = 100 && cbr_divine_probability2 = 0
+             && cbr_divine_dice_number = 0 && cbr_divine_dice_size = 0
+             && cbr_divine_save_type = 0 && cbr_divine_save_bonus = 0
+             && cbr_divine_special = 0) BEGIN
+        PATCH_IF (cbr_divine_effect = 0
+               && ~%cbr_divine_resource%~ STR_EQ ~OHTMPS1~) BEGIN
+          SET cbr_divine_legacy_cross = 1
+        END ELSE PATCH_IF (cbr_divine_effect = 1
+                        && ~%cbr_divine_resource%~ STR_EQ ~%divine_power_resref%~) BEGIN
+          SET cbr_divine_legacy_self = 1
+        END
+      END
       SET cbr_divine_slot = "-1"
       SET cbr_divine_expected_p2 = 2
       PATCH_IF (~%cbr_divine_resource%~ STR_EQ ~OHTMPS1~) BEGIN
@@ -2535,14 +2741,22 @@ BEGIN
     SET cbr_divine_header_status = 0
     PATCH_IF (cbr_divine_owned_count = 5 && !cbr_divine_owned_invalid) BEGIN
       SET cbr_divine_header_status = 1
+    END ELSE PATCH_IF (cbr_divine_owned_count = 1
+                   && cbr_divine_legacy_cross = 1 && cbr_divine_legacy_self = 1
+                   && cbr_divine_self_count = 1) BEGIN
+      SET cbr_divine_header_status = 2
     END ELSE PATCH_IF (cbr_divine_owned_count != 0 || cbr_divine_owned_invalid) BEGIN
       PATCH_FAIL ~CBR Divine Power %divine_power_resref% header %cbr_divine_header% has a partial, duplicated, or misordered Tempus cleanup prefix.~
     END
     PATCH_IF (cleanup_status < 0) BEGIN
       SET cleanup_status = cbr_divine_header_status
     END ELSE PATCH_IF (cleanup_status != cbr_divine_header_status) BEGIN
-      PATCH_FAIL ~CBR Divine Power %divine_power_resref% mixes pristine and Tempus-cleanup headers.~
+      PATCH_FAIL ~CBR Divine Power %divine_power_resref% mixes pristine, legacy, or Tempus-cleanup headers.~
     END
+  END
+  PATCH_IF (cleanup_status = 2) BEGIN
+    SET legacy_cleanup = 1
+    SET cleanup_status = 0
   END
 END
 
@@ -3202,6 +3416,13 @@ DEFINE_PATCH_FUNCTION cbr_build_tempus_divine_cleanup
     strength_set_20 = ~CBRST20~
     strength_set_21 = ~CBRST21~
 BEGIN
+  LPF cbr_validate_tempus_divine_cleanup_graph
+    STR_VAR
+      divine_power_resref = EVAL ~%divine_power_resref%~
+      strength_set_18 = EVAL ~%strength_set_18%~ strength_set_19 = EVAL ~%strength_set_19%~
+      strength_set_20 = EVAL ~%strength_set_20%~ strength_set_21 = EVAL ~%strength_set_21%~
+    RET cbr_divine_build_legacy = legacy_cleanup
+  END
   LPF cbr_validate_spl_v1
     STR_VAR resource_name = EVAL ~Divine Power %divine_power_resref% cleanup source~
     RET
@@ -3236,7 +3457,9 @@ BEGIN
     ++cbr_divine_build_new_index
     LPF cbr_append_spl_effect_record INT_VAR opcode = 321 target = 1 power = 4 parameter2 = 2 timing = 1 resist_dispel = 2 STR_VAR resource = EVAL ~%strength_set_21%~ END
     ++cbr_divine_build_new_index
-    FOR (cbr_divine_build_effect = 0; cbr_divine_build_effect < cbr_divine_build_source_count; ++cbr_divine_build_effect) BEGIN
+    // For the exact validated legacy pair, replace only its cross-exclusion
+    // record. Its self-refresh and every following source record stay intact.
+    FOR (cbr_divine_build_effect = cbr_divine_build_legacy; cbr_divine_build_effect < cbr_divine_build_source_count; ++cbr_divine_build_effect) BEGIN
       SET cbr_divine_build_source = cbr_divine_build_effect_offset + ((cbr_divine_build_source_first + cbr_divine_build_effect) * 0x30)
       LPF cbr_append_raw_spl_effect_record INT_VAR source_offset = cbr_divine_build_source END
       ++cbr_divine_build_new_index
@@ -4047,6 +4270,7 @@ BEGIN
   LAF cbr_classify_improved_haste_file
     STR_VAR
       resource_path          = EVAL ~%cbr_improved_haste_path%~
+      resource_dir           = EVAL ~%resource_dir%~
       improved_haste_resref  = EVAL ~%improved_haste_resref%~
       compatibility_mode     = EVAL ~%compatibility_mode%~
     RET cbr_improved_haste_semantics = semantics

@@ -1,0 +1,151 @@
+{
+  "description": "Base-game KEY resources, ignoring installed override, from original game BIFs. No SCS or Spell Revisions transformations applied.",
+  "resources": [
+    {
+      "key_entry_index": 44297,
+      "key_locator": 20972393,
+      "bif_index": 20,
+      "resource_index": 873,
+      "bif_path": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Spells.bif",
+      "bif_resource_locator": 873,
+      "payload_offset": 1233516,
+      "payload_size": 4362,
+      "sha256": "a31fea52522839011c2d1745848c2a80eb4ebdf60897add390cd60d775e454a3",
+      "output_path": "research\\originals\\tempus-base-game\\SPWI613.SPL",
+      "file": "SPWI613.SPL"
+    },
+    {
+      "key_entry_index": 50992,
+      "key_locator": 16777269,
+      "bif_index": 16,
+      "resource_index": 53,
+      "bif_path": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Patch25.bif",
+      "bif_resource_locator": 53,
+      "payload_offset": 6209540,
+      "payload_size": 13394,
+      "sha256": "abd47abfa923196f7c25332a5bc9518ceb08458b0a0bfa25a85fa3be1e1d70ef",
+      "output_path": "research\\originals\\tempus-base-game\\OHTMPS1.SPL",
+      "file": "OHTMPS1.SPL"
+    },
+    {
+      "key_entry_index": 44574,
+      "key_locator": 20972116,
+      "bif_index": 20,
+      "resource_index": 596,
+      "bif_path": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Spells.bif",
+      "bif_resource_locator": 596,
+      "payload_offset": 658232,
+      "payload_size": 9410,
+      "sha256": "da84fd4392a28508888bf0de8b73ae0ac8b164fa48d47e8334b719dcdf88b4e5",
+      "output_path": "research\\originals\\tempus-base-game\\SPPR412.SPL",
+      "file": "SPPR412.SPL"
+    },
+    {
+      "key_entry_index": 50994,
+      "key_locator": 16777267,
+      "bif_index": 16,
+      "resource_index": 51,
+      "bif_path": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Patch25.bif",
+      "bif_resource_locator": 51,
+      "payload_offset": 6204916,
+      "payload_size": 4264,
+      "sha256": "fb4b5a60e2a77c1c85d5211700ec820e64ae913ceb24f6c38732a680c99c62ec",
+      "output_path": "research\\originals\\tempus-base-game\\OHTEMPUS.2DA",
+      "file": "OHTEMPUS.2DA"
+    },
+    {
+      "key_entry_index": 14005,
+      "key_locator": 198181797,
+      "bif_index": 189,
+      "resource_index": 933,
+      "bif_path": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Patch2.bif",
+      "bif_resource_locator": 933,
+      "payload_offset": 34858460,
+      "payload_size": 2666,
+      "sha256": "beec9cf9fa5b9f587498325d44bfc09e5fcb9e91a3532b840c6c1fef4adc1e78",
+      "output_path": "research\\originals\\tempus-base-game\\SPLSTATE.IDS",
+      "file": "SPLSTATE.IDS"
+    },
+    {
+      "key_entry_index": 14007,
+      "key_locator": 198181795,
+      "bif_index": 189,
+      "resource_index": 931,
+      "bif_path": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Patch2.bif",
+      "bif_resource_locator": 931,
+      "payload_offset": 34836344,
+      "payload_size": 20661,
+      "sha256": "c5b0f3119fb866be96459ee3350b6cc248306edd9a7f9b485b0a72e5fdbac01b",
+      "output_path": "research\\originals\\tempus-base-game\\SPLPROT.2DA",
+      "file": "SPLPROT.2DA"
+    },
+    {
+      "key_entry_index": 67716,
+      "key_locator": 464,
+      "bif_index": 0,
+      "resource_index": 464,
+      "bif_path": "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Default.bif",
+      "bif_resource_locator": 464,
+      "payload_offset": 2367716,
+      "payload_size": 26285,
+      "sha256": "38e895a9328acdbb3fbfa44b9eb54d65be9e69b5122316ba9f3c7986968795fa",
+      "output_path": "research\\originals\\tempus-base-game\\SPELL.IDS",
+      "file": "SPELL.IDS"
+    }
+  ],
+  "source_files_before": {
+    "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\chitin.key": {
+      "sha256": "20be30d70217b7248b28939ba3c13a001f8e2569ab61ec411b8208324f457081",
+      "size": 1184643,
+      "mtime_ns": 1788763376104594000
+    },
+    "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Spells.bif": {
+      "sha256": "3296b8ad42432ab509b90b5ab7efd43618e411bff9a6deeda315aead4e6f8d22",
+      "size": 1462368,
+      "mtime_ns": 1788761226854103900
+    },
+    "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Patch25.bif": {
+      "sha256": "b810b50cb028abf9c3470339980f788cdf4bd6e9117c9d5d4c4e657654a5b081",
+      "size": 17402192,
+      "mtime_ns": 1788761226378638400
+    },
+    "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Patch2.bif": {
+      "sha256": "9972c8f3cb8f9cbcc00eaa7cc64dcb2fbc2f562b15b1b643806b768490704062",
+      "size": 39760712,
+      "mtime_ns": 1788761224411221600
+    },
+    "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Default.bif": {
+      "sha256": "7efd1ca22154895be0dafc470406bcff3934aafa887304dd14fa0652f124da60",
+      "size": 2850260,
+      "mtime_ns": 1788761222389080700
+    }
+  },
+  "source_files_after": {
+    "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\chitin.key": {
+      "sha256": "20be30d70217b7248b28939ba3c13a001f8e2569ab61ec411b8208324f457081",
+      "size": 1184643,
+      "mtime_ns": 1788763376104594000
+    },
+    "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Spells.bif": {
+      "sha256": "3296b8ad42432ab509b90b5ab7efd43618e411bff9a6deeda315aead4e6f8d22",
+      "size": 1462368,
+      "mtime_ns": 1788761226854103900
+    },
+    "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Patch25.bif": {
+      "sha256": "b810b50cb028abf9c3470339980f788cdf4bd6e9117c9d5d4c4e657654a5b081",
+      "size": 17402192,
+      "mtime_ns": 1788761226378638400
+    },
+    "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Patch2.bif": {
+      "sha256": "9972c8f3cb8f9cbcc00eaa7cc64dcb2fbc2f562b15b1b643806b768490704062",
+      "size": 39760712,
+      "mtime_ns": 1788761224411221600
+    },
+    "C:\\Users\\chris\\Games\\ChrizEasyBG-No-SR-Test\\game\\data\\Default.bif": {
+      "sha256": "7efd1ca22154895be0dafc470406bcff3934aafa887304dd14fa0652f124da60",
+      "size": 2850260,
+      "mtime_ns": 1788761222389080700
+    }
+  },
+  "unchanged": true
+}

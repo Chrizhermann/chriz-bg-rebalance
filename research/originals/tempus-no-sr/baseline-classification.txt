@@ -1,0 +1,6 @@
+Isolated --nogame reproduction against captured inputs and pre-fix production classifier.
+Return code: 2
+CBR Improved Haste SPWI613 header 0 has an unsafe opcode/probability layout for mode auto: opcode1 additive=0 deterministic=0; opcode16/317 double=0 deterministic=0; require timed probability 100/0.
+ERROR: [C:\Users\chris\AppData\Local\Temp\cbr-no-sr-baseline-eu5m180q\out/SPWI613.SPL] -> [C:\Users\chris\AppData\Local\Temp\cbr-no-sr-baseline-eu5m180q\out/SPWI613.SPL] Patching Failed (COPY) (Failure("CBR Improved Haste SPWI613 header 0 has an unsafe opcode/probability layout for mode auto: opcode1 additive=0 deterministic=0; opcode16/317 double=0 deterministic=0; require timed probability 100/0."))
+ERROR: Failure("CBR Improved Haste SPWI613 header 0 has an unsafe opcode/probability layout for mode auto: opcode1 additive=0 deterministic=0; opcode16/317 double=0 deterministic=0; require timed probability 100/0.")
+NOT INSTALLED DUE TO ERRORS Tempus Holy Power harness: compatibility classification
