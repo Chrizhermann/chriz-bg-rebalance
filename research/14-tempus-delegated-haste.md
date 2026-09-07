@@ -168,3 +168,29 @@ This work is based on the installed v0.3.1 commit `d31fda2`; implementation comm
    The collection task owns recovery and the remaining BG Modpack, final CDTweaks
    2312 and BuffBot steps. This fix does not manually install 401, alter receipts
    or logs, uninstall later components, or restart the stack.
+
+## Collection integration result — 2026-09-07
+
+The collection task **bg installer main chat (2)**
+(`01a06cdf-fe4f-7b51-b87c-681b48065ba4`) reported the following completed integration.
+This section records that task's verification; this mod task did not repeat its
+installation operations or independently inspect the recovery receipt.
+
+- The public v0.3.2 archive's SHA-256 and size were independently verified and
+  pinned in released **CEBG app 0.1.0-alpha.15 / collection 0.1.0-alpha.13**.
+  Archive: 1,369,825 bytes; SHA-256
+  `25480a8e597d316d3cf1799f641971f3b6edb113eea24da7f45a8dd70b0a9ef4`.
+- Christopher's exact failed no-SR copy was recovered in place under the
+  collection task's separate authorization. It reports uninstalling the seven
+  top BG Rebalance rows with byte-verified rollback and the preceding 372-row
+  prefix preserved, then installing all eight original selections
+  `101 121 400 401 404 405 407 408` from v0.3.2 with exit code 0.
+- BG Modpack, final CDTweaks 2312 and BuffBot then completed with exit code 0.
+  All 429 frozen components were validated: 27 BG1 and 402 BG2.
+- A separate supervised completion receipt was published; the original failure
+  history was preserved.
+
+This closes the reported installer incident. **Runtime gameplay remains untested.**
+The recovery report is historical evidence, not a reusable uninstall procedure or
+new authorization to modify an installation. No further mod change, retagging or
+release replacement is required for this incident.

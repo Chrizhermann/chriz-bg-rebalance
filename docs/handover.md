@@ -17,9 +17,13 @@ Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Ap
 - All 281 automated tests pass, including actual base-game and SCS/no-SR inputs,
   source preservation, idempotence and exact rollback in isolated synthetic games.
   See `research/14-tempus-delegated-haste.md` and `CHANGELOG.md`.
-- The collection task owns the new artifact pin, frozen-record reconciliation and
-  controlled recovery of failed component 401. This release work does not modify
-  either installed game or certify the earlier live rollback.
+- The collection task reports v0.3.2 pinned in CEBG app 0.1.0-alpha.15 / collection
+  0.1.0-alpha.13 and successful in-place recovery of the exact no-SR installation:
+  all eight BG Rebalance selections and the remaining stack completed with exit 0,
+  and all 429 frozen components were validated. Failure history was preserved with
+  a separate supervised completion receipt. See research/14 for the attributed
+  recovery evidence. Runtime gameplay remains untested; no further mod release is
+  needed for this installer incident.
 
 ## Previous status (2026-09-04) — v1.2 ambient/urgent PASS; v0.3.1 CLAB fix
 
