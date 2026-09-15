@@ -1,0 +1,173 @@
+// Component 110: identity-scoped runtime activation for five SCS dragons.
+// Research: research/14-dragon-runtime-scope.md. No CRE/weapon stat edits.
+
+DEFINE_PATCH_FUNCTION cbr_dragon_vorpal_prefix
+  INT_VAR apply = 0
+  STR_VAR actor = ~~ package = ~~ script_name = ~~
+  RET changed
+BEGIN
+  SET changed = 0
+  READ_ASCII 0 cbr_dv_signature (3)
+  READ_ASCII (BUFFER_LENGTH - 3) cbr_dv_tail (3)
+  PATCH_IF !(~%cbr_dv_signature%~ STR_EQ ~SC%LNL%~)
+        OR !(~%cbr_dv_tail%~ STR_EQ ~SC%LNL%~) BEGIN
+    PATCH_FAIL ~CBR 110: %script_name% is not a supported compiled BCS.~
+  END
+  // Generated in memory; no upstream BAF source is edited. Four disjoint
+  // transitions handle explicit category values and the game-slider fallback.
+  SPRINT cbr_dv_baf ~
+IF
+  Name("%actor%",Myself)
+  Global("CBR_DV_ACTIVE","LOCALS",0)
+  OR(3)
+    INI("DMWW_dragon_difficulty",5)
+    INI("DMWW_dragon_difficulty",6)
+    INI("DMWW_dragon_difficulty",7)
+THEN
+  RESPONSE #100
+    ApplySpellRES("%package%",Myself)
+    SetGlobal("CBR_DV_ACTIVE","LOCALS",1)
+    Continue()
+END
+IF
+  Name("%actor%",Myself)
+  Global("CBR_DV_ACTIVE","LOCALS",0)
+  INI("DMWW_dragon_difficulty",0)
+  DifficultyGT(3)
+  DifficultyLT(6)
+THEN
+  RESPONSE #100
+    ApplySpellRES("%package%",Myself)
+    SetGlobal("CBR_DV_ACTIVE","LOCALS",1)
+    Continue()
+END
+IF
+  Name("%actor%",Myself)
+  Global("CBR_DV_ACTIVE","LOCALS",1)
+  !INI("DMWW_dragon_difficulty",0)
+  !INI("DMWW_dragon_difficulty",5)
+  !INI("DMWW_dragon_difficulty",6)
+  !INI("DMWW_dragon_difficulty",7)
+THEN
+  RESPONSE #100
+    ApplySpellRES("CBRDVREM",Myself)
+    SetGlobal("CBR_DV_ACTIVE","LOCALS",0)
+    Continue()
+END
+IF
+  Name("%actor%",Myself)
+  Global("CBR_DV_ACTIVE","LOCALS",1)
+  INI("DMWW_dragon_difficulty",0)
+  OR(2)
+    DifficultyLT(4)
+    DifficultyGT(5)
+THEN
+  RESPONSE #100
+    ApplySpellRES("CBRDVREM",Myself)
+    SetGlobal("CBR_DV_ACTIVE","LOCALS",0)
+    Continue()
+END
+~
+  INNER_PATCH_SAVE cbr_dv_prefix ~%cbr_dv_baf%~ BEGIN
+    COMPILE_BAF_TO_BCS
+    READ_ASCII 0 cbr_dv_start (3)
+    READ_ASCII (BUFFER_LENGTH - 3) cbr_dv_end (3)
+    PATCH_IF !(~%cbr_dv_start%~ STR_EQ ~SC%LNL%~)
+          OR !(~%cbr_dv_end%~ STR_EQ ~SC%LNL%~) BEGIN
+      PATCH_FAIL ~CBR 110: unexpected compiler output for %script_name%.~
+    END
+    DELETE_BYTES (BUFFER_LENGTH - 3) 3
+    DELETE_BYTES 0 3
+  END
+  SET cbr_dv_length = STRING_LENGTH ~%cbr_dv_prefix%~
+  PATCH_IF (INDEX_BUFFER (~CBR_DV_ACTIVE~) >= 0) BEGIN
+    PATCH_IF (BUFFER_LENGTH < cbr_dv_length + 6) BEGIN
+      PATCH_FAIL ~CBR 110: truncated existing prefix in %script_name%.~
+    END
+    READ_ASCII 3 cbr_dv_existing (cbr_dv_length)
+    PATCH_IF !(~%cbr_dv_existing%~ STR_EQ ~%cbr_dv_prefix%~) BEGIN
+      PATCH_FAIL ~CBR 110: foreign or modified vorpal prefix in %script_name%.~
+    END
+    // Reject a second marker-bearing payload beyond the exact known prefix.
+    READ_ASCII (3 + cbr_dv_length) cbr_dv_remainder (BUFFER_LENGTH - 3 - cbr_dv_length)
+    INNER_PATCH ~%cbr_dv_remainder%~ BEGIN
+      PATCH_IF (INDEX_BUFFER (~CBR_DV_ACTIVE~) >= 0) BEGIN
+        PATCH_FAIL ~CBR 110: duplicate vorpal prefix in %script_name%.~
+      END
+    END
+  END ELSE BEGIN
+    READ_ASCII 0 cbr_dv_remainder (BUFFER_LENGTH)
+    SET changed = 1
+  END
+  // SCS can also compile a GLOBAL-based difficulty family on other installs.
+  // Recognize the final script, not just the installed component number. Exclude
+  // our prefix from this check so it cannot make an unsupported donor pass.
+  INNER_PATCH ~%cbr_dv_remainder%~ BEGIN
+    PATCH_IF (INDEX_BUFFER (~TR%LNL%16621 [0-7] [01] 0 0 "DMWW_dragon_difficulty" "" OB~) < 0) BEGIN
+      PATCH_FAIL ~CBR 110: %script_name% lacks the supported SCS INI difficulty family.~
+    END
+  END
+  PATCH_IF (changed AND apply) BEGIN
+    INSERT_BYTES 3 cbr_dv_length
+    WRITE_ASCIIE 3 ~%cbr_dv_prefix%~ (cbr_dv_length)
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_dragon_vorpal_roster
+  RET_ARRAY cbr_dv_roster
+BEGIN
+  ACTION_DEFINE_ASSOCIATIVE_ARRAY cbr_dv_roster BEGIN
+    ~firkra02~ => ~dragred firkra02 CBRDV15~
+    ~shadra01~ => ~shadra01 ShaDra01 CBRDV05~
+    ~dragblac~ => ~dragblac Dragblac CBRDV10~
+    ~gorsal~   => ~gorsal GorSal CBRDV10~
+    ~fsdragon~ => ~draggree FSdragon CBRDV05~
+  END
+END
+
+// Preflight does not publish even unchanged BIFF resources. All five actors
+// must be recognized; no silent partial installation on an unfamiliar stack.
+DEFINE_ACTION_FUNCTION cbr_apply_dragon_vorpal_scripts
+  INT_VAR apply = 0
+BEGIN
+  LAF cbr_dragon_vorpal_roster RET_ARRAY cbr_dv_roster END
+  ACTION_PHP_EACH cbr_dv_roster AS cbr_dv_cre => cbr_dv_row BEGIN
+    OUTER_INNER_PATCH ~%cbr_dv_row%~ BEGIN
+      READ_2DA_ENTRY 0 0 3 cbr_dv_script
+      READ_2DA_ENTRY 0 1 3 cbr_dv_actor
+      READ_2DA_ENTRY 0 2 3 cbr_dv_package
+    END
+    ACTION_IF !(FILE_EXISTS_IN_GAME ~%cbr_dv_cre%.CRE~)
+           OR !(FILE_EXISTS_IN_GAME ~%cbr_dv_script%.BCS~) BEGIN
+      FAIL ~CBR 110: missing encounter resource %cbr_dv_cre% / %cbr_dv_script%.~
+    END
+    COPY_EXISTING ~%cbr_dv_cre%.CRE~ ~override~
+      PATCH_IF BUFFER_LENGTH < 0x2d4 BEGIN
+        PATCH_FAIL ~CBR 110: truncated CRE %cbr_dv_cre%.~
+      END
+      READ_ASCII 0 cbr_dv_cre_sig (8)
+      READ_ASCII 0x280 cbr_dv_cre_actor (32) NULL
+      PATCH_IF !(~%cbr_dv_cre_sig%~ STR_EQ ~CRE V1.0~)
+            OR !(~%cbr_dv_cre_actor%~ STRING_EQUAL_CASE ~%cbr_dv_actor%~) BEGIN
+        PATCH_FAIL ~CBR 110: unexpected creature identity in %cbr_dv_cre%.~
+      END
+      SET cbr_dv_has_script = 0
+      FOR (cbr_dv_slot = 0x248; cbr_dv_slot <= 0x268; cbr_dv_slot += 8) BEGIN
+        READ_ASCII cbr_dv_slot cbr_dv_cre_script (8) NULL
+        PATCH_IF (~%cbr_dv_cre_script%~ STRING_EQUAL_CASE ~%cbr_dv_script%~) BEGIN
+          SET cbr_dv_has_script = 1
+        END
+      END
+      PATCH_IF !cbr_dv_has_script BEGIN
+        PATCH_FAIL ~CBR 110: %cbr_dv_cre% no longer uses %cbr_dv_script%.~
+      END
+    BUT_ONLY
+    COPY_EXISTING ~%cbr_dv_script%.BCS~ ~override~
+      LPF cbr_dragon_vorpal_prefix
+        INT_VAR apply = apply
+        STR_VAR actor = EVAL ~%cbr_dv_actor%~ package = EVAL ~%cbr_dv_package%~
+                script_name = EVAL ~%cbr_dv_script%~
+      END
+    BUT_ONLY
+  END
+END

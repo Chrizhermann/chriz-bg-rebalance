@@ -5,7 +5,9 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Status:** active component development. See `docs/00-project-scope.md`.
+**Version: v0.4.0.** Optional dragon components are now included; their native combat
+acceptance is still pending. All previously released fixes remain included.
+See `docs/00-project-scope.md` for the broader project.
 
 ## Credits — stand on the shoulders of giants
 
@@ -18,6 +20,8 @@ without them; other components declare their own prerequisites:
 - **[Spell Revisions (SR)](https://github.com/Gibberlings3/SpellRevisions)** by Demivrgvs & the
   Gibberlings3 team — a thoughtful, comprehensive spell rebalance. Most of its changes are
   excellent; this mod adjusts the handful that don't fit my table.
+- **[EEex](https://github.com/Bubb13/EEex)** by Bubb — engine extensions used by the optional
+  lethal-dragon component and this mod's other EEex integrations.
 
 Code patterns in this repo are frequently adapted from SCS (open source). Bugs found here are
 reported upstream first (see `research/02-upstream-scs-report-draft.md`).
@@ -28,6 +32,8 @@ reported upstream first (see `research/02-upstream-scs-report-draft.md`).
 |---|-------|-----------|--------|
 | 100 | SCS adjustments | Telekinetic Storm: restore save vs. spell for half damage (+ bypass Mirror Image) | ✅ implemented |
 | 101 | SCS adjustments | Restore five Freedom scrolls to the Adventurer's Mart | ✅ implemented |
+| 110 | SCS adjustments | EEex Apex Dragons: lethal claws and bites, with possible permanent death | Optional; released; combat acceptance pending |
+| 111 | SCS adjustments | Five dragon encounters: 18-second wing-buffet cooldown | Optional; released; combat acceptance pending |
 | 120 | SCS adjustments | Repair the SCS/SR false Improved Mantle weapon-protection semantics | ✅ implemented |
 | 121 | SCS adjustments | EEex ambient caster readiness + one honest first-contact defense | ✅ implemented; v1.2 ambient + neutral-to-hostile urgent path live accepted; legacy live pending |
 | 2xx | SR adjustments | Cherry-picked Spell Revisions tweaks | 📋 planning (`docs/00-project-scope.md`) |
@@ -49,6 +55,60 @@ ORs `save vs. spell (bit 0) + bypass mirror image (bit 24)` into the save-type f
 save-for-half damage effect, across all level-scaled ability headers. Idempotent.
 
 Full diagnosis: `research/01-telekinetic-storm-save-bug.md`.
+
+### Component 110 — Apex Dragons: lethal claws and bites
+
+**Optional difficulty increase. Requires SCS Smarter Dragons (6540) and EEex.**
+
+**A failed saving throw can cause permanent death (chunking). A chunked companion cannot
+be raised or resurrected through normal gameplay.** The native engine still honors its
+gore, difficulty and permanent-death protection settings; those may convert the result to
+ordinary death. This component does not override those settings.
+
+| Dragon | Chance per qualifying melee hit | Save vs. death |
+|---|---:|---:|
+| Firkraag | 15% | -4 penalty |
+| Thaxll'ssillyia | 5% | -2 penalty |
+| Nizidramanii'yt | 10% | -2 penalty |
+| Saladrex | 10% | -2 penalty |
+| Watcher's Keep guardian | 5% | -2 penalty |
+
+The extra attack effect activates at **Hardcore and Insane** in SCS's Dragon difficulty
+settings (including the intermediate setting between them). When that setting follows
+the game's slider, it activates on Hard and Insane. Lower settings remove the extra effect.
+
+The hit's physical death effect bypasses **Death Ward, death-effect immunity, Stoneskin
+and physical damage resistance**. The victim retains their protections against other
+attacks and spells. The effect requires a qualifying melee hit: weapon immunity can stop
+it, and scripted minimum-HP protection remains intact. The engine resolves the chance and
+one death save before EEex applies the death effect; there is no extra damage prerequisite.
+
+This first pass changes neither HP nor auras. It adds no escorts or spells. Adalon and ToB
+dragon changes are deferred. Exact actor-identity guards keep other users of the shared
+combat scripts and weapons on their existing behavior; the Thaxll'ssillyia donor alias
+shares his identity. The separate SR Death Ward correction is not a prerequisite.
+
+Runtime additions are five patched BCS scripts, four private SPLs, three EFFs and one
+autoload Lua module in `override`; WeiDU also maintains its normal installation records.
+The component recognizes the current SCS configuration-based difficulty scripts and rejects
+unsupported variants before publishing. Script reload may reach already-spawned dragons,
+but saved-encounter and combat acceptance remain pending. Do not install into an active
+playthrough on the strength of fixture tests alone.
+
+Research: [runtime scope](research/14-dragon-runtime-scope.md),
+[physical death delivery](research/19-dragon-vorpal-delivery.md).
+
+### Component 111 — Less frequent dragon wing buffet
+
+This independent option increases the wing-buffet cooldown from **6 to 18 seconds** for
+the same five dragon identities. It works at all their existing SCS difficulty settings
+and **does not require EEex or component 110**. Existing spell conditions, response weights,
+and other dragons' behavior are preserved. It does not change the buffet spell itself.
+
+Both components belong after SCS in the installation order. Their installer, resource and
+script behavior is covered by isolated automated checks; actual combat acceptance remains
+pending. See [wing-buffet research](research/15-dragon-wing-buffet.md) and the
+[v0.4.0 release notes](docs/release-notes/v0.4.0.md).
 
 ### Component 120 — SCS / Spell Revisions weapon-protection compatibility
 
@@ -206,15 +266,18 @@ components.
 
 ## Install
 
-Copy `chriz-bg-rebalance/` + `setup-chriz-bg-rebalance.tp2` into the game dir, then (per the
-target install's conventions) copy the WeiDU template as `Setup-chriz-bg-rebalance.exe` and run:
+Download the Windows release ZIP and extract its contents into your separate modded game
+folder. It includes `Setup-chriz-bg-rebalance.exe`; run it to choose components, or use:
 
 ```
 ./Setup-chriz-bg-rebalance.exe --force-install-list 401 --language 0 --no-exit-pause
 ```
 
-Use `100`, `101`, `120`, `121`, or exactly one of `401`/`402`/`403` as appropriate; the example
-selects the recommended Tempus mode. Install component 120 after the final Spell Revisions
+Use `100`, `101`, optional `110`/`111`, `120`, `121`, or exactly one of `401`/`402`/`403`
+as appropriate; the example selects the recommended Tempus mode. The two dragon options
+require SCS Smarter Dragons (6540) first; 110 also requires EEex. They can be selected
+independently and in either order (the normal menu order is 110 then 111).
+Install component 120 after the final Spell Revisions
 and SCS Smarter Mages components so it sees the effective spell and generated-script shapes.
 On the researched SCS/SR/EEex setup, install 120 before 121.
 
@@ -228,4 +291,6 @@ setup, configurably") — see `docs/plans/2026-07-02-chriz-bg-rebalance-design.m
 
 ## License
 
-MIT (see LICENSE). Third-party mods are **not** redistributed here.
+Original project code: MIT (see LICENSE). Third-party mods are **not** bundled in the
+release ZIP. The included WeiDU 249 installer is distributed under GPL v2; see
+`WEIDU-LICENSE.txt` and [WeiDU source](https://github.com/WeiDUorg/weidu/tree/v249.00).

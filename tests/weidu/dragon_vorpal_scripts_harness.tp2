@@ -1,0 +1,12 @@
+BACKUP ~backup~
+AUTHOR ~chriz-bg-rebalance tests~
+ALWAYS
+  INCLUDE ~%argv[0]%~
+END
+BEGIN ~Dragon runtime prefix fixture~ DESIGNATED 1
+COPY ~%argv[1]%~ ~%argv[2]%~
+  LPF cbr_dragon_vorpal_prefix
+    INT_VAR apply = 1
+    STR_VAR actor = ~firkra02~ package = ~CBRDV15~ script_name = ~dragred~
+  END
+BUT_ONLY

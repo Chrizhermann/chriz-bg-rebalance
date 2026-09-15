@@ -1,0 +1,15 @@
+BACKUP ~backup~
+AUTHOR ~chriz-bg-rebalance test harness~
+
+ALWAYS
+  INCLUDE ~%argv[0]%~
+END
+
+BEGIN ~Dragon wing-buffet fixture transformation~ DESIGNATED 1
+LAF cbr_apply_dragon_wing_buffet
+  INT_VAR game_mode = 0
+  STR_VAR resource_dir = ~%argv[1]%~
+END
+
+BEGIN ~Dragon wing-buffet synthetic game transformation~ DESIGNATED 2
+LAF cbr_apply_dragon_wing_buffet END

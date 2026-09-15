@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 .worktrees/
+# Captured game resources used only for local dragon regression evidence.
+research/originals/dragon_wing_buffet/
+tests/fixtures/dragon_wing_buffet/

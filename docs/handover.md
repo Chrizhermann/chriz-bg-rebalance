@@ -3,6 +3,24 @@
 Live entry point for anyone (user, future agent) picking up work on this repo.
 Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
 
+## Status (2026-09-16) — v0.4.0 optional dragon intake
+
+- Components 110/111 are ported from the existing a947 implementation onto the
+  current public main baseline (9fe9ec6, including v0.3.2 and its no-SR recovery
+  documentation). The six runtime changes match the collection's pinned dragon
+  payload; this release does not absorb other dirty development work.
+- 110 is the optional EEex lethal-melee rider; 111 is independent 18-second wing
+  buffet. Both require SCS Smarter Dragons 6540; see the README for all five actors,
+  difficulty activation and the permanent-death warning.
+- User decision: include implemented candidates now, then test combat on one
+  combined CEBG installation. Older docs requiring another standalone combat test
+  before publication are superseded. Native combat and existing-save support are
+  still unverified, not silently accepted.
+- Captured game/SCS test resources remain local and are excluded from publication.
+  The test code reports their absence explicitly on a fresh clone. The release
+  package contains only runtime files, player documentation, licenses and WeiDU.
+- No live installation, saved game, legacy worktree or earlier release was modified.
+
 ## What this is
 
 SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-install WeiDU mod.

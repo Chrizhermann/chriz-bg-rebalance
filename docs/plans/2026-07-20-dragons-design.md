@@ -1,5 +1,7 @@
 # Apex Dragons (components 110 + 111) — design draft
 
+> **Historical draft, superseded in part:** consult the [current design update](2026-09-06-dragons-design-update.md) for current decisions and release status. Components 110/111 are included in v0.4.0; native combat acceptance remains pending. The old wording below that describes effects as "live" is not an installation or acceptance claim. The old aura values, Death Ward behavior, vorpal values, HP approval, roster, no-EEex claim, and GLOBAL-based difficulty description are not current specifications.
+
 **Status:** 2026-07-20 — lever decisions taken by the user in-session; §6 points resolved
 same session (WK in; tier gating clarified against SCS's real tier ladder). Ready for an
 implementation plan once the user green-lights the build. Research/evidence base:

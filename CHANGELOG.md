@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.4.0 — 2026-09-16
+
+- Add optional component 110: EEex + SCS Apex Dragons lethal melee attacks for five
+  explicitly identified encounters. At SCS Dragon Hardcore/Insane, Firkraag uses
+  15% / death save -4, Nizidramanii'yt and Saladrex 10% / -2, and Thaxll'ssillyia
+  and the Watcher's Keep guardian 5% / -2. Game-slider fallback is Hard/Insane.
+  A failed save can cause permanent death; normal resurrection cannot restore a
+  chunked companion. Native gore/anti-chunking settings and plot minimum HP remain
+  respected. This physical rider bypasses Death Ward and physical resistance.
+- Add independent optional component 111: 18-second wing-buffet cooldown for the
+  same five identities, at all SCS difficulty settings. No EEex required for 111.
+- Preserve unrelated users of shared encounter scripts, dynamically resolve spell
+  IDs, reject unsupported input shapes, and make repeated application byte-stable.
+- Retain every v0.3.2 Tempus, SCS and ambient/urgent-readiness fix.
+- Include the Windows setup executable and its WeiDU license in the release ZIP.
+
+Native combat and existing-save acceptance remain pending. On 2026-09-16 the user
+approved shipping these implemented optional candidates before the combined CEBG
+installation test; the former standalone combat-before-release gate is superseded.
+No automatic existing-game or save migration is included.
+
 ## v0.3.2 — 2026-09-07
 
 - Fix component 401 on installations without Spell Revisions when Improved Haste

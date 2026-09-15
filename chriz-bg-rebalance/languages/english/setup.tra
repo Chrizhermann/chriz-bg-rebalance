@@ -3,6 +3,8 @@
 // Component names (match DESIGNATED numbers)
 @100 = ~SCS: Telekinetic Storm — restore save vs. spell for half damage (+ bypass Mirror Image)~
 @101 = ~SCS: Adventurer's Mart — restore the five Freedom scrolls (spell tweak orphaned in v35)~
+@110 = ~EEex + SCS: Apex Dragons — lethal claws and bites (can cause permanent death)~
+@111 = ~SCS: five dragon encounters — wing buffet at most once per 18 seconds~
 @120 = ~SCS + Spell Revisions: repair false weapon-protection semantics~
 @121 = ~EEex + SCS: ambient caster readiness and one honest first-contact defense~
 @400 = ~Cleric of Tempus: weapon training — axe, longsword, crossbow, and two-pip mastery~
@@ -29,6 +31,11 @@
 @4041 = ~Tide of Battle: Onslaught!~
 @4042 = ~Tide of Battle: Bulwark!~
 @4043 = ~Tide of Battle: Fortune!~
+
+// Displayed by the installer; not added to dialog.tlk.
+@1110 = ~WARNING: This optional component gives five dragons lethal melee attacks on SCS Dragon Hardcore/Insane (or Hard/Insane when following the game slider). Firkraag: 15% chance, save vs. death at -4. Nizidramanii'yt and Saladrex: 10%, save at -2. Thaxll'ssillyia and the Watcher's Keep guardian: 5%, save at -2.
+
+On a failed save the attack bypasses Death Ward, death-effect immunity, Stoneskin and physical resistance, requesting permanent death (chunking). A chunked companion cannot be raised or resurrected through normal gameplay. The engine's gore and permanent-death protection settings still apply and may turn this into ordinary death. Weapon immunity can prevent a qualifying hit; scripted minimum-HP protection remains intact. Requires EEex. No HP or aura changes are included.~
 
 // Component 408 - the three replacement descriptions (kit, Holy Power,
 // Chaos of Battle). The kit's flavor paragraph is SoD's, verbatim.
@@ -82,6 +89,9 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9101 = ~This component is for BG2:EE / EET games.~
 @9102 = ~Sword Coast Stratagems (spell tweaks or AI components) is not installed — nothing to restore.~
 @9103 = ~ribald.sto / scrl9z.itm not found in this game.~
+@9110 = ~These dragon components support BG2:EE / EET only.~
+@9111 = ~SCS Smarter Dragons component 6540 is not installed. Install SCS before these tail components.~
+@9112 = ~The lethal dragon component requires EEex (M___EEex.lua). Its physical-death rider uses EEex to bypass death-effect immunity without stripping protections.~
 @9120 = ~The SCS / Spell Revisions weapon-protection repair supports BG2:EE / EET only.~
 @9121 = ~SCS Smarter Mages component 6030 is not installed — there are no generated common-mage scripts to repair.~
 @9122 = ~The final loose SPELL.IDS is missing. Install SCS and Spell Revisions before this tail component.~

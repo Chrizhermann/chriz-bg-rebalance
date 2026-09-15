@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/chriz-bg-rebalance~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.3.2~
+VERSION ~v0.4.0~
 
 // Load the tested transformation library and define one installer wrapper for
 // all Tempus Holy Power compatibility choices. WeiDU's backup namespace is
@@ -18,6 +18,9 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/tempus_descriptions.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/scs_weapon_protection_semantics.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/ambient_readiness.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/dragon_wing_buffet.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/dragon_vorpal.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/dragon_vorpal_effects.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -201,6 +204,30 @@ COPY_EXISTING ~ribald.sto~ ~override~
     PATCH_PRINT ~cbr 101: Adventurer's Mart already sells scrl9z - nothing to do.~
   END
   BUT_ONLY
+
+BEGIN @110 DESIGNATED 110 GROUP @1100 LABEL ~cbr_scs_dragon_vorpal~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9110
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 6540) @9111
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9112
+
+PRINT @1110
+// Every existing encounter and reserved payload is validated before publishing
+// the first runtime file. Native death handling retains anti-chunking settings.
+LAF cbr_apply_dragon_vorpal_scripts INT_VAR apply = 0 END
+LAF cbr_apply_dragon_vorpal_effects
+  STR_VAR phase = ~preflight~ resource_dir = ~override~
+          template_file = ~chriz-bg-rebalance/lua/M_CBRDVG.lua~
+END
+LAF cbr_apply_dragon_vorpal_effects
+  STR_VAR phase = ~full~ resource_dir = ~override~
+          template_file = ~chriz-bg-rebalance/lua/M_CBRDVG.lua~
+END
+LAF cbr_apply_dragon_vorpal_scripts INT_VAR apply = 1 END
+
+BEGIN @111 DESIGNATED 111 GROUP @1100 LABEL ~cbr_scs_dragon_wing_buffet~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9110
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 6540) @9111
+LAF cbr_apply_dragon_wing_buffet END
 
 BEGIN @120
 DESIGNATED 120
