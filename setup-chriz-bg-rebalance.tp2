@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/chriz-bg-rebalance~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.4.0~
+VERSION ~v0.5.0~
 
 // Load the tested transformation library and define one installer wrapper for
 // all Tempus Holy Power compatibility choices. WeiDU's backup namespace is
@@ -16,6 +16,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/tempus_spec_apr.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/tempus_spec_apr_eeex.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/tempus_descriptions.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/bard_progression.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/scs_weapon_protection_semantics.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/ambient_readiness.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/dragon_wing_buffet.tpa~
@@ -604,4 +605,65 @@ LAF cbr_apply_tempus_descriptions
     hp_desc_strref  = cbr_ds_resolved_hp_desc
     cob_desc_strref = cbr_ds_resolved_cob_desc
   STR_VAR resource_dir = ~override~
+END
+
+// The provider is independently selectable; it changes no class defaults.
+BEGIN @420 DESIGNATED 420 GROUP @1400 LABEL ~cbr_kit_spell_progression_provider~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet iwdee~) @9470
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9471
+REQUIRE_PREDICATE ((DIRECTORY_EXISTS ~EEex_scripts/extra_pattern_dbs~)
+  AND (FILE_CONTAINS_EVALUATED (~EEex_scripts/EEex_Assembly_x86-64.lua~ ~^function[ %TAB%]+EEex_HookAfterRestoreWithLabels~))
+  AND (FILE_CONTAINS_EVALUATED (~EEex_scripts/EEex_Resource.lua~ ~^function[ %TAB%]+EEex_Resource_Load2DA~))
+  AND (FILE_CONTAINS_EVALUATED (~EEex_scripts/EEex_Resource.lua~ ~^function[ %TAB%]+EEex_Resource_Get2DARowTableIterator~))) @9472
+
+// Match the loader's canonical game names; do not probe an unrelated executable.
+ACTION_IF (GAME_IS ~iwdee~) BEGIN
+  OUTER_SPRINT cbr_sp_executable ~icewind.exe~
+END ELSE ACTION_IF (FILE_EXISTS ~Baldur.exe~) BEGIN
+  OUTER_SPRINT cbr_sp_executable ~Baldur.exe~
+END ELSE ACTION_IF (FILE_EXISTS ~BaldurII.exe~) BEGIN
+  OUTER_SPRINT cbr_sp_executable ~BaldurII.exe~
+END ELSE BEGIN
+  FAIL @9473
+END
+LAF cbr_sp_preflight_executable STR_VAR executable_path = EVAL ~%cbr_sp_executable%~ END
+
+// A valid API 1 registry can contain registrations from independent adapters.
+// Preserve it; never replace it with the shipped blank table during a refresh.
+ACTION_IF (FILE_EXISTS_IN_GAME ~CBRSPVER.2DA~) BEGIN
+  LAF cbr_sp_validate_provider END
+END ELSE ACTION_IF (FILE_EXISTS_IN_GAME ~CBRSPKIT.2DA~) BEGIN
+  FAIL @9474
+END
+ACTION_IF (NOT FILE_EXISTS_IN_GAME ~CBRSPKIT.2DA~) BEGIN
+  COPY ~chriz-bg-rebalance/bard/CBRSPKIT.2DA~ ~override/CBRSPKIT.2DA~
+END
+COPY ~chriz-bg-rebalance/bard/CBRSPVER.2DA~ ~override/CBRSPVER.2DA~
+COPY ~chriz-bg-rebalance/bard/CBRBG6.2DA~ ~override/CBRBG6.2DA~
+COPY ~chriz-bg-rebalance/bard/CBRIWD7.2DA~ ~override/CBRIWD7.2DA~
+COPY ~chriz-bg-rebalance/bard/CBRIWD8.2DA~ ~override/CBRIWD8.2DA~
+COPY ~chriz-bg-rebalance/lua/M_CBRSP.lua~ ~override/M_CBRSP.lua~
+COPY ~chriz-bg-rebalance/lib/bard_progression.tpa~ ~override/CBRSPAPI.TPA~
+COPY ~chriz-bg-rebalance/bard/CBRSP.db~ ~EEex_scripts/extra_pattern_dbs/CBRSP.db~
+PRINT @9475
+
+BEGIN @421 DESIGNATED 421 GROUP @1400 LABEL ~cbr_bard_default_progression~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet iwdee~) @9470
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 420) @9476
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~KITLIST.2DA~)
+               AND (FILE_EXISTS_IN_GAME ~CLASTEXT.2DA~)
+               AND (FILE_EXISTS_IN_GAME ~KIT.IDS~)) @9477
+
+LAF cbr_sp_validate_provider END
+OUTER_SPRINT cbr_sp_iwd7_text @4211
+OUTER_SPRINT cbr_sp_bg6_text @4212
+LAF cbr_sp_register INT_VAR class_id = 5 kit_id = 0 STR_VAR slot_table = ~CBRIWD7~ END
+LAF cbr_sp_register_bard
+  STR_VAR kit_symbol = ~BARD~ slot_table = ~CBRIWD7~ description_section = ~CLASS FEATURES~ progression_text = EVAL ~%cbr_sp_iwd7_text%~
+END
+LAF cbr_sp_register_bard STR_VAR kit_symbol = ~JESTER~ slot_table = ~CBRIWD7~ progression_text = EVAL ~%cbr_sp_iwd7_text%~ END
+ACTION_FOR_EACH cbr_sp_default_kit IN BLADE SKALD BEGIN
+  LAF cbr_sp_register_bard
+    STR_VAR kit_symbol = EVAL ~%cbr_sp_default_kit%~ slot_table = ~CBRBG6~ description_section = ~Disadvantages~ progression_text = EVAL ~%cbr_sp_bg6_text%~
+  END
 END

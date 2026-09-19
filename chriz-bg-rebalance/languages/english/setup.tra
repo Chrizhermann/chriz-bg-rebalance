@@ -137,3 +137,16 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9463 = ~CBRCHT1D.SPL not found — install the Chaos of Battle component (404) first; the text describes its changes.~
 @9464 = ~CBRTMDV.SPL not found — install the Divination toll component (405) first; the text describes its changes.~
 @9465 = ~M_CBRAPR.lua not found — install the EEex specialization APR component (407) first; the text describes its changes.~
+
+@420 = ~EEex: independent kit spell-progression provider (BG2EE / EET / IWDEE)~
+@421 = ~Bard progression: IWD through level 7; Blade and Skald use original progression through level 6~
+@4211 = ~Uses the Icewind Dale bard progression, limited to 7th-level spells; 7th-level spells become available at bard level 21. Existing spell-slot modifiers still apply.~
+@4212 = ~Uses the original Baldur's Gate bard progression, limited to 6th-level spells instead of the normal bard's 7th-level maximum. Existing kit penalties still apply.~
+@9470 = ~Kit spell progression supports BG2:EE / EET / Icewind Dale: Enhanced Edition.~
+@9471 = ~Kit spell progression requires EEex. Install EEex before this component.~
+@9472 = ~Kit spell progression requires EEex's extra-pattern-database loader, 64-bit assembly hook helpers and 2DA resource helpers. Install compatible EEex support first.~
+@9473 = ~Kit spell progression could not find the game's executable. BG2:EE / EET requires Baldur.exe or BaldurII.exe; IWDEE requires icewind.exe.~
+@9474 = ~CBRSPKIT.2DA exists without a supported provider API marker. Resolve this conflicting registry before installing the provider.~
+@9475 = ~Kit spell-progression provider installed. Class defaults are unchanged until a policy component is selected. Launch through EEex's InfinityLoader.~
+@9476 = ~Install the independent kit spell-progression provider (chriz-bg-rebalance component 420) first.~
+@9477 = ~Bard defaults require KITLIST.2DA, CLASTEXT.2DA and KIT.IDS.~

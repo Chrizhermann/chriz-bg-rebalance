@@ -1,0 +1,282 @@
+// API 1 installer helpers. Component 420 publishes this functions-only library
+// as CBRSPAPI.TPA so late kit adapters share the registry and text contract.
+
+// Read-only, file-based preflight, also callable from a --nogame test harness.
+// Find the actual instruction sequence rather than pinning a build offset or
+// the relative CALL displacement (which differs between BG2EE and IWDEE).
+DEFINE_ACTION_FUNCTION cbr_sp_preflight_executable
+  STR_VAR executable_path = ~~
+  RET hook_offset
+BEGIN
+  OUTER_SPRINT executable_path EVALUATE_BUFFER ~%executable_path%~
+  ACTION_IF (NOT FILE_EXISTS ~%executable_path%~) BEGIN
+    FAIL ~Bard progression: game executable %executable_path% was not found.~
+  END
+  OUTER_PATCH_SAVE cbr_sp_signature ~................~ BEGIN
+    WRITE_LONG 0 0x388e8d48
+    WRITE_LONG 4 0x4c000007
+    WRITE_LONG 8 0x48f0458d
+    WRITE_LONG 12 0xe8f8558d
+  END
+  OUTER_SET hook_offset = (0 - 1)
+  COPY - ~%executable_path%~ ~cbr_bard_exe_probe~
+    PATCH_IF (SOURCE_SIZE < 0x40) BEGIN
+      PATCH_FAIL ~Bard progression: executable is not a supported 64-bit PE image.~
+    END
+    READ_SHORT 0 cbr_sp_dos_magic
+    READ_LONG 0x3c cbr_sp_pe
+    PATCH_IF ((cbr_sp_dos_magic != 0x5a4d) OR (cbr_sp_pe < 0x40)
+           OR (cbr_sp_pe > SOURCE_SIZE - 26)) BEGIN
+      PATCH_FAIL ~Bard progression: executable is not a supported 64-bit PE image.~
+    END
+    READ_LONG cbr_sp_pe cbr_sp_pe_magic
+    READ_SHORT (cbr_sp_pe + 4) cbr_sp_machine
+    READ_SHORT (cbr_sp_pe + 6) cbr_sp_sections
+    READ_SHORT (cbr_sp_pe + 20) cbr_sp_optional_size
+    READ_SHORT (cbr_sp_pe + 24) cbr_sp_optional_magic
+    PATCH_IF ((cbr_sp_pe_magic != 0x4550) OR (cbr_sp_machine != 0x8664)
+           OR (cbr_sp_optional_magic != 0x20b) OR (cbr_sp_optional_size < 2)
+           OR (cbr_sp_sections < 1)
+           OR (cbr_sp_pe + 24 + cbr_sp_optional_size + cbr_sp_sections * 40 > SOURCE_SIZE)) BEGIN
+      PATCH_FAIL ~Bard progression: executable is not a supported 64-bit PE image.~
+    END
+    SET cbr_sp_matches = 0
+    SET cbr_sp_match = INDEX_BUFFER (CASE_SENSITIVE EXACT_MATCH ~%cbr_sp_signature%~)
+    WHILE (cbr_sp_match >= 0) BEGIN
+      PATCH_IF (cbr_sp_match <= SOURCE_SIZE - 24) BEGIN
+        READ_LONG (cbr_sp_match + 20) cbr_sp_tail
+        PATCH_IF (cbr_sp_tail = 0xe4458d4c) BEGIN
+          SET cbr_sp_matches += 1
+          SET hook_offset = cbr_sp_match
+        END
+      END
+      SET cbr_sp_match = INDEX_BUFFER (CASE_SENSITIVE EXACT_MATCH ~%cbr_sp_signature%~ (cbr_sp_match + 1))
+    END
+    PATCH_IF (cbr_sp_matches != 1) BEGIN
+      PATCH_FAIL ~Bard progression: expected one compatible bard-table hook, found %cbr_sp_matches%. This executable is unsupported or ambiguous; no hook was installed.~
+    END
+    SET cbr_sp_executable_section = 0
+    FOR (cbr_sp_section = 0; cbr_sp_section < cbr_sp_sections; ++cbr_sp_section) BEGIN
+      SET cbr_sp_section_offset = cbr_sp_pe + 24 + cbr_sp_optional_size + cbr_sp_section * 40
+      READ_LONG (cbr_sp_section_offset + 16) cbr_sp_raw_size
+      READ_LONG (cbr_sp_section_offset + 20) cbr_sp_raw_start
+      READ_LONG (cbr_sp_section_offset + 36) cbr_sp_section_flags
+      PATCH_IF ((cbr_sp_raw_start >= 0) AND (cbr_sp_raw_size >= 24)
+             AND (cbr_sp_raw_start <= SOURCE_SIZE - cbr_sp_raw_size)
+             AND (hook_offset >= cbr_sp_raw_start)
+             AND (hook_offset <= cbr_sp_raw_start + cbr_sp_raw_size - 24)
+             AND ((cbr_sp_section_flags BAND 0x20000000) != 0)) BEGIN
+        SET cbr_sp_executable_section = 1
+      END
+    END
+    PATCH_IF (NOT cbr_sp_executable_section) BEGIN
+      PATCH_FAIL ~Bard progression: compatible bytes are outside an executable section; no hook was installed.~
+    END
+  PRINT ~Bard progression: compatible native hook found in %executable_path% at file offset %hook_offset%.~
+END
+
+DEFINE_ACTION_FUNCTION cbr_sp_validate_provider
+BEGIN
+  ACTION_IF (NOT FILE_EXISTS_IN_GAME ~CBRSPVER.2DA~) BEGIN
+    FAIL ~Bard progression: the shared provider is missing.~
+  END
+  OUTER_SET cbr_sp_api = 0
+  OUTER_SET cbr_sp_api_rows = 0
+  COPY_EXISTING ~CBRSPVER.2DA~ ~override~
+    COUNT_2DA_ROWS 2 cbr_sp_rows
+    FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
+      READ_2DA_ENTRY cbr_sp_row 0 2 cbr_sp_key
+      PATCH_IF (~%cbr_sp_key%~ STRING_EQUAL_CASE ~API~) BEGIN
+        READ_2DA_ENTRY cbr_sp_row 1 2 cbr_sp_api
+        SET cbr_sp_api_rows += 1
+      END
+    END
+    BUT_ONLY
+  ACTION_IF (NOT IS_AN_INT ~%cbr_sp_api%~) BEGIN
+    FAIL ~Bard progression: invalid provider API marker.~
+  END
+  ACTION_IF ((cbr_sp_api_rows != 1) OR (cbr_sp_api != 1)) BEGIN
+    FAIL ~Bard progression: this installer requires provider API 1.~
+  END
+  ACTION_FOR_EACH cbr_sp_required IN CBRSPKIT CBRBG6 CBRIWD7 CBRIWD8 BEGIN
+    ACTION_IF (NOT FILE_EXISTS_IN_GAME ~%cbr_sp_required%.2DA~) BEGIN
+      FAIL ~Bard progression: missing provider resource %cbr_sp_required%.2DA.~
+    END
+  END
+  COPY_EXISTING ~CBRSPKIT.2DA~ ~override~
+    COUNT_2DA_COLS cbr_sp_cols
+    // A new registry has only its three-token header and no data rows yet.
+    PATCH_IF ((cbr_sp_cols != 3) AND (cbr_sp_cols != 4)) BEGIN
+      PATCH_FAIL ~Bard progression: registry must have CLASS, KIT and TABLE columns.~
+    END
+    READ_2DA_ENTRIES_NOW cbr_sp_headers 3
+    READ_2DA_ENTRY_FORMER cbr_sp_headers 0 0 cbr_sp_h1
+    READ_2DA_ENTRY_FORMER cbr_sp_headers 0 1 cbr_sp_h2
+    READ_2DA_ENTRY_FORMER cbr_sp_headers 0 2 cbr_sp_h3
+    PATCH_IF (NOT (~%cbr_sp_h1%~ STRING_EQUAL_CASE ~CLASS~)
+           OR NOT (~%cbr_sp_h2%~ STRING_EQUAL_CASE ~KIT~)
+           OR NOT (~%cbr_sp_h3%~ STRING_EQUAL_CASE ~TABLE~)) BEGIN
+      PATCH_FAIL ~Bard progression: unsupported registry columns.~
+    END
+    COUNT_2DA_ROWS 4 cbr_sp_rows
+    CLEAR_ARRAY cbr_sp_seen
+    FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
+      READ_2DA_ENTRY cbr_sp_row 1 4 cbr_sp_class
+      READ_2DA_ENTRY cbr_sp_row 2 4 cbr_sp_kit
+      READ_2DA_ENTRY cbr_sp_row 3 4 cbr_sp_table
+      PATCH_IF (NOT IS_AN_INT ~%cbr_sp_class%~ OR NOT IS_AN_INT ~%cbr_sp_kit%~) BEGIN
+        PATCH_FAIL ~Bard progression: registry CLASS and KIT values must be integers.~
+      END
+      SET cbr_sp_class = cbr_sp_class
+      SET cbr_sp_kit = cbr_sp_kit
+      PATCH_IF (VARIABLE_IS_SET $cbr_sp_seen(~%cbr_sp_class%~ ~%cbr_sp_kit%~)) BEGIN
+        PATCH_FAIL ~Bard progression: duplicate class/kit registration.~
+      END
+      SET $cbr_sp_seen(~%cbr_sp_class%~ ~%cbr_sp_kit%~) = 1
+      PATCH_IF (NOT FILE_EXISTS_IN_GAME ~%cbr_sp_table%.2DA~) BEGIN
+        PATCH_FAIL ~Bard progression: registered table %cbr_sp_table%.2DA is missing.~
+      END
+    END
+    BUT_ONLY
+END
+
+DEFINE_ACTION_FUNCTION cbr_sp_register
+  INT_VAR class_id = 5 kit_id = 0
+  STR_VAR slot_table = ~~
+BEGIN
+  OUTER_SET cbr_sp_matches = 0
+  ACTION_IF (NOT FILE_EXISTS_IN_GAME ~%slot_table%.2DA~) BEGIN
+    FAIL ~Bard progression: requested table %slot_table%.2DA is missing.~
+  END
+  COPY_EXISTING ~CBRSPKIT.2DA~ ~override~
+    COUNT_2DA_ROWS 4 cbr_sp_rows
+    FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
+      READ_2DA_ENTRY cbr_sp_row 1 4 cbr_sp_class
+      READ_2DA_ENTRY cbr_sp_row 2 4 cbr_sp_kit
+      PATCH_IF ((cbr_sp_class = class_id) AND (cbr_sp_kit = kit_id)) BEGIN
+        SET cbr_sp_matches += 1
+        SET_2DA_ENTRY cbr_sp_row 3 4 ~%slot_table%~
+      END
+    END
+    PATCH_IF (cbr_sp_matches > 1) BEGIN
+      PATCH_FAIL ~Bard progression: duplicate class/kit registration.~
+    END
+    BUT_ONLY
+  ACTION_IF (cbr_sp_matches = 0) BEGIN
+    APPEND ~CBRSPKIT.2DA~ ~CBR_%class_id%_%kit_id% %class_id% %kit_id% %slot_table%~
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_sp_register_bard
+  INT_VAR register_table = 1
+  STR_VAR kit_symbol = ~~ slot_table = ~~ description_section = ~Advantages~ progression_text = ~~
+BEGIN
+  OUTER_SET cbr_sp_help = (0 - 1)
+  OUTER_SET cbr_sp_found = 0
+  OUTER_SET cbr_sp_trueclass = (~%kit_symbol%~ STRING_EQUAL_CASE ~BARD~)
+  ACTION_IF cbr_sp_trueclass BEGIN
+    OUTER_SET cbr_sp_id = 0x4000
+    COPY_EXISTING ~CLASTEXT.2DA~ ~override~
+      COUNT_2DA_COLS cbr_sp_cols
+      COUNT_2DA_ROWS cbr_sp_cols cbr_sp_rows
+      FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
+        READ_2DA_ENTRY cbr_sp_row 0 cbr_sp_cols cbr_sp_symbol
+        PATCH_IF (~%cbr_sp_symbol%~ STRING_EQUAL_CASE ~BARD~) BEGIN
+          READ_2DA_ENTRY cbr_sp_row 4 cbr_sp_cols cbr_sp_help
+          SET cbr_sp_found = 1
+        END
+      END
+      BUT_ONLY
+  END ELSE BEGIN
+    COPY_EXISTING ~KITLIST.2DA~ ~override~
+      COUNT_2DA_ROWS 10 cbr_sp_rows
+      FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
+        READ_2DA_ENTRY cbr_sp_row 1 10 cbr_sp_symbol
+        READ_2DA_ENTRY cbr_sp_row 8 10 cbr_sp_class
+        PATCH_IF ((~%cbr_sp_symbol%~ STRING_EQUAL_CASE ~%kit_symbol%~) AND (cbr_sp_class = 5)) BEGIN
+          READ_2DA_ENTRY cbr_sp_row 4 10 cbr_sp_help
+          SET cbr_sp_found = 1
+        END
+      END
+      BUT_ONLY
+    ACTION_IF cbr_sp_found BEGIN
+      OUTER_SET cbr_sp_id = IDS_OF_SYMBOL (~KIT~ ~%kit_symbol%~)
+      ACTION_IF (cbr_sp_id <= 0) BEGIN
+        FAIL ~Bard progression: KIT.IDS has no valid %kit_symbol% mapping.~
+      END
+    END
+  END
+  ACTION_IF cbr_sp_found BEGIN
+    ACTION_IF (NOT IS_AN_INT ~%cbr_sp_help%~) BEGIN
+      FAIL ~Bard progression: %kit_symbol% has an invalid description reference.~
+    END
+    ACTION_IF (cbr_sp_help < 0) BEGIN
+      FAIL ~Bard progression: %kit_symbol% has no description reference.~
+    END
+    OUTER_SET cbr_sp_mapping_matches = 0
+    ACTION_IF register_table BEGIN
+      LAF cbr_sp_register INT_VAR class_id = 5 kit_id = cbr_sp_id STR_VAR slot_table END
+      OUTER_SET cbr_sp_mapping_matches = 1
+    END ELSE BEGIN
+      COPY_EXISTING ~CBRSPKIT.2DA~ ~override~
+        COUNT_2DA_ROWS 4 cbr_sp_rows
+        FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
+          READ_2DA_ENTRY cbr_sp_row 1 4 cbr_sp_class
+          READ_2DA_ENTRY cbr_sp_row 2 4 cbr_sp_kit
+          READ_2DA_ENTRY cbr_sp_row 3 4 cbr_sp_table
+          PATCH_IF ((cbr_sp_class = 5) AND (cbr_sp_kit = cbr_sp_id)
+                 AND (~%cbr_sp_table%~ STRING_EQUAL_CASE ~%slot_table%~)) BEGIN
+            SET cbr_sp_mapping_matches = 1
+          END
+        END
+        BUT_ONLY
+    END
+    ACTION_IF cbr_sp_mapping_matches BEGIN
+      OUTER_PATCH ~~ BEGIN
+        GET_STRREF cbr_sp_help cbr_sp_old_description
+      END
+      OUTER_SPRINT cbr_sp_line ~- Spellbook progression: %progression_text%~
+      OUTER_PATCH_SAVE cbr_sp_description ~%cbr_sp_old_description%~ BEGIN
+        // Remove only simple obsolete normal-spellbook cap claims. Extra-slot,
+        // caster-level, and innate/HLA statements remain independent.
+        REPLACE_TEXTUALLY CASE_INSENSITIVE ~May cast arcane spells up to [678][a-z]* level\.~ ~~
+        PATCH_IF (INDEX_BUFFER (~Spellbook progression:~) >= 0) BEGIN
+          REPLACE_TEXTUALLY ~Spellbook progression:[^%WNL%%LNL%%MNL%]*~ ~Spellbook progression: %progression_text%~
+        END ELSE BEGIN
+          REPLACE_TEXTUALLY CASE_INSENSITIVE ~\(^\|[%WNL%%LNL%%MNL%]\)\([ %TAB%]*%description_section%:[ %TAB%]*\)~ ~\1\2%WNL%%cbr_sp_line%~
+          PATCH_IF (INDEX_BUFFER (~Spellbook progression:~) < 0) BEGIN
+            INSERT_BYTES SOURCE_SIZE (STRING_LENGTH ~%WNL%%WNL%%description_section%:%WNL%%cbr_sp_line%~)
+            WRITE_ASCIIE (SOURCE_SIZE - STRING_LENGTH ~%WNL%%WNL%%description_section%:%WNL%%cbr_sp_line%~) ~%WNL%%WNL%%description_section%:%WNL%%cbr_sp_line%~
+          END
+        END
+      END
+      OUTER_SET cbr_sp_new_help = RESOLVE_STR_REF (~%cbr_sp_description%~)
+      ACTION_IF (NOT cbr_sp_trueclass) BEGIN
+        COPY_EXISTING ~KITLIST.2DA~ ~override~
+          COUNT_2DA_ROWS 10 cbr_sp_rows
+          FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
+            READ_2DA_ENTRY cbr_sp_row 1 10 cbr_sp_symbol
+            PATCH_IF (~%cbr_sp_symbol%~ STRING_EQUAL_CASE ~%kit_symbol%~) BEGIN
+              SET_2DA_ENTRY cbr_sp_row 4 10 cbr_sp_new_help
+            END
+          END
+          BUT_ONLY
+      END
+      ACTION_FOR_EACH cbr_sp_class_text IN BGCLATXT CLASTEXT SODCLTXT BEGIN
+        ACTION_IF FILE_EXISTS_IN_GAME ~%cbr_sp_class_text%.2DA~ BEGIN
+          COPY_EXISTING ~%cbr_sp_class_text%.2DA~ ~override~
+            COUNT_2DA_COLS cbr_sp_cols
+            COUNT_2DA_ROWS cbr_sp_cols cbr_sp_rows
+            FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
+              READ_2DA_ENTRY cbr_sp_row 0 cbr_sp_cols cbr_sp_symbol
+              PATCH_IF (~%cbr_sp_symbol%~ STRING_EQUAL_CASE ~%kit_symbol%~) BEGIN
+                SET_2DA_ENTRY cbr_sp_row 4 cbr_sp_cols cbr_sp_new_help
+              END
+            END
+            BUT_ONLY
+        END
+      END
+      PRINT ~Bard progression: %kit_symbol% uses %slot_table%; description updated.~
+    END
+  END
+END
