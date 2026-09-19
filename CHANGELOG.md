@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.5.0 — 2026-09-20
+
+- Add component 420: shared EEex provider for native per-kit bard spell progression,
+  with a registry and installer API for independent kit adapters.
+- Add component 421: Bard/Jester use IWD progression through spell level 7;
+  Blade/Skald use the original BG progression through spell level 6.
+- Support Bardic Wonders component 3010 for its custom kit policy and descriptions,
+  including optional Darkbloom. Preserve existing slot modifiers, caster levels,
+  innate/HLA access and the shared CDTweaks table.
+- Check actual EEex capabilities and a unique native hook signature. Accept the
+  verified BG2EE/EET and IWDEE 2.7.3 layouts without a fixed file-offset/version gate.
+- Record the user's successful BG2EE/EET check and focused offline installer/runtime
+  checks. IWDEE in-game verification remains pending. Existing saved spellbooks use
+  normal level-up calculations; no automatic migration is included.
+
+See [release notes](docs/release-notes/v0.5.0.md) for installation and compatibility.
+
 ## v0.4.0 — 2026-09-16
 
 - Add optional component 110: EEex + SCS Apex Dragons lethal melee attacks for five

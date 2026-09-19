@@ -5,8 +5,9 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.4.0.** Optional dragon components are now included; their native combat
-acceptance is still pending. All previously released fixes remain included.
+**Version: v0.5.0.** Kit-specific bard spell progression is available through EEex.
+BG2EE/EET passed the user's quick in-game check; IWDEE support is verified offline.
+Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.
 
 ## Credits — stand on the shoulders of giants
@@ -39,6 +40,47 @@ reported upstream first (see `research/02-upstream-scs-report-draft.md`).
 | 2xx | SR adjustments | Cherry-picked Spell Revisions tweaks | 📋 planning (`docs/00-project-scope.md`) |
 | 3xx | Cross-cutting audits | e.g. generalized save-for-half audit | 📋 planning |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
+| 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
+| 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
+
+### Components 420–421 — Kit-specific bard progression
+
+Supports **Windows BG2EE/EET and IWDEE with compatible EEex**. The native lookup was
+verified in both games' **2.7.3.0** executables; BG2EE/EET also passed the user's in-game
+check. IWDEE still needs an in-game check. EEex 1.2 and 1.3 supply the required APIs;
+the installer checks capabilities and the actual executable instructions instead of
+requiring one exact version or file address. Component 420 supplies one engine hook
+and shared table registry; 421 selects IWD progression through seventh-level spells
+for ordinary Bards and Jesters, and vanilla progression through sixth level for
+Blades and Skalds. Other classes and unregistered kits keep their native behavior.
+Future builds can use the provider if their lookup remains compatible and uniquely
+identifiable; a changed or ambiguous lookup is rejected before installation.
+
+For Artisan's bard kits, install the kits first, then 420, 421, and **Bardic Wonders
+Balance Patch component 3010** last. It gives Dancer vanilla6, Kapellmeister and
+Darkbloom IWD8, and the other supported bard kits IWD7. Darkbloom is optional and is
+skipped when absent. Progression adds no Spell Revisions restriction; Darkbloom's
+separate copied-spell issue under SR remains outside this component. Existing extra
+slots, slot penalties, caster levels and innate HLAs remain unchanged. Descriptions
+update with the chosen policy.
+
+These components work without SCS, SR or the collection. The shared installer API
+is `override/CBRSPAPI.TPA`; adapters add numeric class/kit-to-table registrations to
+`CBRSPKIT.2DA`. API 1's native hook handles bards only. No duplicate runtime is
+needed in downstream mods. Tables come from the BG2EE bard progression and the
+IWD/un-nerfed progression documented by **Tweaks Anthology / Gibberlings3**; the
+hook uses **Bubb's EEex** infrastructure.
+
+Standalone Bardic Wonders users may install **420 → 3010** without 421, retaining
+their existing base Bard and native-kit progression. The collection selects
+**420 → 421 → 3010** for the complete policy. No component rewrites CDTweaks'
+`MXSPLBRD.2DA`; registered kits use their selected private table, while unregistered
+kits retain the shared table. Install after kits and description-changing tweaks.
+
+The normal level-up path applies the new capacities. This first build does not
+automatically rewrite existing saved spellbooks on load. See the
+[short in-game check](docs/bard-progression-playtest.md) and
+[engine evidence](research/09-kit-spell-progression-and-caster-level.md).
 
 ### Component 100 — Telekinetic Storm save fix
 
