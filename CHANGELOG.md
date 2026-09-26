@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.6.0 — 2026-09-26
+
+- Add component 301: Emotion, Courage and Emotion, Hope are mutually exclusive on each
+  creature. The last beneficial Emotion applied wins; recasting the same spell refreshes
+  it. This also repairs the installed Courage defect that let it stack with itself.
+- IWDification- or SCS-supplied spells are rebuilt in place, keeping their slots,
+  presentation, scroll placement and SCS detectable-spell markers. Fear and Symbol,
+  Hopelessness remove their matching benefit in their own save/MR domain; Emotion,
+  Hopelessness keeps its unconditional Hope removal.
+- Without either spell pack, 301 adds both spells in dynamic level-four slots with the
+  original IWDEE icons and animation, character-sheet status entries, and point-target
+  learn-scrolls stocked wherever Enchanted Weapon / Emotion, Hopelessness scrolls are sold.
+- Install 301 after IWDification, SCS, Spell Revisions and other spell, scroll or store
+  overhauls. It overwrites the effective Courage/Hope mechanics and English descriptions;
+  a later spell mod can overwrite it again.
+
+Validation: 369 automated tests pass; 26 capture-gated dragon tests skip on a fresh
+clone. The 44 component-301 tests cover standalone, mixed-provider, provider-only,
+reinstall and uninstall paths. A disposable standalone install confirmed real spell
+delivery, stat changes and Hope/Courage replacement. The standalone status-list retest
+and a live check on IWDification-supplied spells are not separately recorded; the user
+approved this release based on earlier in-game testing, with any issue fixed in a follow-up.
+All v0.5.0 components are unchanged.
+
+See [release notes](docs/release-notes/v0.6.0.md).
+
 ## v0.5.0 — 2026-09-20
 
 - Add component 420: shared EEex provider for native per-kit bard spell progression,

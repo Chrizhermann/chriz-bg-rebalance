@@ -5,8 +5,8 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.5.0.** Kit-specific bard spell progression is available through EEex.
-BG2EE/EET passed the user's quick in-game check; IWDEE support is verified offline.
+**Version: v0.6.0.** Component 301 makes Emotion, Courage and Emotion, Hope mutually
+exclusive. The v0.5.0 kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.
 
