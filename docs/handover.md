@@ -3,6 +3,21 @@
 Live entry point for anyone (user, future agent) picking up work on this repo.
 Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
 
+## Status (2026-09-26) — v0.6.0 ships component 301
+
+- The 2026-08-30 Emotion, Courage / Emotion, Hope work (component 301) was never
+  committed: its Codex worktree was cleaned up on 2026-09-05 and only the automatic
+  snapshot `9c662ad` kept it (local backup branch
+  `backup/emotion-hope-courage-301-snapshot-20260905`). It was ported unchanged in
+  behavior onto the v0.5.0 baseline on branch `claude/emotion-hope-courage-301` and
+  released as v0.6.0 with Christopher's approval. All v0.5.0 components are unchanged.
+- Christopher wants 301 as a collection default; the collection pins v0.6.0 for that.
+- Not separately recorded: the standalone status-list retest in the retained
+  `CBR301 STATUS UI TEST R3 20260830` host (see the 2026-08-30 section), and a live
+  check of provider mode (IWDification/SCS-supplied spells), which the collection uses
+  and which has installer/transformer fixture coverage. Christopher accepted release
+  based on earlier in-game testing; fix any reported issue in a follow-up release.
+
 ## Status (2026-09-16) — v0.4.0 optional dragon intake
 
 - Components 110/111 are ported from the existing a947 implementation onto the
@@ -174,6 +189,41 @@ RED/GREEN evidence.
   `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`. At this checkpoint no live
   component install had yet been authorized; the later disposable-lab result and correction
   are superseded by the 2026-09-02 status above.
+
+## Status (2026-08-30) — component 301 Emotion, Courage / Emotion, Hope
+
+- **Component 301 (Emotion, Courage / Emotion, Hope): IMPLEMENTED and automated-verified;
+  real delivery and mutual exclusion live-verified; status-list correction awaiting one manual
+  retest.** It owns the final dynamically resolved spell resources and English
+  descriptions, makes the beneficial Emotions mutually exclusive per creature, preserves the
+  save/MR-coupled Fear/Symbol removers, the unconditional Emotion, Hopelessness remover, and SCS
+  state markers. It supplies dynamically allocated fallback spells with original blue IWDEE
+  spell icons, independently extracted 13x13 IWDEE heart status icons, dynamic `STATDESC.2DA`
+  rows/opcode 142, a private IWDEE allies-only projectile/animation/sound graph, and clean
+  point-target CBR scrolls when the symbols are absent. Standalone store distribution mirrors the live donor
+  entries dynamically; fixed area, CRE, spellbook, and save edits are excluded. Install after
+  IWDification, SCS, SR, and other spell/scroll/store overhauls. Evidence:
+  `research/11-emotion-hope-courage.md`; design:
+  `docs/plans/2026-08-30-emotion-hope-courage-design.md`.
+- **The earlier controlled result did not validate delivery.** Direct EEex effect-block tests in
+  `CBR301 DISPOSABLE TEST 20260830 R2` bypassed the spell projectile. The later UI pass correctly
+  found that the former HOLD projectile filtered out allies and that the donor-cloned Courage
+  scroll could not target the ground. The corrected IWDEE projectile and clean scroll build pass
+  automated binary/install tests and were installed once into the fresh disposable
+  `CBR301 CORRECTED TEST 20260830` copy. Its first save load crashed because that clean host was
+  missing the EEex/BuffBot runtime required by the `bfbt-test` save, not because of a decoded
+  component resource defect. A compatible fresh `CBR301 CORRECTED UI TEST R2 20260830` host now
+  has the exact old EEex/BuffBot/Remote Console order, English TLK, isolated profile, referenced
+  test resources, and corrected component 301 last; launch it only through `InfinityLoader.exe`.
+  The later real UI casts delivered both complete buff sequences and confirmed Hope/Courage
+  replacement, but showed no character-sheet status entry because the fallback SPLs had no
+  opcode 142 and the clone had no matching `STATDESC.2DA` rows. The repository correction now
+  generates both. A fresh `CBR301 STATUS UI TEST R3 20260830` host and matching isolated profile
+  are installed and binary-audited: Courage/Hope resolve to `SPWI422`/`SPWI426`, their status
+  rows are 207/208, and both one-frame 13x13 D BAMs match the native IWDEE hashes. Launch only
+  that host's `InfinityLoader.exe`; only the visible status-list result still needs manual
+  confirmation. The production game and active playthrough stayed read-only. Full evidence:
+  `research/11-emotion-hope-courage.md`.
 
 ## Status (2026-08-22)
 

@@ -5,15 +5,16 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.5.0.** Kit-specific bard spell progression is available through EEex.
-BG2EE/EET passed the user's quick in-game check; IWDEE support is verified offline.
+**Version: v0.6.0.** Component 301 makes Emotion, Courage and Emotion, Hope mutually
+exclusive. The v0.5.0 kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.
 
 ## Credits — stand on the shoulders of giants
 
-This mod draws on two outstanding open-source mods. Its Tempus Holy Power components also work
-without them; other components declare their own prerequisites:
+This mod draws on three outstanding open-source mods and Bubb's EEex. Its Tempus Holy Power
+components also work without them, and component 301 can supply its own Hope and Courage spells
+on a plain BG2:EE/EET spell set; other components declare their own prerequisites:
 
 - **[Sword Coast Stratagems (SCS)](https://github.com/Gibberlings3/SwordCoastStratagems)** by
   DavidW — the gold standard for Infinity Engine AI and tactics. Install it. This mod merely
@@ -23,9 +24,16 @@ without them; other components declare their own prerequisites:
   excellent; this mod adjusts the handful that don't fit my table.
 - **[EEex](https://github.com/Bubb13/EEex)** by Bubb — engine extensions used by the optional
   lethal-dragon component and this mod's other EEex integrations.
+- **[IWDification](https://github.com/Gibberlings3/iwdification)** by CamDawg and contributors —
+  the established Icewind Dale spell port whose spell allocation, detectable-state, and
+  donor-scroll distribution precedents informed component 301.
 
-Code patterns in this repo are frequently adapted from SCS (open source). Bugs found here are
-reported upstream first (see `research/02-upstream-scs-report-draft.md`).
+Code patterns in this repo are frequently adapted from SCS (open source). Component 301 uses
+original CBR code and English text informed by the PnP/IWD spell concepts and read-only study of
+the installed IWDification/SCS implementations. Its standalone presentation files are original
+IWDEE game assets extracted from a pristine user-owned installation and credited in
+`chriz-bg-rebalance/resources/emotion_iwdee/README.md`; no IWDification or SCS binary was copied.
+Bugs found here are reported upstream first (see `research/02-upstream-scs-report-draft.md`).
 
 ## Components
 
@@ -38,7 +46,7 @@ reported upstream first (see `research/02-upstream-scs-report-draft.md`).
 | 120 | SCS adjustments | Repair the SCS/SR false Improved Mantle weapon-protection semantics | ✅ implemented |
 | 121 | SCS adjustments | EEex ambient caster readiness + one honest first-contact defense | ✅ implemented; v1.2 ambient + neutral-to-hostile urgent path live accepted; legacy live pending |
 | 2xx | SR adjustments | Cherry-picked Spell Revisions tweaks | 📋 planning (`docs/00-project-scope.md`) |
-| 3xx | Cross-cutting audits | e.g. generalized save-for-half audit | 📋 planning |
+| 301 | Cross-cutting audits | Emotion, Courage / Emotion, Hope: mutually exclusive beneficial emotions | ✅ implemented and automated-verified; delivery/mutual exclusion live-verified, status-entry retest pending |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
@@ -270,6 +278,50 @@ The two layers can be retired independently without uninstalling the component:
 Each callback layer also has its own fail-closed fuse. Offensive AI, target selection,
 sequencers, later-round defense choices, non-caster potion logic, and the future full EEex AI
 are deliberately out of scope.
+### Component 301 — Emotion, Courage / Emotion, Hope
+
+Component 301 owns the final level-four wizard spells at their dynamically resolved
+`SPELL.IDS` slots. The last beneficial Emotion applied wins on each creature, while recasting
+the same spell refreshes it. Courage grants +1 THAC0, +3 damage, and +5 Hit Points and ends fear
+and morale failure. Hope grants +2 morale, +2 THAC0, +2 damage, and +2 to all saving throws and
+ends Emotion, Hopelessness and Symbol, Hopelessness. Fear and Symbol, Hopelessness remove their
+matching benefit in the hostile mechanic's save/MR domain. Emotion, Hopelessness retains its
+established unconditional Hope removal before its separately saved hostile effects.
+
+**Compatibility notice:** Component 301 deliberately overwrites the effective Emotion,
+Courage and Emotion, Hope mechanics and English descriptions. Install it after IWDification,
+SCS, Spell Revisions, and other spell, scroll, or store overhauls. A spell mod installed later
+can overwrite component 301 again.
+
+When the symbols already exist, the component retains their allocated slots, valid installed
+visual/audio references, and existing learn-scroll placement. When either symbol is missing,
+it allocates the missing spell dynamically in a normal level-four wizard slot and creates a
+private CBR learn-scroll. The standalone spells use the original blue IWDEE A/B/C icons,
+independently extracted 13x13 IWDEE heart status icons, and a privately namespaced copy of
+IWDEE's allies-only Emotion projectile, VVC, animation, and sounds. Each fallback receives a
+dynamic `STATDESC.2DA` row and one 300-second opcode-142 entry, so `Courage` or `Hope` appears
+in the character-sheet status list. The scrolls are constructed cleanly from the same contract
+as IWDification: point targeting, range 50, opcode 148 at caster level 10, followed by a
+separate opcode-147 learning ability.
+
+The dynamically discovered Enchanted Weapon and Emotion, Hopelessness scrolls are distribution
+anchors only; their item abilities, icons, and other bytes are not cloned. Component 301 mirrors
+their store entries while preserving each store's quantities, charges, flags, and ordering.
+Those donor scrolls remain guarded requirements for the initial standalone distribution path;
+a missing or ambiguous donor aborts the WeiDU transaction. An existing spell with no
+discoverable learn-scroll is left without one in this initial compatibility pass. The component
+does not add fixed area, creature, save, or spellbook edits, so a store already cached in an
+active save may not acquire a new entry without separate save work.
+
+The first disposable UI pass exposed an enemy-only HOLD projectile and a donor-cloned Courage
+scroll in the earlier build; that build could not apply either buff and was discarded. The
+corrected UI test then confirmed real spell delivery, the complete stat sequences, and
+Hope/Courage replacement, but exposed one remaining presentation defect: the fallback spells
+had no character-sheet status entry. Regression tests now require the IWDEE allies-only
+projectile, blue icons, point-target scroll contract, dynamic STATDESC rows, D-icons, and
+opcode 142. A final manual status-list retest remains. Full binary evidence, provenance, and
+the controlled-test boundary are in
+`research/11-emotion-hope-courage.md`.
 
 ### Components 401–403 — Cleric of Tempus Holy Power
 
@@ -312,11 +364,12 @@ Download the Windows release ZIP and extract its contents into your separate mod
 folder. It includes `Setup-chriz-bg-rebalance.exe`; run it to choose components, or use:
 
 ```
-./Setup-chriz-bg-rebalance.exe --force-install-list 401 --language 0 --no-exit-pause
+./Setup-chriz-bg-rebalance.exe --force-install-list 401 301 --language 0 --no-exit-pause
 ```
 
-Use `100`, `101`, optional `110`/`111`, `120`, `121`, or exactly one of `401`/`402`/`403`
-as appropriate; the example selects the recommended Tempus mode. The two dragon options
+Use `100`, `101`, optional `110`/`111`, `120`, `121`, `301`, or exactly one of
+`401`/`402`/`403` as appropriate; the example selects the recommended Tempus mode and installs
+component 301 last, after every spell overhaul. The two dragon options
 require SCS Smarter Dragons (6540) first; 110 also requires EEex. They can be selected
 independently and in either order (the normal menu order is 110 then 111).
 Install component 120 after the final Spell Revisions

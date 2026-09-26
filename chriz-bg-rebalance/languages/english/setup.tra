@@ -7,6 +7,7 @@
 @111 = ~SCS: five dragon encounters — wing buffet at most once per 18 seconds~
 @120 = ~SCS + Spell Revisions: repair false weapon-protection semantics~
 @121 = ~EEex + SCS: ambient caster readiness and one honest first-contact defense~
+@301 = ~Emotion, Courage / Emotion, Hope — mutually exclusive beneficial emotions~
 @400 = ~Cleric of Tempus: weapon training — axe, longsword, crossbow, and two-pip mastery~
 @401 = ~Cleric of Tempus: Holy Power — automatic semantic detection (recommended)~
 @402 = ~Cleric of Tempus: Holy Power — force true-doubling compatibility~
@@ -26,8 +27,7 @@
 @1401 = ~Cleric of Tempus: Holy Power compatibility~
 @1406 = ~Cleric of Tempus: weapon specialization grants extra attacks~
 
-// Game-facing strings (component 404 announce lines; the only TLK additions
-// this mod makes)
+// Game-facing strings for components 301 and 404.
 @4041 = ~Tide of Battle: Onslaught!~
 @4042 = ~Tide of Battle: Bulwark!~
 @4043 = ~Tide of Battle: Fortune!~
@@ -36,6 +36,38 @@
 @1110 = ~WARNING: This optional component gives five dragons lethal melee attacks on SCS Dragon Hardcore/Insane (or Hard/Insane when following the game slider). Firkraag: 15% chance, save vs. death at -4. Nizidramanii'yt and Saladrex: 10%, save at -2. Thaxll'ssillyia and the Watcher's Keep guardian: 5%, save at -2.
 
 On a failed save the attack bypasses Death Ward, death-effect immunity, Stoneskin and physical resistance, requesting permanent death (chunking). A chunked companion cannot be raised or resurrected through normal gameplay. The engine's gore and permanent-death protection settings still apply and may turn this into ordinary death. Weapon immunity can prevent a qualifying hit; scripted minimum-HP protection remains intact. Requires EEex. No HP or aura changes are included.~
+// Component 301 - owned spell names and descriptions.  These strings are
+// used by both installed implementations and the standalone fallbacks.
+@3011 = ~Emotion, Courage~
+@3012 = ~Emotion, Courage
+(Enchantment/Charm)
+
+Level: 4
+Range: 50 ft.
+Duration: 300 seconds (50 rounds)
+Casting Time: 4
+Area of Effect: 7-foot radius
+Saving Throw: None
+
+This spell fills allies in the area with steadfast courage. For the duration, affected creatures gain +1 to THAC0, +3 to damage, and +5 Hit Points. It also ends fear and morale failure, including effects caused by Emotion, Fear, Horror, and Innate Horror.
+
+A creature can be affected by only one of Emotion, Courage and Emotion, Hope at a time. Applying either spell removes the other.~
+@3013 = ~Emotion, Hope~
+@3014 = ~Emotion, Hope
+(Enchantment/Charm)
+
+Level: 4
+Range: 50 ft.
+Duration: 300 seconds (50 rounds)
+Casting Time: 4
+Area of Effect: 7-foot radius
+Saving Throw: None
+
+This spell inspires allies in the area with supernatural hope. For the duration, affected creatures gain +2 morale, +2 to THAC0, +2 to damage, and +2 to all saving throws. It also ends effects caused by Emotion, Hopelessness and Symbol, Hopelessness.
+
+A creature can be affected by only one of Emotion, Courage and Emotion, Hope at a time. Applying either spell removes the other.~
+@3015 = ~Courage~
+@3016 = ~Hope~
 
 // Component 408 - the three replacement descriptions (kit, Holy Power,
 // Chaos of Battle). The kit's flavor paragraph is SoD's, verbatim.
@@ -103,6 +135,20 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9134 = ~EEex's M_*.lua autoload bootstrap (M___EEex.lua) is missing. Component 121 targets the EEex v1.2.0 API surface and rechecks required APIs at runtime.~
 @9135 = ~The final loose SPELL.IDS is missing. Install SCS and spell revisions before this tail component.~
 @9136 = ~SCS's final instant-prebuff mapping is missing from weidu_external/data/stratagems.~
+@9300 = ~The Emotion, Courage / Emotion, Hope component supports BG2:EE / EET only.~
+@9301 = ~SPELL.IDS, SPLSTATE.IDS, MISSILE.IDS, PROJECTL.IDS, or STATDESC.2DA is missing. This component requires the final BG2:EE / EET spell infrastructure.~
+@9302 = ~An installed Emotion, Courage or Emotion, Hope mapping is not a level-4 wizard-spell slot.~
+@9303 = ~SPELL.IDS maps an installed beneficial Emotion spell to a missing SPL resource.~
+@9304 = ~The standalone Emotion spells require the final WIZARD_EMOTION_HOPELESSNESS spell for adverse-spell integration and scroll distribution.~
+@9305 = ~The standalone Emotion, Courage spell requires a scroll that teaches WIZARD_ENCHANTED_WEAPON as its distribution donor.~
+@9306 = ~The standalone Emotion, Hope spell requires a scroll that teaches WIZARD_EMOTION_HOPELESSNESS as its distribution donor.~
+@9308 = ~A reserved fallback Emotion scroll resref is already owned by another resource.~
+@9309 = ~The standalone Emotion, Courage spell found more than one structurally valid WIZARD_ENCHANTED_WEAPON scroll donor; exactly one is required for deterministic distribution.~
+@9310 = ~The standalone Emotion, Hope spell found more than one structurally valid WIZARD_EMOTION_HOPELESSNESS scroll donor; exactly one is required for deterministic distribution.~
+@9311 = ~A private component-301 IWDEE visual, sound, or projectile resref is already owned by another resource.~
+@9312 = ~The dynamically allocated fallback spell slot already has an icon resource; refusing to overwrite it.~
+@9313 = ~STATDESC.2DA does not have the BG2EE description/icon shape required by the fallback Emotion status entries.~
+@9314 = ~A fallback Emotion status BAM already has a conflicting STATDESC.2DA row.~
 @9400 = ~The Cleric of Tempus Holy Power component supports BG2:EE / EET only.~
 @9401 = ~OHTEMPUS.2DA is missing. Install the Cleric of Tempus kit before this component.~
 @9402 = ~OHTMPS1.SPL is missing. Install the Cleric of Tempus kit before this component.~

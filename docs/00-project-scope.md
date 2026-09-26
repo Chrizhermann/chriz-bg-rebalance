@@ -63,11 +63,29 @@ collect concrete gripes with numbers, then design per-spell adjustments.
 
 ## Part 3 — Cross-cutting audits (components 300–399)
 
+- **301 — Emotion, Courage / Emotion, Hope** ✅ IMPLEMENTED and automated-verified;
+  real spell delivery and mutual exclusion live-verified; the character-sheet status-entry
+  correction needs one final isolated manual retest. Owns the final dynamically
+  resolved spells and descriptions so
+  the two beneficial Emotions are mutually exclusive per creature (last application wins;
+  recasts refresh). Fear and Symbol, Hopelessness retain their matching hostile mechanic's
+  save/MR domain; Emotion, Hopelessness retains its unconditional Hope remover before its
+  separately saved hostile effects. Existing spell-pack presentation and scrolls are reused
+  where valid; a standalone install uses the original blue IWDEE spell icons, independently
+  extracted 13x13 IWDEE heart status icons, dynamic `STATDESC.2DA` rows/opcode 142, and a
+  privately namespaced IWDEE Emotion projectile/animation/sound graph. It constructs point-target
+  scrolls and mirrors donor-scroll store entries dynamically. Real corrected UI casts delivered
+  both complete buff sequences and replacement behavior; they also exposed the formerly absent
+  status entries. Install after IWDification, SCS, SR, and other spell/scroll/store
+  overhauls. Diagnosis: `research/11-emotion-hope-courage.md`.
 - **Save-for-half audit (candidate 300):** the generalized sweep from `research/scripts/`
   found the whole install has exactly 3 unique offenders (TK Storm; Aura's Spirit Blade katana
   + CDTweaks 2H clones; Aura's yuki-onna breath). The Aura items are parked as issues on
   `Aura_BG1_BG2_EET-Chriz-Balance-Patch` (user: low priority). A WeiDU-native generalized
   audit component is possible later but YAGNI until new offenders appear.
+- **Reserved 310/311:** unidentified-item disguise options; EEex feasibility research remains
+  pending.
+- **Reserved 320:** weapon-damage-dice rebalance; design remains pending.
 
 ## Part 4 — Class and kit revisions (components 400–499)
 
@@ -123,3 +141,5 @@ symbols; components idempotent + predicate-guarded. Follow CLAUDE.md.
       game; old-version live acceptance is a later separately approved stage)
 - [ ] Components 401–403 independent review and controlled live deployment (no active-game write
       has occurred during implementation)
+- [x] Component 301 implementation and automated verification
+- [ ] Component 301 final Courage/Hope character-sheet status-list retest, then active-save deployment
