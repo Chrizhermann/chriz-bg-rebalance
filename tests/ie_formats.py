@@ -1,7 +1,7 @@
-"""Minimal Infinity Engine formats used by the Tempus Holy Power fixtures.
+"""Minimal Infinity Engine formats used by the binary fixture suites.
 
 This is intentionally not a general IE file-format library.  It implements only
-the SPL V1, EFF V2, 2DA, and IDS fields asserted by this test suite.
+the SPL V1, ITM V1, EFF V2, 2DA, and IDS fields asserted by this test suite.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ from typing import Iterable
 SPL_HEADER_SIZE = 0x72
 SPL_ABILITY_SIZE = 0x28
 SPL_EFFECT_SIZE = 0x30
+ITM_HEADER_SIZE = 0x72
+ITM_ABILITY_SIZE = 0x38
 EFF_V2_SIZE = 0x110
 
 
@@ -371,6 +373,137 @@ def make_spl_header(
 
 
 @dataclasses.dataclass(frozen=True)
+class ItmAbility:
+    """The small ITM V1 extended-header subset needed by scroll fixtures."""
+
+    effects: tuple[SplEffect, ...]
+    icon: str = ""
+    raw: bytes = dataclasses.field(default=b"", repr=False, compare=False)
+
+    @classmethod
+    def from_bytes(cls, raw: bytes, effects: tuple[SplEffect, ...]) -> "ItmAbility":
+        if len(raw) != ITM_ABILITY_SIZE:
+            raise ValueError(f"ITM ability must be {ITM_ABILITY_SIZE} bytes, got {len(raw)}")
+        return cls(effects=effects, icon=_resref(raw, 0x04), raw=raw)
+
+    def to_bytes(self, first_effect: int) -> bytes:
+        raw = bytearray(self.raw if len(self.raw) == ITM_ABILITY_SIZE else bytes(ITM_ABILITY_SIZE))
+        _put_resref(raw, 0x04, self.icon)
+        _put_u16(raw, 0x1E, len(self.effects))
+        _put_u16(raw, 0x20, first_effect)
+        return bytes(raw)
+
+    def canonical(self) -> tuple[object, ...]:
+        return (self.icon.upper(), tuple(effect.canonical() for effect in self.effects))
+
+
+@dataclasses.dataclass(frozen=True)
+class ItmFile:
+    """Minimal ITM V1 model with names, descriptions, and effect partitions."""
+
+    abilities: tuple[ItmAbility, ...]
+    unidentified_name: int = 0
+    identified_name: int = 0
+    unidentified_description: int = 0
+    identified_description: int = 0
+    global_effects: tuple[SplEffect, ...] = ()
+    header_raw: bytes = dataclasses.field(default=b"", repr=False, compare=False)
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "ItmFile":
+        if len(data) < ITM_HEADER_SIZE:
+            raise ValueError(f"truncated ITM V1 header: {len(data)} bytes")
+        if data[:8] != b"ITM V1  ":
+            raise ValueError(f"not ITM V1: {data[:8]!r}")
+        ability_offset = _u32(data, 0x64)
+        ability_count = _u16(data, 0x68)
+        effect_offset = _u32(data, 0x6A)
+        global_first = _u16(data, 0x6E)
+        global_count = _u16(data, 0x70)
+        ability_end = ability_offset + ability_count * ITM_ABILITY_SIZE
+        if ability_offset < ITM_HEADER_SIZE or ability_end > len(data):
+            raise ValueError("ITM ability table is out of bounds")
+        if effect_offset < ability_end or effect_offset > len(data):
+            raise ValueError("ITM effect table overlaps or is out of bounds")
+        effect_bytes = len(data) - effect_offset
+        if effect_bytes % SPL_EFFECT_SIZE:
+            raise ValueError("ITM effect table has a partial effect")
+        effect_count = effect_bytes // SPL_EFFECT_SIZE
+        effects = tuple(
+            SplEffect.from_bytes(
+                data[
+                    effect_offset + index * SPL_EFFECT_SIZE :
+                    effect_offset + (index + 1) * SPL_EFFECT_SIZE
+                ]
+            )
+            for index in range(effect_count)
+        )
+        if global_first + global_count > effect_count:
+            raise ValueError("ITM global-effect slice is out of bounds")
+        abilities = []
+        for index in range(ability_count):
+            offset = ability_offset + index * ITM_ABILITY_SIZE
+            raw = data[offset : offset + ITM_ABILITY_SIZE]
+            count = _u16(raw, 0x1E)
+            first = _u16(raw, 0x20)
+            if first + count > effect_count:
+                raise ValueError(
+                    f"ITM ability {index} effect slice {first}+{count} exceeds {effect_count}"
+                )
+            abilities.append(ItmAbility.from_bytes(raw, effects[first : first + count]))
+        return cls(
+            abilities=tuple(abilities),
+            unidentified_name=_i32(data, 0x08),
+            identified_name=_i32(data, 0x0C),
+            unidentified_description=_i32(data, 0x50),
+            identified_description=_i32(data, 0x54),
+            global_effects=effects[global_first : global_first + global_count],
+            header_raw=data[:ITM_HEADER_SIZE],
+        )
+
+    def to_bytes(self) -> bytes:
+        header = bytearray(
+            self.header_raw if len(self.header_raw) == ITM_HEADER_SIZE else bytes(ITM_HEADER_SIZE)
+        )
+        header[:8] = b"ITM V1  "
+        for offset, value in (
+            (0x08, self.unidentified_name),
+            (0x0C, self.identified_name),
+            (0x50, self.unidentified_description),
+            (0x54, self.identified_description),
+        ):
+            _put_u32(header, offset, value)
+        ability_offset = ITM_HEADER_SIZE
+        effect_offset = ability_offset + len(self.abilities) * ITM_ABILITY_SIZE
+        _put_u32(header, 0x64, ability_offset)
+        _put_u16(header, 0x68, len(self.abilities))
+        _put_u32(header, 0x6A, effect_offset)
+        _put_u16(header, 0x6E, 0)
+        _put_u16(header, 0x70, len(self.global_effects))
+
+        effect_index = len(self.global_effects)
+        ability_bytes = []
+        effects = list(self.global_effects)
+        for ability in self.abilities:
+            ability_bytes.append(ability.to_bytes(effect_index))
+            effects.extend(ability.effects)
+            effect_index += len(ability.effects)
+        return bytes(header) + b"".join(ability_bytes) + b"".join(
+            effect.to_bytes() for effect in effects
+        )
+
+    def canonical(self) -> tuple[object, ...]:
+        return (
+            self.unidentified_name,
+            self.identified_name,
+            self.unidentified_description,
+            self.identified_description,
+            tuple(effect.canonical() for effect in self.global_effects),
+            tuple(ability.canonical() for ability in self.abilities),
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class EffV2:
     opcode: int = 0
     target: int = 0
@@ -560,6 +693,14 @@ def read_spl(path: Path | str) -> SplFile:
 
 def write_spl(path: Path | str, spell: SplFile) -> None:
     Path(path).write_bytes(spell.to_bytes())
+
+
+def read_itm(path: Path | str) -> ItmFile:
+    return ItmFile.from_bytes(Path(path).read_bytes())
+
+
+def write_itm(path: Path | str, item: ItmFile) -> None:
+    Path(path).write_bytes(item.to_bytes())
 
 
 def read_eff_v2(path: Path | str) -> EffV2:

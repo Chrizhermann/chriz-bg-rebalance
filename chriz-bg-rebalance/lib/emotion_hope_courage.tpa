@@ -1,0 +1,958 @@
+// Component 301: deterministic Emotion, Courage / Emotion, Hope ownership.
+//
+// This library is intentionally hermetic.  The public action function works
+// only on files in resource_dir; allocation, IDS lookup, fallback creation,
+// and game-resource discovery belong to the installer wrapper.
+
+DEFINE_PATCH_FUNCTION cbr_em_append_effect
+  INT_VAR
+    opcode = 0
+    target = 0
+    power = 0
+    parameter1 = 0
+    parameter2 = 0
+    timing = 0
+    resist_dispel = 0
+    duration = 0
+    probability1 = 100
+    probability2 = 0
+    dice_number = 0
+    dice_size = 0
+    save_type = 0
+    save_bonus = 0
+    special = 0
+  STR_VAR
+    resource = ~~
+  RET
+    appended_offset
+BEGIN
+  SET appended_offset = BUFFER_LENGTH
+  INSERT_BYTES appended_offset 0x30
+  WRITE_SHORT appended_offset opcode
+  WRITE_BYTE (appended_offset + 0x02) target
+  WRITE_BYTE (appended_offset + 0x03) power
+  WRITE_LONG (appended_offset + 0x04) parameter1
+  WRITE_LONG (appended_offset + 0x08) parameter2
+  WRITE_BYTE (appended_offset + 0x0c) timing
+  WRITE_BYTE (appended_offset + 0x0d) resist_dispel
+  WRITE_LONG (appended_offset + 0x0e) duration
+  WRITE_BYTE (appended_offset + 0x12) probability1
+  WRITE_BYTE (appended_offset + 0x13) probability2
+  WRITE_ASCIIE (appended_offset + 0x14) ~%resource%~ #8
+  WRITE_LONG (appended_offset + 0x1c) dice_number
+  WRITE_LONG (appended_offset + 0x20) dice_size
+  WRITE_LONG (appended_offset + 0x24) save_type
+  WRITE_LONG (appended_offset + 0x28) save_bonus
+  WRITE_LONG (appended_offset + 0x2c) special
+END
+
+DEFINE_PATCH_FUNCTION cbr_em_append_raw_effect
+  INT_VAR
+    source_offset = 0
+  RET
+    appended_offset
+BEGIN
+  PATCH_IF (source_offset < 0 || source_offset + 0x30 > BUFFER_LENGTH) BEGIN
+    PATCH_FAIL ~CBR_EM_ERR_SPL_SIGNATURE~
+  END
+  SET appended_offset = BUFFER_LENGTH
+  INSERT_BYTES appended_offset 0x30
+  FOR (cbr_em_raw_byte = 0; cbr_em_raw_byte < 0x30; ++cbr_em_raw_byte) BEGIN
+    READ_BYTE (source_offset + cbr_em_raw_byte) cbr_em_raw_value
+    WRITE_BYTE (appended_offset + cbr_em_raw_byte) cbr_em_raw_value
+  END
+END
+
+// Validate the common SPL/ITM V1 table layout and prove that every effect is
+// owned by exactly one casting/global or ability slice.
+DEFINE_PATCH_FUNCTION cbr_em_validate_v1_partition
+  INT_VAR
+    ability_size = 0x28
+  STR_VAR
+    signature = ~SPL V1  ~
+    error_token = ~CBR_EM_ERR_BENEFICIAL_PARTITION~
+  RET
+    ability_offset
+    ability_count
+    effect_offset
+    effect_count
+    global_first
+    global_count
+BEGIN
+  PATCH_IF (BUFFER_LENGTH < 0x72) BEGIN
+    PATCH_FAIL ~%error_token%~
+  END
+  READ_ASCII 0 cbr_em_signature (8)
+  PATCH_IF !(~%cbr_em_signature%~ STRING_EQUAL ~%signature%~) BEGIN
+    PATCH_FAIL ~%error_token%~
+  END
+  READ_LONG 0x64 ability_offset
+  READ_SHORT 0x68 ability_count
+  READ_LONG 0x6a effect_offset
+  READ_SHORT 0x6e global_first
+  READ_SHORT 0x70 global_count
+  SET cbr_em_ability_end = ability_offset + ability_count * ability_size
+  PATCH_IF (ability_offset < 0x72 || cbr_em_ability_end > BUFFER_LENGTH
+         || effect_offset < cbr_em_ability_end || effect_offset > BUFFER_LENGTH
+         || ((BUFFER_LENGTH - effect_offset) MODULO 0x30) != 0) BEGIN
+    PATCH_FAIL ~%error_token%~
+  END
+  SET effect_count = (BUFFER_LENGTH - effect_offset) / 0x30
+  PATCH_IF (global_first + global_count > effect_count) BEGIN
+    PATCH_FAIL ~%error_token%~
+  END
+  FOR (cbr_em_cov_i = 0; cbr_em_cov_i < effect_count; ++cbr_em_cov_i) BEGIN
+    SET $cbr_em_coverage(~%cbr_em_cov_i%~) = 0
+  END
+  FOR (cbr_em_cov_i = global_first; cbr_em_cov_i < global_first + global_count; ++cbr_em_cov_i) BEGIN
+    SET $cbr_em_coverage(~%cbr_em_cov_i%~) = $cbr_em_coverage(~%cbr_em_cov_i%~) + 1
+  END
+  FOR (cbr_em_ab = 0; cbr_em_ab < ability_count; ++cbr_em_ab) BEGIN
+    SET cbr_em_ab_offset = ability_offset + cbr_em_ab * ability_size
+    READ_SHORT (cbr_em_ab_offset + 0x1e) cbr_em_ab_count
+    READ_SHORT (cbr_em_ab_offset + 0x20) cbr_em_ab_first
+    PATCH_IF (cbr_em_ab_first + cbr_em_ab_count > effect_count) BEGIN
+      PATCH_FAIL ~%error_token%~
+    END
+    FOR (cbr_em_cov_i = cbr_em_ab_first; cbr_em_cov_i < cbr_em_ab_first + cbr_em_ab_count; ++cbr_em_cov_i) BEGIN
+      SET $cbr_em_coverage(~%cbr_em_cov_i%~) = $cbr_em_coverage(~%cbr_em_cov_i%~) + 1
+    END
+  END
+  FOR (cbr_em_cov_i = 0; cbr_em_cov_i < effect_count; ++cbr_em_cov_i) BEGIN
+    PATCH_IF ($cbr_em_coverage(~%cbr_em_cov_i%~) != 1) BEGIN
+      PATCH_FAIL ~%error_token%~
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_em_validate_spl
+  STR_VAR
+    partition_error = ~CBR_EM_ERR_ADVERSE_PARTITION~
+  RET
+    ability_offset
+    ability_count
+    effect_offset
+    effect_count
+    casting_first
+    casting_count
+BEGIN
+  PATCH_IF (BUFFER_LENGTH < 8) BEGIN
+    PATCH_FAIL ~CBR_EM_ERR_SPL_SIGNATURE~
+  END
+  READ_ASCII 0 cbr_em_spl_signature (8)
+  PATCH_IF !(~%cbr_em_spl_signature%~ STRING_EQUAL ~SPL V1  ~) BEGIN
+    PATCH_FAIL ~CBR_EM_ERR_SPL_SIGNATURE~
+  END
+  LPF cbr_em_validate_v1_partition
+    INT_VAR ability_size = 0x28
+    STR_VAR signature = ~SPL V1  ~ error_token = EVAL ~%partition_error%~
+    RET
+      ability_offset = ability_offset
+      ability_count = ability_count
+      effect_offset = effect_offset
+      effect_count = effect_count
+      casting_first = global_first
+      casting_count = global_count
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_em_validate_beneficial
+BEGIN
+  // Diagnose corruption of the casting-feature slice distinctly.  The full
+  // coverage validator below owns ability-table defects; this narrow pass
+  // catches an out-of-range casting slice and a leading casting record that
+  // was orphaned by a shortened casting count.
+  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+    READ_LONG 0x64 cbr_em_bc_ability_offset
+    READ_SHORT 0x68 cbr_em_bc_ability_count
+    READ_LONG 0x6a cbr_em_bc_effect_offset
+    READ_SHORT 0x6e cbr_em_bc_first
+    READ_SHORT 0x70 cbr_em_bc_count
+    PATCH_IF (cbr_em_bc_effect_offset <= BUFFER_LENGTH
+           && ((BUFFER_LENGTH - cbr_em_bc_effect_offset) MODULO 0x30) = 0) BEGIN
+      SET cbr_em_bc_total = (BUFFER_LENGTH - cbr_em_bc_effect_offset) / 0x30
+      PATCH_IF (cbr_em_bc_first + cbr_em_bc_count > cbr_em_bc_total) BEGIN
+        PATCH_FAIL ~CBR_EM_ERR_CASTING_PARTITION~
+      END
+      PATCH_IF (cbr_em_bc_ability_count = 1
+             && cbr_em_bc_ability_offset + 0x28 <= BUFFER_LENGTH) BEGIN
+        READ_SHORT (cbr_em_bc_ability_offset + 0x20) cbr_em_bc_ability_first
+        PATCH_IF (cbr_em_bc_first = 0 && cbr_em_bc_count < cbr_em_bc_ability_first
+               && cbr_em_bc_count < cbr_em_bc_total) BEGIN
+          SET cbr_em_bc_gap_fx = cbr_em_bc_effect_offset + cbr_em_bc_count * 0x30
+          READ_SHORT cbr_em_bc_gap_fx cbr_em_bc_gap_opcode
+          PATCH_IF (cbr_em_bc_gap_opcode = 146 || cbr_em_bc_gap_opcode = 215) BEGIN
+            PATCH_FAIL ~CBR_EM_ERR_CASTING_PARTITION~
+          END
+        END
+      END
+    END
+  END
+  LPF cbr_em_validate_spl
+    STR_VAR partition_error = ~CBR_EM_ERR_BENEFICIAL_PARTITION~
+    RET
+      cbr_em_bv_ability_offset = ability_offset
+      cbr_em_bv_ability_count = ability_count
+  END
+  READ_SHORT 0x1c cbr_em_bv_type
+  PATCH_IF (cbr_em_bv_type != 1) BEGIN
+    PATCH_FAIL ~CBR_EM_ERR_BENEFICIAL_TYPE~
+  END
+  READ_LONG 0x34 cbr_em_bv_level
+  PATCH_IF (cbr_em_bv_level != 4) BEGIN
+    PATCH_FAIL ~CBR_EM_ERR_BENEFICIAL_LEVEL~
+  END
+  PATCH_IF (cbr_em_bv_ability_count != 1) BEGIN
+    PATCH_FAIL ~CBR_EM_ERR_BENEFICIAL_PARTITION~
+  END
+  READ_BYTE 0x25 cbr_em_bv_school
+  READ_BYTE (cbr_em_bv_ability_offset + 0x0c) cbr_em_bv_target
+  READ_SHORT (cbr_em_bv_ability_offset + 0x0e) cbr_em_bv_range
+  READ_SHORT (cbr_em_bv_ability_offset + 0x12) cbr_em_bv_casting
+  PATCH_IF (cbr_em_bv_school != 4 || cbr_em_bv_target != 4
+         || cbr_em_bv_range != 50 || cbr_em_bv_casting != 4) BEGIN
+    PATCH_FAIL ~CBR_EM_ERR_BENEFICIAL_PARTITION~
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_em_validate_adverse
+  INT_VAR
+    mechanic_opcode = 0
+    unconditional = 0
+    require_remover = 0
+  STR_VAR
+    positive_resref = ~~
+BEGIN
+  LPF cbr_em_validate_spl
+    STR_VAR partition_error = ~CBR_EM_ERR_ADVERSE_PARTITION~
+    RET
+      cbr_em_av_ability_offset = ability_offset
+      cbr_em_av_ability_count = ability_count
+      cbr_em_av_effect_offset = effect_offset
+  END
+  PATCH_IF (cbr_em_av_ability_count < 1) BEGIN
+    PATCH_FAIL ~CBR_EM_ERR_ADVERSE_PARTITION~
+  END
+  FOR (cbr_em_av_ab = 0; cbr_em_av_ab < cbr_em_av_ability_count; ++cbr_em_av_ab) BEGIN
+    SET cbr_em_av_header = cbr_em_av_ability_offset + cbr_em_av_ab * 0x28
+    READ_SHORT (cbr_em_av_header + 0x1e) cbr_em_av_count
+    READ_SHORT (cbr_em_av_header + 0x20) cbr_em_av_first
+    SET cbr_em_av_donors = 0
+    SET cbr_em_av_removers = 0
+    FOR (cbr_em_av_i = 0; cbr_em_av_i < cbr_em_av_count; ++cbr_em_av_i) BEGIN
+      SET cbr_em_av_fx = cbr_em_av_effect_offset + (cbr_em_av_first + cbr_em_av_i) * 0x30
+      READ_SHORT cbr_em_av_fx cbr_em_av_opcode
+      PATCH_IF (cbr_em_av_opcode = mechanic_opcode) BEGIN
+        ++cbr_em_av_donors
+      END
+      PATCH_IF (cbr_em_av_opcode = 321) BEGIN
+        READ_ASCII (cbr_em_av_fx + 0x14) cbr_em_av_resource (8) NULL
+        PATCH_IF (~%cbr_em_av_resource%~ STRING_EQUAL_CASE ~%positive_resref%~) BEGIN
+          ++cbr_em_av_removers
+        END
+      END
+    END
+    // Emotion, Hopelessness removes Hope unconditionally before its own
+    // separately saved hostile effects.  That path neither reads nor clones a
+    // hostile mechanic donor, and the native BG2EE spell has no opcode-45
+    // record.  Saved Fear/Symbol removers still require exactly one donor.
+    PATCH_IF (unconditional = 0 && cbr_em_av_donors != 1) BEGIN
+      PATCH_FAIL ~CBR_EM_ERR_ADVERSE_PARTITION~
+    END
+    PATCH_IF (require_remover = 1 && cbr_em_av_removers != 1) BEGIN
+      PATCH_FAIL ~CBR_EM_ERR_ADVERSE_PARTITION~
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_em_validate_itm
+  STR_VAR
+    courage_resref = ~~
+    hope_resref = ~~
+  RET
+    matching_kind
+BEGIN
+  LPF cbr_em_validate_v1_partition
+    INT_VAR ability_size = 0x38
+    STR_VAR signature = ~ITM V1  ~ error_token = ~CBR_EM_ERR_ITM_PARTITION~
+    RET
+      cbr_em_iv_ability_offset = ability_offset
+      cbr_em_iv_ability_count = ability_count
+      cbr_em_iv_effect_offset = effect_offset
+  END
+  SET matching_kind = 0
+  SET cbr_em_iv_courage_hits = 0
+  SET cbr_em_iv_hope_hits = 0
+  FOR (cbr_em_iv_ab = 0; cbr_em_iv_ab < cbr_em_iv_ability_count; ++cbr_em_iv_ab) BEGIN
+    SET cbr_em_iv_header = cbr_em_iv_ability_offset + cbr_em_iv_ab * 0x38
+    READ_SHORT (cbr_em_iv_header + 0x1e) cbr_em_iv_count
+    READ_SHORT (cbr_em_iv_header + 0x20) cbr_em_iv_first
+    FOR (cbr_em_iv_i = 0; cbr_em_iv_i < cbr_em_iv_count; ++cbr_em_iv_i) BEGIN
+      SET cbr_em_iv_fx = cbr_em_iv_effect_offset + (cbr_em_iv_first + cbr_em_iv_i) * 0x30
+      READ_SHORT cbr_em_iv_fx cbr_em_iv_opcode
+      PATCH_IF (cbr_em_iv_opcode = 147) BEGIN
+        READ_ASCII (cbr_em_iv_fx + 0x14) cbr_em_iv_resource (8) NULL
+        PATCH_IF (~%cbr_em_iv_resource%~ STRING_EQUAL_CASE ~%courage_resref%~) BEGIN
+          ++cbr_em_iv_courage_hits
+        END ELSE PATCH_IF (~%cbr_em_iv_resource%~ STRING_EQUAL_CASE ~%hope_resref%~) BEGIN
+          ++cbr_em_iv_hope_hits
+        END
+      END
+    END
+  END
+  PATCH_IF (cbr_em_iv_courage_hits > 0 && cbr_em_iv_hope_hits > 0) BEGIN
+    PATCH_FAIL ~CBR_EM_ERR_SCROLL_AMBIGUOUS~
+  END
+  PATCH_IF (cbr_em_iv_courage_hits > 0) BEGIN
+    SET matching_kind = 1
+  END ELSE PATCH_IF (cbr_em_iv_hope_hits > 0) BEGIN
+    SET matching_kind = 2
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_em_append_transition
+  STR_VAR resource = ~~
+BEGIN
+  LPF cbr_em_append_effect
+    INT_VAR opcode = 321 target = 2 power = 4 parameter2 = 2 timing = 1
+            resist_dispel = 2
+    STR_VAR resource = EVAL ~%resource%~
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_em_append_cleanse
+  STR_VAR resource = ~~
+BEGIN
+  LPF cbr_em_append_effect
+    INT_VAR opcode = 321 target = 2 power = 4 timing = 1 resist_dispel = 2
+    STR_VAR resource = EVAL ~%resource%~
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_em_rebuild_beneficial
+  INT_VAR
+    spell_state = "-1"
+    portrait_icon = "-1"
+    name_strref = "-1"
+    desc_strref = "-1"
+    is_courage = 0
+    have_fear = 0
+    have_horror = 0
+    have_innate_horror = 0
+    have_hopelessness = 0
+    have_symbol = 0
+  STR_VAR
+    courage_resref = ~~
+    hope_resref = ~~
+    fear_resref = ~~
+    horror_resref = ~~
+    innate_horror_resref = ~~
+    hopelessness_resref = ~~
+    symbol_resref = ~~
+BEGIN
+  LPF cbr_em_validate_beneficial END
+  LPF cbr_em_validate_spl
+    STR_VAR partition_error = ~CBR_EM_ERR_BENEFICIAL_PARTITION~
+    RET
+      cbr_em_bb_ability_offset = ability_offset
+      cbr_em_bb_effect_offset = effect_offset
+      cbr_em_bb_effect_count = effect_count
+      cbr_em_bb_cast_first = casting_first
+      cbr_em_bb_cast_count = casting_count
+  END
+  SET cbr_em_bb_header = cbr_em_bb_ability_offset
+  READ_SHORT (cbr_em_bb_header + 0x1e) cbr_em_bb_old_count
+  READ_SHORT (cbr_em_bb_header + 0x20) cbr_em_bb_old_first
+  SET cbr_em_bb_new_count = 0
+
+  // Casting features remain an exact opaque prefix.
+  FOR (cbr_em_bb_i = 0; cbr_em_bb_i < cbr_em_bb_cast_count; ++cbr_em_bb_i) BEGIN
+    LPF cbr_em_append_raw_effect
+      INT_VAR source_offset = cbr_em_bb_effect_offset + (cbr_em_bb_cast_first + cbr_em_bb_i) * 0x30
+    END
+  END
+
+  // Last cast wins, including a same-spell refresh.
+  PATCH_IF (is_courage = 1) BEGIN
+    LPF cbr_em_append_transition STR_VAR resource = EVAL ~%courage_resref%~ END
+    LPF cbr_em_append_transition STR_VAR resource = EVAL ~%hope_resref%~ END
+  END ELSE BEGIN
+    LPF cbr_em_append_transition STR_VAR resource = EVAL ~%hope_resref%~ END
+    LPF cbr_em_append_transition STR_VAR resource = EVAL ~%courage_resref%~ END
+  END
+  SET cbr_em_bb_new_count = 2
+
+  PATCH_IF (is_courage = 1) BEGIN
+    PATCH_IF (have_fear = 1) BEGIN
+      LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%fear_resref%~ END
+      ++cbr_em_bb_new_count
+    END
+    PATCH_IF (have_horror = 1) BEGIN
+      LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%horror_resref%~ END
+      ++cbr_em_bb_new_count
+    END
+    PATCH_IF (have_innate_horror = 1) BEGIN
+      LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%innate_horror_resref%~ END
+      ++cbr_em_bb_new_count
+    END
+  END ELSE BEGIN
+    PATCH_IF (have_hopelessness = 1) BEGIN
+      LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%hopelessness_resref%~ END
+      ++cbr_em_bb_new_count
+    END
+    PATCH_IF (have_symbol = 1) BEGIN
+      LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%symbol_resref%~ END
+      ++cbr_em_bb_new_count
+    END
+  END
+
+  // Preserve installed visual/audio presentation, in donor order.
+  FOR (cbr_em_bb_i = 0; cbr_em_bb_i < cbr_em_bb_old_count; ++cbr_em_bb_i) BEGIN
+    SET cbr_em_bb_fx = cbr_em_bb_effect_offset + (cbr_em_bb_old_first + cbr_em_bb_i) * 0x30
+    READ_SHORT cbr_em_bb_fx cbr_em_bb_opcode
+    PATCH_IF (cbr_em_bb_opcode = 61 || cbr_em_bb_opcode = 141
+           || (cbr_em_bb_opcode = 142 && portrait_icon < 0)
+           || cbr_em_bb_opcode = 174 || cbr_em_bb_opcode = 215) BEGIN
+      LPF cbr_em_append_raw_effect INT_VAR source_offset = cbr_em_bb_fx END
+      ++cbr_em_bb_new_count
+    END
+  END
+
+  // Standalone spells receive one canonical BG2EE character-sheet status
+  // entry. Provider spells pass -1 and retain their existing opcode 142
+  // bytes above, including the provider's own dynamically allocated row.
+  PATCH_IF (portrait_icon >= 0) BEGIN
+    LPF cbr_em_append_effect
+      INT_VAR opcode = 142 target = 2 power = 4 parameter2 = portrait_icon
+              timing = 0 resist_dispel = 3 duration = 300
+    END
+    ++cbr_em_bb_new_count
+  END
+
+  PATCH_IF (is_courage = 1) BEGIN
+    LPF cbr_em_append_effect INT_VAR opcode = 54 target = 2 power = 4 parameter1 = 1 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 73 target = 2 power = 4 parameter1 = 3 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 18 target = 2 power = 4 parameter1 = 5 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 23 target = 2 power = 4 parameter1 = 20 parameter2 = 1 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 240 target = 2 power = 4 parameter2 = 36 timing = 1 resist_dispel = 3 END
+    LPF cbr_em_append_effect INT_VAR opcode = 161 target = 2 power = 4 timing = 1 resist_dispel = 3 END
+    SET cbr_em_bb_new_count += 6
+  END ELSE BEGIN
+    LPF cbr_em_append_effect INT_VAR opcode = 23 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 54 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 73 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 325 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
+    SET cbr_em_bb_new_count += 4
+  END
+
+  // Replace duplicate owned markers with one canonical marker.
+  PATCH_IF (spell_state >= 0) BEGIN
+    LPF cbr_em_append_effect
+      INT_VAR opcode = 328 target = 2 power = 4 parameter1 = 1 parameter2 = spell_state
+              timing = 0 resist_dispel = 3 duration = 300 special = 1
+    END
+    ++cbr_em_bb_new_count
+  END
+  FOR (cbr_em_bb_i = 0; cbr_em_bb_i < cbr_em_bb_old_count; ++cbr_em_bb_i) BEGIN
+    SET cbr_em_bb_fx = cbr_em_bb_effect_offset + (cbr_em_bb_old_first + cbr_em_bb_i) * 0x30
+    READ_SHORT cbr_em_bb_fx cbr_em_bb_opcode
+    PATCH_IF (cbr_em_bb_opcode = 328) BEGIN
+      READ_LONG (cbr_em_bb_fx + 0x08) cbr_em_bb_state
+      PATCH_IF (spell_state < 0 || cbr_em_bb_state != spell_state) BEGIN
+        LPF cbr_em_append_raw_effect INT_VAR source_offset = cbr_em_bb_fx END
+        ++cbr_em_bb_new_count
+      END
+    END
+  END
+
+  DELETE_BYTES cbr_em_bb_effect_offset (cbr_em_bb_effect_count * 0x30)
+  WRITE_SHORT 0x6e 0
+  WRITE_SHORT 0x70 cbr_em_bb_cast_count
+  WRITE_SHORT (cbr_em_bb_header + 0x1e) cbr_em_bb_new_count
+  WRITE_SHORT (cbr_em_bb_header + 0x20) cbr_em_bb_cast_count
+  WRITE_LONG 0x08 name_strref
+  WRITE_LONG 0x0c name_strref
+  WRITE_LONG 0x50 desc_strref
+  LPF cbr_em_validate_beneficial END
+END
+
+DEFINE_PATCH_FUNCTION cbr_em_rebuild_adverse
+  INT_VAR
+    mechanic_opcode = 0
+    unconditional = 0
+  STR_VAR
+    positive_resref = ~~
+BEGIN
+  LPF cbr_em_validate_adverse
+    INT_VAR mechanic_opcode = mechanic_opcode unconditional = unconditional require_remover = 0
+    STR_VAR positive_resref = EVAL ~%positive_resref%~
+  END
+  LPF cbr_em_validate_spl
+    STR_VAR partition_error = ~CBR_EM_ERR_ADVERSE_PARTITION~
+    RET
+      cbr_em_ba_ability_offset = ability_offset
+      cbr_em_ba_ability_count = ability_count
+      cbr_em_ba_effect_offset = effect_offset
+      cbr_em_ba_effect_count = effect_count
+      cbr_em_ba_cast_first = casting_first
+      cbr_em_ba_cast_count = casting_count
+  END
+  FOR (cbr_em_ba_i = 0; cbr_em_ba_i < cbr_em_ba_cast_count; ++cbr_em_ba_i) BEGIN
+    LPF cbr_em_append_raw_effect
+      INT_VAR source_offset = cbr_em_ba_effect_offset + (cbr_em_ba_cast_first + cbr_em_ba_i) * 0x30
+    END
+  END
+  SET cbr_em_ba_total = cbr_em_ba_cast_count
+  FOR (cbr_em_ba_ab = 0; cbr_em_ba_ab < cbr_em_ba_ability_count; ++cbr_em_ba_ab) BEGIN
+    SET cbr_em_ba_header = cbr_em_ba_ability_offset + cbr_em_ba_ab * 0x28
+    READ_SHORT (cbr_em_ba_header + 0x1e) cbr_em_ba_old_count
+    READ_SHORT (cbr_em_ba_header + 0x20) cbr_em_ba_old_first
+    SET $cbr_em_ba_first(~%cbr_em_ba_ab%~) = cbr_em_ba_total
+    SET $cbr_em_ba_count(~%cbr_em_ba_ab%~) = 0
+    PATCH_IF (unconditional = 1) BEGIN
+      LPF cbr_em_append_effect
+        INT_VAR opcode = 321 target = 2 power = 4 timing = 1
+        STR_VAR resource = EVAL ~%positive_resref%~
+      END
+      ++cbr_em_ba_total
+      SET $cbr_em_ba_count(~%cbr_em_ba_ab%~) = 1
+    END
+    FOR (cbr_em_ba_i = 0; cbr_em_ba_i < cbr_em_ba_old_count; ++cbr_em_ba_i) BEGIN
+      SET cbr_em_ba_fx = cbr_em_ba_effect_offset + (cbr_em_ba_old_first + cbr_em_ba_i) * 0x30
+      READ_SHORT cbr_em_ba_fx cbr_em_ba_opcode
+      READ_ASCII (cbr_em_ba_fx + 0x14) cbr_em_ba_resource (8) NULL
+      SET cbr_em_ba_owned = 0
+      PATCH_IF (cbr_em_ba_opcode = 321 && ~%cbr_em_ba_resource%~ STRING_EQUAL_CASE ~%positive_resref%~) BEGIN
+        SET cbr_em_ba_owned = 1
+      END
+      PATCH_IF (unconditional = 0 && cbr_em_ba_opcode = mechanic_opcode) BEGIN
+        READ_BYTE (cbr_em_ba_fx + 0x02) cbr_em_ba_target
+        READ_BYTE (cbr_em_ba_fx + 0x03) cbr_em_ba_power
+        READ_BYTE (cbr_em_ba_fx + 0x0d) cbr_em_ba_resist
+        READ_BYTE (cbr_em_ba_fx + 0x12) cbr_em_ba_prob1
+        READ_BYTE (cbr_em_ba_fx + 0x13) cbr_em_ba_prob2
+        READ_LONG (cbr_em_ba_fx + 0x24) cbr_em_ba_save
+        READ_LONG (cbr_em_ba_fx + 0x28) cbr_em_ba_bonus
+        READ_LONG (cbr_em_ba_fx + 0x2c) cbr_em_ba_special
+        LPF cbr_em_append_effect
+          INT_VAR opcode = 321 target = cbr_em_ba_target power = cbr_em_ba_power
+                  timing = 1 resist_dispel = cbr_em_ba_resist
+                  probability1 = cbr_em_ba_prob1 probability2 = cbr_em_ba_prob2
+                  save_type = cbr_em_ba_save save_bonus = cbr_em_ba_bonus special = cbr_em_ba_special
+          STR_VAR resource = EVAL ~%positive_resref%~
+        END
+        ++cbr_em_ba_total
+        SET $cbr_em_ba_count(~%cbr_em_ba_ab%~) = $cbr_em_ba_count(~%cbr_em_ba_ab%~) + 1
+      END
+      PATCH_IF (cbr_em_ba_owned = 0) BEGIN
+        LPF cbr_em_append_raw_effect INT_VAR source_offset = cbr_em_ba_fx END
+        ++cbr_em_ba_total
+        SET $cbr_em_ba_count(~%cbr_em_ba_ab%~) = $cbr_em_ba_count(~%cbr_em_ba_ab%~) + 1
+      END
+    END
+  END
+  DELETE_BYTES cbr_em_ba_effect_offset (cbr_em_ba_effect_count * 0x30)
+  WRITE_SHORT 0x6e 0
+  WRITE_SHORT 0x70 cbr_em_ba_cast_count
+  FOR (cbr_em_ba_ab = 0; cbr_em_ba_ab < cbr_em_ba_ability_count; ++cbr_em_ba_ab) BEGIN
+    SET cbr_em_ba_header = cbr_em_ba_ability_offset + cbr_em_ba_ab * 0x28
+    WRITE_SHORT (cbr_em_ba_header + 0x1e) $cbr_em_ba_count(~%cbr_em_ba_ab%~)
+    WRITE_SHORT (cbr_em_ba_header + 0x20) $cbr_em_ba_first(~%cbr_em_ba_ab%~)
+  END
+  LPF cbr_em_validate_adverse
+    INT_VAR mechanic_opcode = mechanic_opcode unconditional = unconditional require_remover = 1
+    STR_VAR positive_resref = EVAL ~%positive_resref%~
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_em_patch_scroll_text
+  INT_VAR
+    courage_name_strref = "-1"
+    courage_desc_strref = "-1"
+    hope_name_strref = "-1"
+    hope_desc_strref = "-1"
+  STR_VAR
+    courage_resref = ~~
+    hope_resref = ~~
+BEGIN
+  LPF cbr_em_validate_itm
+    STR_VAR courage_resref = EVAL ~%courage_resref%~ hope_resref = EVAL ~%hope_resref%~
+    RET cbr_em_ps_kind = matching_kind
+  END
+  PATCH_IF (cbr_em_ps_kind = 1) BEGIN
+    WRITE_LONG 0x0c courage_name_strref
+    WRITE_LONG 0x54 courage_desc_strref
+  END ELSE PATCH_IF (cbr_em_ps_kind = 2) BEGIN
+    WRITE_LONG 0x0c hope_name_strref
+    WRITE_LONG 0x54 hope_desc_strref
+  END
+END
+
+// Build the same two-ability wizard-scroll shape used by IWDification's
+// spl_make_scroll: point-targeted opcode 148 at caster level 10, followed by
+// a self-targeted opcode 147 learning path.  The caller supplies a disposable
+// input buffer; this function deletes every byte before constructing the ITM.
+DEFINE_PATCH_FUNCTION cbr_em_make_wizard_scroll
+  INT_VAR
+    name_strref = "-1"
+    desc_strref = "-1"
+  STR_VAR
+    spell_resref = ~~
+    icon_resref = ~~
+BEGIN
+  DELETE_BYTES 0 BUFFER_LENGTH
+  INSERT_BYTES 0 0x142
+
+  WRITE_ASCII 0x00 ~ITM V1  ~
+  WRITE_LONG 0x08 7222
+  WRITE_LONG 0x0c name_strref
+  WRITE_LONG 0x18 0x6c
+  WRITE_SHORT 0x1c 11
+  // IWDification's wizard-scroll usability contract.
+  WRITE_LONG 0x1e 0x60725e80
+  WRITE_BYTE 0x2a 9
+  WRITE_BYTE 0x2d 8
+  WRITE_LONG 0x34 500
+  WRITE_SHORT 0x38 50
+  WRITE_ASCIIE 0x3a ~%icon_resref%~ #8
+  WRITE_ASCII 0x44 ~GSCRL01~ #8
+  WRITE_LONG 0x54 desc_strref
+  WRITE_ASCII 0x58 ~CSCRL01~ #8
+  WRITE_LONG 0x64 0x72
+  WRITE_SHORT 0x68 2
+  WRITE_LONG 0x6a 0xe2
+
+  // Cast from the scroll: PointWithinRange, range 50, one charge.
+  SET cbr_em_ws_cast = 0x72
+  WRITE_SHORT cbr_em_ws_cast 3
+  WRITE_SHORT (cbr_em_ws_cast + 0x02) 3
+  WRITE_ASCIIE (cbr_em_ws_cast + 0x04) ~%icon_resref%~ #8
+  WRITE_SHORT (cbr_em_ws_cast + 0x0c) 4
+  WRITE_SHORT (cbr_em_ws_cast + 0x0e) 50
+  WRITE_SHORT (cbr_em_ws_cast + 0x1e) 1
+  WRITE_SHORT (cbr_em_ws_cast + 0x20) 0
+  WRITE_SHORT (cbr_em_ws_cast + 0x22) 1
+  WRITE_SHORT (cbr_em_ws_cast + 0x24) 1
+  WRITE_SHORT (cbr_em_ws_cast + 0x2a) 1
+
+  // Learn from the scroll: Caster, one charge, second effect record.
+  SET cbr_em_ws_learn = 0xaa
+  WRITE_SHORT cbr_em_ws_learn 3
+  WRITE_SHORT (cbr_em_ws_learn + 0x02) 3
+  WRITE_ASCIIE (cbr_em_ws_learn + 0x04) ~%icon_resref%~ #8
+  WRITE_SHORT (cbr_em_ws_learn + 0x0c) 5
+  WRITE_SHORT (cbr_em_ws_learn + 0x1e) 1
+  WRITE_SHORT (cbr_em_ws_learn + 0x20) 1
+  WRITE_SHORT (cbr_em_ws_learn + 0x22) 1
+  WRITE_SHORT (cbr_em_ws_learn + 0x24) 1
+  WRITE_SHORT (cbr_em_ws_learn + 0x2a) 1
+
+  // Use spell at caster level 10.
+  SET cbr_em_ws_cast_fx = 0xe2
+  WRITE_SHORT cbr_em_ws_cast_fx 148
+  WRITE_BYTE (cbr_em_ws_cast_fx + 0x02) 1
+  WRITE_LONG (cbr_em_ws_cast_fx + 0x04) 10
+  WRITE_BYTE (cbr_em_ws_cast_fx + 0x0c) 1
+  WRITE_BYTE (cbr_em_ws_cast_fx + 0x12) 100
+  WRITE_ASCIIE (cbr_em_ws_cast_fx + 0x14) ~%spell_resref%~ #8
+
+  // Learn spell.
+  SET cbr_em_ws_learn_fx = 0x112
+  WRITE_SHORT cbr_em_ws_learn_fx 147
+  WRITE_BYTE (cbr_em_ws_learn_fx + 0x02) 1
+  WRITE_BYTE (cbr_em_ws_learn_fx + 0x0c) 1
+  WRITE_BYTE (cbr_em_ws_learn_fx + 0x12) 100
+  WRITE_ASCIIE (cbr_em_ws_learn_fx + 0x14) ~%spell_resref%~ #8
+
+  LPF cbr_em_validate_itm
+    STR_VAR courage_resref = EVAL ~%spell_resref%~ hope_resref = ~__CBRNIL~
+  END
+END
+
+// Canonical clean-room seed used only when the public installer must allocate
+// a missing spell.  All behavior, IWD/BG casting chrome, and structural bytes
+// are rebuilt here before ADD_SPELL assigns the dynamic destination resref.
+DEFINE_PATCH_FUNCTION cbr_em_make_native_seed
+  INT_VAR
+    is_courage = 0
+    stored_projectile = 0
+BEGIN
+  LPF cbr_em_validate_spl
+    STR_VAR partition_error = ~CBR_EM_ERR_ADVERSE_PARTITION~
+    RET cbr_em_ns_ability_offset = ability_offset cbr_em_ns_ability_count = ability_count
+  END
+  PATCH_IF (cbr_em_ns_ability_count < 1) BEGIN
+    PATCH_FAIL ~CBR_EM_ERR_ADVERSE_PARTITION~
+  END
+  DELETE_BYTES 0 BUFFER_LENGTH
+  INSERT_BYTES 0 0x9a
+  WRITE_ASCII 0x00 ~SPL V1  ~
+  WRITE_ASCIIE 0x10 ~CAS_M05~ #8
+  WRITE_SHORT 0x1c 1
+  WRITE_LONG 0x1e 0x800
+  WRITE_SHORT 0x22 11
+  WRITE_BYTE 0x25 4
+  WRITE_BYTE 0x27 ((is_courage = 1) ? 7 : 2)
+  WRITE_LONG 0x34 4
+  WRITE_LONG 0x64 0x72
+  WRITE_SHORT 0x68 1
+  WRITE_LONG 0x6a 0x9a
+
+  SET cbr_em_ns_ability = 0x72
+  WRITE_BYTE cbr_em_ns_ability 2
+  WRITE_BYTE (cbr_em_ns_ability + 0x02) 2
+  WRITE_BYTE (cbr_em_ns_ability + 0x0c) 4
+  WRITE_SHORT (cbr_em_ns_ability + 0x0e) 50
+  WRITE_SHORT (cbr_em_ns_ability + 0x10) 1
+  WRITE_SHORT (cbr_em_ns_ability + 0x12) 4
+  WRITE_SHORT (cbr_em_ns_ability + 0x1c) 1
+  WRITE_SHORT (cbr_em_ns_ability + 0x20) 0
+  WRITE_SHORT (cbr_em_ns_ability + 0x22) 1
+  WRITE_SHORT (cbr_em_ns_ability + 0x24) 1
+  WRITE_SHORT (cbr_em_ns_ability + 0x26) stored_projectile
+
+  // Native BG2EE Enchantment presentation, shared by both fallbacks.
+  LPF cbr_em_append_effect INT_VAR opcode = 141 target = 2 power = 4 parameter2 = 10 timing = 1 resist_dispel = 3 END
+  LPF cbr_em_append_effect INT_VAR opcode = 174 target = 2 power = 4 timing = 1 resist_dispel = 3 STR_VAR resource = ~EFF_M05~ END
+  LPF cbr_em_append_effect INT_VAR opcode = 61 target = 2 power = 4 parameter1 = 509245440 parameter2 = 1638400 timing = 1 resist_dispel = 3 END
+  // IWDEE's delayed Emotion sound, privately namespaced by the installer.
+  LPF cbr_em_append_effect INT_VAR opcode = 174 target = 2 power = 4 timing = 4 duration = 300 resist_dispel = 3 STR_VAR resource = ~CBR301E~ END
+  // Do not synthesize a portrait-icon effect in the seed: its dynamic
+  // STATDESC row does not exist until after ADD_SPELL assigns the final
+  // resref. The public installer passes that row into the final rebuild;
+  // installed providers retain their raw opcode-142 effect instead.
+
+  PATCH_IF (is_courage = 1) BEGIN
+    LPF cbr_em_append_effect INT_VAR opcode = 54 target = 2 power = 4 parameter1 = 1 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 73 target = 2 power = 4 parameter1 = 3 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 18 target = 2 power = 4 parameter1 = 5 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 23 target = 2 power = 4 parameter1 = 20 parameter2 = 1 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 240 target = 2 power = 4 parameter2 = 36 timing = 1 resist_dispel = 3 END
+    LPF cbr_em_append_effect INT_VAR opcode = 161 target = 2 power = 4 timing = 1 resist_dispel = 3 END
+    WRITE_SHORT (cbr_em_ns_ability + 0x1e) 10
+  END ELSE BEGIN
+    LPF cbr_em_append_effect INT_VAR opcode = 23 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 54 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 73 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
+    LPF cbr_em_append_effect INT_VAR opcode = 325 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
+    WRITE_SHORT (cbr_em_ns_ability + 0x1e) 8
+  END
+  LPF cbr_em_validate_beneficial END
+END
+
+// The sole public entry point.  Every read-only validation completes before
+// the first mutation, so any malformed input aborts transactionally.
+DEFINE_ACTION_FUNCTION cbr_apply_emotion_hope_courage
+  INT_VAR
+    courage_spell_state = "-1"
+    hope_spell_state = "-1"
+    courage_portrait_icon = "-1"
+    hope_portrait_icon = "-1"
+    courage_name_strref = "-1"
+    courage_desc_strref = "-1"
+    hope_name_strref = "-1"
+    hope_desc_strref = "-1"
+    // The standalone harness keeps the default file-backed discovery.  The
+    // public installer can supply the presence of BIF-only, cleanse-only
+    // Horror resources without publishing them, and patches only the target
+    // scrolls it discovered through the KEY.
+    horror_present = "-1"
+    innate_horror_present = "-1"
+    process_scrolls = 1
+  STR_VAR
+    resource_dir = ~~
+    courage_resref = ~~
+    hope_resref = ~~
+    fear_resref = ~~
+    horror_resref = ~~
+    innate_horror_resref = ~~
+    hopelessness_resref = ~~
+    symbol_resref = ~~
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  OUTER_SPRINT courage_resref EVALUATE_BUFFER ~%courage_resref%~
+  OUTER_SPRINT hope_resref EVALUATE_BUFFER ~%hope_resref%~
+  OUTER_SPRINT fear_resref EVALUATE_BUFFER ~%fear_resref%~
+  OUTER_SPRINT horror_resref EVALUATE_BUFFER ~%horror_resref%~
+  OUTER_SPRINT innate_horror_resref EVALUATE_BUFFER ~%innate_horror_resref%~
+  OUTER_SPRINT hopelessness_resref EVALUATE_BUFFER ~%hopelessness_resref%~
+  OUTER_SPRINT symbol_resref EVALUATE_BUFFER ~%symbol_resref%~
+
+  ACTION_IF (~%resource_dir%~ STR_EQ ~~) BEGIN
+    FAIL ~CBR_EM_ERR_RESOURCE_DIR~
+  END
+  ACTION_IF (~%courage_resref%~ STR_EQ ~~ || ~%hope_resref%~ STR_EQ ~~) BEGIN
+    FAIL ~CBR_EM_ERR_RESREF_EMPTY~
+  END
+  ACTION_IF (courage_spell_state < (0 - 1) || hope_spell_state < (0 - 1)) BEGIN
+    FAIL ~CBR_EM_ERR_SPELL_STATE~
+  END
+  ACTION_IF (courage_name_strref < 0 || courage_desc_strref < 0
+          || hope_name_strref < 0 || hope_desc_strref < 0) BEGIN
+    FAIL ~CBR_EM_ERR_STRREF~
+  END
+
+  ACTION_FOR_EACH cbr_em_ref IN
+    ~%courage_resref%~ ~%hope_resref%~ ~%fear_resref%~ ~%horror_resref%~
+    ~%innate_horror_resref%~ ~%hopelessness_resref%~ ~%symbol_resref%~
+  BEGIN
+    // Optional adverse symbols may be unresolved; empty means skip.  Every
+    // supplied resref remains length-checked and pairwise distinct.
+    ACTION_IF !(~%cbr_em_ref%~ STR_EQ ~~) BEGIN
+      OUTER_SET cbr_em_ref_length = STRING_LENGTH ~%cbr_em_ref%~
+      ACTION_IF (cbr_em_ref_length > 8) BEGIN
+        FAIL ~CBR_EM_ERR_RESREF_LENGTH~
+      END
+      OUTER_SET cbr_em_ref_matches = 0
+      ACTION_FOR_EACH cbr_em_other IN
+        ~%courage_resref%~ ~%hope_resref%~ ~%fear_resref%~ ~%horror_resref%~
+        ~%innate_horror_resref%~ ~%hopelessness_resref%~ ~%symbol_resref%~
+      BEGIN
+        ACTION_IF !(~%cbr_em_other%~ STR_EQ ~~)
+               && (~%cbr_em_ref%~ STR_EQ ~%cbr_em_other%~) BEGIN
+          OUTER_SET cbr_em_ref_matches += 1
+        END
+      END
+      ACTION_IF (cbr_em_ref_matches != 1) BEGIN
+        FAIL ~CBR_EM_ERR_RESREF_COLLISION~
+      END
+    END
+  END
+
+  ACTION_IF !(FILE_EXISTS ~%resource_dir%/%courage_resref%.SPL~) BEGIN
+    FAIL ~CBR_EM_ERR_MISSING_COURAGE~
+  END
+  ACTION_IF !(FILE_EXISTS ~%resource_dir%/%hope_resref%.SPL~) BEGIN
+    FAIL ~CBR_EM_ERR_MISSING_HOPE~
+  END
+  OUTER_SET cbr_em_have_fear = FILE_EXISTS ~%resource_dir%/%fear_resref%.SPL~
+  OUTER_SET cbr_em_horror_file = FILE_EXISTS ~%resource_dir%/%horror_resref%.SPL~
+  OUTER_SET cbr_em_innate_horror_file = FILE_EXISTS ~%resource_dir%/%innate_horror_resref%.SPL~
+  OUTER_SET cbr_em_have_horror = (horror_present >= 0) ? horror_present : cbr_em_horror_file
+  OUTER_SET cbr_em_have_innate_horror = (innate_horror_present >= 0) ? innate_horror_present : cbr_em_innate_horror_file
+  OUTER_SET cbr_em_have_hopelessness = FILE_EXISTS ~%resource_dir%/%hopelessness_resref%.SPL~
+  OUTER_SET cbr_em_have_symbol = FILE_EXISTS ~%resource_dir%/%symbol_resref%.SPL~
+
+  // Preflight mandatory benefits.
+  COPY ~%resource_dir%/%courage_resref%.SPL~ ~%resource_dir%/%courage_resref%.SPL~
+    LPF cbr_em_validate_beneficial END
+  BUT_ONLY
+  COPY ~%resource_dir%/%hope_resref%.SPL~ ~%resource_dir%/%hope_resref%.SPL~
+    LPF cbr_em_validate_beneficial END
+  BUT_ONLY
+
+  // Preflight optional adverse resources, specializing only the three this
+  // component edits. Horror variants are validated but otherwise untouched.
+  ACTION_IF (cbr_em_have_fear = 1) BEGIN
+    COPY ~%resource_dir%/%fear_resref%.SPL~ ~%resource_dir%/%fear_resref%.SPL~
+      LPF cbr_em_validate_adverse
+        INT_VAR mechanic_opcode = 24 unconditional = 0
+        STR_VAR positive_resref = EVAL ~%courage_resref%~
+      END
+    BUT_ONLY
+  END
+  ACTION_IF (cbr_em_horror_file = 1) BEGIN
+    COPY ~%resource_dir%/%horror_resref%.SPL~ ~%resource_dir%/%horror_resref%.SPL~
+      LPF cbr_em_validate_spl STR_VAR partition_error = ~CBR_EM_ERR_ADVERSE_PARTITION~ END
+    BUT_ONLY
+  END
+  ACTION_IF (cbr_em_innate_horror_file = 1) BEGIN
+    COPY ~%resource_dir%/%innate_horror_resref%.SPL~ ~%resource_dir%/%innate_horror_resref%.SPL~
+      LPF cbr_em_validate_spl STR_VAR partition_error = ~CBR_EM_ERR_ADVERSE_PARTITION~ END
+    BUT_ONLY
+  END
+  ACTION_IF (cbr_em_have_hopelessness = 1) BEGIN
+    COPY ~%resource_dir%/%hopelessness_resref%.SPL~ ~%resource_dir%/%hopelessness_resref%.SPL~
+      LPF cbr_em_validate_adverse
+        INT_VAR mechanic_opcode = 45 unconditional = 1
+        STR_VAR positive_resref = EVAL ~%hope_resref%~
+      END
+    BUT_ONLY
+  END
+  ACTION_IF (cbr_em_have_symbol = 1) BEGIN
+    COPY ~%resource_dir%/%symbol_resref%.SPL~ ~%resource_dir%/%symbol_resref%.SPL~
+      LPF cbr_em_validate_adverse
+        INT_VAR mechanic_opcode = 45 unconditional = 0
+        STR_VAR positive_resref = EVAL ~%hope_resref%~
+      END
+    BUT_ONLY
+  END
+
+  ACTION_IF (process_scrolls = 1) BEGIN
+    ACTION_BASH_FOR ~%resource_dir%~ ~.*\.ITM$~ BEGIN
+      COPY ~%BASH_FOR_FILESPEC%~ ~%BASH_FOR_FILESPEC%~
+        LPF cbr_em_validate_itm
+          STR_VAR courage_resref = EVAL ~%courage_resref%~ hope_resref = EVAL ~%hope_resref%~
+        END
+      BUT_ONLY
+    END
+  END
+
+  // All preflights passed; mutation begins.
+  COPY ~%resource_dir%/%courage_resref%.SPL~ ~%resource_dir%/%courage_resref%.SPL~
+    LPF cbr_em_rebuild_beneficial
+      INT_VAR
+        spell_state = courage_spell_state portrait_icon = courage_portrait_icon
+        name_strref = courage_name_strref desc_strref = courage_desc_strref
+        is_courage = 1 have_fear = cbr_em_have_fear have_horror = cbr_em_have_horror
+        have_innate_horror = cbr_em_have_innate_horror
+        have_hopelessness = cbr_em_have_hopelessness have_symbol = cbr_em_have_symbol
+      STR_VAR
+        courage_resref = EVAL ~%courage_resref%~ hope_resref = EVAL ~%hope_resref%~
+        fear_resref = EVAL ~%fear_resref%~ horror_resref = EVAL ~%horror_resref%~
+        innate_horror_resref = EVAL ~%innate_horror_resref%~
+        hopelessness_resref = EVAL ~%hopelessness_resref%~ symbol_resref = EVAL ~%symbol_resref%~
+    END
+  BUT_ONLY
+  COPY ~%resource_dir%/%hope_resref%.SPL~ ~%resource_dir%/%hope_resref%.SPL~
+    LPF cbr_em_rebuild_beneficial
+      INT_VAR
+        spell_state = hope_spell_state portrait_icon = hope_portrait_icon
+        name_strref = hope_name_strref desc_strref = hope_desc_strref
+        is_courage = 0 have_fear = cbr_em_have_fear have_horror = cbr_em_have_horror
+        have_innate_horror = cbr_em_have_innate_horror
+        have_hopelessness = cbr_em_have_hopelessness have_symbol = cbr_em_have_symbol
+      STR_VAR
+        courage_resref = EVAL ~%courage_resref%~ hope_resref = EVAL ~%hope_resref%~
+        fear_resref = EVAL ~%fear_resref%~ horror_resref = EVAL ~%horror_resref%~
+        innate_horror_resref = EVAL ~%innate_horror_resref%~
+        hopelessness_resref = EVAL ~%hopelessness_resref%~ symbol_resref = EVAL ~%symbol_resref%~
+    END
+  BUT_ONLY
+  ACTION_IF (cbr_em_have_fear = 1) BEGIN
+    COPY ~%resource_dir%/%fear_resref%.SPL~ ~%resource_dir%/%fear_resref%.SPL~
+      LPF cbr_em_rebuild_adverse
+        INT_VAR mechanic_opcode = 24 unconditional = 0
+        STR_VAR positive_resref = EVAL ~%courage_resref%~
+      END
+    BUT_ONLY
+  END
+  ACTION_IF (cbr_em_have_hopelessness = 1) BEGIN
+    COPY ~%resource_dir%/%hopelessness_resref%.SPL~ ~%resource_dir%/%hopelessness_resref%.SPL~
+      LPF cbr_em_rebuild_adverse
+        INT_VAR mechanic_opcode = 45 unconditional = 1
+        STR_VAR positive_resref = EVAL ~%hope_resref%~
+      END
+    BUT_ONLY
+  END
+  ACTION_IF (cbr_em_have_symbol = 1) BEGIN
+    COPY ~%resource_dir%/%symbol_resref%.SPL~ ~%resource_dir%/%symbol_resref%.SPL~
+      LPF cbr_em_rebuild_adverse
+        INT_VAR mechanic_opcode = 45 unconditional = 0
+        STR_VAR positive_resref = EVAL ~%hope_resref%~
+      END
+    BUT_ONLY
+  END
+  ACTION_IF (process_scrolls = 1) BEGIN
+    ACTION_BASH_FOR ~%resource_dir%~ ~.*\.ITM$~ BEGIN
+      COPY ~%BASH_FOR_FILESPEC%~ ~%BASH_FOR_FILESPEC%~
+        LPF cbr_em_patch_scroll_text
+          INT_VAR
+            courage_name_strref = courage_name_strref courage_desc_strref = courage_desc_strref
+            hope_name_strref = hope_name_strref hope_desc_strref = hope_desc_strref
+          STR_VAR courage_resref = EVAL ~%courage_resref%~ hope_resref = EVAL ~%hope_resref%~
+        END
+      BUT_ONLY
+    END
+  END
+END
