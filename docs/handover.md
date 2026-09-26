@@ -11,7 +11,10 @@ Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
   `backup/emotion-hope-courage-301-snapshot-20260905`). It was ported unchanged in
   behavior onto the v0.5.0 baseline on branch `claude/emotion-hope-courage-301` and
   released as v0.6.0 with Christopher's approval. All v0.5.0 components are unchanged.
-- Christopher wants 301 as a collection default; the collection pins v0.6.0 for that.
+- Published 2026-09-26 (PR #3, tag on merge `4aa6110`): `chriz-bg-rebalance-v0.6.0.zip`,
+  1,724,047 bytes, SHA-256 `e5f39cb60ecf90a715715d95848df4582168e55cdcff4fc5455bc768f3063224`.
+- Christopher wants 301 as a collection default. The collection still pins v0.4.0; the
+  pin change and default selection are handed to the collection release line.
 - Not separately recorded: the standalone status-list retest in the retained
   `CBR301 STATUS UI TEST R3 20260830` host (see the 2026-08-30 section), and a live
   check of provider mode (IWDification/SCS-supplied spells), which the collection uses
