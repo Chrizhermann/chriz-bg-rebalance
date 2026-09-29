@@ -19,10 +19,12 @@ Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
   Full regression: **395 tests passed, no skips**, exit 0 (444 seconds), with
   private legacy and Test19 captures available. Expected negative-path Bard
   diagnostics appeared in stdout; there were no test failures. No game was run.
-- Prepared release ZIP: 50 reviewed entries, **1,734,037 bytes**, SHA-256
+- Published release ZIP: 50 reviewed entries, **1,734,037 bytes**, SHA-256
   `ba53f02e1b5542534412331dc2f33d78c4b3a19e2dd3dee60ef6a9755ef170ab`.
   Captured game resources, tests and private research inputs are excluded.
-  Publication is the next authorized step; this line does not claim it happened.
+  PR #5 merged at `1578fac00cd93ba88341ffdfcb0346c08480cd21`; annotated tag
+  `v0.7.1` points there. GitHub reports normal Latest (not draft/prerelease).
+  Fresh release acquisition matches the candidate and published asset digest.
 - Christopher authorized publishing this small mod fix. No CEBG public release
   or installed-game change is authorized by that approval. The stopped Test19
   remains untouched: CEBG must also correct its expected order (302 is declared
