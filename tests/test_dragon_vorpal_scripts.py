@@ -26,7 +26,8 @@ def trigger_records(block: bytes) -> list[tuple[int, int, bool, str]]:
             for op, value, negate, name in records]
 
 
-def matches(block: bytes, *, actor: str, active: int, category: int, game: int) -> bool:
+def matches(block: bytes, *, actor: str, active: int, category: int, game: int,
+            family: str = "ini") -> bool:
     terms: list[bool] = []
     remaining = 0
     group: list[bool] = []
@@ -39,10 +40,13 @@ def matches(block: bytes, *, actor: str, active: int, category: int, game: int) 
         if opcode == 0x40A5:
             condition = actor.casefold() == name.casefold()
         elif opcode == 0x400F:
-            assert name == "LOCALSCBR_DV_ACTIVE", name
-            condition = active == value
+            if name == "LOCALSCBR_DV_ACTIVE":
+                condition = active == value
+            else:
+                assert family == "global" and name == "GLOBALDMWW_dragon_difficulty", name
+                condition = category == value
         elif opcode == 0x40ED:
-            assert name == "DMWW_dragon_difficulty", name
+            assert family == "ini" and name == "DMWW_dragon_difficulty", name
             condition = category == value
         elif opcode == 0x40D1:
             condition = game > value
@@ -63,8 +67,9 @@ def matches(block: bytes, *, actor: str, active: int, category: int, game: int) 
 
 
 @unittest.skipUnless(WEIDU.exists(), "WeiDU executable not available")
-@unittest.skipUnless(CAPTURE_AVAILABLE, CAPTURE_REQUIRED)
 class DragonVorpalScriptTests(unittest.TestCase):
+    family = "ini"
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="cbr-vorpal-scripts-")
         self.addCleanup(self.temp.cleanup)
@@ -73,17 +78,33 @@ class DragonVorpalScriptTests(unittest.TestCase):
         self.ids.mkdir()
         write_ids(self.ids)
         self.source = self.root / "source.bcs"
-        self.source.write_bytes((ORIGINALS / "dragred.bcs.orig").read_bytes())
         self.out = self.root / "out.bcs"
         self.counter = 0
+        self.source.write_bytes(self.compile_donor(self.family))
 
-    def run_patch(self, expected_success: bool = True) -> bytes:
+    def compile_donor(self, family: str) -> bytes:
+        # Synthetic scripts are compiled by real WeiDU, not captured game data.
+        # Both signatures occur in SCS 35.21; each donor selects its own backend.
+        trigger = ('INI("DMWW_dragon_difficulty",5)' if family == "ini" else
+                   'Global("DMWW_dragon_difficulty","GLOBAL",5)')
+        donor = self.root / "donor.txt"
+        donor.write_text(f"IF\n  {trigger}\nTHEN\n  RESPONSE #100\n    Continue()\nEND\n",
+                         encoding="ascii")
+        saved_source = self.source
+        self.source = donor
+        try:
+            return self.run_patch(component="2")
+        finally:
+            self.source = saved_source
+            self.out.unlink(missing_ok=True)
+
+    def run_patch(self, expected_success: bool = True, *, component: str = "1") -> bytes:
         self.counter += 1
         run = self.root / f"run-{self.counter}"
         run.mkdir()
         process = subprocess.run([
             str(WEIDU), str(HARNESS), "--nogame", "--search-ids", str(self.ids),
-            "--force-install-list", "1", "--args", str(LIB),
+            "--force-install-list", component, "--args", str(LIB),
             "--args", str(self.source), "--args", str(self.out),
             "--no-exit-pause", "--quick-log",
         ], cwd=run, text=True, capture_output=True, timeout=60, check=False)
@@ -115,7 +136,8 @@ class DragonVorpalScriptTests(unittest.TestCase):
                     for active in (0, 1):
                         with self.subTest(actor=actor, category=category, game=game, active=active):
                             selected = [i for i, block in enumerate(prefix) if matches(
-                                block, actor=actor, active=active, category=category, game=game
+                                block, actor=actor, active=active, category=category, game=game,
+                                family=self.family,
                             )]
                             enabled = category in (5, 6, 7) or (category == 0 and game in (4, 5))
                             should_change = actor.casefold() == "firkra02" and enabled != bool(active)
@@ -142,13 +164,41 @@ class DragonVorpalScriptTests(unittest.TestCase):
         self.run_patch(False)
         self.assertFalse(self.out.exists())
 
-    def test_non_ini_scs_difficulty_family_is_rejected(self) -> None:
-        # Old/alternate SCS builds use GLOBAL; the component must not silently
-        # ignore their category selector and follow the game slider instead.
+    def test_wrong_variable_scope_is_rejected(self) -> None:
         original = self.source.read_bytes()
-        self.source.write_bytes(original.replace(b"16621 ", b"16399 "))
+        name = (b'DMWW_dragon_difficulty' if self.family == "ini" else
+                b'GLOBALDMWW_dragon_difficulty')
+        self.source.write_bytes(original.replace(name, b'LOCALSDMWW_dragon_difficulty'))
         self.run_patch(False)
         self.assertFalse(self.out.exists())
+
+    def test_mixed_difficulty_backends_are_rejected(self) -> None:
+        original = self.source.read_bytes()
+        other = self.compile_donor("global" if self.family == "ini" else "ini")
+        self.source.write_bytes(original[:-3] + other[3:])
+        self.run_patch(False)
+        self.assertFalse(self.out.exists())
+
+    def test_own_prefix_cannot_supply_missing_donor_difficulty(self) -> None:
+        patched = self.run_patch()
+        prefix_only = b"SC\n" + b"".join(blocks(patched)[:4]) + b"SC\n"
+        self.source.write_bytes(prefix_only)
+        before = self.out.read_bytes()
+        self.run_patch(False)
+        self.assertEqual(self.out.read_bytes(), before)
+
+    @unittest.skipUnless(CAPTURE_AVAILABLE, CAPTURE_REQUIRED)
+    def test_full_captured_script_is_preserved(self) -> None:
+        original = (ORIGINALS / "dragred.bcs.orig").read_bytes()
+        if self.family == "global":
+            original = original.replace(b'16621 ', b'16399 ').replace(
+                b'"DMWW_dragon_difficulty"', b'"GLOBALDMWW_dragon_difficulty"')
+        self.source.write_bytes(original)
+        self.assertEqual(blocks(self.run_patch())[4:], blocks(original))
+
+
+class DragonVorpalGlobalScriptTests(DragonVorpalScriptTests):
+    family = "global"
 
 
 if __name__ == "__main__":

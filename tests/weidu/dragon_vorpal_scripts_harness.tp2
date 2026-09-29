@@ -10,3 +10,7 @@ COPY ~%argv[1]%~ ~%argv[2]%~
     STR_VAR actor = ~firkra02~ package = ~CBRDV15~ script_name = ~dragred~
   END
 BUT_ONLY
+
+BEGIN ~Compile synthetic difficulty donor~ DESIGNATED 2
+COPY ~%argv[1]%~ ~%argv[2]%~
+  COMPILE_BAF_TO_BCS

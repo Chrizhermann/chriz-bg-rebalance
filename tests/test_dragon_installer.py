@@ -21,7 +21,8 @@ PAYLOADS = {"cbrdv05.spl", "cbrdv10.spl", "cbrdv15.spl", "cbrdvrem.spl",
 
 
 class DragonGame:
-    def __init__(self, root: Path, *, scs: bool = True, eeex: bool = True) -> None:
+    def __init__(self, root: Path, *, scs: bool = True, eeex: bool = True,
+                 originals: Path = ORIGINALS) -> None:
         self.root = root
         self.root.mkdir()
         self.override = root / "override"
@@ -34,8 +35,8 @@ class DragonGame:
         shutil.copytree(ROOT / "chriz-bg-rebalance", root / "chriz-bg-rebalance")
         resources = [("OH6000", "ARE", b"synthetic BG2EE marker")]
         for cre, (script, _, _) in ROSTER.items():
-            resources.append((cre, "CRE", (ORIGINALS / f"{cre}.cre.orig").read_bytes()))
-            resources.append((script, "BCS", (ORIGINALS / f"{script}.bcs.orig").read_bytes()))
+            resources.append((cre, "CRE", (originals / f"{cre}.cre.orig").read_bytes()))
+            resources.append((script, "BCS", (originals / f"{script}.bcs.orig").read_bytes()))
         with patch.dict(RESOURCE_TYPE, {"CRE": 1009, "BCS": 1007}):
             _write_key_and_bif(root, tuple(resources))
         for path in (root / "dialog.tlk", root / "lang/en_us/dialog.tlk"):

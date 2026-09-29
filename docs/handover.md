@@ -3,6 +3,32 @@
 Live entry point for anyone (user, future agent) picking up work on this repo.
 Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
 
+## Status (2026-09-30) — v0.7.1 Apex Dragons compatibility fix
+
+- Component 110 now supports both legitimate SCS difficulty backends: INI and
+  GLOBAL. SCS converts its authored GLOBAL checks to INI only when its integrated
+  difficulty menu is present. The GLOBAL scripts in CEBG Test19 were valid; our
+  INI-only guard was the defect. The component still owns only its lethal-melee
+  prefix and preserves the rest of SCS's AI byte for byte.
+- No gameplay tuning changed: same five dragons, difficulty thresholds, proc
+  chances and removal rules. Missing/mixed difficulty controls and foreign or
+  duplicate prefixes still reject. Component 111 and Flail 302 are unchanged.
+- All **52 focused dragon checks pass**, including real WeiDU installation of
+  110/111 over private copies of Test19's actual resources and exact uninstall
+  restoration in a disposable synthetic game. This is not a live combat test.
+  Full regression: **395 tests passed, no skips**, exit 0 (444 seconds), with
+  private legacy and Test19 captures available. Expected negative-path Bard
+  diagnostics appeared in stdout; there were no test failures. No game was run.
+- Prepared release ZIP: 50 reviewed entries, **1,734,037 bytes**, SHA-256
+  `ba53f02e1b5542534412331dc2f33d78c4b3a19e2dd3dee60ef6a9755ef170ab`.
+  Captured game resources, tests and private research inputs are excluded.
+  Publication is the next authorized step; this line does not claim it happened.
+- Christopher authorized publishing this small mod fix. No CEBG public release
+  or installed-game change is authorized by that approval. The stopped Test19
+  remains untouched: CEBG must also correct its expected order (302 is declared
+  last) and separately validate any supervised recovery. A new archive alone
+  cannot make the old frozen attempt resumable.
+
 ## Status (2026-09-29) — v0.7.0 published with Flail of the Ages
 
 - PR #4 merged at `5db2f64cf623f818991ca077b9a2edb2156f16ee`; annotated tag
