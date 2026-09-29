@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.7.0 — 2026-09-29
+
+- Add component 302: Flail of the Ages' on-hit Slow allows a save vs. breath at
+  -2 for +3, -4 for either +4 version and -6 for +5. Slow's associated feedback
+  and Spell Revisions Haste removal use the same save; damage stays unchanged.
+- The +5 version retains protection from harmful movement effects but permits
+  Haste and Improved Haste. This does not change other Free Action sources.
+- Update the affected item descriptions locally, preserving shared game text.
+  Install after spell/item overhauls and description changes. Unknown structures
+  or descriptions are rejected rather than silently overwritten.
+
+Thirteen focused real-WeiDU tests pass, including SR/non-SR and captured vanilla
+and CEBG resources, preservation, repeated application and exact uninstall.
+In-game testing will be part of the next combined CEBG install; no live game or
+save was modified. All v0.6.0 components retain their existing behavior.
+
+See [release notes](docs/release-notes/v0.7.0.md).
+
 ## v0.6.0 — 2026-09-26
 
 - Add component 301: Emotion, Courage and Emotion, Hope are mutually exclusive on each

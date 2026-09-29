@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/chriz-bg-rebalance~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.6.0~
+VERSION ~v0.7.0~
 
 // Load the tested transformation library and define one installer wrapper for
 // all Tempus Holy Power compatibility choices. WeiDU's backup namespace is
@@ -23,6 +23,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/dragon_vorpal.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/dragon_vorpal_effects.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/emotion_hope_courage.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/flail_of_ages.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -1301,6 +1302,63 @@ LAF cbr_apply_tempus_descriptions
     hp_desc_strref  = cbr_ds_resolved_hp_desc
     cob_desc_strref = cbr_ds_resolved_cob_desc
   STR_VAR resource_dir = ~override~
+END
+
+BEGIN @302 DESIGNATED 302 GROUP @1300 LABEL ~cbr_flail_of_ages_rebalance~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9480
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~BLUN14.ITM~)
+  AND (FILE_EXISTS_IN_GAME ~BLUN30.ITM~)
+  AND (FILE_EXISTS_IN_GAME ~BLUN30C.ITM~)
+  AND (FILE_EXISTS_IN_GAME ~BLUN30D.ITM~)
+  AND (FILE_EXISTS_IN_GAME ~SPELL.IDS~)) @9481
+
+CLEAR_IDS_MAP
+OUTER_SPRINT cbr_f_haste ~~
+OUTER_SPRINT cbr_f_improved ~~
+OUTER_SET cbr_f_haste_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_HASTE~)
+OUTER_SET cbr_f_improved_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~)
+ACTION_IF (cbr_f_haste_id >= 2000 AND cbr_f_haste_id < 3000) BEGIN
+  OUTER_SET cbr_f_number = cbr_f_haste_id - 2000
+  OUTER_SPRINT cbr_f_haste ~SPWI%cbr_f_number%~
+END
+ACTION_IF (cbr_f_improved_id >= 2000 AND cbr_f_improved_id < 3000) BEGIN
+  OUTER_SET cbr_f_number = cbr_f_improved_id - 2000
+  OUTER_SPRINT cbr_f_improved ~SPWI%cbr_f_number%~
+END
+OUTER_SET cbr_f_haste_secondary = (0 - 1)
+ACTION_IF ((NOT (~%cbr_f_haste%~ STRING_EQUAL ~~)) AND (FILE_EXISTS_IN_GAME ~%cbr_f_haste%.SPL~)) BEGIN
+  // SR allocates its k1#Haste secondary type in MSECTYPE.2DA, not an IDS.
+  // Read the effective symbol-resolved Haste spell rather than assuming slot 20.
+  COPY_EXISTING ~%cbr_f_haste%.SPL~ ~~
+    PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+      READ_BYTE 0x27 cbr_f_haste_secondary
+      PATCH_IF (cbr_f_haste_secondary = 0) BEGIN SET cbr_f_haste_secondary = (0 - 1) END
+    END
+  BUT_ONLY
+END
+ACTION_FOR_EACH cbr_f_item IN BLUN14 BLUN30C BLUN30D BLUN30 BEGIN
+  OUTER_SET cbr_f_penalty = 4
+  OUTER_SET cbr_f_allow = 0
+  OUTER_SPRINT cbr_f_save_note @3022
+  ACTION_IF (~%cbr_f_item%~ STRING_EQUAL ~BLUN14~) BEGIN
+    OUTER_SET cbr_f_penalty = 2
+    OUTER_SPRINT cbr_f_save_note @3021
+  END ELSE ACTION_IF (~%cbr_f_item%~ STRING_EQUAL ~BLUN30~) BEGIN
+    OUTER_SET cbr_f_penalty = 6
+    OUTER_SET cbr_f_allow = 1
+    OUTER_SPRINT cbr_f_save_note @3023
+  END
+  OUTER_SPRINT cbr_f_haste_note @3024
+  COPY_EXISTING ~%cbr_f_item%.ITM~ ~override~
+    LPF cbr_foa_patch
+      INT_VAR save_penalty = cbr_f_penalty allow_haste = cbr_f_allow haste_secondary = cbr_f_haste_secondary
+      STR_VAR haste_resref = EVAL ~%cbr_f_haste%~ improved_haste_resref = EVAL ~%cbr_f_improved%~
+    END
+    LPF cbr_foa_description
+      INT_VAR allow_haste = cbr_f_allow
+      STR_VAR save_note = EVAL ~%cbr_f_save_note%~ haste_note = EVAL ~%cbr_f_haste_note%~
+    END
+  BUT_ONLY
 END
 
 // The provider is independently selectable; it changes no class defaults.

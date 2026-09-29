@@ -5,8 +5,9 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.6.0.** Component 301 makes Emotion, Courage and Emotion, Hope mutually
-exclusive. The v0.5.0 kit-specific bard spell progression remains available through EEex.
+**Version: v0.7.0.** Component 302 gives Flail of the Ages' Slow a saving throw and
+lets its +5 version work with Haste. Component 301 makes Emotion, Courage and
+Emotion, Hope mutually exclusive. Kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.
 
@@ -47,9 +48,33 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 121 | SCS adjustments | EEex ambient caster readiness + one honest first-contact defense | ✅ implemented; v1.2 ambient + neutral-to-hostile urgent path live accepted; legacy live pending |
 | 2xx | SR adjustments | Cherry-picked Spell Revisions tweaks | 📋 planning (`docs/00-project-scope.md`) |
 | 301 | Cross-cutting audits | Emotion, Courage / Emotion, Hope: mutually exclusive beneficial emotions | ✅ implemented and automated-verified; delivery/mutual exclusion live-verified, status-entry retest pending |
+| 302 | Cross-cutting audits | Flail of the Ages: saves against Slow; +5 allows Haste | Isolated WeiDU checks passed; in-game check pending |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
+
+### Component 302 — Flail of the Ages
+
+The on-hit Slow now allows a **save vs. breath**: **−2 for +3**, **−4 for either
++4 version**, and **−6 for +5**. A successful save prevents Slow and its associated
+Haste removal and feedback; the weapon's damage is unaffected. Its existing
+chance to trigger, Slow duration and other properties are preserved. Lower-tier
+versions do not change.
+
+The **+5 version keeps Free Action but allows Haste and Improved Haste**, including
+Spell Revisions' versions. Other Free Action sources and the Slow spell are not
+changed. Item descriptions show the new rules without replacing shared game text.
+
+Requires BG2:EE/EET, but not SCS, Spell Revisions or EEex. Install after SCS, Spell
+Revisions and other changes to these items or their descriptions. The base-game
+items and CEBG's English EET/SR/SCS/Artisan/UB items are covered by automated checks;
+unrecognized item structures or description text are rejected, not silently
+overwritten. This is not a universal item-overhaul or translation compatibility claim.
+
+This component is included in v0.7.0 and intended as a CEBG default.
+It has not been installed into a live game. Existing-save hotpatching is a separate
+question: the component neither edits saves nor promises to replace effects already
+stored in them. [Evidence and boundaries](research/15-flail-of-ages.md).
 
 ### Components 420–421 — Kit-specific bard progression
 

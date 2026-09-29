@@ -3,6 +3,37 @@
 Live entry point for anyone (user, future agent) picking up work on this repo.
 Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
 
+## Status (2026-09-29) — v0.7.0 prepared for Flail of the Ages
+
+- Component **302**, label `cbr_flail_of_ages_rebalance`, implements Christopher's
+  approved item rebalance: Slow saves vs. breath at −2/+3, −4/either +4, −6/+5;
+  +5 retains harmful-impairment Free Action protection while permitting Haste and
+  Improved Haste. Chance, duration, damage, unrelated effects and lower tiers stay
+  unchanged. SR's associated Haste removal and Slow feedback share the save.
+- Work is isolated on `codex/flail-of-ages-rebalance`, based on current
+  `origin/main` `8349304`, in the reused clean worktree
+  `.worktrees/bard-progression-release-20260920`. Owner main's unrelated dirty Bard
+  and Time Stop work is untouched. Version markers and release notes now target
+  v0.7.0. Publication is authorized for this approved component so the next CEBG
+  package can pin it; archive/remote verification will be recorded below when done.
+- **13 focused tests pass** using actual WeiDU 249 in disposable games, including
+  vanilla and default CEBG item captures, both effect layouts, negative signed save
+  values, preservation, exact item uninstall, idempotence and unchanged pre-existing
+  TLK strings. Full current installed English descriptions also passed an isolated
+  check. TP2 and TPA parse checks pass. No live installation or save was modified,
+  and these are not in-game acceptance claims.
+- CEBG intends to select 302 by default after the next owner release. It belongs in
+  the existing late/post-EET_end Rebalance run, after SR/SCS/item-description changes;
+  no EEex or external provider component is required. Later selected CDTweaks
+  2310/2311 alter SPLs, not these ITMs. Do not pin an unreleased branch as if it were
+  a published release artifact. No extra isolated gameplay gate is added here;
+  the user plans the combined release install/playtest.
+- Unknown item structures or non-English/unrecognized descriptions reject safely.
+  This is not a global Free Action policy, arbitrary overhaul support, or an
+  existing-save hotpatch. See `research/15-flail-of-ages.md` and
+  `tests/test_flail_of_ages.py`. Captured game binaries remain local research inputs,
+  not distributable mod payloads.
+
 ## Status (2026-09-26) — v0.6.0 ships component 301
 
 - The 2026-08-30 Emotion, Courage / Emotion, Hope work (component 301) was never
