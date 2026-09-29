@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.7.1 — 2026-09-30
+
+- Fix Apex Dragons (110) failing to install when SCS uses its GLOBAL-based
+  difficulty controls. It now follows the actual installed GLOBAL or INI checks.
+- Keep the same five dragons, lethal-attack chances, difficulty thresholds and
+  removal behaviour. SCS's original combat scripts remain unchanged behind our
+  added blocks; this is not a replacement of the dragon AI.
+- Both difficulty systems now have real-WeiDU regressions that run without private
+  game captures. An optional captured-stack test also verifies installation and
+  exact uninstall against the actual CEBG failure's resources in a disposable game.
+
+See [release notes](docs/release-notes/v0.7.1.md). This fixes the mod installer;
+it does not automatically repair an already-stopped CEBG installation or edit saves.
+
 ## v0.7.0 — 2026-09-29
 
 - Add component 302: Flail of the Ages' on-hit Slow allows a save vs. breath at

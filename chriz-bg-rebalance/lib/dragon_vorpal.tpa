@@ -7,11 +7,37 @@ DEFINE_PATCH_FUNCTION cbr_dragon_vorpal_prefix
   RET changed
 BEGIN
   SET changed = 0
+  PATCH_IF BUFFER_LENGTH < 6 BEGIN
+    PATCH_FAIL ~CBR 110: %script_name% is not a supported compiled BCS.~
+  END
   READ_ASCII 0 cbr_dv_signature (3)
   READ_ASCII (BUFFER_LENGTH - 3) cbr_dv_tail (3)
   PATCH_IF !(~%cbr_dv_signature%~ STR_EQ ~SC%LNL%~)
         OR !(~%cbr_dv_tail%~ STR_EQ ~SC%LNL%~) BEGIN
     PATCH_FAIL ~CBR 110: %script_name% is not a supported compiled BCS.~
+  END
+  // We own the lethal-melee rider, not SCS's combat AI. Match the difficulty
+  // storage used by this installed script; both families are valid SCS output.
+  // Validate again below without our prefix, so it cannot vouch for its donor.
+  SPRINT cbr_dv_ini_pattern ~TR%LNL%16621 [0-7] [01] 0 0 "DMWW_dragon_difficulty" "" OB~
+  SPRINT cbr_dv_global_pattern ~TR%LNL%16399 [0-7] [01] 0 0 "GLOBALDMWW_dragon_difficulty" "" OB~
+  SET cbr_dv_ini = INDEX_BUFFER (~%cbr_dv_ini_pattern%~) >= 0
+  SET cbr_dv_global = INDEX_BUFFER (~%cbr_dv_global_pattern%~) >= 0
+  PATCH_IF cbr_dv_ini + cbr_dv_global != 1 BEGIN
+    PATCH_FAIL ~CBR 110: %script_name% has missing or mixed SCS difficulty controls; expected INI or GLOBAL.~
+  END
+  PATCH_IF cbr_dv_global BEGIN
+    SPRINT cbr_dv_difficulty_pattern ~%cbr_dv_global_pattern%~
+    SPRINT cbr_dv_category_0 ~Global("DMWW_dragon_difficulty","GLOBAL",0)~
+    SPRINT cbr_dv_category_5 ~Global("DMWW_dragon_difficulty","GLOBAL",5)~
+    SPRINT cbr_dv_category_6 ~Global("DMWW_dragon_difficulty","GLOBAL",6)~
+    SPRINT cbr_dv_category_7 ~Global("DMWW_dragon_difficulty","GLOBAL",7)~
+  END ELSE BEGIN
+    SPRINT cbr_dv_difficulty_pattern ~%cbr_dv_ini_pattern%~
+    SPRINT cbr_dv_category_0 ~INI("DMWW_dragon_difficulty",0)~
+    SPRINT cbr_dv_category_5 ~INI("DMWW_dragon_difficulty",5)~
+    SPRINT cbr_dv_category_6 ~INI("DMWW_dragon_difficulty",6)~
+    SPRINT cbr_dv_category_7 ~INI("DMWW_dragon_difficulty",7)~
   END
   // Generated in memory; no upstream BAF source is edited. Four disjoint
   // transitions handle explicit category values and the game-slider fallback.
@@ -20,9 +46,9 @@ IF
   Name("%actor%",Myself)
   Global("CBR_DV_ACTIVE","LOCALS",0)
   OR(3)
-    INI("DMWW_dragon_difficulty",5)
-    INI("DMWW_dragon_difficulty",6)
-    INI("DMWW_dragon_difficulty",7)
+    %cbr_dv_category_5%
+    %cbr_dv_category_6%
+    %cbr_dv_category_7%
 THEN
   RESPONSE #100
     ApplySpellRES("%package%",Myself)
@@ -32,7 +58,7 @@ END
 IF
   Name("%actor%",Myself)
   Global("CBR_DV_ACTIVE","LOCALS",0)
-  INI("DMWW_dragon_difficulty",0)
+  %cbr_dv_category_0%
   DifficultyGT(3)
   DifficultyLT(6)
 THEN
@@ -44,10 +70,10 @@ END
 IF
   Name("%actor%",Myself)
   Global("CBR_DV_ACTIVE","LOCALS",1)
-  !INI("DMWW_dragon_difficulty",0)
-  !INI("DMWW_dragon_difficulty",5)
-  !INI("DMWW_dragon_difficulty",6)
-  !INI("DMWW_dragon_difficulty",7)
+  !%cbr_dv_category_0%
+  !%cbr_dv_category_5%
+  !%cbr_dv_category_6%
+  !%cbr_dv_category_7%
 THEN
   RESPONSE #100
     ApplySpellRES("CBRDVREM",Myself)
@@ -57,7 +83,7 @@ END
 IF
   Name("%actor%",Myself)
   Global("CBR_DV_ACTIVE","LOCALS",1)
-  INI("DMWW_dragon_difficulty",0)
+  %cbr_dv_category_0%
   OR(2)
     DifficultyLT(4)
     DifficultyGT(5)
@@ -99,12 +125,10 @@ END
     READ_ASCII 0 cbr_dv_remainder (BUFFER_LENGTH)
     SET changed = 1
   END
-  // SCS can also compile a GLOBAL-based difficulty family on other installs.
-  // Recognize the final script, not just the installed component number. Exclude
-  // our prefix from this check so it cannot make an unsupported donor pass.
+  // Recognize the donor independently of our own generated prefix.
   INNER_PATCH ~%cbr_dv_remainder%~ BEGIN
-    PATCH_IF (INDEX_BUFFER (~TR%LNL%16621 [0-7] [01] 0 0 "DMWW_dragon_difficulty" "" OB~) < 0) BEGIN
-      PATCH_FAIL ~CBR 110: %script_name% lacks the supported SCS INI difficulty family.~
+    PATCH_IF (INDEX_BUFFER (~%cbr_dv_difficulty_pattern%~) < 0) BEGIN
+      PATCH_FAIL ~CBR 110: %script_name% has no SCS difficulty controls outside our own prefix.~
     END
   END
   PATCH_IF (changed AND apply) BEGIN

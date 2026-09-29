@@ -1,5 +1,27 @@
 # Dragon runtime scope and difficulty gates
 
+## September 30 correction: both SCS difficulty backends are valid
+
+The earlier INI-only finding below described one captured installation, not a
+universal SCS contract. SCS 35.21 `sfo2e/lib_script.tph`'s `script_difficulty_ini`
+changes `Global("DMWW...difficulty","GLOBAL",N)` into `INI(...)` only when
+`m_dw_did.lua` exists. Its `ssl/difficulty.slb` authors the GLOBAL form. A CEBG
+installation using an alternate UI produced GLOBAL-only checks in all five target
+scripts; component 110 rejected them before publishing any files.
+
+The fix selects the backend from the effective BCS and emits only its own four
+activation/removal blocks in that backend. It preserves existing difficulty
+thresholds and every original script byte. Missing or mixed controls, wrong scope,
+foreign/duplicate prefixes and wrong creature identities still reject. Our prefix
+cannot supply the evidence for an otherwise unrecognized donor.
+
+The INI and GLOBAL test grids now run without private captures, using real WeiDU
+compilation. A read-only capture of the five current CREs and their pre-111 BCS
+backups also passed public 110+111 installation and exact uninstall in a temporary
+synthetic game. No live game/ledger/save was changed. Combat remains a user playtest.
+
+## Original September 7 capture
+
 2026-09-07. Read-only inspection of the installed SCS 35.21 resources, before implementation. Captured CRE/BCS bytes and SHA-256 provenance are in `originals/dragon_wing_buffet/manifest.json`.
 
 The first implementation covers five encounters. No HP or aura change is included. Current implementation defaults are Hardcore/Insane activation, 15%/-4 for Firkraag, 10%/-2 for Nizidramanii'yt and Saladrex, and 5%/-2 for Thaxll'ssillyia and the Watcher's Keep guardian. The latter allocations and activation are conservative implementation choices following the request to proceed, rather than earlier explicit per-dragon decisions.

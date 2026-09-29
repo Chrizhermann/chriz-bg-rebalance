@@ -1,6 +1,6 @@
 # Local dragon test capture
 
-The 110/111 installer, script and wing-buffet suites use a read-only captured SCS
+The 110/111 installer and wing-buffet suites use a read-only captured SCS
 35.21/EET stack, rather than accessing any live installation during a test run.
 The captured CRE and full BCS assets are not published in Git or release archives.
 
@@ -26,3 +26,11 @@ that prerequisite as unavailable. The fully synthetic vorpal effects/Lua tests
 still run. Presence of a capture does not suppress hash or partial-file failures.
 The v0.4.0 release validation used the complete capture; none of the 39 dragon
 tests were skipped. Synthetic success is not native combat acceptance.
+
+As of v0.7.1, the INI/GLOBAL script-prefix tests use synthetic, real-compiler inputs
+and run without this capture; only their two full-script preservation cases use it.
+`test_dragon_captured_stack.py` accepts a separate private ten-file capture via
+`CBR_DRAGON_STACK_CAPTURE` (five `<cre>.cre.orig`, five `<script>.bcs.orig`). Use the
+effective CREs and the GLOBAL scripts from before component 111. It only reads the
+capture and installs/uninstalls in its own temporary synthetic game. Never point it
+at a playable installation. Captures remain excluded from Git and release archives.

@@ -5,7 +5,8 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.7.0.** Component 302 gives Flail of the Ages' Slow a saving throw and
+**Version: v0.7.1.** Apex Dragons now supports both SCS difficulty-control systems.
+Component 302 gives Flail of the Ages' Slow a saving throw and
 lets its +5 version work with Haste. Component 301 makes Emotion, Courage and
 Emotion, Hope mutually exclusive. Kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
