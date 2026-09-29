@@ -3,7 +3,17 @@
 Live entry point for anyone (user, future agent) picking up work on this repo.
 Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
 
-## Status (2026-09-29) — v0.7.0 prepared for Flail of the Ages
+## Status (2026-09-29) — v0.7.0 published with Flail of the Ages
+
+- PR #4 merged at `5db2f64cf623f818991ca077b9a2edb2156f16ee`; annotated tag
+  `v0.7.0` points there. GitHub reports normal Latest (not draft/prerelease).
+  Downloaded `chriz-bg-rebalance-v0.7.0.zip` is **1,733,901 bytes**, SHA-256
+  `3aae59bc634671ad6a6565d5862c4db984584bd90094ecbf640dda338d665b87`.
+  Its 50 entries are the reviewed runtime/docs/licenses/setup allowlist; captured
+  test resources are excluded. Extracted component catalogue includes 302.
+- Full automated suite: **382 cases, exit 0, 26 existing capture-dependent skips**;
+  all 13 Flail cases pass. TP2/TPA parsing passes. Publication does not claim live
+  gameplay acceptance or an installed-game update. Exact pin handed to CEBG.
 
 - Component **302**, label `cbr_flail_of_ages_rebalance`, implements Christopher's
   approved item rebalance: Slow saves vs. breath at −2/+3, −4/either +4, −6/+5;
@@ -14,8 +24,7 @@ Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
   `origin/main` `8349304`, in the reused clean worktree
   `.worktrees/bard-progression-release-20260920`. Owner main's unrelated dirty Bard
   and Time Stop work is untouched. Version markers and release notes now target
-  v0.7.0. Publication is authorized for this approved component so the next CEBG
-  package can pin it; archive/remote verification will be recorded below when done.
+  v0.7.0; publication and archive verification are complete as recorded above.
 - **13 focused tests pass** using actual WeiDU 249 in disposable games, including
   vanilla and default CEBG item captures, both effect layouts, negative signed save
   values, preservation, exact item uninstall, idempotence and unchanged pre-existing
