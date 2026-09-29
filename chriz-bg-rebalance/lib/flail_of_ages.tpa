@@ -1,0 +1,168 @@
+// Component 302. Deliberately item-local: no global Free Action/Slow rewrite.
+DEFINE_PATCH_FUNCTION cbr_foa_patch
+  INT_VAR save_penalty = 2 allow_haste = 0 haste_secondary = (0 - 1)
+  STR_VAR haste_resref = ~~ improved_haste_resref = ~~
+BEGIN
+  PATCH_IF (BUFFER_LENGTH < 0x72) BEGIN PATCH_FAIL ~Flail of Ages: truncated ITM.~ END
+  READ_ASCII 0 cbr_f_sig (8)
+  PATCH_IF (NOT (~%cbr_f_sig%~ STRING_EQUAL ~ITM V1  ~)) BEGIN
+    PATCH_FAIL ~Flail of Ages: unsupported ITM format.~
+  END
+  READ_LONG 0x64 cbr_f_ab
+  READ_SHORT 0x68 cbr_f_num_ab
+  READ_LONG 0x6a cbr_f_fx
+  READ_SHORT 0x6e cbr_f_eq_first
+  READ_SHORT 0x70 cbr_f_eq_count
+  PATCH_IF ((cbr_f_num_ab != 1) OR (cbr_f_ab < 0x72)
+    OR (cbr_f_fx < cbr_f_ab + 0x38) OR (cbr_f_fx > BUFFER_LENGTH)
+    OR ((BUFFER_LENGTH - cbr_f_fx) MODULO 0x30 != 0)) BEGIN
+    PATCH_FAIL ~Flail of Ages: unsupported ability/effect layout.~
+  END
+  SET cbr_f_total = (BUFFER_LENGTH - cbr_f_fx) / 0x30
+  READ_BYTE cbr_f_ab cbr_f_ab_type
+  READ_SHORT (cbr_f_ab + 0x1e) cbr_f_hit_count
+  READ_SHORT (cbr_f_ab + 0x20) cbr_f_hit_first
+  PATCH_IF ((cbr_f_ab_type != 1)
+    OR (cbr_f_hit_first + cbr_f_hit_count > cbr_f_total)
+    OR (cbr_f_eq_first + cbr_f_eq_count > cbr_f_total)
+    OR ((cbr_f_hit_first < cbr_f_eq_first + cbr_f_eq_count)
+      AND (cbr_f_eq_first < cbr_f_hit_first + cbr_f_hit_count))) BEGIN
+    PATCH_FAIL ~Flail of Ages: invalid melee/equipment effect slices.~
+  END
+  SET cbr_f_slow_count = 0
+  FOR (cbr_f_i = 0; cbr_f_i < cbr_f_hit_count; ++cbr_f_i) BEGIN
+    SET cbr_f_at = cbr_f_fx + 0x30 * (cbr_f_hit_first + cbr_f_i)
+    READ_SHORT cbr_f_at cbr_f_op
+    PATCH_IF (cbr_f_op = 40) BEGIN
+      SET cbr_f_slow_count += 1
+      READ_BYTE (cbr_f_at + 2) cbr_f_slow_target
+      READ_BYTE (cbr_f_at + 0x12) cbr_f_slow_p1
+      READ_BYTE (cbr_f_at + 0x13) cbr_f_slow_p2
+    END
+  END
+  PATCH_IF (cbr_f_slow_count != 1) BEGIN
+    PATCH_FAIL ~Flail of Ages: expected one direct melee Slow effect.~
+  END
+
+  // One save gates the Slow package, NOT damage or unrelated weapon riders.
+  // Direct WRITE_LONG is required: ALTER_EFFECT silently ignores negatives.
+  FOR (cbr_f_i = 0; cbr_f_i < cbr_f_hit_count; ++cbr_f_i) BEGIN
+    SET cbr_f_at = cbr_f_fx + 0x30 * (cbr_f_hit_first + cbr_f_i)
+    READ_SHORT cbr_f_at cbr_f_op
+    READ_BYTE (cbr_f_at + 2) cbr_f_target
+    READ_LONG (cbr_f_at + 4) cbr_f_p1
+    READ_LONG (cbr_f_at + 8) cbr_f_p2
+    READ_BYTE (cbr_f_at + 0x12) cbr_f_prob1
+    READ_BYTE (cbr_f_at + 0x13) cbr_f_prob2
+    PATCH_IF ((cbr_f_target = cbr_f_slow_target)
+      AND (cbr_f_prob1 = cbr_f_slow_p1) AND (cbr_f_prob2 = cbr_f_slow_p2)
+      AND (cbr_f_op = 221) AND (haste_secondary < 0)) BEGIN
+      PATCH_FAIL ~Flail of Ages: cannot resolve the Slow package's Haste-removal secondary type.~
+    END
+    PATCH_IF ((cbr_f_target = cbr_f_slow_target)
+      AND (cbr_f_prob1 = cbr_f_slow_p1) AND (cbr_f_prob2 = cbr_f_slow_p2)
+      AND ((cbr_f_op = 40) OR ((cbr_f_op = 139) AND (cbr_f_p1 = 14000))
+        OR ((cbr_f_op = 221) AND (haste_secondary >= 0) AND (cbr_f_p2 = haste_secondary)))) BEGIN
+      READ_LONG (cbr_f_at + 0x24) cbr_f_save
+      WRITE_LONG (cbr_f_at + 0x24) ((cbr_f_save BAND 0xffffffe0) BOR 2)
+      WRITE_LONG (cbr_f_at + 0x28) (0 - save_penalty)
+    END
+  END
+
+  PATCH_IF allow_haste BEGIN
+    SET cbr_f_free_action = 0
+    FOR (cbr_f_i = 0; cbr_f_i < cbr_f_eq_count; ++cbr_f_i) BEGIN
+      SET cbr_f_at = cbr_f_fx + 0x30 * (cbr_f_eq_first + cbr_f_i)
+      READ_SHORT cbr_f_at cbr_f_op
+      READ_LONG (cbr_f_at + 8) cbr_f_p2
+      PATCH_IF (cbr_f_op = 163) BEGIN SET cbr_f_free_action += 1 END
+      PATCH_IF ((cbr_f_op = 101) AND (cbr_f_p2 = 176)) BEGIN
+        PATCH_FAIL ~Flail of Ages: unreviewed movement immunity; cannot safely preserve its protections while enabling SR Haste.~
+      END
+    END
+    PATCH_IF (cbr_f_free_action = 0) BEGIN
+      PATCH_FAIL ~Flail of Ages +5: Free Action source is not the reviewed direct-effect layout.~
+    END
+    FOR (cbr_f_i = cbr_f_eq_count - 1; cbr_f_i >= 0; --cbr_f_i) BEGIN
+      SET cbr_f_idx = cbr_f_eq_first + cbr_f_i
+      SET cbr_f_at = cbr_f_fx + 0x30 * cbr_f_idx
+      READ_SHORT cbr_f_at cbr_f_op
+      READ_BYTE (cbr_f_at + 2) cbr_f_target
+      READ_LONG (cbr_f_at + 4) cbr_f_p1
+      READ_LONG (cbr_f_at + 8) cbr_f_p2
+      READ_ASCII (cbr_f_at + 0x14) cbr_f_res (8) NULL
+      SET cbr_f_remove = 0
+      PATCH_IF (cbr_f_target = 1) BEGIN
+        SET cbr_f_remove = (((cbr_f_op = 101) OR (cbr_f_op = 337)) AND (cbr_f_p2 = 16))
+          OR (((cbr_f_op = 169) OR (cbr_f_op = 240)) AND (cbr_f_p2 = 38))
+          OR ((cbr_f_op = 267) AND (cbr_f_p1 = 14023))
+          OR ((cbr_f_op = 126) AND (cbr_f_p1 = 100) AND (cbr_f_p2 = 2))
+        PATCH_IF (cbr_f_op = 206) BEGIN
+          PATCH_IF (((NOT (~%haste_resref%~ STRING_EQUAL ~~)) AND (~%cbr_f_res%~ STRING_EQUAL_CASE ~%haste_resref%~))
+            OR ((NOT (~%improved_haste_resref%~ STRING_EQUAL ~~)) AND (~%cbr_f_res%~ STRING_EQUAL_CASE ~%improved_haste_resref%~))) BEGIN
+            SET cbr_f_remove = 1
+          END ELSE PATCH_IF (FILE_EXISTS_IN_GAME ~%cbr_f_res%.spl~) BEGIN
+            // Catch native potion/racial Haste resources without mistaking a
+            // slot reassigned by SR for its old vanilla spell.
+            INNER_PATCH_FILE ~%cbr_f_res%.spl~ BEGIN
+              PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+                READ_LONG 0x6a cbr_f_spl_fx
+                PATCH_IF ((cbr_f_spl_fx >= 0x72) AND (cbr_f_spl_fx <= BUFFER_LENGTH)
+                  AND ((BUFFER_LENGTH - cbr_f_spl_fx) MODULO 0x30 = 0)) BEGIN
+                  FOR (cbr_f_sf = cbr_f_spl_fx; cbr_f_sf < BUFFER_LENGTH; cbr_f_sf += 0x30) BEGIN
+                    READ_SHORT cbr_f_sf cbr_f_spl_op
+                    PATCH_IF (cbr_f_spl_op = 16) BEGIN SET cbr_f_remove = 1 END
+                  END
+                END
+              END
+            END
+          END
+        END
+      END
+      PATCH_IF cbr_f_remove BEGIN
+        DELETE_BYTES cbr_f_at 0x30
+        --cbr_f_eq_count
+        WRITE_SHORT 0x70 cbr_f_eq_count
+        PATCH_IF (cbr_f_hit_first > cbr_f_idx) BEGIN
+          --cbr_f_hit_first
+          WRITE_SHORT (cbr_f_ab + 0x20) cbr_f_hit_first
+        END
+      END
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_foa_description
+  INT_VAR allow_haste = 0
+  STR_VAR save_note = ~~ haste_note = ~~
+BEGIN
+  READ_STRREF 0x54 cbr_f_desc
+  INNER_PATCH_SAVE cbr_f_new_desc ~%cbr_f_desc%~ BEGIN
+    COUNT_REGEXP_INSTANCES ~[^%WNL%%LNL%%MNL%]*[Ss]low[^%WNL%%LNL%%MNL%]*~ cbr_f_lines
+    PATCH_IF (cbr_f_lines != 1) BEGIN
+      PATCH_FAIL ~Flail of Ages: cannot safely identify the English Slow description line.~
+    END
+    REPLACE_EVALUATE ~[^%WNL%%LNL%%MNL%]*[Ss]low[^%WNL%%LNL%%MNL%]*~ BEGIN
+      INNER_PATCH_SAVE cbr_f_line ~%MATCH0%~ BEGIN
+        REPLACE_TEXTUALLY CASE_INSENSITIVE ~[ ]*(No Save)~ ~~
+        REPLACE_TEXTUALLY CASE_INSENSITIVE ~[ ]*(no saving throw)~ ~~
+        REPLACE_TEXTUALLY ~[ ]*(Save vs. Breath at -[246] negates)~ ~~
+        REPLACE_TEXTUALLY ~[ %TAB%]+$~ ~~
+      END
+    END ~%cbr_f_line% %save_note%~
+    PATCH_IF allow_haste BEGIN
+      COUNT_REGEXP_INSTANCES ~[^%WNL%%LNL%%MNL%]*[Ff]ree [Aa]ction[^%WNL%%LNL%%MNL%]*~ cbr_f_lines
+      PATCH_IF (cbr_f_lines != 1) BEGIN
+        PATCH_FAIL ~Flail of Ages +5: cannot safely identify the English Free Action description line.~
+      END
+      REPLACE_EVALUATE ~[^%WNL%%LNL%%MNL%]*[Ff]ree [Aa]ction[^%WNL%%LNL%%MNL%]*~ BEGIN
+        INNER_PATCH_SAVE cbr_f_line ~%MATCH0%~ BEGIN
+          REPLACE_TEXTUALLY ~[ ]*(allows Haste and Improved Haste)~ ~~
+          REPLACE_TEXTUALLY ~[ %TAB%]+$~ ~~
+        END
+      END ~%cbr_f_line% %haste_note%~
+    END
+  END
+  // Allocate a local description; do not overwrite the old TLK entry.
+  WRITE_LONG 0x54 (RESOLVE_STR_REF (~%cbr_f_new_desc%~))
+END

@@ -8,6 +8,13 @@
 @120 = ~SCS + Spell Revisions: repair false weapon-protection semantics~
 @121 = ~EEex + SCS: ambient caster readiness and one honest first-contact defense~
 @301 = ~Emotion, Courage / Emotion, Hope — mutually exclusive beneficial emotions~
+@302 = ~Flail of the Ages: saving throw against Slow; Haste-compatible +5 Free Action~
+@3021 = ~(Save vs. Breath at -2 negates)~
+@3022 = ~(Save vs. Breath at -4 negates)~
+@3023 = ~(Save vs. Breath at -6 negates)~
+@3024 = ~(allows Haste and Improved Haste)~
+@9480 = ~This component requires BG2:EE or EET.~
+@9481 = ~This component requires all four Flail of the Ages +3/+4/+5 items and SPELL.IDS.~
 @400 = ~Cleric of Tempus: weapon training — axe, longsword, crossbow, and two-pip mastery~
 @401 = ~Cleric of Tempus: Holy Power — automatic semantic detection (recommended)~
 @402 = ~Cleric of Tempus: Holy Power — force true-doubling compatibility~
