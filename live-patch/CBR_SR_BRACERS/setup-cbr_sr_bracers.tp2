@@ -1,0 +1,7 @@
+BACKUP ~CBR_SR_BRACERS/backup~
+AUTHOR ~Chriz~
+VERSION ~private-2026-10-06~
+BEGIN ~Bracers of Blinding Strike: Spell Revisions Improved Haste, 20 seconds~
+REQUIRE_PREDICATE GAME_IS ~bg2ee eet~ ~This patch requires BG2:EE or EET.~
+INCLUDE ~CBR_SR_BRACERS/lib/sr_bracers.tpa~
+LAF cbr_apply_sr_bracers END
