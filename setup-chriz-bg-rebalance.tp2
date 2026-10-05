@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/chriz-bg-rebalance~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.7.1~
+VERSION ~v0.8.0-dev~
 
 // Load the tested transformation library and define one installer wrapper for
 // all Tempus Holy Power compatibility choices. WeiDU's backup namespace is
@@ -25,6 +25,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/emotion_hope_courage.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/flail_of_ages.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/physical_resistance.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/sr_hardiness.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -369,6 +370,43 @@ LAF cbr_install_ambient_readiness_runtime
 END
 
 PRINT ~cbr 121: shipped M_CBRRDY.lua (ambient=%cbr_121_ambient_count%; urgent=%cbr_121_urgent_count%; EEex v1.2-first; legacy capability fallback enabled).~
+
+// ============================================================
+// Spell Revisions adjustments (200-299)
+// ============================================================
+
+BEGIN @200 DESIGNATED 200 SUBCOMPONENT @1201 GROUP @1200 LABEL ~cbr_sr_hardiness_40~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9200
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 65) @9201
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~spcl907.spl~ AND FILE_EXISTS_IN_GAME ~spwish12.spl~) @9202
+REQUIRE_PREDICATE NOT ((MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 200)
+  OR (MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 201)
+  OR (MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 202)) @9203
+LAF cbr_install_sr_hardiness INT_VAR physical = 40 extra_resistance = 0 END
+
+BEGIN @201 DESIGNATED 201 SUBCOMPONENT @1201 GROUP @1200 LABEL ~cbr_sr_hardiness_30~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9200
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 65) @9201
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~spcl907.spl~ AND FILE_EXISTS_IN_GAME ~spwish12.spl~) @9202
+REQUIRE_PREDICATE NOT ((MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 200)
+  OR (MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 201)
+  OR (MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 202)) @9203
+LAF cbr_install_sr_hardiness INT_VAR physical = 30 extra_resistance = 0 END
+
+BEGIN @202 DESIGNATED 202 GROUP @1200 LABEL ~cbr_sr_hardiness_extra_resistance~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9200
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 65) @9201
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~spcl907.spl~ AND FILE_EXISTS_IN_GAME ~spwish12.spl~) @9202
+REQUIRE_PREDICATE ((MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 200)
+  OR (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 201)) @9204
+REQUIRE_PREDICATE NOT ((MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 200)
+  OR (MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 201)
+  OR (MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 202)) @9203
+ACTION_IF (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 201) BEGIN
+  LAF cbr_install_sr_hardiness INT_VAR physical = 30 extra_resistance = 20 END
+END ELSE BEGIN
+  LAF cbr_install_sr_hardiness INT_VAR physical = 40 extra_resistance = 20 END
+END
 
 // ============================================================
 // Cross-cutting spell audits/fixes (300-399)

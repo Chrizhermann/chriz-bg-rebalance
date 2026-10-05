@@ -7,6 +7,9 @@
 @111 = ~SCS: five dragon encounters — wing buffet at most once per 18 seconds~
 @120 = ~SCS + Spell Revisions: repair false weapon-protection semantics~
 @121 = ~EEex + SCS: ambient caster readiness and one honest first-contact defense~
+@200 = ~40% physical resistance only (recommended vanilla resistance profile)~
+@201 = ~30% physical resistance only~
+@202 = ~Hardiness: also grant 20% elemental and magic damage resistance (optional)~
 @301 = ~Emotion, Courage / Emotion, Hope — mutually exclusive beneficial emotions~
 @302 = ~Flail of the Ages: saving throw against Slow; Haste-compatible +5 Free Action~
 @3021 = ~(Save vs. Breath at -2 negates)~
@@ -29,10 +32,27 @@
 // Component groups
 @1100 = ~SCS adjustments~
 @1200 = ~Spell Revisions adjustments~
+@1201 = ~SR Hardiness: physical resistance (normal and Wish-granted)~
 @1300 = ~Cross-cutting audits~
 @1400 = ~Class and kit revisions~
 @1401 = ~Cleric of Tempus: Holy Power compatibility~
 @1406 = ~Cleric of Tempus: weapon specialization grants extra attacks~
+
+// Hardiness: new resource-local descriptions, never STRING_SET shared text.
+// Duration and stacking rules are unchanged; Breach classification is retained.
+@2000 = ~Hardiness
+Calling upon hidden reserves of strength during times of danger, a warrior can use the Hardiness ability to gain 40% resistance to physical damage (slashing, crushing, piercing, and missile damage). The ability lasts for 1 round per 2 levels.~
+@2010 = ~Hardiness
+Calling upon hidden reserves of strength during times of danger, a warrior can use the Hardiness ability to gain 30% resistance to physical damage (slashing, crushing, piercing, and missile damage). The ability lasts for 1 round per 2 levels.~
+@2020 = ~Hardiness
+Calling upon hidden reserves of strength during times of danger, a warrior can use the Hardiness ability to gain 40% resistance to physical damage (slashing, crushing, piercing, and missile damage) and 20% resistance to acid, cold, electricity, fire, and magic damage, including magical fire and magical cold. This does not grant Magic Resistance or poison resistance. The ability lasts for 1 round per 2 levels.~
+@2030 = ~Hardiness
+Calling upon hidden reserves of strength during times of danger, a warrior can use the Hardiness ability to gain 30% resistance to physical damage (slashing, crushing, piercing, and missile damage) and 20% resistance to acid, cold, electricity, fire, and magic damage, including magical fire and magical cold. This does not grant Magic Resistance or poison resistance. The ability lasts for 1 round per 2 levels.~
+@9200 = ~Hardiness adjustments require BG2:EE or EET.~
+@9201 = ~Hardiness adjustments require Spell Revisions component 65: Revised Warrior HLAs.~
+@9202 = ~Hardiness adjustments require both normal Hardiness (SPCL907) and Wish Hardiness (SPWISH12).~
+@9203 = ~Hardiness is already supplied by the other CBR installer. Use either the full mod or the standalone tail patch, never both Hardiness installations.~
+@9204 = ~Install this installer's 40% or 30% Hardiness component before the optional extra resistances.~
 
 // Game-facing strings for components 301 and 404.
 @4041 = ~Tide of Battle: Onslaught!~

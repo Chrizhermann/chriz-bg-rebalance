@@ -1,0 +1,201 @@
+// SR #65 patches these native resources directly. Preserve their headers,
+// casting features, delivery metadata and all unrelated effects. Only the
+// four physical modifiers and SR's seven opcode-86 clones are owned.
+DEFINE_PATCH_FUNCTION cbr_sr_hardiness_patch
+  INT_VAR physical = 40 extra_resistance = 0
+BEGIN
+  PATCH_IF ((physical != 40 AND physical != 30)
+    OR (extra_resistance != 0 AND extra_resistance != 20)) BEGIN
+    PATCH_FAIL ~CBR Hardiness: unsupported resistance choice.~
+  END
+  PATCH_IF (BUFFER_LENGTH < 0x72) BEGIN
+    PATCH_FAIL ~CBR Hardiness: truncated SPL header.~
+  END
+  READ_ASCII 0 cbr_h_signature (8)
+  PATCH_IF NOT (~%cbr_h_signature%~ STRING_EQUAL ~SPL V1  ~) BEGIN
+    PATCH_FAIL ~CBR Hardiness: expected SPL V1.~
+  END
+  READ_LONG 0x64 cbr_h_ab
+  READ_SHORT 0x68 cbr_h_ab_count
+  READ_LONG 0x6a cbr_h_fx
+  READ_SHORT 0x6e cbr_h_cast_first
+  READ_SHORT 0x70 cbr_h_cast_count
+  PATCH_IF (cbr_h_ab < 0x72 OR cbr_h_ab_count = 0
+    OR cbr_h_ab + 0x28 * cbr_h_ab_count > BUFFER_LENGTH
+    OR cbr_h_fx < cbr_h_ab + 0x28 * cbr_h_ab_count
+    OR cbr_h_fx > BUFFER_LENGTH
+    OR ((BUFFER_LENGTH - cbr_h_fx) MODULO 0x30 != 0)) BEGIN
+    PATCH_FAIL ~CBR Hardiness: invalid ability/effect tables.~
+  END
+  SET cbr_h_total = (BUFFER_LENGTH - cbr_h_fx) / 0x30
+  PATCH_IF (cbr_h_total > 65535 OR cbr_h_cast_first + cbr_h_cast_count > cbr_h_total) BEGIN
+    PATCH_FAIL ~CBR Hardiness: invalid casting-effect slice.~
+  END
+  FOR (cbr_h_i = 0; cbr_h_i < cbr_h_total; ++cbr_h_i) BEGIN
+    SET $cbr_h_owner(~%cbr_h_i%~) = (0 - 2)
+    SET $cbr_h_extra(~%cbr_h_i%~) = 0
+  END
+  FOR (cbr_h_i = cbr_h_cast_first; cbr_h_i < cbr_h_cast_first + cbr_h_cast_count; ++cbr_h_i) BEGIN
+    SET $cbr_h_owner(~%cbr_h_i%~) = (0 - 1)
+  END
+
+  // Validate disjoint slices and identify the donor in each level header.
+  // No original resistance percentage is a compatibility fingerprint.
+  FOR (cbr_h_a = 0; cbr_h_a < cbr_h_ab_count; ++cbr_h_a) BEGIN
+    SET cbr_h_header = cbr_h_ab + 0x28 * cbr_h_a
+    READ_SHORT (cbr_h_header + 0x1e) cbr_h_count
+    READ_SHORT (cbr_h_header + 0x20) cbr_h_first
+    PATCH_IF (cbr_h_count = 0 OR cbr_h_first + cbr_h_count > cbr_h_total) BEGIN
+      PATCH_FAIL ~CBR Hardiness: invalid ability-effect slice.~
+    END
+    SET $cbr_h_first(~%cbr_h_a%~) = cbr_h_first
+    SET $cbr_h_count(~%cbr_h_a%~) = cbr_h_count
+    FOR (cbr_h_op = 86; cbr_h_op <= 89; ++cbr_h_op) BEGIN
+      SET $cbr_h_physical_count(~%cbr_h_op%~) = 0
+    END
+    FOR (cbr_h_i = cbr_h_first; cbr_h_i < cbr_h_first + cbr_h_count; ++cbr_h_i) BEGIN
+      PATCH_IF ($cbr_h_owner(~%cbr_h_i%~) != (0 - 2)) BEGIN
+        PATCH_FAIL ~CBR Hardiness: overlapping effect slices.~
+      END
+      SET $cbr_h_owner(~%cbr_h_i%~) = cbr_h_a
+      SET cbr_h_at = cbr_h_fx + cbr_h_i * 0x30
+      READ_SHORT cbr_h_at cbr_h_op
+      PATCH_IF (cbr_h_op >= 86 AND cbr_h_op <= 89) BEGIN
+        READ_LONG (cbr_h_at + 8) cbr_h_mode
+        PATCH_IF (cbr_h_mode != 0) BEGIN
+          PATCH_FAIL ~CBR Hardiness: physical resistance must use additive modifiers.~
+        END
+        SET $cbr_h_physical_count(~%cbr_h_op%~) += 1
+        PATCH_IF (cbr_h_op = 86) BEGIN SET $cbr_h_donor(~%cbr_h_a%~) = cbr_h_i END
+      END
+    END
+    FOR (cbr_h_op = 86; cbr_h_op <= 89; ++cbr_h_op) BEGIN
+      PATCH_IF ($cbr_h_physical_count(~%cbr_h_op%~) != 1) BEGIN
+        PATCH_FAIL ~CBR Hardiness: expected one direct modifier for each physical damage type.~
+      END
+    END
+
+    SET cbr_h_donor_at = cbr_h_fx + $cbr_h_donor(~%cbr_h_a%~) * 0x30
+    SET $cbr_h_extra_count(~%cbr_h_a%~) = 0
+    PATCH_FOR_EACH cbr_h_op IN 27 28 29 30 31 84 85 BEGIN
+      SET $cbr_h_clone_count(~%cbr_h_op%~) = 0
+    END
+    FOR (cbr_h_i = cbr_h_first; cbr_h_i < cbr_h_first + cbr_h_count; ++cbr_h_i) BEGIN
+      SET cbr_h_at = cbr_h_fx + cbr_h_i * 0x30
+      READ_SHORT cbr_h_at cbr_h_op
+      PATCH_IF ((cbr_h_op >= 27 AND cbr_h_op <= 31) OR (cbr_h_op >= 84 AND cbr_h_op <= 89)) BEGIN
+        SET cbr_h_matches = 1
+        // Compare every byte except opcode and amount. This includes p2,
+        // target, power, timing, duration, probabilities and even opaque bytes.
+        FOR (cbr_h_b = 2; cbr_h_b < 0x30; ++cbr_h_b) BEGIN
+          PATCH_IF (cbr_h_b < 4 OR cbr_h_b >= 8) BEGIN
+            READ_BYTE (cbr_h_at + cbr_h_b) cbr_h_left
+            READ_BYTE (cbr_h_donor_at + cbr_h_b) cbr_h_right
+            PATCH_IF (cbr_h_left != cbr_h_right) BEGIN SET cbr_h_matches = 0 END
+          END
+        END
+        PATCH_IF (cbr_h_op >= 86) BEGIN
+          PATCH_IF NOT cbr_h_matches BEGIN
+            PATCH_FAIL ~CBR Hardiness: physical modifiers have inconsistent delivery metadata.~
+          END
+        END ELSE PATCH_IF cbr_h_matches BEGIN
+          SET $cbr_h_clone_count(~%cbr_h_op%~) += 1
+          SET $cbr_h_extra_count(~%cbr_h_a%~) += 1
+          SET $cbr_h_extra(~%cbr_h_i%~) = 1
+        END
+      END
+    END
+    PATCH_FOR_EACH cbr_h_op IN 27 28 29 30 31 84 85 BEGIN
+      PATCH_IF ($cbr_h_clone_count(~%cbr_h_op%~) > 1) BEGIN
+        PATCH_FAIL ~CBR Hardiness: ambiguous duplicate SR resistance clones.~
+      END
+    END
+    PATCH_IF ($cbr_h_extra_count(~%cbr_h_a%~) != 0 AND $cbr_h_extra_count(~%cbr_h_a%~) != 7) BEGIN
+      PATCH_FAIL ~CBR Hardiness: incomplete SR resistance clone set.~
+    END
+  END
+  FOR (cbr_h_i = 0; cbr_h_i < cbr_h_total; ++cbr_h_i) BEGIN
+    PATCH_IF ($cbr_h_owner(~%cbr_h_i%~) = (0 - 2)) BEGIN
+      PATCH_FAIL ~CBR Hardiness: unowned effects outside the casting/ability slices.~
+    END
+  END
+
+  // Append the new table before removing the old one, so original effect
+  // offsets remain readable. Keep group order (including casting-first files)
+  // and every retained effect's position relative to other retained effects.
+  SET cbr_h_out_count = 0
+  FOR (cbr_h_i = 0; cbr_h_i < cbr_h_total; ++cbr_h_i) BEGIN
+    SET cbr_h_a = $cbr_h_owner(~%cbr_h_i%~)
+    PATCH_IF (cbr_h_i = cbr_h_cast_first) BEGIN WRITE_SHORT 0x6e cbr_h_out_count END
+    PATCH_IF (cbr_h_a >= 0) BEGIN
+      PATCH_IF (cbr_h_i = $cbr_h_first(~%cbr_h_a%~)) BEGIN
+        WRITE_SHORT (cbr_h_ab + cbr_h_a * 0x28 + 0x20) cbr_h_out_count
+      END
+    END
+    PATCH_IF NOT ($cbr_h_extra(~%cbr_h_i%~) AND extra_resistance = 0) BEGIN
+      SET cbr_h_at = cbr_h_fx + cbr_h_i * 0x30
+      SET cbr_h_dest = BUFFER_LENGTH
+      INSERT_BYTES cbr_h_dest 0x30
+      FOR (cbr_h_b = 0; cbr_h_b < 0x30; ++cbr_h_b) BEGIN
+        READ_BYTE (cbr_h_at + cbr_h_b) cbr_h_byte
+        WRITE_BYTE (cbr_h_dest + cbr_h_b) cbr_h_byte
+      END
+      READ_SHORT cbr_h_at cbr_h_op
+      PATCH_IF (cbr_h_a >= 0 AND cbr_h_op >= 86 AND cbr_h_op <= 89) BEGIN
+        WRITE_LONG (cbr_h_dest + 4) physical
+      END ELSE PATCH_IF $cbr_h_extra(~%cbr_h_i%~) BEGIN
+        WRITE_LONG (cbr_h_dest + 4) extra_resistance
+      END
+      ++cbr_h_out_count
+    END
+    PATCH_IF (cbr_h_a >= 0) BEGIN
+      PATCH_IF (cbr_h_i = $cbr_h_first(~%cbr_h_a%~) + $cbr_h_count(~%cbr_h_a%~) - 1) BEGIN
+        SET cbr_h_new_count = $cbr_h_count(~%cbr_h_a%~)
+        PATCH_IF (extra_resistance = 0) BEGIN
+          SET cbr_h_new_count -= $cbr_h_extra_count(~%cbr_h_a%~)
+        END ELSE PATCH_IF ($cbr_h_extra_count(~%cbr_h_a%~) = 0) BEGIN
+          SET cbr_h_at = cbr_h_fx + $cbr_h_donor(~%cbr_h_a%~) * 0x30
+          PATCH_FOR_EACH cbr_h_op IN 27 28 29 30 31 84 85 BEGIN
+            SET cbr_h_dest = BUFFER_LENGTH
+            INSERT_BYTES cbr_h_dest 0x30
+            FOR (cbr_h_b = 0; cbr_h_b < 0x30; ++cbr_h_b) BEGIN
+              READ_BYTE (cbr_h_at + cbr_h_b) cbr_h_byte
+              WRITE_BYTE (cbr_h_dest + cbr_h_b) cbr_h_byte
+            END
+            WRITE_SHORT cbr_h_dest cbr_h_op
+            WRITE_LONG (cbr_h_dest + 4) extra_resistance
+            ++cbr_h_out_count
+            ++cbr_h_new_count
+          END
+        END
+        WRITE_SHORT (cbr_h_ab + cbr_h_a * 0x28 + 0x1e) cbr_h_new_count
+      END
+    END
+  END
+  PATCH_IF (cbr_h_out_count > 65535) BEGIN PATCH_FAIL ~CBR Hardiness: too many output effects.~ END
+  PATCH_IF (cbr_h_cast_first = cbr_h_total) BEGIN WRITE_SHORT 0x6e cbr_h_out_count END
+  DELETE_BYTES cbr_h_fx (cbr_h_total * 0x30)
+END
+
+DEFINE_ACTION_FUNCTION cbr_install_sr_hardiness
+  INT_VAR physical = 40 extra_resistance = 0
+BEGIN
+  // Native resource identities, not dynamically allocated mod spells.
+  // COPY_EXISTING/SAY keep backups and TLK updates in WeiDU's transaction.
+  ACTION_IF (extra_resistance = 20) BEGIN
+    ACTION_IF (physical = 40) BEGIN OUTER_SPRINT cbr_h_desc @2020 END
+    ELSE BEGIN OUTER_SPRINT cbr_h_desc @2030 END
+  END ELSE BEGIN
+    ACTION_IF (physical = 40) BEGIN OUTER_SPRINT cbr_h_desc @2000 END
+    ELSE BEGIN OUTER_SPRINT cbr_h_desc @2010 END
+  END
+  COPY_EXISTING ~spcl907.spl~ ~override~ ~spwish12.spl~ ~override~
+    LPF cbr_sr_hardiness_patch INT_VAR physical extra_resistance END
+  BUT_ONLY_IF_IT_CHANGES
+  // Finish both binary transformations before allocating any TLK strings.
+  // A malformed second spell then rolls the first file back without leaving
+  // a new, unused description in the string table.
+  COPY_EXISTING ~spcl907.spl~ ~override~ ~spwish12.spl~ ~override~
+    SAY UNIDENTIFIED_DESC ~%cbr_h_desc%~
+  BUT_ONLY_IF_IT_CHANGES
+END

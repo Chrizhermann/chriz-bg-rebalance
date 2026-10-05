@@ -1,5 +1,23 @@
 # chriz-bg-rebalance — Handover
 
+## Unpublished Hardiness work — 2026-10-06
+
+`v0.8.0-dev`, branch `codex/sr-hardiness-adjustment`, adds 200 (40% physical only,
+recommended), 201 (30% physical only, mutually exclusive with 200), and 202
+(optional extra 20% elemental/magic-damage resistances, requires 200 or 201).
+Both normal and Wish Hardiness are covered; duration, stacking and existing
+Breach behavior are retained. Requires SR Revised Warrior HLAs #65.
+
+A separate tail installer avoids reinstalling SR or prior BG Rebalance entries.
+Build local packages with `python tools/package_sr_hardiness.py`. These are
+unpublished development artifacts; no live game or saves were changed.
+
+The collection's v0.7.1 pin does not include this work. Integration remains a
+separate required step: [exact handover](handovers/2026-10-06-sr-hardiness-collection.md).
+
+The previously published status below is historical and remains unchanged.
+
+
 Live entry point for anyone (user, future agent) picking up work on this repo.
 Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
 

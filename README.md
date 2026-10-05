@@ -5,7 +5,9 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.7.1.** Apex Dragons now supports both SCS difficulty-control systems.
+**Version: v0.8.0-dev (unpublished).** Hardiness has a recommended 40% physical-only
+profile, a 30% alternative, and an optional SR damage-resistance add-on.
+Apex Dragons supports both SCS difficulty-control systems.
 Component 302 gives Flail of the Ages' Slow a saving throw and
 lets its +5 version work with Haste. Component 301 makes Emotion, Courage and
 Emotion, Hope mutually exclusive. Kit-specific bard spell progression remains available through EEex.
@@ -47,7 +49,8 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 111 | SCS adjustments | Five dragon encounters: 18-second wing-buffet cooldown | Optional; released; combat acceptance pending |
 | 120 | SCS adjustments | Repair the SCS/SR false Improved Mantle weapon-protection semantics | ✅ implemented |
 | 121 | SCS adjustments | EEex ambient caster readiness + one honest first-contact defense | ✅ implemented; v1.2 ambient + neutral-to-hostile urgent path live accepted; legacy live pending |
-| 2xx | SR adjustments | Cherry-picked Spell Revisions tweaks | 📋 planning (`docs/00-project-scope.md`) |
+| 200 / 201 | SR adjustments | Hardiness: 40% / 30% physical resistance only | Implemented; choose one; live acceptance pending |
+| 202 | SR adjustments | Hardiness: optional extra 20% damage resistances | Requires 200 or 201; live acceptance pending |
 | 301 | Cross-cutting audits | Emotion, Courage / Emotion, Hope: mutually exclusive beneficial emotions | ✅ implemented and automated-verified; delivery/mutual exclusion live-verified, status-entry retest pending |
 | 302 | Cross-cutting audits | Flail of the Ages: saves against Slow; +5 allows Haste | Isolated WeiDU checks passed; in-game check pending |
 | 310 | Cross-cutting audits | Party physical resistance: half effectiveness above 80%, maximum 90% | Automated checks passed; not released or live-tested |
@@ -72,6 +75,31 @@ resistance above 100% before the normal EEex callback. Simply changing the ceili
 would still produce at most 90%. That alternative needs a separate engine change.
 This component is not yet pinned or selected in CEBG.
 [Design and engine evidence](research/2026-10-06-physical-resistance-softcap.md).
+### Components 200–202 — SR Hardiness
+
+Requires **Spell Revisions #65, Revised Warrior HLAs**, on BG2:EE/EET. Both normal
+Hardiness and Wish-granted Hardiness receive the same resistance profile:
+
+- **200 (recommended): 40% physical resistance only.** Removes SR's extra resistances.
+- **201: 30% physical resistance only.** Mutually exclusive with 200.
+- **202 (optional): add 20% resistance** to acid, cold, electricity, fire, magic
+  damage, magical fire and magical cold. Install after either 200 or 201.
+
+This is a recommendation of the **vanilla resistance profile**, not a complete
+vanilla restoration. Duration, casting, dispel flags, stacking protections and
+existing Breach behavior are preserved. No Magic Resistance or poison resistance
+is added. Descriptions on both resources receive new strings; shared text is not
+rewritten. Install after SR's HLAs and other mods changing these spells.
+
+For an existing stack, use the separate [tail patch](live-patch/CBR_SR_HARDINESS/README.md)
+without reinstalling SR or previously installed BG Rebalance components. Use only
+one Hardiness installer family. Build local Windows packages with
+`python tools/package_sr_hardiness.py`; they are unpublished development artifacts.
+
+**Collection integration is still required.** The existing v0.7.1 collection pin
+does not contain these components. The [collection handover](docs/handovers/2026-10-06-sr-hardiness-collection.md)
+specifies the new source pin, SR #65 dependency, default 200, optional 201/202,
+curation mappings and resolver checks. No live game has been changed.
 
 ### Component 302 — Flail of the Ages
 
