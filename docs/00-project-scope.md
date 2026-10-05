@@ -56,6 +56,16 @@ rationale, fully reversible, idempotent, testable without wrecking a live save.
 
 ## Part 2 — Spell Revisions adjustments (components 200–299)
 
+- **200 / 201 — Hardiness physical resistance** implemented in unpublished
+  v0.8.0-dev: 40% physical only (recommended vanilla resistance profile), or 30%.
+- **202 — Hardiness extra resistances** optional 20% elemental/magic-damage
+  resistance, requiring 200 or 201. Both normal and Wish Hardiness are covered;
+  duration, stacking and existing Breach behavior are unchanged. Requires SR #65.
+  See [research](../research/06-sr-hardiness.md) and the
+  [collection handover](handovers/2026-10-06-sr-hardiness-collection.md).
+  Automated checks pass; collection integration, publication and live acceptance
+  remain outstanding.
+
 User cherry-picks: which SR changes to keep, revert toward vanilla, or re-tune. **Needs a
 collaborative wishlist session** — the user has strong opinions here. Research doc TBD
 (`research/10-sr-wishlist.md`): walk SR's component/spell list against the user's experience,

@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.8.0-dev — unreleased
+
+- Add SR Hardiness components 200 (40% physical only, recommended) and 201
+  (30% physical only), with optional component 202 restoring SR's extra 20%
+  elemental/magic-damage resistances. Both normal and Wish Hardiness are covered.
+- Correct their descriptions without rewriting shared strings. Preserve duration,
+  stacking, casting, dispel flags and existing Breach classifications.
+- Require SR Revised Warrior HLAs #65. Add a separate tail-install patch for existing
+  installs, built from the same library, without reinstalling old mod components.
+- Add isolated real-WeiDU checks and a collection integration handover. This work
+  is not published, not live-game accepted, and not yet integrated into the collection.
+
 ## v0.7.1 — 2026-09-30
 
 - Fix Apex Dragons (110) failing to install when SCS uses its GLOBAL-based
