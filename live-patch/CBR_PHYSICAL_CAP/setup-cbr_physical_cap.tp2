@@ -1,0 +1,18 @@
+BACKUP ~CBR_PHYSICAL_CAP/backup~
+AUTHOR ~ChrizFader~
+VERSION ~private-oct06-90pct~
+
+BEGIN ~Party physical resistance: half effectiveness above 80%, maximum 90%~
+DESIGNATED 0
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) ~This patch requires BG2EE or EET.~
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) ~This patch requires EEex.~
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) ~SPLSTATE.IDS is required.~
+
+INCLUDE ~CBR_PHYSICAL_CAP/lib/tempus_holy_power.tpa~
+INCLUDE ~CBR_PHYSICAL_CAP/lib/tempus_spec_apr_eeex.tpa~
+INCLUDE ~CBR_PHYSICAL_CAP/lib/physical_resistance.tpa~
+COPY_EXISTING ~SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
+LAF cbr_apply_physical_resistance
+  INT_VAR cap = 90
+  STR_VAR template_file = ~CBR_PHYSICAL_CAP/lua/M_CBRRES.lua~
+END
