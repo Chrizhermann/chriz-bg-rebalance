@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/chriz-bg-rebalance~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.8.0-dev~
+VERSION ~v0.8.1-dev~
 
 // Load the tested transformation library and define one installer wrapper for
 // all Tempus Holy Power compatibility choices. WeiDU's backup namespace is
@@ -26,6 +26,8 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/flail_of_ages.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/physical_resistance.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/sr_hardiness.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/sr_antimagic.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/sr_spellstrike.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -409,6 +411,20 @@ END ELSE BEGIN
 END
 
 // ============================================================
+// SR anti-magic: independent choices; Spellstrike does not require EEex.
+BEGIN @210 DESIGNATED 210 GROUP @1200 LABEL ~cbr_sr_pierce_magic~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9210
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 0) @9211
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9212
+REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~cbr_sr_antimagic/setup-cbr_sr_antimagic.tp2~ 210) @9213
+LAF cbr_install_sr_antimagic INT_VAR component = 210 END
+
+BEGIN @211 DESIGNATED 211 GROUP @1200 LABEL ~cbr_sr_spellstrike~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9210
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 0) @9211
+REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~cbr_sr_antimagic/setup-cbr_sr_antimagic.tp2~ 211) @9213
+LAF cbr_install_sr_antimagic INT_VAR component = 211 END
+
 // Cross-cutting spell audits/fixes (300-399)
 // ============================================================
 

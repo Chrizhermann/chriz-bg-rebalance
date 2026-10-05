@@ -1,0 +1,8 @@
+// Hermetic --nogame entry point: library, input SPL, output SPL, payload resref.
+BACKUP ~backup~
+AUTHOR ~chriz-bg-rebalance test harness~
+BEGIN ~SR Spellstrike isolated transformation~
+DESIGNATED 0
+INCLUDE ~%argv[0]%~
+COPY ~%argv[1]%~ ~%argv[2]%~
+  LPF cbr_sr_spellstrike_patch STR_VAR payload_resref = EVAL ~%argv[3]%~ END

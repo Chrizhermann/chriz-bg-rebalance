@@ -66,7 +66,17 @@ rationale, fully reversible, idempotent, testable without wrecking a live save.
   Automated checks pass; collection integration, publication and live acceptance
   remain outstanding.
 
-User cherry-picks: which SR changes to keep, revert toward vanilla, or re-tune. **Needs a
+- **210 — Pierce Magic** implemented in unpublished v0.8.1-dev: halves current MR,
+  bounded to a 10-40 percentage-point reduction, for five rounds. Refreshes the
+  same amount and combines with Lower Resistance. Requires SR main0 and EEex.
+- **211 — Spellstrike**: 15% arcane/divine spell failure for two rounds, refreshing
+  without self-stacking; existing protection removal retained. Requires SR main0.
+  See [implementation evidence](../research/20-sr-antimagic-implementation.md) and
+  [collection handover](handovers/2026-10-06-sr-antimagic-collection.md). Prepared
+  with automated checks; no game modification or publication. Entropy Shield is
+  still a separate, deferred research topic.
+
+Further user cherry-picks: which SR changes to keep, revert toward vanilla, or re-tune. **Needs a
 collaborative wishlist session** — the user has strong opinions here. Research doc TBD
 (`research/10-sr-wishlist.md`): walk SR's component/spell list against the user's experience,
 collect concrete gripes with numbers, then design per-spell adjustments.

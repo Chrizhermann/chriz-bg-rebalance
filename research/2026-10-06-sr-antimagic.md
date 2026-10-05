@@ -1,7 +1,10 @@
 # SR anti-magic comparison and unapproved balance options
 
 Research date: 2026-10-06. Owner: BG Rebalance, SR adjustments (2xx).
-Status: **discussion only; no nerf selected or implemented**.
+Initial source comparison below is retained as research evidence. The later user
+decision and implementation are recorded in [20-sr-antimagic-implementation.md](20-sr-antimagic-implementation.md):
+Pierce Magic bounded halving for five rounds; Spellstrike 15% failure for two
+rounds. The earlier discussion options below are superseded, not installer choices.
 
 The temporary MR=0 effect belongs to **Pierce Magic**, not Pierce Shield, in the
 current installation. Pierce Shield has no MR modifier at all. This distinction
@@ -23,7 +26,7 @@ Paths are `spell_rev/spwi5##/spwi514.spl`, `spwi6##/spwi608.spl`,
 `spwi8##/spwi805.spl`, `spwi9##/spwi903.spl`, and `sppr5##/sppr509.spl`.
 The installed versions include subsequent SR/SCS wrappers, markers and text edits.
 
-No game writes, installer runs, gameplay experiments, publication, collection
+No game writes, game-directory installer runs, gameplay experiments, publication, collection
 source changes or new component IDs were part of this research. Static binary
 evidence is not live acceptance or proof of optimal AI use.
 

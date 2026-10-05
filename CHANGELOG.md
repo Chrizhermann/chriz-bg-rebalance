@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.8.1-dev — unreleased
+
+- Add component 210: Pierce Magic halves current MR with a 10-40 percentage-point
+  reduction, zero floor and upward rounding, for five rounds. Recasts renew the
+  existing amount instead of compounding it. It combines with Lower Resistance.
+  Requires EEex for the impact calculation and native-effect refresh.
+- Add component 211: Spellstrike's guaranteed/50% failure stages become 15% for
+  two rounds, refreshing without self-stacking. Does not require EEex.
+- Resolve actual SR/SCS payloads and preserve protection stripping, Spell Shield
+  wrappers and invisible targeting. Correct descriptions without shared-TLK edits.
+- Add independent existing-install tail packaging, focused real-WeiDU and Lua
+  behavioral checks, and collection handover. No game modification or publication;
+  native-engine acceptance and collection integration remain pending.
+- Include the previously approved Hardiness components in this local source.
+
 ## v0.8.0-dev — unreleased
 
 - Add SR Hardiness components 200 (40% physical only, recommended) and 201

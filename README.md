@@ -5,7 +5,9 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.8.0-dev (unpublished).** Hardiness has a recommended 40% physical-only
+**Version: v0.8.1-dev (unpublished).** Pierce Magic has a bounded five-round MR
+reduction; Spellstrike causes 15% spell failure for two rounds.
+Hardiness has a recommended 40% physical-only
 profile, a 30% alternative, and an optional SR damage-resistance add-on.
 Apex Dragons supports both SCS difficulty-control systems.
 Component 302 gives Flail of the Ages' Slow a saving throw and
@@ -51,12 +53,33 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 121 | SCS adjustments | EEex ambient caster readiness + one honest first-contact defense | ✅ implemented; v1.2 ambient + neutral-to-hostile urgent path live accepted; legacy live pending |
 | 200 / 201 | SR adjustments | Hardiness: 40% / 30% physical resistance only | Implemented; choose one; live acceptance pending |
 | 202 | SR adjustments | Hardiness: optional extra 20% damage resistances | Requires 200 or 201; live acceptance pending |
+| 210 | SR adjustments | EEex Pierce Magic: halve MR, bounded to 10-40 points, for five rounds | Automated checks passed; live acceptance pending |
+| 211 | SR adjustments | Spellstrike: 15% spell failure for two rounds | Automated checks passed; live acceptance pending |
 | 301 | Cross-cutting audits | Emotion, Courage / Emotion, Hope: mutually exclusive beneficial emotions | ✅ implemented and automated-verified; delivery/mutual exclusion live-verified, status-entry retest pending |
 | 302 | Cross-cutting audits | Flail of the Ages: saves against Slow; +5 allows Haste | Isolated WeiDU checks passed; in-game check pending |
 | 310 | Cross-cutting audits | Party physical resistance: half effectiveness above 80%, maximum 90% | Automated checks passed; not released or live-tested |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
+
+### Components 210–211 — SR anti-magic
+
+Requires **SR main component 0**; component 210 also requires **EEex** and launching
+through InfinityLoader. These are independent choices. Pierce Magic halves current
+MR, reducing it by at least 10 and at most 40 percentage points, with a zero floor
+and rounding the reduction up. The reduction lasts five rounds; recasts renew the
+same amount. It combines with Lower Resistance. Spellstrike causes 15% arcane/divine
+spell failure for two rounds, refreshing its own effect instead of stacking.
+
+Both preserve protection removal, Spell Shield interception and installed invisible
+targeting. Pierce Shield and Entropy Shield are unchanged. These are tested local
+development components; native first-hit/refresh/save-load acceptance is pending.
+
+Build the full mod and separate tail patches with `python tools/package_sr_antimagic.py`.
+For an existing stack, use the [anti-magic tail patch](live-patch/CBR_SR_ANTIMAGIC/README.md)
+after authorization, without reinstalling SR or existing Rebalance components.
+The [collection handover](docs/handovers/2026-10-06-sr-antimagic-collection.md) covers
+the new source pin, dependencies, selections and recipe checks still required.
 
 ### Component 310 — Party physical resistance (unreleased)
 
