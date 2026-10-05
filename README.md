@@ -50,9 +50,28 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 2xx | SR adjustments | Cherry-picked Spell Revisions tweaks | 📋 planning (`docs/00-project-scope.md`) |
 | 301 | Cross-cutting audits | Emotion, Courage / Emotion, Hope: mutually exclusive beneficial emotions | ✅ implemented and automated-verified; delivery/mutual exclusion live-verified, status-entry retest pending |
 | 302 | Cross-cutting audits | Flail of the Ages: saves against Slow; +5 allows Haste | Isolated WeiDU checks passed; in-game check pending |
+| 310 | Cross-cutting audits | Party physical resistance: half effectiveness above 80%, maximum 90% | Automated checks passed; not released or live-tested |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
+
+### Component 310 — Party physical resistance (unreleased)
+
+Physical resistance above **80% counts at half strength**, up to **90%**:
+90% becomes 85%, and 100% becomes 90%. Odd points round down. Applies separately
+to slashing, crushing, piercing and missile resistance for party members only.
+Enemies, summons and elemental/magic resistance are unchanged.
+
+Requires EEex and BG2:EE/EET. Launch through InfinityLoader. This operates on
+the resistance the engine has calculated, including its normal stacking rules;
+it does not change individual spells or items. Stoneskin and weapon-immunity
+spells still work normally. No saved-game files or base creature stats are edited.
+
+The requested **95% alternative is not available yet**: the engine truncates
+resistance above 100% before the normal EEex callback. Simply changing the ceiling
+would still produce at most 90%. That alternative needs a separate engine change.
+This component is not yet pinned or selected in CEBG.
+[Design and engine evidence](research/2026-10-06-physical-resistance-softcap.md).
 
 ### Component 302 — Flail of the Ages
 

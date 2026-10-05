@@ -24,6 +24,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/dragon_vorpal_effects.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/emotion_hope_courage.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/flail_of_ages.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/physical_resistance.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -1421,3 +1422,12 @@ ACTION_FOR_EACH cbr_sp_default_kit IN BLADE SKALD BEGIN
     STR_VAR kit_symbol = EVAL ~%cbr_sp_default_kit%~ slot_table = ~CBRBG6~ description_section = ~Disadvantages~ progression_text = EVAL ~%cbr_sp_bg6_text%~
   END
 END
+
+BEGIN @310 DESIGNATED 310 GROUP @1300 LABEL ~cbr_party_physical_resistance_90~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9315
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9316
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) @9317
+
+COPY_EXISTING ~SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
+LAF cbr_apply_physical_resistance END
+PRINT @9318

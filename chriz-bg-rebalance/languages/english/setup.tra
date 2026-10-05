@@ -203,3 +203,9 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9475 = ~Kit spell-progression provider installed. Class defaults are unchanged until a policy component is selected. Launch through EEex's InfinityLoader.~
 @9476 = ~Install the independent kit spell-progression provider (chriz-bg-rebalance component 420) first.~
 @9477 = ~Bard defaults require KITLIST.2DA, CLASTEXT.2DA and KIT.IDS.~
+
+@310 = ~Party physical resistance: half effectiveness above 80%, maximum 90% (EEex)~
+@9315 = ~Party physical resistance supports BG2:EE / EET only.~
+@9316 = ~Party physical resistance requires EEex. Install EEex before this component.~
+@9317 = ~Party physical resistance requires SPLSTATE.IDS to reserve its rebuild marker.~
+@9318 = ~Party physical resistance installed: 90% becomes 85%; 100% becomes 90%. Enemies, summons and non-physical resistances are unchanged. Launch through InfinityLoader.~
