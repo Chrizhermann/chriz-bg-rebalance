@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/cbr_sr_hardiness~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.8.1-dev~
+VERSION ~v0.8.1~
 ALWAYS
   INCLUDE ~CBR_SR_HARDINESS/lib/sr_hardiness.tpa~
 END

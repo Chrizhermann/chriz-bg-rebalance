@@ -1,0 +1,245 @@
+// Component 320: native, resource-local combat cloud resistance.
+// No animation-wide sweep, scripts, normal-form CREs, or death escapes are edited.
+// Flat-set 75 is intentional: this is the cloud's resistance, not a runtime floor.
+
+DEFINE_PATCH_MACRO cbr_cloud_layout
+BEGIN
+  PATCH_IF BUFFER_LENGTH < 0x72 BEGIN PATCH_FAIL ~Cloud forms: truncated resource.~ END
+  READ_ASCII 0 cf_sig (8)
+  SET cf_kind = 0
+  PATCH_IF (~%cf_sig%~ STRING_EQUAL ~ITM V1  ~) BEGIN SET cf_kind = 56 END
+  PATCH_IF (~%cf_sig%~ STRING_EQUAL ~SPL V1  ~) BEGIN SET cf_kind = 40 END
+  PATCH_IF cf_kind = 0 BEGIN PATCH_FAIL ~Cloud forms: unsupported resource format.~ END
+  READ_LONG 0x64 cf_ab
+  READ_SHORT 0x68 cf_nab
+  READ_LONG 0x6a cf_fx
+  PATCH_IF ((cf_ab < 0x72 AND cf_nab > 0) OR (cf_fx < 0x72)
+    OR (cf_nab > 0 AND cf_fx < cf_ab + cf_nab * cf_kind)
+    OR cf_fx > BUFFER_LENGTH OR (BUFFER_LENGTH - cf_fx) MODULO 48 != 0) BEGIN
+    PATCH_FAIL ~Cloud forms: invalid ability/effect table.~
+  END
+  SET cf_total = (BUFFER_LENGTH - cf_fx) / 48
+  READ_SHORT 0x6e cf_first
+  READ_SHORT 0x70 cf_count
+  PATCH_IF cf_first + cf_count > cf_total BEGIN PATCH_FAIL ~Cloud forms: invalid global effects.~ END
+  // Validate every slice, then visit only referenced effects (never trailing data).
+  PATCH_CLEAR_ARRAY cf_used
+  FOR (cf_i = 0; cf_i < cf_count; ++cf_i) BEGIN
+    SET cf_index = cf_first + cf_i
+    SET $cf_used(~%cf_index%~) = 1
+  END
+  FOR (cf_h = 0; cf_h < cf_nab; ++cf_h) BEGIN
+    READ_SHORT (cf_ab + cf_h * cf_kind + 0x1e) cf_count
+    READ_SHORT (cf_ab + cf_h * cf_kind + 0x20) cf_first
+    PATCH_IF cf_first + cf_count > cf_total BEGIN PATCH_FAIL ~Cloud forms: invalid ability effects.~ END
+    FOR (cf_i = 0; cf_i < cf_count; ++cf_i) BEGIN
+      SET cf_index = cf_first + cf_i
+      SET $cf_used(~%cf_index%~) = 1
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_cloud_patch_effects
+  INT_VAR apply = 0
+BEGIN
+  LPM cbr_cloud_layout
+  SET cf_regen = 0
+  SET cf_form = 0
+  SET cf_physical = 0
+  PATCH_CLEAR_ARRAY cf_phys_seen
+  PATCH_PHP_EACH cf_used AS cf_index => cf_used_value BEGIN
+    SET cf_at = cf_fx + cf_index * 48
+    READ_SHORT cf_at cf_op
+    READ_LONG (cf_at + 4) cf_p1
+    READ_LONG (cf_at + 8) cf_p2
+    READ_BYTE (cf_at + 2) cf_target
+    READ_BYTE (cf_at + 12) cf_timing
+    READ_LONG (cf_at + 14) cf_duration
+    READ_ASCII (cf_at + 20) cf_res (8) NULL
+    PATCH_IF cf_op = 98 BEGIN SET cf_regen += 1 END
+    PATCH_IF ((cf_op = 53 AND cf_p1 = 0x7f39 AND cf_p2 = 0)
+      OR (cf_op = 135 AND cf_p2 = 1 AND ~%cf_res%~ STRING_EQUAL_CASE ~GASFORM4~)) BEGIN
+      SET cf_form += 1
+    END
+    PATCH_IF (cf_op = 208 OR cf_op = 120 OR (cf_op = 101 AND cf_p2 = 12)) BEGIN
+      PATCH_FAIL ~Cloud forms: unreviewed damage/weapon/minimum-HP immunity; resource left unchanged.~
+    END
+    PATCH_IF ((cf_op >= 27 AND cf_op <= 31) OR (cf_op >= 84 AND cf_op <= 89)) BEGIN
+      PATCH_IF (cf_p2 != 1 OR cf_p1 > 100 OR cf_target != 1
+        OR (cf_kind = 56 AND cf_timing != 2)
+        OR (cf_kind = 40 AND (cf_timing != 0 OR cf_duration = 0))) BEGIN
+        PATCH_FAIL ~Cloud forms: unsupported resistance effect; resource left unchanged.~
+      END
+      PATCH_IF (cf_op >= 86 AND cf_op <= 89) BEGIN
+        PATCH_IF (cf_p1 != 100 AND cf_p1 != 75) BEGIN
+          PATCH_FAIL ~Cloud forms: unreviewed physical resistance layout.~
+        END
+        SET $cf_phys_seen(~%cf_op%~) = 1
+      END
+      PATCH_IF apply AND cf_p1 = 100 BEGIN WRITE_LONG (cf_at + 4) 75 END
+    END
+    PATCH_IF cf_op = 166 BEGIN
+      // Neutral additive zero removes only the cloud's MR100 setter, preserving
+      // layout and underlying MR. Ascension's existing set-zero stays unchanged.
+      PATCH_IF (cf_p1 = 100 AND cf_p2 = 1) BEGIN
+        PATCH_IF apply BEGIN WRITE_LONG (cf_at + 4) 0 WRITE_LONG (cf_at + 8) 0 END
+      END ELSE PATCH_IF cf_p1 != 0 BEGIN
+        PATCH_FAIL ~Cloud forms: unreviewed magic resistance bonus.~
+      END
+    END
+  END
+  PATCH_PHP_EACH cf_phys_seen AS cf_index => cf_used_value BEGIN SET cf_physical += 1 END
+  PATCH_IF (cf_regen = 0 OR cf_form = 0 OR cf_physical != 4) BEGIN
+    PATCH_FAIL ~Cloud forms: expected combat transformation, regeneration and four physical resistances.~
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_cloud_donor
+BEGIN
+  PATCH_IF BUFFER_LENGTH < 0x2d4 BEGIN PATCH_FAIL ~Cloud forms: truncated mist donor.~ END
+  READ_ASCII 0 cf_sig (8)
+  READ_LONG 0x28 cf_animation
+  READ_LONG 0x2c0 cf_items
+  PATCH_IF (NOT (~%cf_sig%~ STRING_EQUAL ~CRE V1.0~) OR cf_animation != 0x7f39 OR cf_items != 0) BEGIN
+    PATCH_FAIL ~Cloud forms: unsupported GASFORM4 donor.~
+  END
+  FOR (cf_at = 0x59; cf_at <= 0x63; ++cf_at) BEGIN
+    READ_BYTE cf_at cf_resist
+    PATCH_IF cf_resist != 100 BEGIN PATCH_FAIL ~Cloud forms: unreviewed mist donor resistance.~ END
+  END
+  READ_BYTE 0x33 cf_effver
+  READ_LONG 0x2c4 cf_effoff
+  READ_LONG 0x2c8 cf_effcount
+  SET cf_stride = 48
+  PATCH_IF cf_effver = 1 BEGIN SET cf_stride = 264 END
+  PATCH_IF cf_effver > 1 OR cf_effoff + cf_effcount * cf_stride > BUFFER_LENGTH BEGIN
+    PATCH_FAIL ~Cloud forms: invalid donor effects.~
+  END
+  FOR (cf_i = 0; cf_i < cf_effcount; ++cf_i) BEGIN
+    SET cf_at = cf_effoff + cf_i * cf_stride
+    PATCH_IF cf_effver = 1 BEGIN
+      READ_LONG (cf_at + 8) cf_op
+      READ_LONG (cf_at + 24) cf_p2
+    END ELSE BEGIN
+      READ_SHORT cf_at cf_op
+      READ_LONG (cf_at + 8) cf_p2
+    END
+    PATCH_IF (cf_op = 208 OR cf_op = 120 OR (cf_op = 101 AND cf_p2 = 12)
+      OR (cf_op >= 27 AND cf_op <= 31) OR (cf_op >= 84 AND cf_op <= 89) OR cf_op = 166) BEGIN
+      PATCH_FAIL ~Cloud forms: mist donor has additional unreviewed defenses.~
+    END
+  END
+  FOR (cf_at = 0x59; cf_at <= 0x63; ++cf_at) BEGIN WRITE_BYTE cf_at 75 END
+  // Mode-0 polymorph imports donor MR. The combat form has zero MR, not a
+  // second 75% chance to reject spells; native MR returns with the normal form.
+  WRITE_BYTE 0x5d 0
+END
+
+DEFINE_PATCH_FUNCTION cbr_cloud_vampire_spell
+  INT_VAR apply = 0
+BEGIN
+  LPM cbr_cloud_layout
+  PATCH_IF cf_kind != 40 BEGIN PATCH_FAIL ~Cloud forms: expected mist spell.~ END
+  SET cf_polymorphs = 0
+  PATCH_PHP_EACH cf_used AS cf_index => cf_used_value BEGIN
+    SET cf_at = cf_fx + cf_index * 48
+    READ_SHORT cf_at cf_op
+    READ_LONG (cf_at + 8) cf_p2
+    PATCH_IF (cf_op = 208 OR cf_op = 120 OR (cf_op = 101 AND cf_p2 = 12)
+      OR (cf_op >= 27 AND cf_op <= 31) OR (cf_op >= 84 AND cf_op <= 89) OR cf_op = 166) BEGIN
+      PATCH_FAIL ~Cloud forms: combat mist spell has additional unreviewed defenses.~
+    END
+    PATCH_IF cf_op = 135 BEGIN
+      SET cf_polymorphs += 1
+      READ_BYTE (cf_at + 2) cf_target
+      READ_LONG (cf_at + 8) cf_p2
+      READ_BYTE (cf_at + 12) cf_timing
+      READ_LONG (cf_at + 14) cf_duration
+      READ_ASCII (cf_at + 20) cf_res (8) NULL
+      PATCH_IF (cf_target != 1 OR cf_p2 != 0 OR cf_timing != 0 OR cf_duration = 0
+        OR NOT ((~%cf_res%~ STRING_EQUAL_CASE ~GASFORM4~) OR (~%cf_res%~ STRING_EQUAL_CASE ~CBRGAS75~))) BEGIN
+        PATCH_FAIL ~Cloud forms: unreviewed combat polymorph.~
+      END
+      PATCH_IF apply BEGIN WRITE_ASCII (cf_at + 20) ~CBRGAS75~ #8 END
+    END
+  END
+  PATCH_IF cf_polymorphs != 1 BEGIN PATCH_FAIL ~Cloud forms: expected one combat polymorph.~ END
+END
+
+DEFINE_ACTION_FUNCTION cbr_cloud_descriptions
+  INT_VAR apply = 0
+BEGIN
+  // Only the SR wording associated with the patched shared genie item is owned.
+  // Preflight BOTH descriptions before allocating either TLK entry. WeiDU can
+  // retain unused appended strings after a late component failure.
+  ACTION_IF (FILE_EXISTS_IN_GAME ~DVGASFRM.ITM~ AND FILE_EXISTS_IN_GAME ~SPELL.IDS~) BEGIN
+    CLEAR_IDS_MAP
+    ACTION_FOR_EACH cf_symbol IN ~WIZARD_SUMMON_EFREET~ ~WIZARD_SUMMON_DJINNI~ BEGIN
+      OUTER_SET cf_id = IDS_OF_SYMBOL (~spell~ ~%cf_symbol%~)
+      ACTION_IF cf_id >= 2100 AND cf_id <= 2999 BEGIN
+        OUTER_SET cf_slot = cf_id - 2000
+        ACTION_IF FILE_EXISTS_IN_GAME ~SPWI%cf_slot%.SPL~ BEGIN
+          COPY_EXISTING ~SPWI%cf_slot%.SPL~ ~override~
+            PATCH_IF BUFFER_LENGTH < 0x72 BEGIN PATCH_FAIL ~Cloud forms: invalid summon description resource.~ END
+            READ_ASCII 0 cf_desc_sig (8)
+            PATCH_IF NOT (~%cf_desc_sig%~ STRING_EQUAL ~SPL V1  ~) BEGIN
+              PATCH_FAIL ~Cloud forms: unsupported summon description resource.~
+            END
+            READ_STRREF 0x50 cf_description
+            INNER_PATCH_SAVE cf_new_description ~%cf_description%~ BEGIN
+              REPLACE_TEXTUALLY ~immune to almost all forms of damage~ ~75% resistant to physical, elemental and magic damage while retaining poison immunity~
+            END
+            PATCH_IF apply AND NOT (~%cf_description%~ STRING_EQUAL ~%cf_new_description%~) BEGIN
+              WRITE_LONG 0x50 (RESOLVE_STR_REF (~%cf_new_description%~))
+            END ELSE PATCH_IF apply AND NOT (~%cf_description%~ STRING_CONTAINS_REGEXP ~75% resistant to physical~ = 0) BEGIN
+              PATCH_WARN ~Cloud forms: %cf_symbol% has different or untranslated text; description unchanged.~
+            END
+          BUT_ONLY
+        END
+      END
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_install_cloud_forms
+BEGIN
+  OUTER_SET cf_found = 0
+  // First validate all present packages without publishing anything.
+  ACTION_FOR_EACH cf_file IN ~DVGASFRM.ITM~ ~OHBEGASF.SPL~ ~BDGASFOR.SPL~ ~OHGASFRM.SPL~ ~FINBODGF.ITM~ BEGIN
+    ACTION_IF FILE_EXISTS_IN_GAME ~%cf_file%~ BEGIN
+      OUTER_SET cf_found += 1
+      COPY_EXISTING ~%cf_file%~ ~override~ LPF cbr_cloud_patch_effects END BUT_ONLY
+    END
+  END
+  ACTION_IF FILE_EXISTS_IN_GAME ~DW#VMGAS.SPL~ BEGIN
+    OUTER_SET cf_found += 1
+    ACTION_IF NOT FILE_EXISTS_IN_GAME ~GASFORM4.CRE~ BEGIN FAIL ~Cloud forms: combat mist donor is missing.~ END
+    COPY_EXISTING ~DW#VMGAS.SPL~ ~override~ LPF cbr_cloud_vampire_spell END BUT_ONLY
+    COPY_EXISTING ~GASFORM4.CRE~ ~override~
+      READ_ASCII 0 cf_original (BUFFER_LENGTH)
+      INNER_PATCH_SAVE cf_expected ~%cf_original%~ BEGIN LPF cbr_cloud_donor END END
+    BUT_ONLY
+    ACTION_IF FILE_EXISTS_IN_GAME ~CBRGAS75.CRE~ BEGIN
+      COPY_EXISTING ~CBRGAS75.CRE~ ~override~
+        READ_ASCII 0 cf_existing (BUFFER_LENGTH)
+        PATCH_IF NOT (~%cf_existing%~ STRING_EQUAL ~%cf_expected%~) BEGIN
+          PATCH_FAIL ~Cloud forms: reserved CBRGAS75.CRE belongs to different data.~
+        END
+      BUT_ONLY
+    END
+  END
+  ACTION_IF cf_found = 0 BEGIN FAIL ~No supported combat cloud form is installed.~ END
+  LAF cbr_cloud_descriptions END
+
+  ACTION_FOR_EACH cf_file IN ~DVGASFRM.ITM~ ~OHBEGASF.SPL~ ~BDGASFOR.SPL~ ~OHGASFRM.SPL~ ~FINBODGF.ITM~ BEGIN
+    ACTION_IF FILE_EXISTS_IN_GAME ~%cf_file%~ BEGIN
+      COPY_EXISTING ~%cf_file%~ ~override~ LPF cbr_cloud_patch_effects INT_VAR apply = 1 END BUT_ONLY
+    END
+  END
+  ACTION_IF FILE_EXISTS_IN_GAME ~DW#VMGAS.SPL~ BEGIN
+    COPY_EXISTING ~GASFORM4.CRE~ ~override/CBRGAS75.CRE~ LPF cbr_cloud_donor END
+    COPY_EXISTING ~DW#VMGAS.SPL~ ~override~ LPF cbr_cloud_vampire_spell INT_VAR apply = 1 END BUT_ONLY
+  END
+  LAF cbr_cloud_descriptions INT_VAR apply = 1 END
+  PRINT ~Combat cloud forms: invulnerability replaced with 75% damage resistance. Poison and scripted escape protections are unchanged.~
+END

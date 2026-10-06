@@ -1,4 +1,4 @@
-# Hardiness existing-install patch — v0.8.1-dev (unpublished)
+# Hardiness existing-install patch — v0.8.1
 
 This new, standalone WeiDU mod appends its own entry after the current install.
 It does not reinstall Spell Revisions or any previously installed component.
@@ -28,7 +28,7 @@ Hardiness's existing Breach behavior. Only the resistance profile is vanilla.
    complete distribution.
 2. Before applying it, close the game and back up the game directory and saves.
    This package has not been applied to or playtested in a live game.
-3. Extract `CBR_SR_HARDINESS-v0.8.1-dev-windows.zip` into the game directory.
+3. Extract `CBR_SR_HARDINESS-v0.8.1-windows.zip` into the game directory.
 4. Run `Setup-cbr_sr_hardiness.exe`. Choose 200 (recommended) or 201. Leave 202
    uninstalled unless the extra damage resistances are wanted.
 

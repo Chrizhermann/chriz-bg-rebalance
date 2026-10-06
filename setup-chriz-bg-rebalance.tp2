@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/chriz-bg-rebalance~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.8.1-dev~
+VERSION ~v0.8.1~
 
 // Load the tested transformation library and define one installer wrapper for
 // all Tempus Holy Power compatibility choices. WeiDU's backup namespace is
@@ -1485,3 +1485,26 @@ REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) @9317
 COPY_EXISTING ~SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
 LAF cbr_apply_physical_resistance END
 PRINT @9318
+
+BEGIN @130 DESIGNATED 130 GROUP @1100 LABEL ~cbr_eet_elemental_arrows~
+REQUIRE_PREDICATE (GAME_IS ~eet~) @9140
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 2000) @9141
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~AROW04.ITM~) AND (FILE_EXISTS_IN_GAME ~AROW09.ITM~)
+  AND (FILE_EXISTS_IN_GAME ~AROW08.ITM~) AND (FILE_EXISTS_IN_GAME ~AROWKC.ITM~)) @9142
+INCLUDE ~chriz-bg-rebalance/lib/elemental_arrows.tpa~
+
+BEGIN @220 DESIGNATED 220 GROUP @1200 LABEL ~cbr_sr_bracers_improved_haste~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9220
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 0) @9221
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~BRAC16.ITM~) AND (FILE_EXISTS_IN_GAME ~SPELL.IDS~)) @9222
+INCLUDE ~chriz-bg-rebalance/lib/sr_bracers.tpa~
+LAF cbr_apply_sr_bracers END
+
+BEGIN @320 DESIGNATED 320 GROUP @1300 LABEL ~cbr_damageable_combat_clouds~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9320
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~DVGASFRM.ITM~)
+  OR (FILE_EXISTS_IN_GAME ~OHBEGASF.SPL~) OR (FILE_EXISTS_IN_GAME ~BDGASFOR.SPL~)
+  OR (FILE_EXISTS_IN_GAME ~OHGASFRM.SPL~) OR (FILE_EXISTS_IN_GAME ~FINBODGF.ITM~)
+  OR (FILE_EXISTS_IN_GAME ~DW#VMGAS.SPL~)) @9321
+INCLUDE ~chriz-bg-rebalance/lib/cloud_forms.tpa~
+LAF cbr_install_cloud_forms END

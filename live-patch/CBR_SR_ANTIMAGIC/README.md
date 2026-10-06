@@ -1,7 +1,9 @@
 # SR anti-magic existing-install patch
 
-Prepared development source **v0.8.1-dev**. No game installation or publication
-has been performed. Live acceptance remains pending.
+Source version **v0.8.1**. Component 210 was applied
+with authorization to Christopher's private stream installation on October 6;
+211 was not. See the collection handover for backups and verification. Native
+gameplay acceptance remains separate from the automated release checks.
 
 - **210:** Pierce Magic halves current MR, subtracting at least 10 and at most
   40 percentage points, rounded up; never below zero. Duration: five rounds.
@@ -19,7 +21,7 @@ changed. These components are independent; choose either or both.
 1. Close the game and InfinityLoader. Verify the intended game root and its
    `WeiDU.log`. Keep a backup of the game, string tables and saves, plus a copy of
    the pre-patch log. Do not reuse an archive from a different development commit.
-2. Extract the prepared `CBR_SR_ANTIMAGIC-v0.8.1-dev-windows.zip` into that root.
+2. Extract `CBR_SR_ANTIMAGIC-v0.8.1-windows.zip` into that root.
    It contains `Setup-cbr_sr_antimagic.exe` and the `CBR_SR_ANTIMAGIC` directory.
 3. Run the separate setup and choose 210 and/or 211. They append new entries at
    the end of the stack and use their own backup namespace. **Do not reinstall SR,

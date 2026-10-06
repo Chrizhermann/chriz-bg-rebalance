@@ -1,0 +1,97 @@
+// EET adaptation of installed SCS 35.21 component 3017.
+// Upstream elemental_arrows.tpa changes AROW04 to 1d3 acid, AROW09 to
+// 1d2 cold, and removes AROW08/AROWKC's physical/attack +2 bonuses.
+// Also reduce those two fire effects to 1d2, verified in BG2's AROW08
+// in data/ITEMS.BIF and the SCS @16011 description. SCS omits that
+// write, and its component gate excludes EET. No item replacement.
+// ARROPHE2 and special arrows are intentionally outside the SCS list.
+
+DEFINE_PATCH_FUNCTION cbr_elemental_arrow
+    INT_VAR elemental_type=0 elemental_size=0 remove_bonus=0
+    STR_VAR element=~~
+BEGIN
+    PATCH_IF BUFFER_LENGTH < 0x72 BEGIN PATCH_FAIL ~Truncated arrow resource.~ END
+    READ_ASCII 0 signature (8)
+    PATCH_IF NOT (~%signature%~ STRING_EQUAL ~ITM V1  ~) BEGIN
+        PATCH_FAIL ~Unsupported arrow format.~
+    END
+    READ_SHORT 0x1c category
+    PATCH_IF category != 5 BEGIN PATCH_FAIL ~Target resource is not an arrow.~ END
+    READ_LONG 0x64 ability_offset
+    READ_SHORT 0x68 ability_count
+    READ_LONG 0x6a effect_offset
+    PATCH_IF ability_count < 1 OR ability_offset < 0x72 OR
+        ability_offset + ability_count * 0x38 > BUFFER_LENGTH OR
+        effect_offset < ability_offset + ability_count * 0x38 BEGIN
+        PATCH_FAIL ~Malformed arrow ability table.~
+    END
+    SET matched = 0
+    SET damage_save = 0
+    FOR (i=0; i<ability_count; i+=1) BEGIN
+        SET a=ability_offset+i*0x38
+        READ_BYTE a ability_type
+        READ_SHORT (a+0x1e) effect_count
+        READ_SHORT (a+0x20) first_effect
+        PATCH_IF effect_offset+(first_effect+effect_count)*0x30 > BUFFER_LENGTH BEGIN
+            PATCH_FAIL ~Malformed arrow effect table.~
+        END
+        PATCH_IF ability_type != 2 BEGIN PATCH_FAIL ~Unexpected non-projectile arrow ability.~ END
+        SET ability_matches=0
+        FOR (j=0; j<effect_count; j+=1) BEGIN
+            SET e=effect_offset+(first_effect+j)*0x30
+            READ_SHORT e opcode
+            PATCH_IF opcode=12 BEGIN
+                READ_LONG (e+8) damage_type
+                READ_BYTE (e+2) effect_target
+                PATCH_IF damage_type != elemental_type OR effect_target != 2 BEGIN
+                    PATCH_FAIL ~Unexpected damage effect; no arrow was installed.~
+                END
+                READ_LONG (e+0x24) damage_save
+                WRITE_LONG (e+0x1c) 1
+                WRITE_LONG (e+0x20) elemental_size
+                SET ability_matches+=1
+                SET matched+=1
+            END
+        END
+        PATCH_IF ability_matches != 1 BEGIN
+            PATCH_FAIL ~Expected one elemental damage effect per arrow ability.~
+        END
+        PATCH_IF remove_bonus BEGIN
+            WRITE_SHORT (a+0x14) 0
+            WRITE_SHORT (a+0x1a) 0
+        END
+    END
+    READ_STRREF 0x54 old_description
+    INNER_PATCH_SAVE description ~%old_description%~ BEGIN
+        REPLACE_TEXTUALLY CASE_INSENSITIVE ~\+[0-9]+d[0-9]+ %element% damage~ ~+1d%elemental_size% %element% damage~
+        PATCH_IF remove_bonus BEGIN
+            REPLACE_TEXTUALLY CASE_INSENSITIVE ~THAC0: \+2~ ~THAC0: +0~
+            REPLACE_TEXTUALLY CASE_INSENSITIVE ~1d6\+2~ ~1d6~
+            // The special kobold arrow keeps its original save vs. breath.
+            PATCH_IF damage_save = 2 BEGIN
+                REPLACE_TEXTUALLY CASE_INSENSITIVE ~Save vs\. Spell~ ~Save vs. Breath~
+            END
+        END
+    END
+    SAY DESC ~%description%~
+    PATCH_IF remove_bonus BEGIN
+        READ_STRREF 0x0c old_name
+        INNER_PATCH_SAVE new_name ~%old_name%~ BEGIN
+            REPLACE_TEXTUALLY ~ *\+[0-9]+$~ ~~
+        END
+        SAY NAME2 ~%new_name%~
+    END
+END
+
+COPY_EXISTING ~arow04.itm~ ~override~
+    LPF cbr_elemental_arrow INT_VAR elemental_type=65536 elemental_size=3 STR_VAR element=acid END
+BUT_ONLY
+
+COPY_EXISTING ~arow09.itm~ ~override~
+    LPF cbr_elemental_arrow INT_VAR elemental_type=131072 elemental_size=2 STR_VAR element=cold END
+BUT_ONLY
+
+COPY_EXISTING ~arow08.itm~ ~override~
+              ~arowkc.itm~ ~override~
+    LPF cbr_elemental_arrow INT_VAR elemental_type=524288 elemental_size=2 remove_bonus=1 STR_VAR element=fire END
+BUT_ONLY

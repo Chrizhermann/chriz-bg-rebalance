@@ -1,6 +1,26 @@
 # Changelog
 
-## v0.8.1-dev — unreleased
+## v0.8.1 — 2026-10-07
+
+- Add EET elemental arrows (130): acid deals 1d3; cold and fire deal 1d2.
+  Remove the fire arrows' +2 attack/physical-damage bonuses. Preserve their
+  original saving throws, SCS troll helpers and unrelated properties. Other
+  special arrows are unchanged. This adapts SCS's BG2-strength rule for EET.
+- Add Bracers of Blinding Strike compatibility (220): their once-per-day,
+  self-only, 20-second activation uses Spell Revisions' +1 APR Improved Haste
+  instead of native double APR. Retain reciprocal Haste exclusions and the
+  installed Tempus bridge. Requires SR's main component.
+- Add party physical resistance (310): values above 80% count at half strength,
+  with a 90% maximum. Applies separately to the four physical damage types,
+  to party members only. Requires EEex; the proposed 95% alternative is deferred.
+- Add combat cloud forms (320): cloud-granted damage immunity becomes 75%
+  resistance. Preserve regeneration, duration, poison immunity, AI and quest
+  protections. Includes SR/SCS genies, known EE/SoD clouds, Ascension's combat
+  Bodhi form and SCS tactical vampire mist. Scripted death escapes are unchanged.
+- Add SR Hardiness choices: 200 restores 40% physical resistance only
+  (recommended); 201 offers 30% instead; optional 202 adds SR's extra 20%
+  elemental/magic-damage resistances. Both ordinary and Wish Hardiness change.
+  Requires SR Revised Warrior HLAs (65).
 
 - Add component 210: Pierce Magic halves current MR with a 10-40 percentage-point
   reduction, zero floor and upward rounding, for five rounds. Recasts renew the
@@ -10,22 +30,14 @@
   two rounds, refreshing without self-stacking. Does not require EEex.
 - Resolve actual SR/SCS payloads and preserve protection stripping, Spell Shield
   wrappers and invisible targeting. Correct descriptions without shared-TLK edits.
-- Add independent existing-install tail packaging, focused real-WeiDU and Lua
-  behavioral checks, and collection handover. No game modification or publication;
-  native-engine acceptance and collection integration remain pending.
-- Include the previously approved Hardiness components in this local source.
+- Provide independent Hardiness and anti-magic tail packages for existing
+  installations. Preserve shared game text by assigning resource-local descriptions.
+- Add real-WeiDU install/rollback/uninstall checks and EEex runtime-model tests.
+  These are automated checks, not a new in-engine combat playtest. No saves
+  are changed by these components, and already-active effects are not rewritten.
 
-## v0.8.0-dev — unreleased
-
-- Add SR Hardiness components 200 (40% physical only, recommended) and 201
-  (30% physical only), with optional component 202 restoring SR's extra 20%
-  elemental/magic-damage resistances. Both normal and Wish Hardiness are covered.
-- Correct their descriptions without rewriting shared strings. Preserve duration,
-  stacking, casting, dispel flags and existing Breach classifications.
-- Require SR Revised Warrior HLAs #65. Add a separate tail-install patch for existing
-  installs, built from the same library, without reinstalling old mod components.
-- Add isolated real-WeiDU checks and a collection integration handover. This work
-  is not published, not live-game accepted, and not yet integrated into the collection.
+See [release notes](docs/release-notes/v0.8.1.md). The earlier 0.8.0/0.8.1
+development snapshots were not separate public releases.
 
 ## v0.7.1 — 2026-09-30
 
