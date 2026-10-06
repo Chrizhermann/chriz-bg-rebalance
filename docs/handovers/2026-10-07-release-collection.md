@@ -1,6 +1,11 @@
 # BG Rebalance v0.8.1 collection integration
 
-Prepared October 7; publication and immutable pin verification are separate.
+Published and freshly downloaded/verified October 7 as normal GitHub Latest.
+Annotated tag `v0.8.1` points to merge commit
+`09db97dc5cbd14f1b8bf7fe3af64f69bee313585` (PR #6).
+Full asset: `https://github.com/Chrizhermann/chriz-bg-rebalance/releases/download/v0.8.1/chriz-bg-rebalance-v0.8.1-windows.zip`.
+Size: **1,753,775 bytes**. SHA-256:
+`5d6cc9dfec8779e1e4534da686dc2f3849bcb795b24981c0930d95918efccf0c`.
 Current source worktree: `.worktrees/sr-antimagic-research`.
 Build: `python tools/package_sr_antimagic.py`. Use the full mod archive for
 fresh installs, not the private repair adapters or standalone tail packages.
@@ -53,5 +58,6 @@ changed; no mid-stack repair is implied by this new source.
 
 Package/source checks are not in-engine playtests. Current-game private repairs
 are not proof that a newly built collection is installed, and do not authorize
-reinstalling old WeiDU entries or modifying saves. Record actual release URL,
-size/hash, tag and tested component expansion only after publication.
+reinstalling old WeiDU entries or modifying saves. The asset metadata above is
+verified publication evidence; the collection must still validate its own
+selected component expansion and package.

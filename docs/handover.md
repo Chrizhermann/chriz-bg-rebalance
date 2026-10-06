@@ -1,8 +1,14 @@
 # chriz-bg-rebalance — Handover
 
-## October 7 release integration — prepared, awaiting publication approval
+## October 7 release integration — v0.8.1 published and verified
 
-The approved combined owner release is **v0.8.1**, prepared locally, not published.
+The approved combined owner release **v0.8.1** is public GitHub Latest, not a draft
+or prerelease. [PR #6](https://github.com/Chrizhermann/chriz-bg-rebalance/pull/6)
+merged at `09db97dc5cbd14f1b8bf7fe3af64f69bee313585`; the annotated v0.8.1 tag
+points to that source. All three freshly downloaded published ZIPs match the
+tested candidate sizes and SHA-256 hashes recorded below. No Actions workflows
+or remote checks are configured in this repository; the completed local checks
+and independent review are the release evidence, not a claimed CI run.
 Worktree: `.worktrees/sr-antimagic-research`, branch `codex/sr-antimagic-research`.
 HEAD `c14a9a2` cleanly cherry-picks the approved bracers/private-cap commit
 `9078d11` onto the combined Hardiness/anti-magic/physical-cap base `48938d1`.
@@ -33,7 +39,7 @@ Verified, all exit 0:
 - Earlier bracers/cloud suite: 36 cases, one absent private-capture skip.
 - Main TP2 parse and `git diff --check` pass.
 
-Local candidates were built with
+Published archives were built with
 `python tools/package_sr_antimagic.py --output dist\v0.8.1-candidate`:
 
 - `chriz-bg-rebalance-v0.8.1-windows.zip`: 1,753,775 bytes, SHA-256
@@ -43,9 +49,12 @@ Local candidates were built with
 - `CBR_SR_ANTIMAGIC-v0.8.1-windows.zip`: 1,289,937 bytes, SHA-256
   `5102469389ad087674794d76cc60cd67527137dc5a0b46fb35df7b550eff7b63`.
 
-Remaining: independent review, scoped commit and parent publication go-ahead.
-README, changelog, release notes and collection handover are complete. Publication
-must verify the final tag/archive and then provide immutable pin details to CEBG.
+Independent review found no blocker; implementation commit `784fb83` and release
+publication were approved by the collection lead on Christopher's authority.
+README, changelog, release notes and collection handover are complete. The full
+collection asset is
+`https://github.com/Chrizhermann/chriz-bg-rebalance/releases/download/v0.8.1/chriz-bg-rebalance-v0.8.1-windows.zip`.
+CEBG pinning and installer publication remain separate work in that repository.
 Keep the pre-existing deployment-note edit to
 `docs/handovers/2026-10-06-sr-antimagic-collection.md` out of this integration commit;
 the matching existing note in the tail README is preserved alongside its necessary
