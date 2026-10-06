@@ -1,5 +1,75 @@
 # chriz-bg-rebalance — Handover
 
+## October 7 release integration — prepared, awaiting publication approval
+
+The approved combined owner release is **v0.8.1**, prepared locally, not published.
+Worktree: `.worktrees/sr-antimagic-research`, branch `codex/sr-antimagic-research`.
+HEAD `c14a9a2` cleanly cherry-picks the approved bracers/private-cap commit
+`9078d11` onto the combined Hardiness/anti-magic/physical-cap base `48938d1`.
+The original physical-cap worktree and its dirty cloud work remain untouched.
+
+Integration adds public 130 (EET elemental arrows), 220 (SR bracers)
+and 320 (75% combat cloud forms), their source/tests, and matching v0.8.1
+version markers in the main/Hardiness/anti-magic TP2s. 130 is the previously
+verified October 3 adapter, renamed into the owner namespace, scoped to
+AROW04/09/08/AROWKC only. 220 uses the unchanged tested bracers library. 320
+copies the owner's approved October 6 cloud source without modifying that copy.
+Current public declaration order ends `...302,420,421,310,130,220,320`;
+collection must follow actual declaration order. The earlier sequence contains
+`...407,409,408...`, not numerical order. See the [component/default/dependency
+matrix](handovers/2026-10-07-release-collection.md) before pinning.
+
+Verified, all exit 0:
+
+- Full regression `python -B -m unittest discover -s tests -t . -v`: **539 tests,
+  26 expected skips** for unavailable private resource captures, 428 seconds.
+  Session 37698 is complete and its final result was collected; do not rerun it
+  to recover the old result. Negative Bard guard diagnostics were expected.
+- Subsequently added extracted-package test and ran
+  `python -B -m unittest tests.test_release_components -v`: **6 tests passed**.
+  Covers exact arrow changes/preservation/uninstall/rollback, public bracers
+  parity/requirements, and full ZIP allowlist/source fidelity plus installation
+  of 130, 220 and 320 using its packaged WeiDU in a disposable synthetic game.
+- Earlier bracers/cloud suite: 36 cases, one absent private-capture skip.
+- Main TP2 parse and `git diff --check` pass.
+
+Local candidates were built with
+`python tools/package_sr_antimagic.py --output dist\v0.8.1-candidate`:
+
+- `chriz-bg-rebalance-v0.8.1-windows.zip`: 1,753,775 bytes, SHA-256
+  `5d6cc9dfec8779e1e4534da686dc2f3849bcb795b24981c0930d95918efccf0c`.
+- `CBR_SR_HARDINESS-v0.8.1-windows.zip`: 1,285,575 bytes, SHA-256
+  `1816039b574a0b7b4a71b6622e2658aedecdab5e36c56b5c59393c0817587d87`.
+- `CBR_SR_ANTIMAGIC-v0.8.1-windows.zip`: 1,289,937 bytes, SHA-256
+  `5102469389ad087674794d76cc60cd67527137dc5a0b46fb35df7b550eff7b63`.
+
+Remaining: independent review, scoped commit and parent publication go-ahead.
+README, changelog, release notes and collection handover are complete. Publication
+must verify the final tag/archive and then provide immutable pin details to CEBG.
+Keep the pre-existing deployment-note edit to
+`docs/handovers/2026-10-06-sr-antimagic-collection.md` out of this integration commit;
+the matching existing note in the tail README is preserved alongside its necessary
+version update. No 95% physical-cap variant or deferred redesign was added.
+No live game, save, security setting, collection or website was changed.
+
+## Unpublished Hardiness work — 2026-10-06
+
+`v0.8.0-dev`, branch `codex/sr-hardiness-adjustment`, adds 200 (40% physical only,
+recommended), 201 (30% physical only, mutually exclusive with 200), and 202
+(optional extra 20% elemental/magic-damage resistances, requires 200 or 201).
+Both normal and Wish Hardiness are covered; duration, stacking and existing
+Breach behavior are retained. Requires SR Revised Warrior HLAs #65.
+
+A separate tail installer avoids reinstalling SR or prior BG Rebalance entries.
+Build local packages with `python tools/package_sr_hardiness.py`. These are
+unpublished development artifacts; no live game or saves were changed.
+
+The collection's v0.7.1 pin does not include this work. Integration remains a
+separate required step: [exact handover](handovers/2026-10-06-sr-hardiness-collection.md).
+
+The previously published status below is historical and remains unchanged.
+
+
 Live entry point for anyone (user, future agent) picking up work on this repo.
 Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
 

@@ -1,0 +1,15 @@
+// Hermetic --nogame entry point for the production SPL patch function.
+// argv: library, input SPL, output SPL, physical percentage, extra percentage.
+BACKUP ~backup~
+AUTHOR ~chriz-bg-rebalance test harness~
+
+BEGIN ~SR Hardiness isolated transformation~
+DESIGNATED 0
+
+INCLUDE ~%argv[0]%~
+OUTER_SET cbr_harness_physical = %argv[3]%
+OUTER_SET cbr_harness_extra = %argv[4]%
+COPY ~%argv[1]%~ ~%argv[2]%~
+  LPF cbr_sr_hardiness_patch
+    INT_VAR physical = cbr_harness_physical extra_resistance = cbr_harness_extra
+  END

@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.8.1 — 2026-10-07
+
+- Add EET elemental arrows (130): acid deals 1d3; cold and fire deal 1d2.
+  Remove the fire arrows' +2 attack/physical-damage bonuses. Preserve their
+  original saving throws, SCS troll helpers and unrelated properties. Other
+  special arrows are unchanged. This adapts SCS's BG2-strength rule for EET.
+- Add Bracers of Blinding Strike compatibility (220): their once-per-day,
+  self-only, 20-second activation uses Spell Revisions' +1 APR Improved Haste
+  instead of native double APR. Retain reciprocal Haste exclusions and the
+  installed Tempus bridge. Requires SR's main component.
+- Add party physical resistance (310): values above 80% count at half strength,
+  with a 90% maximum. Applies separately to the four physical damage types,
+  to party members only. Requires EEex; the proposed 95% alternative is deferred.
+- Add combat cloud forms (320): cloud-granted damage immunity becomes 75%
+  resistance. Preserve regeneration, duration, poison immunity, AI and quest
+  protections. Includes SR/SCS genies, known EE/SoD clouds, Ascension's combat
+  Bodhi form and SCS tactical vampire mist. Scripted death escapes are unchanged.
+- Add SR Hardiness choices: 200 restores 40% physical resistance only
+  (recommended); 201 offers 30% instead; optional 202 adds SR's extra 20%
+  elemental/magic-damage resistances. Both ordinary and Wish Hardiness change.
+  Requires SR Revised Warrior HLAs (65).
+
+- Add component 210: Pierce Magic halves current MR with a 10-40 percentage-point
+  reduction, zero floor and upward rounding, for five rounds. Recasts renew the
+  existing amount instead of compounding it. It combines with Lower Resistance.
+  Requires EEex for the impact calculation and native-effect refresh.
+- Add component 211: Spellstrike's guaranteed/50% failure stages become 15% for
+  two rounds, refreshing without self-stacking. Does not require EEex.
+- Resolve actual SR/SCS payloads and preserve protection stripping, Spell Shield
+  wrappers and invisible targeting. Correct descriptions without shared-TLK edits.
+- Provide independent Hardiness and anti-magic tail packages for existing
+  installations. Preserve shared game text by assigning resource-local descriptions.
+- Add real-WeiDU install/rollback/uninstall checks and EEex runtime-model tests.
+  These are automated checks, not a new in-engine combat playtest. No saves
+  are changed by these components, and already-active effects are not rewritten.
+
+See [release notes](docs/release-notes/v0.8.1.md). The earlier 0.8.0/0.8.1
+development snapshots were not separate public releases.
+
 ## v0.7.1 — 2026-09-30
 
 - Fix Apex Dragons (110) failing to install when SCS uses its GLOBAL-based

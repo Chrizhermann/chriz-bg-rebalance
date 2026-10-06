@@ -5,7 +5,13 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.7.1.** Apex Dragons now supports both SCS difficulty-control systems.
+**Version: v0.8.1.** Pierce Magic has a bounded five-round MR
+reduction; Spellstrike causes 15% spell failure for two rounds.
+Hardiness has a recommended 40% physical-only
+profile, a 30% alternative, and an optional SR damage-resistance add-on.
+The new options also cover BG2-strength EET arrows, SR-compatible Bracers of
+Blinding Strike, party physical resistance capped at 90%, and damageable clouds.
+Apex Dragons supports both SCS difficulty-control systems.
 Component 302 gives Flail of the Ages' Slow a saving throw and
 lets its +5 version work with Haste. Component 301 makes Emotion, Courage and
 Emotion, Hope mutually exclusive. Kit-specific bard spell progression remains available through EEex.
@@ -47,12 +53,111 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 111 | SCS adjustments | Five dragon encounters: 18-second wing-buffet cooldown | Optional; released; combat acceptance pending |
 | 120 | SCS adjustments | Repair the SCS/SR false Improved Mantle weapon-protection semantics | ✅ implemented |
 | 121 | SCS adjustments | EEex ambient caster readiness + one honest first-contact defense | ✅ implemented; v1.2 ambient + neutral-to-hostile urgent path live accepted; legacy live pending |
-| 2xx | SR adjustments | Cherry-picked Spell Revisions tweaks | 📋 planning (`docs/00-project-scope.md`) |
+| 130 | SCS adjustments | EET elemental arrows: BG2-strength acid, cold and fire | Automated checks passed; in-engine check pending |
+| 200 / 201 | SR adjustments | Hardiness: 40% / 30% physical resistance only | Implemented; choose one; live acceptance pending |
+| 202 | SR adjustments | Hardiness: optional extra 20% damage resistances | Requires 200 or 201; live acceptance pending |
+| 210 | SR adjustments | EEex Pierce Magic: halve MR, bounded to 10-40 points, for five rounds | Automated checks passed; live acceptance pending |
+| 211 | SR adjustments | Spellstrike: 15% spell failure for two rounds | Automated checks passed; live acceptance pending |
+| 220 | SR adjustments | Bracers of Blinding Strike: SR Improved Haste, 20 seconds | Automated checks passed; in-engine check pending |
 | 301 | Cross-cutting audits | Emotion, Courage / Emotion, Hope: mutually exclusive beneficial emotions | ✅ implemented and automated-verified; delivery/mutual exclusion live-verified, status-entry retest pending |
 | 302 | Cross-cutting audits | Flail of the Ages: saves against Slow; +5 allows Haste | Isolated WeiDU checks passed; in-game check pending |
+| 310 | Cross-cutting audits | Party physical resistance: half effectiveness above 80%, maximum 90% | Automated checks passed; in-engine check pending |
+| 320 | Cross-cutting audits | Combat clouds: 75% damage resistance instead of invulnerability | Automated checks passed; combat check pending |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
+
+### Components 210–211 — SR anti-magic
+
+Requires **SR main component 0**; component 210 also requires **EEex** and launching
+through InfinityLoader. These are independent choices. Pierce Magic halves current
+MR, reducing it by at least 10 and at most 40 percentage points, with a zero floor
+and rounding the reduction up. The reduction lasts five rounds; recasts renew the
+same amount. It combines with Lower Resistance. Spellstrike causes 15% arcane/divine
+spell failure for two rounds, refreshing its own effect instead of stacking.
+
+Both preserve protection removal, Spell Shield interception and installed invisible
+targeting. Pierce Shield and Entropy Shield are unchanged. Native
+first-hit/refresh/save-load acceptance remains separate from automated checks.
+
+Build the full mod and separate tail patches with `python tools/package_sr_antimagic.py`.
+For an existing stack, use the [anti-magic tail patch](live-patch/CBR_SR_ANTIMAGIC/README.md)
+after authorization, without reinstalling SR or existing Rebalance components.
+The [collection handover](docs/handovers/2026-10-06-sr-antimagic-collection.md) covers
+the new source pin, dependencies, selections and recipe checks still required.
+
+### Component 130 — BG2-strength elemental arrows in EET
+
+Acid arrows deal **1d3 acid**, cold arrows **1d2 cold**, and standard/kobold
+fire arrows **1d2 fire** without their +2 attack/physical-damage bonus.
+Other special arrows, original saving throws and SCS troll helpers are unchanged.
+This fills the EET gap in SCS's own elemental-arrow option; requires EET and
+SCS general spell tweaks (2000). Install after other arrow/item changes.
+
+### Component 220 — SR Bracers of Blinding Strike
+
+The bracers grant **SR Improved Haste (+1 APR)**, still self-only for 20 seconds
+and once per day. The effective SR bonuses and existing Tempus bridge are retained.
+Ordinary/Improved Haste cannot stack with the bracers by changing cast order.
+Requires SR main component 0; install after other Haste/item changes.
+Wish's mechanics are not changed by this component.
+
+### Component 320 — Damageable combat clouds
+
+Cloud-granted 100% damage resistances become **75%**. Regeneration, duration,
+poison immunity and AI remain unchanged. Supported forms include SR/SCS genies,
+the known EE/SoD combat clouds, Ascension Bodhi's combat form and SCS vampire
+tactical mist. Scripted death escapes and quest protections stay intact.
+
+Existing lower resistances stay lower; no protection is added to open channels.
+Cloud-added MR100 is neutralized; SCS tactical mist has MR0 while transformed.
+Normal-form data is unchanged, but a cloud's flat-set values can temporarily
+replace stronger natural resistance. Install after the cloud-form providers.
+No EEex is required. English SR summon descriptions are updated; other wording
+is left intact with a warning. Unknown resource layouts reject transactionally.
+See [scope and exclusions](research/2026-10-06-damageable-cloud-forms.md).
+
+### Component 310 — Party physical resistance
+
+Physical resistance above **80% counts at half strength**, up to **90%**:
+90% becomes 85%, and 100% becomes 90%. Odd points round down. Applies separately
+to slashing, crushing, piercing and missile resistance for party members only.
+Enemies, summons and elemental/magic resistance are unchanged.
+
+Requires EEex and BG2:EE/EET. Launch through InfinityLoader. This operates on
+the resistance the engine has calculated, including its normal stacking rules;
+it does not change individual spells or items. Stoneskin and weapon-immunity
+spells still work normally. No saved-game files or base creature stats are edited.
+
+The requested **95% alternative is not available yet**: the engine truncates
+resistance above 100% before the normal EEex callback. Simply changing the ceiling
+would still produce at most 90%. That alternative needs a separate engine change.
+CEBG selections are maintained separately by the collection.
+[Design and engine evidence](research/2026-10-06-physical-resistance-softcap.md).
+### Components 200–202 — SR Hardiness
+
+Requires **Spell Revisions #65, Revised Warrior HLAs**, on BG2:EE/EET. Both normal
+Hardiness and Wish-granted Hardiness receive the same resistance profile:
+
+- **200 (recommended): 40% physical resistance only.** Removes SR's extra resistances.
+- **201: 30% physical resistance only.** Mutually exclusive with 200.
+- **202 (optional): add 20% resistance** to acid, cold, electricity, fire, magic
+  damage, magical fire and magical cold. Install after either 200 or 201.
+
+This is a recommendation of the **vanilla resistance profile**, not a complete
+vanilla restoration. Duration, casting, dispel flags, stacking protections and
+existing Breach behavior are preserved. No Magic Resistance or poison resistance
+is added. Descriptions on both resources receive new strings; shared text is not
+rewritten. Install after SR's HLAs and other mods changing these spells.
+
+For an existing stack, use the separate [tail patch](live-patch/CBR_SR_HARDINESS/README.md)
+without reinstalling SR or previously installed BG Rebalance components. Use only
+one Hardiness installer family. Build local Windows packages with
+`python tools/package_sr_hardiness.py`.
+
+**An older collection does not gain these components automatically.** The
+[collection handover](docs/handovers/2026-10-07-release-collection.md) specifies
+dependencies, defaults and declaration order for a fresh-install integration.
 
 ### Component 302 — Flail of the Ages
 

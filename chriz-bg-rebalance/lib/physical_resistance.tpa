@@ -1,0 +1,49 @@
+// No spell/item rewriting: allocate a private per-rebuild marker and ship
+// the EEex listener. The 95% variant is deliberately not exposed until a
+// native integration can preserve the engine's discarded >100% values.
+DEFINE_ACTION_FUNCTION cbr_apply_physical_resistance
+  INT_VAR cap = 90
+  STR_VAR
+    resource_dir = ~override~
+    template_file = ~chriz-bg-rebalance/lua/M_CBRRES.lua~
+BEGIN
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  OUTER_SPRINT template_file EVALUATE_BUFFER ~%template_file%~
+  ACTION_IF (cap != 90) BEGIN
+    FAIL ~CBR physical resistance: only the 90% engine integration is implemented. The 95% option requires separate engine support.~
+  END
+  ACTION_IF (NOT FILE_EXISTS ~%template_file%~) BEGIN
+    FAIL ~CBR physical resistance: the listener template is missing.~
+  END
+  OUTER_SPRINT cbr_res_path ~%resource_dir%/SPLSTATE.IDS~
+  ACTION_IF (NOT FILE_EXISTS ~%cbr_res_path%~) BEGIN
+    FAIL ~CBR physical resistance: SPLSTATE.IDS must be materialized before allocation.~
+  END
+
+  // The existing generic planner rejects shared/duplicate private symbols
+  // and chooses another unused bit if the preferred one is already owned.
+  OUTER_SET cbr_res_state = (0 - 1)
+  COPY ~%cbr_res_path%~ ~%cbr_res_path%~
+    LPF cbr_plan_tempus_spec_apr_state
+      INT_VAR planned_value = 255
+      STR_VAR symbol = ~CBR_PHYSICAL_SOFTCAP~
+      RET cbr_res_state = state_value
+    END
+  BUT_ONLY
+  LAF cbr_find_or_allocate_splstate
+    INT_VAR planned_value = cbr_res_state
+    STR_VAR resource_path = EVAL ~%cbr_res_path%~ symbol = ~CBR_PHYSICAL_SOFTCAP~
+  END
+  CLEAR_IDS_MAP
+
+  COPY ~%template_file%~ ~%resource_dir%/M_CBRRES.lua~
+    PATCH_IF ((INDEX_BUFFER (~%CBR_RES_CAP%~) < 0) OR (INDEX_BUFFER (~%CBR_RES_STATE%~) < 0)) BEGIN
+      PATCH_FAIL ~CBR physical resistance: missing listener configuration placeholders.~
+    END
+    REPLACE_TEXTUALLY ~%CBR_RES_CAP%~ ~%cap%~
+    REPLACE_TEXTUALLY ~%CBR_RES_STATE%~ ~%cbr_res_state%~
+    PATCH_IF ((INDEX_BUFFER (~CBR_RES_CAP~) >= 0) OR (INDEX_BUFFER (~CBR_RES_STATE~) >= 0)) BEGIN
+      PATCH_FAIL ~CBR physical resistance: unresolved listener configuration.~
+    END
+  BUT_ONLY
+END
