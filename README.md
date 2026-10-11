@@ -173,9 +173,15 @@ changed. Item descriptions show the new rules without replacing shared game text
 
 Requires BG2:EE/EET, but not SCS, Spell Revisions or EEex. Install after SCS, Spell
 Revisions and other changes to these items or their descriptions. The base-game
-items and CEBG's English EET/SR/SCS/Artisan/UB items are covered by automated checks;
-unrecognized item structures or description text are rejected, not silently
-overwritten. This is not a universal item-overhaul or translation compatibility claim.
+items and CEBG's English EET/SR/SCS/Artisan/UB items are covered by automated checks.
+The pending compatibility update also handles multiple melee abilities/Slow effects,
+extra and shared effect records, reordered layouts and changed descriptions.
+Simple single-target Slow-only SPL/EFF helpers retain their original identity:
+only the weapon's delivery gains the save. Mixed helpers (such as Slow plus
+damage), area delivery and additional inner saves need a specific adapter; gating
+their entire payload would change other behavior. No global spell is rewritten.
+Missing Slow is reported explicitly without inventing one or claiming it was nerfed.
+This is not a universal item-overhaul or translation compatibility claim.
 
 This component is included in v0.7.0 and intended as a CEBG default.
 It has not been installed into a live game. Existing-save hotpatching is a separate

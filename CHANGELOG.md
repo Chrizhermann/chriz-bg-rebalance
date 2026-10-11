@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Make Flail of the Ages (302) tolerate multiple melee abilities, multiple Slow
+  effects, reordered/shared effect records, and extra effects from other mods.
+  Keep their damage, proc chances, duration and unrelated abilities unchanged.
+- Support single-target Slow-only SPL/EFF helpers without copying or changing
+  the shared spell: save the item's delivery instead, preserving spell-specific
+  immunities and refresh behavior. A mixed/area helper needs a specific adapter;
+  it is not silently given a save against its unrelated damage too.
+- Different description wording no longer blocks the component. Update known
+  Slow lines or append a concise rule note without replacing shared TLK entries.
+- Keep unrelated secondary-type dispels on non-SR installs; inspect actual Haste
+  payloads and referenced effect slices when checking +5 Free Action.
+
 ## v0.8.1 — 2026-10-07
 
 - Add EET elemental arrows (130): acid deals 1d3; cold and fire deal 1d2.
