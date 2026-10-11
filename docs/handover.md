@@ -1,5 +1,36 @@
 # chriz-bg-rebalance — Handover
 
+## October 8 — FoA compatibility repair and cross-repo audit (unreleased)
+
+Active worktree: `.worktrees/foa-compatibility-20261008`, branch
+`codex/foa-compatibility-20261008`, based on `83e51d2` / released v0.8.1.
+Component 302 no longer assumes one ability or one direct Slow effect. It
+preserves foreign effects, follows supported single-target Slow-only helpers,
+and separates shared effect slices where needed. Description variation does not
+abort mechanics. See [research](../research/15-flail-of-ages.md) and
+[cross-repository follow-up](audits/README.md).
+
+Prepared for review on the branch above; not released or pinned in CEBG.
+No live-game changes or new engine acceptance. Other audit findings remain open
+in their owning repositories.
+
+Verified evidence: full regression completed with exit 0 on October 8:
+`python -B -m unittest discover -s tests -t . -v` ran 560 tests in 451.995 seconds:
+536 passed, 24 skipped for unavailable private dragon/bracers captures. All 33
+real-WeiDU tests across the four `test_flail_of_ages*` modules ran and passed,
+including captured vanilla/CEBG inputs. The two Bard guard messages in stdout
+are expected negative-test diagnostics, not failures. Saved status and logs:
+`work/foa-full-regression-20261008`, job
+`48856b67-bc53-4382-98d3-a4a4ca55946b`. The completed job was inspected, not rerun.
+
+October 12 shipping check: fetched `origin/main` is still `83e51d2`, with no
+intervening merge conflicts. Fresh focused and packaging run:
+`python -B -m unittest tests.test_flail_of_ages tests.test_flail_of_ages_variants tests.test_flail_of_ages_safety tests.test_flail_of_ages_haste tests.test_release_components -v`
+passed all 39 tests in 26.946 seconds, no skips. Independent bounded review
+found no new correctness or packaging-inclusion blocker; `git diff --check`
+passed. Version remains v0.8.1 until release preparation synchronizes all
+installer markers. No release tag or asset has been published for this fix.
+
 ## October 7 release integration — v0.8.1 published and verified
 
 The approved combined owner release **v0.8.1** is public GitHub Latest, not a draft
