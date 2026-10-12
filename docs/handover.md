@@ -1,5 +1,21 @@
 # chriz-bg-rebalance — Handover
 
+## October 13 — v0.8.2 candidate (local, unpublished)
+
+Review of PR7 found one regression, fixed in `ec0a6e3`: the stricter
+noncanonical Haste check kept the +5's immunity to real innate Haste spells
+(`SPRA301`/`SPIN572`/`SPIN828` in vanilla, `SPIN572` with SR), which v0.8.1
+removes. Their fatigue, glow/sound, Slow-cancel and self-guard records now count
+as Haste; other effects keep the immunity with an installer message. Verified
+with the real spells against the captured CEBG and vanilla items, and new
+synthetic regression tests that fail on the unfixed code. Remaining review
+nits not changed: cosmetic casting features still mark a Slow helper unsafe;
+single-line localized description matching; no work cap on deep helper fan-out.
+
+Version markers, changelog and `docs/release-notes/v0.8.2.md` are prepared.
+Full regression: 565 tests, OK, 24 skipped (private captures). The local
+commits are not pushed to PR7; merge, tag and publication need approval.
+
 ## October 8 — FoA compatibility repair and cross-repo audit (unreleased)
 
 Active worktree: `.worktrees/foa-compatibility-20261008`, branch
