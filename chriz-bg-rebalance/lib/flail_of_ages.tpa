@@ -141,6 +141,9 @@ BEGIN
       PATCH_IF op = 40 BEGIN SET kind = 1 END
       ELSE PATCH_IF (op = 139 AND p1 = 14000) OR (op = 142 AND p2 = 41)
         OR (op = 221 AND haste_secondary >= 0 AND p2 = haste_secondary) BEGIN SET kind = 2 END
+      ELSE PATCH_IF op = 221 AND haste_secondary < 0 BEGIN
+        PATCH_PRINT ~Flail of Ages: %SOURCE_RES% removes secondary type %p2% on hit. Haste's secondary type is unknown in this game, so that removal was left unchanged and has no save.~
+      END
       ELSE PATCH_IF op = 146 OR op = 177 OR op = 326 BEGIN
         READ_ASCII (at + 0x14) child (8) NULL
         SPRINT extension ~SPL~
@@ -177,12 +180,17 @@ BEGIN
 END
 
 // For noncanonical immunity resources, a stray Haste record is not enough:
-// only a referenced, otherwise Haste/feedback-only payload establishes identity.
+// only a referenced payload of Haste and its normal companions establishes
+// identity. Those companions are feedback/visuals, the post-Haste fatigue,
+// removal of Slow or an earlier Haste by secondary type (SR), and guards
+// against stacking the same resource. Vanilla and SR innate Haste spells carry
+// them. Anything else, such as damage, keeps the flail's immunity.
 DEFINE_PATCH_FUNCTION cbr_foa_native_haste
+  INT_VAR haste_secondary = (0 - 1) slow_secondary = (0 - 1)
   STR_VAR owner = ~~
-  RET is_haste
+  RET is_haste has_haste foreign_op
 BEGIN
-  SET is_haste = 0 SET foreign = 0
+  SET has_haste = 0 SET foreign_op = (0 - 1)
   PATCH_IF BUFFER_LENGTH >= 0x72 BEGIN
     READ_ASCII 0 signature (8)
     PATCH_IF ~%signature%~ STRING_EQUAL ~SPL V1  ~ BEGIN
@@ -196,21 +204,23 @@ BEGIN
           SET at = fx + (first + i) * 0x30
           READ_SHORT at op READ_LONG (at + 4) p1 READ_LONG (at + 8) p2
           READ_ASCII (at + 0x14) res (8) NULL
-          PATCH_IF op = 16 BEGIN SET is_haste = 1 END
-          ELSE PATCH_IF NOT ((op = 139 AND p1 = 14023) OR (op = 142 AND p2 = 38)
-            OR op = 174 OR op = 215
-            OR ((op = 321 OR op = 206) AND (~%res%~ STRING_EQUAL_CASE ~%owner%~))) BEGIN
-            SET foreign = 1
+          PATCH_IF op = 16 BEGIN SET has_haste = 1 END
+          ELSE PATCH_IF NOT (op = 50 OR op = 61 OR op = 139 OR op = 141 OR op = 142
+            OR op = 174 OR op = 215 OR op = 93
+            OR (op = 221 AND p2 > 0 AND (p2 = haste_secondary OR p2 = slow_secondary))
+            OR ((op = 206 OR op = 318 OR op = 321 OR op = 324) AND (~%res%~ STRING_EQUAL_CASE ~%owner%~))) BEGIN
+            PATCH_IF foreign_op < 0 BEGIN SET foreign_op = op END
           END
         END
       END
     END
   END
-  PATCH_IF foreign BEGIN SET is_haste = 0 END
+  SET is_haste = (has_haste AND (foreign_op < 0))
 END
 
 DEFINE_PATCH_FUNCTION cbr_foa_patch
-  INT_VAR save_penalty = 2 allow_haste = 0 haste_secondary = (0 - 1) haste_movement = 0
+  INT_VAR save_penalty = 2 allow_haste = 0 haste_secondary = (0 - 1) slow_secondary = (0 - 1)
+    haste_movement = 0
   STR_VAR haste_resref = ~~ improved_haste_resref = ~~
   RET slow_found
 BEGIN
@@ -290,8 +300,12 @@ BEGIN
             SET remove = 1
           END ELSE PATCH_IF FILE_EXISTS_IN_GAME ~%res%.spl~ BEGIN
             INNER_PATCH_FILE ~%res%.spl~ BEGIN
-              LPF cbr_foa_native_haste STR_VAR owner = EVAL ~%res%~ RET is_haste END
-              PATCH_IF is_haste BEGIN SET remove = 1 END
+              LPF cbr_foa_native_haste INT_VAR haste_secondary slow_secondary
+                STR_VAR owner = EVAL ~%res%~ RET is_haste has_haste foreign_op END
+            END
+            PATCH_IF is_haste BEGIN SET remove = 1 END
+            ELSE PATCH_IF has_haste BEGIN
+              PATCH_PRINT ~Flail of Ages: %SOURCE_RES% keeps its immunity to %res%. That spell combines Haste with another effect (opcode %foreign_op%), and removing the immunity would expose the wielder to that effect too.~
             END
           END
         END

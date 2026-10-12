@@ -1392,6 +1392,20 @@ ACTION_IF ((NOT (~%cbr_f_haste%~ STRING_EQUAL ~~)) AND (FILE_EXISTS_IN_GAME ~%cb
     END
   BUT_ONLY
 END
+// Native Haste spells may cancel Slow by its secondary type (SR's k1#Slow).
+OUTER_SET cbr_f_slow_secondary = (0 - 1)
+OUTER_SET cbr_f_slow_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_SLOW~)
+ACTION_IF (cbr_f_slow_id >= 2000 AND cbr_f_slow_id < 3000) BEGIN
+  OUTER_SET cbr_f_number = cbr_f_slow_id - 2000
+  ACTION_IF FILE_EXISTS_IN_GAME ~SPWI%cbr_f_number%.SPL~ BEGIN
+    COPY_EXISTING ~SPWI%cbr_f_number%.SPL~ ~~
+      PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+        READ_BYTE 0x27 cbr_f_slow_secondary
+        PATCH_IF (cbr_f_slow_secondary = 0) BEGIN SET cbr_f_slow_secondary = (0 - 1) END
+      END
+    BUT_ONLY
+  END
+END
 // A secondary-type label is not proof that Haste uses movement opcode 176.
 // Inspect the actual canonical payloads before diagnosing an immunity conflict.
 ACTION_FOR_EACH cbr_f_spell IN ~%cbr_f_haste%~ ~%cbr_f_improved%~ BEGIN
@@ -1417,7 +1431,7 @@ ACTION_FOR_EACH cbr_f_item IN BLUN14 BLUN30C BLUN30D BLUN30 BEGIN
   COPY_EXISTING ~%cbr_f_item%.ITM~ ~override~
     LPF cbr_foa_patch
       INT_VAR save_penalty = cbr_f_penalty allow_haste = cbr_f_allow haste_secondary = cbr_f_haste_secondary
-        haste_movement = cbr_f_haste_movement
+        slow_secondary = cbr_f_slow_secondary haste_movement = cbr_f_haste_movement
       STR_VAR haste_resref = EVAL ~%cbr_f_haste%~ improved_haste_resref = EVAL ~%cbr_f_improved%~
       RET slow_found
     END

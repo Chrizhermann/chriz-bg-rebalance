@@ -219,6 +219,7 @@ class FlailVariantTests(unittest.TestCase):
                 if index == 0:
                     self.assertIn("Unberuehrte Geschichte.", text)
                     self.assertIn("Schaden: 1W6+4", text)
+                    self.assertEqual(1, text.count("(Save vs. Breath at -2 negates)"))
                 else:
                     for line in ("Original lore remains.", "Damage: 1d6+4", "A foreign paragraph about slow travel remains."):
                         self.assertIn(line, text)
