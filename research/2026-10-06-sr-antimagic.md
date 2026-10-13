@@ -12,7 +12,7 @@ matters before deciding which spell to change.
 
 ## Evidence and scope
 
-Read-only reference game: `C:\Users\chris\Games\Chriz Easy BG\game`.
+Read-only reference game: `%USERPROFILE%\Games\Chriz Easy BG\game`.
 Its log records SR `v4.21-chriz.5`, IWDification `v11`, and SCS `35.21`, including
 SCS's spell tweaks and smarter mage/priest components. Effective resources were
 read from `override`, including the generated child spells. Vanilla counterparts

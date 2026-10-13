@@ -13,7 +13,7 @@ mechanical effects remain byte-identical.
 
 ## Read-only evidence, 2026-10-06
 
-Source: `C:\Users\chris\Games\Chriz Easy BG\game`.
+Source: `%USERPROFILE%\Games\Chriz Easy BG\game`.
 
 - BRAC16.ITM: one self-targeted ability, one charge, daily recharge flag 2048.
   Its activation uses opcode 16, parameter2=1, duration=20: native double APR.
@@ -125,6 +125,6 @@ All 439 preceding component log rows remain exact. The only other new log row is
 files remain unchanged. No saves modified and no game launched.
 
 Backup and verification:
-`C:\Users\chris\Games\Chriz Easy BG\repair-backups\oct06-resistance-bracers\bracers`.
+`%USERPROFILE%\Games\Chriz Easy BG\repair-backups\oct06-resistance-bracers\bracers`.
 This confirms deployment, not in-game delivery/stacking acceptance. Existing
 saved active effects are not retroactively rewritten; use a fresh activation.

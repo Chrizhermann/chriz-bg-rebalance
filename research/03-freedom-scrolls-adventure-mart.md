@@ -95,7 +95,7 @@ Bardic Wonders / RR / CDTweaks / IWDification et al., no SCS store touches).
 3. **Save-game store cache:** visited stores persist per-save inside `BALDUR.SAV`, so the
    override change alone cannot reach saves that already loaded the Adventurer's Mart.
    EET userdir on this machine is OneDrive-redirected:
-   `C:\Users\chris\OneDrive\Documents\Baldur's Gate - Enhanced Edition Trilogy\save`
+   `%USERPROFILE%\OneDrive\Documents\Baldur's Gate - Enhanced Edition Trilogy\save`
    (resolve via `[Environment]::GetFolderPath('MyDocuments')`, NOT `%USERPROFILE%\Documents`).
    Scan of all 190+ save folders: 38 had `RIBALD.STO` cached, all without `scrl9z`.
    - **34 saves patched** with `scripts/patch_sav_store.py` (sale entry appended at end of

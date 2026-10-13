@@ -101,7 +101,7 @@ The exact lab `EEex_scripts/B3TimeStep.lua` has SHA-256
 field at lines 48-53. The loaded `EEex.dll` retained the donor hash
 `B6C7C98804360CB46531DB75AB9608E378FD403D60C29C0E29946A60A334276A`.
 Full session evidence is preserved outside the repo in
-`C:\Users\chris\Documents\Codex\2026-09-02\cbr-ambient-v12-98d116c\live-v12-clock-diagnostic.md`.
+`%USERPROFILE%\Documents\Codex\2026-09-02\cbr-ambient-v12-98d116c\live-v12-clock-diagnostic.md`.
 
 ### 2026-09-02 corrected-clock rerun: delivery pass, accounting failure
 

@@ -6,7 +6,7 @@ This investigation was requested alongside the SR antimagic discussion. Entropy 
 
 ## Evidence and provenance
 
-The effective install examined read-only was `C:\Users\chris\Games\Chriz Easy BG\game` (CEBG). Its `WeiDU.log` records Spell Revisions **v4.21-chriz.5**, IWDification **v11** including the divine spell pack, and Sword Coast Stratagems **35.21** including spell tweaks and Smarter Priests. `override\spell.ids` maps `CLERIC_ENTROPY_SHIELD` to 1620, hence `SPPR620` on this install. This mapping is install-specific, not a future installer constant.
+The effective install examined read-only was `%USERPROFILE%\Games\Chriz Easy BG\game` (CEBG). Its `WeiDU.log` records Spell Revisions **v4.21-chriz.5**, IWDification **v11** including the divine spell pack, and Sword Coast Stratagems **35.21** including spell tweaks and Smarter Priests. `override\spell.ids` maps `CLERIC_ENTROPY_SHIELD` to 1620, hence `SPPR620` on this install. This mapping is install-specific, not a future installer constant.
 
 The old owner chat, **Find Entropy Shield counters** (`01a0df45-df6a-7cb1-9e6a-0f70435f4419`), examined a different game at `C:\Games\Baldur's Gate II Enhanced Edition modded` with SR 4.19. Its findings were treated as leads and independently checked against the current CEBG binaries.
 
@@ -114,7 +114,7 @@ Deleting abjuration immunity is a distinct, larger redesign and is not part of t
 - `priest/ssl/prep/short.ssl:1-28` places Entropy Shield among prebuffs assumed to last at least one round per level.
 - `mage/ssl/combatblocks/attack_antimagic.ssl:54-67` and `ssl/library.slb` show anti-spell targeting/Secret Word decisions. Retaining the spell-protection marker/category retains that existing counterplay path.
 
-Installed source paths above are relative to `C:\Users\chris\Games\Chriz Easy BG\game\stratagems`. Additional direct source evidence is `stratagems\spell\entropy_shield_abjuration.tpa:9-20` and `iwdification\iwdspells\lib\iwdfix.tph:13-22`.
+Installed source paths above are relative to `%USERPROFILE%\Games\Chriz Easy BG\game\stratagems`. Additional direct source evidence is `stratagems\spell\entropy_shield_abjuration.tpa:9-20` and `iwdification\iwdspells\lib\iwdfix.tph:13-22`.
 
 ## Verification limits and later acceptance
 

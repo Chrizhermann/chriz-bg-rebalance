@@ -1151,7 +1151,7 @@ git commit -m "Add older EEex readiness fallback"
 - Modify: `README.md`
 - Modify: `docs/handover.md`
 - Modify: `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`
-- Modify outside repository: `C:/Users/chris/.agents/skills/bg-modding/references/gotchas.md`
+- Modify outside repository: `~/.agents/skills/bg-modding/references/gotchas.md`
 
 ### Step 1: Record only official-source evidence
 

@@ -48,7 +48,7 @@ source needs its own immutable pin and verified archive metadata.
 
 The current executable collection recipe was inspected read-only at:
 
-`C:\Users\chris\.codex\worktrees\installer-v0-real-alpha\chriz-bg-collection`
+`%USERPROFILE%\.codex\worktrees\installer-v0-real-alpha\chriz-bg-collection`
 
 Its inspected HEAD is `ef62225` (alpha.19, October 1). This is newer than the
 `spell-revisions-integration` worktree and the repository's docs-only primary

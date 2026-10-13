@@ -63,7 +63,7 @@ No live-game/saved-game compatibility result is claimed. No game was changed.
 
 ## Provenance and inspected inputs
 
-All reads were against `C:/Users/chris/Games/Chriz Easy BG/game`; no game file was
+All reads were against `~/Games/Chriz Easy BG/game`; no game file was
 written. `research/originals/flail-ages/vanilla` contains exact KEY/BIF extracts:
 `BLUN14` originates in base BG2 `data/Items.bif`, and `BLUN30`, `BLUN30C`,
 `BLUN30D` originate in ToB `data/25Items.bif`. The matching `cebg` directory
