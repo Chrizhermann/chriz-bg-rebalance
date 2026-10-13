@@ -257,3 +257,17 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9316 = ~Party physical resistance requires EEex. Install EEex before this component.~
 @9317 = ~Party physical resistance requires SPLSTATE.IDS to reserve its rebuild marker.~
 @9318 = ~Party physical resistance installed: 90% becomes 85%; 100% becomes 90%. Enemies, summons and non-physical resistances are unchanged. Launch through InfinityLoader.~
+@330 = ~All temporary potion types~
+@331 = ~All temporary potion types except Potions of Genius~
+@1330 = ~Potion uniqueness: one dose of each temporary potion type at a time~
+@332 = ~Heroism family: Heroism, Greater Heroism and the Potion of Heroism do not combine~
+@9330 = ~Potion uniqueness and the Heroism family support BG2:EE / EET only.~
+@9331 = ~Potion uniqueness and the Heroism family need SPLSTATE.IDS and SPLPROT.2DA.~
+@3301 = ~Potion uniqueness:%pu_members%already has its own non-stacking rule; left as it is.~
+@3302 = ~Potion uniqueness:%pu_members%(Potion of Genius) keeps its normal stacking.~
+@3303 = ~Potion uniqueness:%pu_members%also has instant, chance-based or delayed effects, so a second dose cannot be blocked cleanly; left as it is.~
+@3304 = ~Potion uniqueness installed: %pu_count_refresh% potion types restart their duration instead of stacking; %pu_count_keep% types with a maximum hit point bonus keep their first dose until it expires.~
+@3305 = ~Heroism family: the Potion of Heroism type (%pu_heroism_members%) also has instant, chance-based or delayed effects; left as it is.~
+@3306 = ~Heroism family: %pu_r% also has instant, chance-based or delayed effects; left as it is.~
+@3307 = ~Heroism family installed for %pu_count_family% potions and spells: while one of them is active on a creature, the others have no effect on it.~
+@3310 = ~This spell, Heroism and the Potion of Heroism are non-cumulative: while one of them is active on a creature, the others have no effect on it until it ends.~

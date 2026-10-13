@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.8.3 — 2026-10-14
+
+- Add potion uniqueness (330, or 331 where Potions of Genius still stack): each
+  temporary potion type works once at a time on its drinker; different types
+  still combine. Potions with a temporary maximum hit point bonus (Heroism,
+  Power) keep the first dose until it expires; other types restart their normal
+  duration instead of stacking. Healing, cures, permanent and quest effects are
+  unchanged. Potions are recognised by their effects, so SCS copies and other
+  mods' potions are included; a potion whose repeat cannot be blocked cleanly
+  is named during installation and left as it is.
+- Add the Heroism family (332): Heroism, Greater Heroism (Bardic Wonders), their
+  copies and the Potion of Heroism do not combine. The first one active on a
+  creature wins, with no refresh or upgrade. Song of Heroism, Aid and the Potion
+  of Power stay separate. Greater Heroism's description now says so.
+
 ## v0.8.2 — 2026-10-13
 
 - Make Flail of the Ages (302) tolerate multiple melee abilities, multiple Slow
