@@ -5,7 +5,7 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.8.1.** Pierce Magic has a bounded five-round MR
+**Version: v0.8.2.** Pierce Magic has a bounded five-round MR
 reduction; Spellstrike causes 15% spell failure for two rounds.
 Hardiness has a recommended 40% physical-only
 profile, a 30% alternative, and an optional SR damage-resistance add-on.
@@ -13,7 +13,7 @@ The new options also cover BG2-strength EET arrows, SR-compatible Bracers of
 Blinding Strike, party physical resistance capped at 90%, and damageable clouds.
 Apex Dragons supports both SCS difficulty-control systems.
 Component 302 gives Flail of the Ages' Slow a saving throw and
-lets its +5 version work with Haste. Component 301 makes Emotion, Courage and
+lets its +5 version work with Haste; v0.8.2 extends it to modded flail layouts. Component 301 makes Emotion, Courage and
 Emotion, Hope mutually exclusive. Kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.
@@ -173,9 +173,15 @@ changed. Item descriptions show the new rules without replacing shared game text
 
 Requires BG2:EE/EET, but not SCS, Spell Revisions or EEex. Install after SCS, Spell
 Revisions and other changes to these items or their descriptions. The base-game
-items and CEBG's English EET/SR/SCS/Artisan/UB items are covered by automated checks;
-unrecognized item structures or description text are rejected, not silently
-overwritten. This is not a universal item-overhaul or translation compatibility claim.
+items and CEBG's English EET/SR/SCS/Artisan/UB items are covered by automated checks.
+The pending compatibility update also handles multiple melee abilities/Slow effects,
+extra and shared effect records, reordered layouts and changed descriptions.
+Simple single-target Slow-only SPL/EFF helpers retain their original identity:
+only the weapon's delivery gains the save. Mixed helpers (such as Slow plus
+damage), area delivery and additional inner saves need a specific adapter; gating
+their entire payload would change other behavior. No global spell is rewritten.
+Missing Slow is reported explicitly without inventing one or claiming it was nerfed.
+This is not a universal item-overhaul or translation compatibility claim.
 
 This component is included in v0.7.0 and intended as a CEBG default.
 It has not been installed into a live game. Existing-save hotpatching is a separate

@@ -224,24 +224,26 @@ class FlailTests(unittest.TestCase):
         result = strings(g.lang_tlk)[read_itm(g.override / "BLUN30.ITM").identified_description]
         self.assertNotIn("no saving throw", result.lower())
 
-    def test_unknown_haste_secondary_type_fails_and_rolls_back(self):
+    def test_unresolved_haste_secondary_preserves_unknown_dispel(self):
         g = self.game()
         (g.override / "SPELL.IDS").write_text("2677 WIZARD_IMPROVED_HASTE\n", encoding="ascii")
-        expected = {p.name.upper(): p.read_bytes() for p in g.override.iterdir() if p.is_file()}
-        _, output = g.run()
-        self.assertIn("cannot resolve the Slow package's Haste-removal secondary type", output)
-        self.assertIn("NOT INSTALLED DUE TO ERRORS", output)
-        self.assertEqual(expected, {p.name.upper(): p.read_bytes() for p in g.override.iterdir() if p.is_file()})
+        before = read_itm(g.override / "BLUN14.ITM")
+        self.assert_installed(g)
+        after = read_itm(g.override / "BLUN14.ITM")
+        self.assertEqual([e.to_bytes() for e in before.abilities[0].effects if e.opcode == 221],
+                         [e.to_bytes() for e in after.abilities[0].effects if e.opcode == 221])
+        self.assertEqual((2, -2), next((e.save_type, e.save_bonus) for e in after.abilities[0].effects if e.opcode == 40))
 
-    def test_ambiguous_description_fails_and_rolls_back(self):
+    def test_multiple_slow_description_lines_keep_lore_and_add_override_note(self):
         g = self.game()
         g.texts[-1] += "\nA second Slow effect from an unreviewed overhaul."
         g.lang_tlk.write_bytes(tlk(g.texts))
-        expected = {p.name.upper(): p.read_bytes() for p in g.override.iterdir() if p.is_file()}
-        _, output = g.run()
-        self.assertIn("cannot safely identify the English Slow description line", output)
-        self.assertIn("NOT INSTALLED DUE TO ERRORS", output)
-        self.assertEqual(expected, {p.name.upper(): p.read_bytes() for p in g.override.iterdir() if p.is_file()})
+        self.assert_installed(g)
+        updated = strings(g.lang_tlk)[read_itm(g.override / "BLUN30.ITM").identified_description]
+        self.assertIn("A second Slow effect from an unreviewed overhaul.", updated)
+        self.assertIn("(Save vs. Breath at -6 negates)", updated)
+        self.assertNotIn("No Save", updated)
+        self.assertEqual(g.texts, strings(g.lang_tlk)[:len(g.texts)])
 
     def test_uninstall_restores_every_override_byte(self):
         g = self.game()
@@ -272,10 +274,10 @@ class FlailTests(unittest.TestCase):
         g = self.game()
         p = g.override / "BLUN30.ITM"
         old = read_itm(p)
-        p.write_bytes(dataclasses.replace(old, global_effects=old.global_effects + (SplEffect(opcode=101, parameter2=176),)).to_bytes())
+        p.write_bytes(dataclasses.replace(old, global_effects=old.global_effects + (SplEffect(opcode=101, target=1, parameter2=176),)).to_bytes())
         expected = {p.name.upper(): p.read_bytes() for p in g.override.iterdir() if p.is_file()}
         _, output = g.run()
-        self.assertIn("unreviewed movement immunity", output)
+        self.assertIn("movement-rate immunity blocks revised Haste", output)
         self.assertIn("NOT INSTALLED DUE TO ERRORS", output)
         self.assertEqual(expected, {p.name.upper(): p.read_bytes() for p in g.override.iterdir() if p.is_file()})
 

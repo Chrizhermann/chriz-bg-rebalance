@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/chriz-bg-rebalance~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.8.1~
+VERSION ~v0.8.2~
 
 // Load the tested transformation library and define one installer wrapper for
 // all Tempus Holy Power compatibility choices. WeiDU's backup namespace is
@@ -1381,6 +1381,7 @@ ACTION_IF (cbr_f_improved_id >= 2000 AND cbr_f_improved_id < 3000) BEGIN
   OUTER_SPRINT cbr_f_improved ~SPWI%cbr_f_number%~
 END
 OUTER_SET cbr_f_haste_secondary = (0 - 1)
+OUTER_SET cbr_f_haste_movement = 0
 ACTION_IF ((NOT (~%cbr_f_haste%~ STRING_EQUAL ~~)) AND (FILE_EXISTS_IN_GAME ~%cbr_f_haste%.SPL~)) BEGIN
   // SR allocates its k1#Haste secondary type in MSECTYPE.2DA, not an IDS.
   // Read the effective symbol-resolved Haste spell rather than assuming slot 20.
@@ -1390,6 +1391,29 @@ ACTION_IF ((NOT (~%cbr_f_haste%~ STRING_EQUAL ~~)) AND (FILE_EXISTS_IN_GAME ~%cb
       PATCH_IF (cbr_f_haste_secondary = 0) BEGIN SET cbr_f_haste_secondary = (0 - 1) END
     END
   BUT_ONLY
+END
+// Native Haste spells may cancel Slow by its secondary type (SR's k1#Slow).
+OUTER_SET cbr_f_slow_secondary = (0 - 1)
+OUTER_SET cbr_f_slow_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_SLOW~)
+ACTION_IF (cbr_f_slow_id >= 2000 AND cbr_f_slow_id < 3000) BEGIN
+  OUTER_SET cbr_f_number = cbr_f_slow_id - 2000
+  ACTION_IF FILE_EXISTS_IN_GAME ~SPWI%cbr_f_number%.SPL~ BEGIN
+    COPY_EXISTING ~SPWI%cbr_f_number%.SPL~ ~~
+      PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+        READ_BYTE 0x27 cbr_f_slow_secondary
+        PATCH_IF (cbr_f_slow_secondary = 0) BEGIN SET cbr_f_slow_secondary = (0 - 1) END
+      END
+    BUT_ONLY
+  END
+END
+// A secondary-type label is not proof that Haste uses movement opcode 176.
+// Inspect the actual canonical payloads before diagnosing an immunity conflict.
+ACTION_FOR_EACH cbr_f_spell IN ~%cbr_f_haste%~ ~%cbr_f_improved%~ BEGIN
+  ACTION_IF FILE_EXISTS_IN_GAME ~%cbr_f_spell%.SPL~ BEGIN
+    LAF cbr_foa_classify_resource INT_VAR search_opcode = 176
+      STR_VAR source = EVAL ~%cbr_f_spell%~ RET kind END
+    OUTER_SET cbr_f_haste_movement = cbr_f_haste_movement BOR kind
+  END
 END
 ACTION_FOR_EACH cbr_f_item IN BLUN14 BLUN30C BLUN30D BLUN30 BEGIN
   OUTER_SET cbr_f_penalty = 4
@@ -1407,10 +1431,12 @@ ACTION_FOR_EACH cbr_f_item IN BLUN14 BLUN30C BLUN30D BLUN30 BEGIN
   COPY_EXISTING ~%cbr_f_item%.ITM~ ~override~
     LPF cbr_foa_patch
       INT_VAR save_penalty = cbr_f_penalty allow_haste = cbr_f_allow haste_secondary = cbr_f_haste_secondary
+        slow_secondary = cbr_f_slow_secondary haste_movement = cbr_f_haste_movement
       STR_VAR haste_resref = EVAL ~%cbr_f_haste%~ improved_haste_resref = EVAL ~%cbr_f_improved%~
+      RET slow_found
     END
     LPF cbr_foa_description
-      INT_VAR allow_haste = cbr_f_allow
+      INT_VAR allow_haste = cbr_f_allow slow_found
       STR_VAR save_note = EVAL ~%cbr_f_save_note%~ haste_note = EVAL ~%cbr_f_haste_note%~
     END
   BUT_ONLY

@@ -5,6 +5,62 @@ Action while allowing Haste/Improved Haste, and give the on-hit Slow a save vers
 breath at -2/+3, -4/both +4 versions, and -6/+5. Do not alter proc probability,
 duration, damage, lower tiers, other Free Action sources or the global Slow spell.
 
+## Compatibility repair — 2026-10-08 (unreleased)
+
+This section supersedes the original narrow preconditions described below.
+The community report failed on `BLUN14.ITM` with “expected one direct melee Slow
+effect.” The reporter's actual resource is not available; this is a repair of
+the source-proven assumption, not a claim to have reproduced their exact mod list.
+
+The old code authenticated one captured layout: one ability, exactly one direct
+Slow, and one recognizable English description line. The transformation now:
+
+- Iterates actual melee abilities and all victim-targeted Slow effects. It gates
+  corresponding feedback/Haste removal by their target and probability window,
+  not whichever match was last. Unrelated secondary-type removals are retained.
+- Uses effect-slice indexes, tolerates unused records/padding, and separates a
+  shared slice before editing it so equipped or non-melee deliveries stay intact.
+- Follows opcode 146/177/326 into read-only SPL/EFF V2 resources with bounded,
+  cycle-aware traversal. A proven single-recipient, no-extra-save Slow-only helper
+  gets a save on the weapon's parent delivery; every helper byte and resref stays
+  unchanged. Separate EFF feedback/Haste-removal companions are recognized too.
+- Does **not** clone shared spells. That would change resource-specific immunity
+  and refresh identity. It also does not put a save on mixed Slow-plus-damage
+  helpers, area/caster delivery, or payloads with additional inner saves. Those
+  require an adapter; otherwise installation rolls back with the actual reason.
+  Non-instant projectiles currently also need a delivery-specific adapter.
+- Preserves an item with no identified on-hit Slow, with an explicit diagnostic
+  and no false Slow-description update. It does not invent a replacement effect.
+- Updates recognizable Slow rule lines, leaving other prose intact. If no safe
+  English line is recognized, appends a concise rule note instead of failing.
+  The appended English note is not a translation of the entire old description.
+- Retains genuine format/bounds checks. +5 movement immunity conflicts are based
+  on actual canonical Haste payloads (including linked helpers), not presence of
+  a secondary-type label. Noncanonical immunity matching ignores unused records
+  and keeps protection against mixed Haste-plus-damage spells.
+
+### Focused evidence
+
+**33 tests passed** across `test_flail_of_ages`, `test_flail_of_ages_variants`,
+`test_flail_of_ages_safety` and `test_flail_of_ages_haste` using real WeiDU 249 in
+disposable synthetic games. This includes subcases for SR/non-SR, captured vanilla
+and CEBG inputs, multiple abilities/proc windows, shared slices, SPL/EFF chains,
+external resource immunity, original helper bytes, reapplication, exact uninstall,
+malformed-input rollback, mixed/AoE/extra-save rejection, localization and lore.
+Tests assert resulting records and retained data, not merely exit status.
+
+Full regression also completed with exit 0: 560 tests in 451.995 seconds,
+536 passed and 24 skipped because private dragon/bracers captures were absent.
+All FoA tests ran. Evidence is saved in `work/foa-full-regression-20261008`;
+the Bard guard diagnostics in stdout are expected negative-test output.
+
+Review rejected an intermediate private-helper design before release; it is not
+part of this implementation. Source reasoning follows IESDP's resource identity
+and delivery rules: [206](https://gibberlings3.github.io/iesdp/opcodes/bgee.htm#op206),
+[321](https://gibberlings3.github.io/iesdp/opcodes/bgee.htm#op321),
+[177](https://gibberlings3.github.io/iesdp/opcodes/bgee.htm#op177).
+No live-game/saved-game compatibility result is claimed. No game was changed.
+
 ## Provenance and inspected inputs
 
 All reads were against `C:/Users/chris/Games/Chriz Easy BG/game`; no game file was
@@ -28,7 +84,7 @@ Ascension 0 also touches BLUN30. Final SCS troll damage helpers and Artisan opco
 319 usability restrictions must survive byte-for-byte. No change-log command was
 run against the live game.
 
-Each item has one melee ability, one opcode-40 Slow lasting 20 seconds and a
+Each captured item has one melee ability, one opcode-40 Slow lasting 20 seconds and a
 matching opcode-139 Slowed message (BG2 string 14000). The BIF probability window
 is 0..33; effective EEFP/SR inputs use 0..32. Preserve the bytes, not an assumed
 percentage. SR adds a matching opcode-221 Haste-secondary-type removal; that
