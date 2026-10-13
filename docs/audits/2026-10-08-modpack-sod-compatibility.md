@@ -14,14 +14,14 @@ its mandatory `references/compatibility-policy.md`, and relevant CRE/SPL
 references. Worktree lists, local logs, cached refs, and status were checked
 before choosing source. No fetch or other network operation was performed.
 
-Path aliases below are exact audit roots; a location such as `M/chriz-bg-modpack/...`
-means that relative path under the corresponding absolute root.
+Path aliases below name the audited checkouts; a location such as `M/chriz-bg-modpack/...`
+means that relative path inside the corresponding checkout.
 
-| Alias | Absolute source root | Source reviewed |
+| Alias | Source checkout | Source reviewed |
 | --- | --- | --- |
-| M | `C:\Users\chris\.codex\worktrees\modpack-release-alpha6\chriz-bg-modpack` | Clean `codex/baeloth-known-spells`, HEAD `17233ea76d1c7cfed7d952a293186f988caf7404`, alpha.10 preparation. Cached `public/main` is `210472d98cb0a66fc2003af886ce545af11e8d56`; `git diff HEAD public/main` was empty, so the audited content matches that newer ref. |
-| S | `C:\Users\chris\.codex\worktrees\avernus-finale\chriz-sod-rebalance` | `codex/avernus-finale`, HEAD and cached `origin/master` `b2af8328a9c78dfa7ff2fd71f73f2c0ea6738544`, v0.6.12 source; separately inspected uncommitted component 285 work. |
-| E | `C:\Users\chris\.codex\worktrees\early-sod-companions\chriz-sod-rebalance` | `codex/early-sod-companions`, HEAD `b2af8328a9c78dfa7ff2fd71f73f2c0ea6738544`; separately inspected uncommitted components 177/198 and the potion-cleanup change. |
+| M | `chriz-bg-modpack` worktree `modpack-release-alpha6` | Clean `codex/baeloth-known-spells`, HEAD `17233ea76d1c7cfed7d952a293186f988caf7404`, alpha.10 preparation. Cached `public/main` is `210472d98cb0a66fc2003af886ce545af11e8d56`; `git diff HEAD public/main` was empty, so the audited content matches that newer ref. |
+| S | `chriz-sod-rebalance` worktree `avernus-finale` | `codex/avernus-finale`, HEAD and cached `origin/master` `b2af8328a9c78dfa7ff2fd71f73f2c0ea6738544`, v0.6.12 source; separately inspected uncommitted component 285 work. |
+| E | `chriz-sod-rebalance` worktree `early-sod-companions` | `codex/early-sod-companions`, HEAD `b2af8328a9c78dfa7ff2fd71f73f2c0ea6738544`; separately inspected uncommitted components 177/198 and the potion-cleanup change. |
 
 The original named checkouts were older: Modpack at `ebdb7424d4155335c2029146c5f29c8693c93bc0`
 and SoD at `115e23cf95c3eba5f4ddb5adf40ac8db52147706`. They were not treated as

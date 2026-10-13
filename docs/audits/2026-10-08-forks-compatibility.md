@@ -14,16 +14,16 @@ not newly reproduced installation or runtime failures.
 
 | Repository | Inspected checkout/ref | Coverage |
 | --- | --- | --- |
-| Artisan's Kitpack fork | `C:\src\private\The-Artisan-s-Kitpack-Chriz-Balance-Patch`, HEAD `0798dc4`, release `v4.81a-dev.85928f9-chriz.1` | Our additions and rejection paths, particularly Fighter Modals retrofit, Called Shot, and shifted dialogue; not an exhaustive upstream audit. |
-| Bardic Wonders fork | `C:\src\private\Bardic-Wonders-Chriz-Balance-Patch\.worktrees\bardic-progression-release-20260920`, HEAD `7db9861`, release `v2.9c-balance.6` | Finite Abettor HLA integration, standalone tail, producer/caller relationship, relevant existing tests, and progression adapter prerequisites. |
-| Aura fork | `C:\src\private\Aura_BG1_BG2_EET-Chriz-Balance-Patch`, HEAD `5f8ca3c` | Recent fork balance changes in `aura_items.tpa`, `aura_bg2.tpa`, and associated history. Existing uncommitted item-use changes were preserved. No release tag was identified in the local tag listing. |
-| Item Randomiser fork | `C:\src\private\bgee-itemrandomiser-fix`, HEAD `f4a9dfb`, release `v8.1.1` | Removal-plan, source multiplicity, and precondition checks. Experimental worktrees were located and screened, not exhaustively audited. |
+| Artisan's Kitpack fork | `The-Artisan-s-Kitpack-Chriz-Balance-Patch` main checkout, HEAD `0798dc4`, release `v4.81a-dev.85928f9-chriz.1` | Our additions and rejection paths, particularly Fighter Modals retrofit, Called Shot, and shifted dialogue; not an exhaustive upstream audit. |
+| Bardic Wonders fork | `Bardic-Wonders-Chriz-Balance-Patch` worktree `bardic-progression-release-20260920`, HEAD `7db9861`, release `v2.9c-balance.6` | Finite Abettor HLA integration, standalone tail, producer/caller relationship, relevant existing tests, and progression adapter prerequisites. |
+| Aura fork | `Aura_BG1_BG2_EET-Chriz-Balance-Patch` main checkout, HEAD `5f8ca3c` | Recent fork balance changes in `aura_items.tpa`, `aura_bg2.tpa`, and associated history. Existing uncommitted item-use changes were preserved. No release tag was identified in the local tag listing. |
+| Item Randomiser fork | `bgee-itemrandomiser-fix` main checkout, HEAD `f4a9dfb`, release `v8.1.1` | Removal-plan, source multiplicity, and precondition checks. Experimental worktrees were located and screened, not exhaustively audited. |
 
 Bardic's root checkout was older (`546dd09`) and dirty, so findings use the clean
 release worktree above. Item Randomiser also has experimental worktrees at
-`C:\Users\chris\.codex\worktrees\mode1-postinstall-profiles\bgee-itemrandomiser-fix`
+worktree `mode1-postinstall-profiles`
 (`39b665b`, `codex/mode1-postinstall-profiles`) and
-`C:\src\private\bgee-itemrandomiser-fix\.claude\worktrees\randomizer-improvements-expansion-1a3ef3`
+worktree `randomizer-improvements-expansion-1a3ef3`
 (`1151182`, `claude/randomizer-improvements-expansion-1a3ef3`). No claim of complete
 coverage of their native-hook prototypes is made. Local refs were inspected;
 remote release freshness was not checked.

@@ -11,9 +11,9 @@ release refs rather than assuming each primary checkout was current:
 
 | Alias | Checkout inspected | Commit / local release tag |
 | --- | --- | --- |
-| `R` | `C:\src\private\chriz-bg-rebalance\.worktrees\sr-antimagic-research` | `83e51d2727192ebeff5f7a470d58122cdba80735`, implementation at `v0.8.1` |
-| `S` | `C:\Users\chris\.codex\worktrees\sr-lightning-release-20260916\chriz-spell-revisions-patch` | `c8494181c224d22002b5f4ee6fc4411235dd4a9f`, `v4.21-chriz.5` |
-| `B` | `C:\src\private\bg-eeex-buffbot` | `5adbe653ff125819f4b541cf2226a9808ceeeee9`, `v1.10.0` |
+| `R` | `chriz-bg-rebalance` worktree `sr-antimagic-research` | `83e51d2727192ebeff5f7a470d58122cdba80735`, implementation at `v0.8.1` |
+| `S` | `chriz-spell-revisions-patch` worktree `sr-lightning-release-20260916` | `c8494181c224d22002b5f4ee6fc4411235dd4a9f`, `v4.21-chriz.5` |
+| `B` | `bg-eeex-buffbot` main checkout | `5adbe653ff125819f4b541cf2226a9808ceeeee9`, `v1.10.0` |
 
 Paths and line numbers below were rechecked using `git show <commit>:<path>`
 against those exact snapshots. Rebalance's `v0.8.1` tag resolves to
