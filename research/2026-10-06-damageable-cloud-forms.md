@@ -14,7 +14,7 @@ Existing poison immunity, regeneration, timings and quest/death escapes remain.
 ## Evidence and scope
 
 Effective resources were read from
-`C:\Users\chris\Games\Chriz Easy BG\game`, preferring `override` and otherwise
+`%USERPROFILE%\Games\Chriz Easy BG\game`, preferring `override` and otherwise
 resolving KEY/BIF entries. This installation has Spell Revisions
 `v4.21-chriz.5` component 0 and SCS `35.21` component 6520 (Smarter genies).
 The installed mod sources and effective compiled scripts were also inspected.
@@ -162,7 +162,7 @@ Primary opcode semantics were checked against IESDP:
 
 ## Applied private repair — October 6
 
-Target: `C:\Users\chris\Games\Chriz Easy BG\game`, game/loader closed.
+Target: `%USERPROFILE%\Games\Chriz Easy BG\game`, game/loader closed.
 WeiDU exit 0; all 441 previous log rows preserved exactly, with only the new
 `CBR_CLOUD_FORMS:0` tail appended. Nine outputs match the tested capture byte for
 byte: five direct form resources, DW#VMGAS, its private CBRGAS75 donor, and the two
@@ -170,7 +170,7 @@ SR summon descriptions. All 330,156 previous TLK entries and sound metadata are
 unchanged; two descriptions were appended. Saves and game processes untouched.
 
 Backup and result:
-`C:\Users\chris\Games\Chriz Easy BG\repair-backups\oct06-cloud-forms\verified.json`.
+`%USERPROFILE%\Games\Chriz Easy BG\repair-backups\oct06-cloud-forms\verified.json`.
 Private test inputs/results and deployment checks remain in ignored collection
 `target/work/oct06-cloud-forms/`, final fixture `capture-review-verified`.
 Do not redistribute these captured game resources. The owner component has not

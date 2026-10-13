@@ -111,10 +111,10 @@ canonical three libraries and runtime without changing installed mod sources.
 Its disposable-game output matches component 310 exactly (29 focused tests now
 pass including that adapter test).
 
-Applied to `C:\Users\chris\Games\Chriz Easy BG\game` as one new tail entry,
+Applied to `%USERPROFILE%\Games\Chriz Easy BG\game` as one new tail entry,
 `CBR_PHYSICAL_CAP:0`, with state 241 allocated from the actual installed table.
 WeiDU exited 0. All 437 old component log rows, dialog.tlk, UI.MENU, KEY and
 configuration hashes were preserved. No saves touched or game launched.
 Backup and verification are in
-`C:\Users\chris\Games\Chriz Easy BG\repair-backups\oct06-resistance-bracers\cap`.
+`%USERPROFILE%\Games\Chriz Easy BG\repair-backups\oct06-resistance-bracers\cap`.
 This is installation verification, not native in-game acceptance or a release.

@@ -334,7 +334,7 @@ Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Ap
   stamped runtime `9957348E...B3D08`. `WeiDU.log` remained byte-identical at `6C988DE3...`;
   the final runtime parses with the bundled Lua interpreter and matches the production suffix
   exactly.
-  Evidence is under `C:\Users\chris\Documents\Codex\2026-09-02\cbr-ambient-v12-accounting-hotfix-20260902-215413`.
+  Evidence is under `%USERPROFILE%\Documents\Codex\2026-09-02\cbr-ambient-v12-accounting-hotfix-20260902-215413`.
   This avoided uninstalling an entry or relying on `--force-install-list 121`, which is a
   silent no-op for an already installed component. Ambient accounting and the primary urgent
   path have cleared their live gates; do not deploy into the active playthrough without

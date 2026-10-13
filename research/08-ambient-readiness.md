@@ -223,7 +223,7 @@ hit changed hostility, then the exact normal `SPWI708` cast started, the contact
 `attempts=1, spent=1`, the one available slot became zero, exact opcode-120 effects were active,
 and `urgent_faulted=0`. A generic mage on non-passive action 22 was correctly not displaced.
 The exact report is
-`C:\Users\chris\Documents\Codex\2026-09-02\cbr-ambient-v12-accounting-hotfix-20260902-215413\live-ambient-acceptance-report.md`.
+`%USERPROFILE%\Documents\Codex\2026-09-02\cbr-ambient-v12-accounting-hotfix-20260902-215413\live-ambient-acceptance-report.md`.
 Urgent evidence is in `live-urgent-acceptance-report.md` beside it.
 The source/simulator-verified older-EEex capability fallback is implemented, but its corrected
 live test remains a later, separately approved stage.

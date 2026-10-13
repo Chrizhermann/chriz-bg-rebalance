@@ -3,7 +3,7 @@
 ## Diagnosis and captured evidence
 
 Component 401 in v0.3.1 fails on the CEBG installation without Spell Revisions at
-`C:\Users\chris\Games\ChrizEasyBG-No-SR-Test\game`. Its classifier examines only
+`%USERPROFILE%\Games\ChrizEasyBG-No-SR-Test\game`. Its classifier examines only
 the main Improved Haste ability effects, but this installed spell delegates its
 mechanics through opcode 146. This is a classifier limitation, not evidence that
 Spell Revisions is required.
