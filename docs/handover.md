@@ -1,5 +1,25 @@
 # chriz-bg-rebalance — Handover
 
+## October 14 — v0.8.3 candidate: potion uniqueness and Heroism family (local, unpublished)
+
+Components 330/331 (choose one) and 332 follow the behaviour Christopher agreed
+on October 9–14. Library `chriz-bg-rebalance/lib/potion_uniqueness.tpa`; design,
+mechanism, limits and the lab result are in
+`research/2026-10-14-potion-uniqueness-heroism-family.md`. The October 9
+prototype's EEex admission hook was not reused: plain WeiDU guards keep every
+effect in its original item or spell.
+
+Verified: `tests/test_potion_uniqueness.py` (real WeiDU on synthetic games:
+patched set, preserved originals, spell states, descriptions, uninstall, a
+repeat run over the installed result, and a game without Bardic Wonders or the
+SPLPROT row). Full regression: 543 passed, 26 skipped (private captures) with WeiDU 249. Lab install on a disposable copy of
+the EET/SR/SCS/Bardic game changed the expected potions and spells only; not
+launched in-engine.
+
+Open: in-game check; a Bardic Wonders adapter for Gallant copies created after
+332 (recipe in the research note); the collection's curation entry for 330–332;
+tag/release only with Christopher's approval.
+
 ## October 13 — v0.8.2 candidate (local, unpublished)
 
 Review of PR7 found one regression, fixed in `ec0a6e3`: the stricter

@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/chriz-bg-rebalance~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.8.2~
+VERSION ~v0.8.3~
 
 // Load the tested transformation library and define one installer wrapper for
 // all Tempus Holy Power compatibility choices. WeiDU's backup namespace is
@@ -28,6 +28,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/sr_hardiness.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/sr_antimagic.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/sr_spellstrike.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/potion_uniqueness.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -1534,3 +1535,18 @@ REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~DVGASFRM.ITM~)
   OR (FILE_EXISTS_IN_GAME ~DW#VMGAS.SPL~)) @9321
 INCLUDE ~chriz-bg-rebalance/lib/cloud_forms.tpa~
 LAF cbr_install_cloud_forms END
+
+BEGIN @330 DESIGNATED 330 SUBCOMPONENT @1330 GROUP @1300 LABEL ~cbr_potion_uniqueness~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9330
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9331
+LAF cbr_install_potion_uniqueness INT_VAR potions = 1 END
+
+BEGIN @331 DESIGNATED 331 SUBCOMPONENT @1330 GROUP @1300 LABEL ~cbr_potion_uniqueness_genius_exempt~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9330
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9331
+LAF cbr_install_potion_uniqueness INT_VAR potions = 1 genius_exempt = 1 END
+
+BEGIN @332 DESIGNATED 332 GROUP @1300 LABEL ~cbr_heroism_family~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9330
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9331
+LAF cbr_install_potion_uniqueness INT_VAR heroism = 1 END

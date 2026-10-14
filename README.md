@@ -5,7 +5,7 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.8.2.** Pierce Magic has a bounded five-round MR
+**Version: v0.8.3.** Pierce Magic has a bounded five-round MR
 reduction; Spellstrike causes 15% spell failure for two rounds.
 Hardiness has a recommended 40% physical-only
 profile, a 30% alternative, and an optional SR damage-resistance add-on.
@@ -14,7 +14,9 @@ Blinding Strike, party physical resistance capped at 90%, and damageable clouds.
 Apex Dragons supports both SCS difficulty-control systems.
 Component 302 gives Flail of the Ages' Slow a saving throw and
 lets its +5 version work with Haste; v0.8.2 extends it to modded flail layouts. Component 301 makes Emotion, Courage and
-Emotion, Hope mutually exclusive. Kit-specific bard spell progression remains available through EEex.
+Emotion, Hope mutually exclusive. New in v0.8.3: each temporary potion type works once at a
+time (330/331), and Heroism, Greater Heroism and the Potion of Heroism no longer combine (332).
+Kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.
 
@@ -63,6 +65,8 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 302 | Cross-cutting audits | Flail of the Ages: saves against Slow; +5 allows Haste | Isolated WeiDU checks passed; in-game check pending |
 | 310 | Cross-cutting audits | Party physical resistance: half effectiveness above 80%, maximum 90% | Automated checks passed; in-engine check pending |
 | 320 | Cross-cutting audits | Combat clouds: 75% damage resistance instead of invulnerability | Automated checks passed; combat check pending |
+| 330 / 331 | Cross-cutting audits | Potion uniqueness: one dose of each temporary potion type at a time (331: Potions of Genius still stack) | Automated checks and lab install passed; in-game check pending |
+| 332 | Cross-cutting audits | Heroism family: Heroism, Greater Heroism and the Potion of Heroism do not combine | Automated checks and lab install passed; in-game check pending |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
@@ -101,6 +105,33 @@ and once per day. The effective SR bonuses and existing Tempus bridge are retain
 Ordinary/Improved Haste cannot stack with the bracers by changing cast order.
 Requires SR main component 0; install after other Haste/item changes.
 Wish's mechanics are not changed by this component.
+
+### Components 330–332 — Potion uniqueness and the Heroism family
+
+**330** makes every temporary potion type unique on its drinker; **331** does the
+same but lets Potions of Genius stack as before. Choose one. Different potion
+types still combine. Drinking the same type again:
+
+- potions with a temporary maximum hit point bonus (Heroism, Power and similar
+  potions from other mods) keep the first dose until it expires; a second dose
+  is used up without effect;
+- every other type restarts its normal duration instead of stacking its bonus.
+
+Instant healing, cures, permanent and quest effects are unchanged. SCS's potion
+copies count as the same type as the originals.
+
+**332** links Heroism, Greater Heroism (Bardic Wonders), their copies and the
+Potion of Heroism: the first one active on a creature wins, and the others have
+no effect on it until it ends (no refresh, no upgrade). Each creature counts
+separately. Song of Heroism, Aid and the Potion of Power stay separate. Greater
+Heroism's description is updated. Works with or without 330/331.
+
+Potions are recognised by what they do, not by file name, so potions from other
+mods are included. A potion whose second dose cannot be blocked cleanly (for
+example one that also deals damage) is left as it is and named during
+installation. No EEex is needed. Effects already active in an existing save can
+stack one more time; new doses behave as described.
+[Design and limits](research/2026-10-14-potion-uniqueness-heroism-family.md).
 
 ### Component 320 — Damageable combat clouds
 
