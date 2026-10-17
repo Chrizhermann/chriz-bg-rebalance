@@ -397,3 +397,37 @@ with the game closed, then restart the game (`M_*.lua` load at process start).
 `ie-apr-proficiency.md` (f), `gotchas.md` § API Corrections — the per-pass cadence, the
 field map, the SPLSTATE-bit idempotence pattern, and the `InfinityLoader.db` → PE
 exception table → capstone re-derivation recipe.
+
+## Addendum 2026-10-17 — 404 donor classification (audit 2026-10-08 item 5)
+
+The donor preflight no longer fingerprints OHTMPS2D/E (five tiers at 1/7/13/19/25, op321
+at record 0, exact icon/pulse counts, one or two op215, a closed opcode list). Every record
+of every ability header is classified instead (`cbr_tide_classify_record`):
+
+- **Owned, dropped/replaced:** op139 feedback; the lottery (stat ops 0/18/22/33–37/54/285/286
+  in any window, and any record with a partial probability window); op321 against the donor's
+  own resref (replaced by the same-side trio; the tier's first one is the clone template);
+  op206/318/324 against the donor's own resref (e.g. SCS self-protection — carried, it would
+  make a tide block itself).
+- **Chrome, kept in donor order:** op215 unchanged; op142/op9 re-anchored to 30 s.
+- **Unowned, carried byte-identically in donor order:** every other full-window record
+  (sounds, state markers, op321/206 against another resource).
+- **Refused:** op206/318/324 against one of the side's own tide resrefs — carrying it blocks
+  the next tide, dropping it discards another mod's immunity.
+
+Tiers: any number ≥ 1; magnitude follows the header's minimum-level band (<7, <13, <19,
+<25, 25+), so the vanilla headers map exactly as before. A tier without its own reset gets
+synthesized resets (target 2, timing 1, probability 100/0, power/resist from the stat
+template so the reset reaches whoever the stats reach); a tier without op54 inherits the
+donor's first op54; a donor with no op54 at all fails (we would otherwise choose the
+enemies' resist/dispel semantics). The verifier walks every header, accepts carried records,
+and still rejects a broken trio, a wrong/duplicate/missing tide stat, any partial window,
+op139, or a stacking record against the donor or a tide resref. It now reads the magnitude
+signed (the old unsigned fallback subtracted `0x100000000`, which WeiDU cannot evaluate).
+
+Evidence: `tests/test_tempus_chaos_tides_variants.py`. The six tide spells built from the
+captured vanilla and live (EEFP + SCS hooks) donors are SHA-256-identical to the pre-change
+output. Synthetic variants exercise a third visual, sound/state markers, a moved reset, six
+headers at other levels, SCS 318/324 self-protection, partial-window outcomes, foreign op321s,
+a tier without icon/pulse/reset/op54, and rejected cases. Automated `--nogame` evidence
+only; no in-game check of carried records.
