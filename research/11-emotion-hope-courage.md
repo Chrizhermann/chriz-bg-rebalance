@@ -697,8 +697,9 @@ therefore failed with `CBR_EM_ERR_BENEFICIAL_PARTITION`, although the transforma
 ownership of both beneficial payloads plus reciprocal removal) does not depend on those fields.
 
 Validation now keeps only real dependencies, each with its own token and a message naming the
-file and the obstacle: SPL V1 signature (`CBR_EM_ERR_SPL_SIGNATURE`); exact effect partition and
-bounds (`CBR_EM_ERR_BENEFICIAL_PARTITION`, `CBR_EM_ERR_CASTING_PARTITION`); wizard spell type 1
+file and the obstacle: SPL V1 signature (`CBR_EM_ERR_SPL_SIGNATURE`); effect-table bounds and
+no unreferenced effect record (`CBR_EM_ERR_BENEFICIAL_PARTITION`, `CBR_EM_ERR_CASTING_PARTITION`;
+see "Shared effect slices" below); wizard spell type 1
 (`CBR_EM_ERR_BENEFICIAL_TYPE`); spell level 4, because the installer maps both symbols to
 level-four wizard slots and calls `ADD_SPELL ... 2 4` (`CBR_EM_ERR_BENEFICIAL_LEVEL`); at least
 one ability header (`CBR_EM_ERR_BENEFICIAL_NO_ABILITY`); and target type 4 in every header
@@ -736,6 +737,43 @@ exists. Non-point-targeted variants are rejected rather than supported. Coverage
 unnamed school, two level headers including disagreeing ones, reordered presentation and
 markers, repeat application, reinstall/uninstall, late-failure rollback, and target-type
 rejection); none of these variants was verified in game.
+
+### Shared effect slices (2026-10-17)
+
+Review finding: two otherwise valid level headers that reference the same recipient-effect
+slice were rejected with `CBR_EM_ERR_BENEFICIAL_PARTITION`, because the SPL partition validator
+required every effect record to be owned by exactly one slice. That fingerprinted the storage
+layout: the engine reads each header's `(first, count)` independently, so headers may share one
+slice, start inside another header's slice, or reuse casting-feature records. Both rebuilds
+(beneficial and adverse) append each header's new slice after the original table, read only that
+header's original `(first, count)`, and delete the original table afterwards, so every header's
+output depends only on its own view. Exclusive ownership had no correctness reason.
+
+SPL validation (`cbr_em_validate_spl`, used by the beneficial and adverse validators and
+rebuilds, the Horror checks and the native seed) now accepts shared and partly overlapping
+slices. Every such layout produces byte-for-byte the same output as the same spell stored with a
+separate copy of each header's slice, and the output is disjoint again. Rejections that remain:
+table and slice bounds, and an effect record that no slice references. No engine path reads an
+unreferenced record, the rebuild would silently drop it, and it usually means that a header's
+count or first index is wrong; the message names the file and the record. Because shared input
+records are copied once per header, the rebuilt table can outgrow the input, so each rebuilt
+`(first, count)` is checked against the 16-bit SPL fields (`CBR_EM_ERR_REBUILT_SLICE`) before it
+is written. Before this check, an overflow would have been caught only indirectly, as an
+unreferenced record in the post-rebuild validation.
+
+Scroll ITMs keep exact one-owner coverage. The installer's scroll discovery applies the same
+rule and relies on it to ignore an overlapping candidate donor scroll
+(`test_malformed_matching_fallback_donor_is_ignored`); relaxing that is a separate decision about
+donor ambiguity, not part of this fix.
+
+Coverage (`tests/test_emotion_hope_courage_variants.py`, `EmotionSliceLayoutTests` and
+`test_shared_and_overlapping_slices_install_with_canonical_descriptions`): two level headers
+sharing one slice, partly overlapping level headers, a casting record shared with the first
+header (the former `beneficial_overlap` rejection case), adverse spells whose last header shares
+the first header's slice, equivalence with the separately stored layout, repeat application,
+unrelated files and header bytes, kept orphan rejections with their message, and the public
+installer with canonical descriptions unchanged byte for byte. The 16-bit overflow check has no
+fixture: reaching it needs more than 65,535 rebuilt records. None of this was verified in game.
 
 ## Evidence boundaries
 

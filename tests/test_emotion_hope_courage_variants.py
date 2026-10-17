@@ -12,9 +12,11 @@ remaining, deliberately kept rejections.
 from __future__ import annotations
 
 import re
+import shutil
 import struct
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 
 from tests import test_emotion_hope_courage_installer as installer_tests
@@ -40,15 +42,20 @@ from tests.test_emotion_hope_courage import (
     SECOND_HEADER_PROJECTILE_DELTA,
     SECOND_HEADER_REQUIRED_LEVEL,
     SYMBOL,
+    FixtureOptions,
     HarnessResult,
     _assert_exact_partition_coverage,
     _cleanse,
     _marker,
     _masked,
+    _raw_partition_coverage,
     _raw_tree,
     _transition,
     apply_beneficial_variant,
     build_fixture,
+    materialized,
+    overlap_casting_and_first_ability,
+    share_last_header_slice,
 )
 from tests.test_emotion_hope_courage_installer import (
     COURAGE_RESREF,
@@ -377,6 +384,216 @@ class EmotionVariantTransformerTests(unittest.TestCase):
         )
 
 
+class EmotionSliceLayoutTests(unittest.TestCase):
+    """Valid SPL storage layouts whose ability slices share effect records.
+
+    The engine reads every ability header's (first, count) independently, so
+    two headers may reference the same records, a header may start inside
+    another header's slice, and a header may reuse casting-feature records.
+    Component 301 must rebuild each header from its own view of the table,
+    exactly as it rebuilds the same spell stored with disjoint copies.
+    """
+
+    def run_layout(
+        self,
+        transforms: dict[str, Callable[[bytes], bytes]],
+        *,
+        options: FixtureOptions = FixtureOptions(),
+    ) -> tuple[HarnessResult, Path]:
+        holder = tempfile.TemporaryDirectory(prefix="cbr-emotion-layout-")
+        self.addCleanup(holder.cleanup)
+        fixture = Path(holder.name) / "fixture"
+        build_fixture(fixture, options)
+        for name, transform in transforms.items():
+            path = fixture / name
+            path.write_bytes(transform(path.read_bytes()))
+        self.assertTrue(PRODUCTION_TPA.is_file())
+        return self.run_fixture(fixture), fixture
+
+    def run_fixture(self, fixture: Path) -> HarnessResult:
+        result = HarnessResult(fixture)
+        self.addCleanup(result.cleanup)
+        return result
+
+    def materialized_copy(self, fixture: Path) -> Path:
+        holder = tempfile.TemporaryDirectory(prefix="cbr-emotion-materialized-")
+        self.addCleanup(holder.cleanup)
+        copy = Path(holder.name) / "fixture"
+        shutil.copytree(fixture, copy)
+        for path in copy.glob("*.SPL"):
+            path.write_bytes(materialized(path.read_bytes()))
+        return copy
+
+    def assert_shares_records_without_orphans(self, data: bytes) -> None:
+        count, coverage = _raw_partition_coverage(data, SPL_ABILITY_SIZE)
+        self.assertEqual(list(range(count)), sorted(set(coverage)), "fixture orphans a record")
+        self.assertNotEqual(len(coverage), len(set(coverage)), "fixture shares no record")
+
+    def assert_layout_rebuilds_like_materialized(
+        self, transforms: dict[str, Callable[[bytes], bytes]]
+    ) -> tuple[HarnessResult, Path]:
+        result, fixture = self.run_layout(transforms)
+        for name in transforms:
+            self.assert_shares_records_without_orphans((fixture / name).read_bytes())
+        self.assertTrue(result.succeeded, result.transcript)
+        self.assertNotIn("CBR_EM_ERR", result.transcript)
+        # Same per-header views stored disjointly: byte-identical output.
+        disjoint = self.run_fixture(self.materialized_copy(fixture))
+        self.assertTrue(disjoint.succeeded, disjoint.transcript)
+        self.assertEqual(_raw_tree(disjoint.output), _raw_tree(result.output))
+        # A repeat application of the rebuilt (now disjoint) tree is byte-exact.
+        repeat = self.run_fixture(result.output)
+        self.assertTrue(repeat.succeeded, repeat.transcript)
+        self.assertEqual(_raw_tree(result.output), _raw_tree(repeat.output))
+        return result, fixture
+
+    def assert_untargeted_files_match_stock(
+        self, result: HarnessResult, targeted: set[str]
+    ) -> None:
+        stock, _fixture = self.run_layout({})
+        self.assertTrue(stock.succeeded, stock.transcript)
+        stock_tree = _raw_tree(stock.output)
+        tree = _raw_tree(result.output)
+        self.assertEqual(set(stock_tree), set(tree))
+        for name, payload in tree.items():
+            if name not in targeted:
+                self.assertEqual(stock_tree[name], payload, name)
+
+    def test_stock_layout_is_its_own_materialized_form(self) -> None:
+        # Control for the oracle below: the stock fixture is already disjoint.
+        result, fixture = self.run_layout({})
+        self.assertTrue(result.succeeded, result.transcript)
+        for path in fixture.glob("*.SPL"):
+            self.assertEqual(path.read_bytes(), materialized(path.read_bytes()), path.name)
+            _assert_exact_partition_coverage(self, path.read_bytes(), SPL_ABILITY_SIZE)
+
+    def test_level_headers_sharing_one_slice_get_independent_rebuilt_slices(self) -> None:
+        shared = {
+            f"{resref}.SPL": lambda data: apply_beneficial_variant(data, ("shared_slice",))
+            for resref in (COURAGE, HOPE)
+        }
+        result, fixture = self.assert_layout_rebuilds_like_materialized(shared)
+        EmotionVariantTransformerTests.assert_rebuilt_per_header(self, result, fixture)
+        for resref in (COURAGE, HOPE):
+            before = read_spl(fixture / f"{resref}.SPL")
+            after = read_spl(result.output / f"{resref}.SPL")
+            self.assertEqual(2, len(after.abilities))
+            # One shared input slice yields two equal but separate output slices.
+            self.assertEqual(before.abilities[0].effects, before.abilities[1].effects)
+            first, second = after.abilities
+            self.assertEqual(
+                [e.to_bytes() for e in first.effects], [e.to_bytes() for e in second.effects]
+            )
+            self.assertEqual(SECOND_HEADER_REQUIRED_LEVEL, second.required_level)
+            self.assertEqual(first.projectile + SECOND_HEADER_PROJECTILE_DELTA, second.projectile)
+        self.assert_untargeted_files_match_stock(result, {f"{COURAGE}.SPL", f"{HOPE}.SPL"})
+
+    def test_partly_overlapping_slices_are_rebuilt_from_each_headers_view(self) -> None:
+        overlap = {
+            f"{resref}.SPL": lambda data: apply_beneficial_variant(data, ("overlap_slice",))
+            for resref in (COURAGE, HOPE)
+        }
+        result, fixture = self.assert_layout_rebuilds_like_materialized(overlap)
+        EmotionVariantTransformerTests.assert_rebuilt_per_header(self, result, fixture)
+        for resref in (COURAGE, HOPE):
+            before = read_spl(fixture / f"{resref}.SPL")
+            after = read_spl(result.output / f"{resref}.SPL")
+            old_first, old_second = before.abilities
+            # The second header starts inside the first and runs past it.
+            shared = old_first.effects[len(old_first.effects) // 2 :]
+            self.assertEqual(shared, old_second.effects[: len(shared)])
+            self.assertGreater(len(old_second.effects), len(shared))
+            self.assertEqual(
+                [e.to_bytes() for e in old_second.effects if e.opcode in PRESENTATION_OPCODES],
+                [e.to_bytes() for e in after.abilities[1].effects if e.opcode in PRESENTATION_OPCODES],
+            )
+            self.assertEqual(
+                _owned_semantics(after.abilities[0].effects),
+                _owned_semantics(after.abilities[1].effects),
+            )
+        self.assert_untargeted_files_match_stock(result, {f"{COURAGE}.SPL", f"{HOPE}.SPL"})
+
+    def test_casting_record_shared_with_the_first_header_is_kept_in_both(self) -> None:
+        # Formerly rejected as the "beneficial_overlap" partition defect.
+        transforms = {
+            f"{resref}.SPL": overlap_casting_and_first_ability for resref in (COURAGE, HOPE)
+        }
+        result, fixture = self.assert_layout_rebuilds_like_materialized(transforms)
+        EmotionVariantTransformerTests.assert_rebuilt_per_header(self, result, fixture)
+        for resref in (COURAGE, HOPE):
+            before = read_spl(fixture / f"{resref}.SPL")
+            after = read_spl(result.output / f"{resref}.SPL")
+            shared = before.casting_effects[-1]
+            self.assertEqual(shared, before.abilities[0].effects[0])
+            self.assertEqual(215, shared.opcode)
+            self.assertEqual(before.casting_effects, after.casting_effects)
+            self.assertEqual(
+                1, [e.to_bytes() for e in after.abilities[0].effects].count(shared.to_bytes())
+            )
+
+    def test_adverse_headers_sharing_one_slice_each_receive_their_remover(self) -> None:
+        cases = ((FEAR, COURAGE), (HOPELESSNESS, HOPE), (SYMBOL, HOPE))
+        transforms = {
+            f"{resref}.SPL": lambda data: share_last_header_slice(data, 0)
+            for resref, _positive in cases
+        }
+        result, fixture = self.assert_layout_rebuilds_like_materialized(transforms)
+        for resref, positive in cases:
+            with self.subTest(resref=resref):
+                before = read_spl(fixture / f"{resref}.SPL")
+                after = read_spl(result.output / f"{resref}.SPL")
+                _assert_exact_partition_coverage(
+                    self, (result.output / f"{resref}.SPL").read_bytes(), SPL_ABILITY_SIZE
+                )
+                self.assertEqual(before.abilities[0].effects, before.abilities[-1].effects)
+                self.assertEqual(len(before.abilities), len(after.abilities))
+                self.assertEqual(
+                    [e.to_bytes() for e in after.abilities[0].effects],
+                    [e.to_bytes() for e in after.abilities[-1].effects],
+                )
+                for index, (old, new) in enumerate(
+                    zip(before.abilities, after.abilities, strict=True)
+                ):
+                    self.assertEqual(
+                        1,
+                        sum(
+                            1
+                            for e in new.effects
+                            if e.opcode == 321 and e.resource == positive
+                        ),
+                        f"{resref} header {index}",
+                    )
+                    self.assertEqual(
+                        _masked(old.raw, *ABILITY_PARTITION_FIELDS),
+                        _masked(new.raw, *ABILITY_PARTITION_FIELDS),
+                    )
+        for untouched in (HORROR, INNATE_HORROR):
+            self.assertEqual(
+                (fixture / f"{untouched}.SPL").read_bytes(),
+                (result.output / f"{untouched}.SPL").read_bytes(),
+            )
+
+    def test_orphaned_effect_records_are_still_rejected_with_their_reason(self) -> None:
+        # A record no slice references would be dropped by the rebuild, and
+        # usually means a header count or first index is wrong.
+        for malformed, record in (("beneficial_gap", 2), ("beneficial_trailing", None)):
+            with self.subTest(malformed=malformed):
+                result, fixture = self.run_layout({}, options=FixtureOptions(malformed=malformed))
+                self.assertFalse(result.succeeded, "orphaned record was accepted")
+                self.assertIn("NOT INSTALLED DUE TO ERRORS", result.transcript)
+                self.assertIn(ERR_BENEFICIAL_PARTITION, result.transcript)
+                count, _coverage = _raw_partition_coverage(
+                    (fixture / f"{COURAGE}.SPL").read_bytes(), SPL_ABILITY_SIZE
+                )
+                index = record if record is not None else count - 1
+                self.assertRegex(
+                    result.transcript,
+                    rf"(?i){COURAGE}\.SPL effect record {index} is not referenced by "
+                    r"the casting-feature slice or any ability slice",
+                )
+                self.assertEqual({}, _raw_tree(result.output), "failed preflight did not roll back")
+
+
 class EmotionVariantInstallerTests(unittest.TestCase):
     """The public installer on synthetic games with valid alternate layouts."""
 
@@ -549,6 +766,30 @@ class EmotionVariantInstallerTests(unittest.TestCase):
             spell = read_spl(game.override / f"{resref}.SPL")
             self.assertEqual(2, len(spell.abilities))
             self.assertEqual(SECOND_HEADER_REQUIRED_LEVEL, spell.abilities[1].required_level)
+        self.assertEqual(
+            {
+                COURAGE_SYMBOL: CANONICAL_COURAGE_DESCRIPTION,
+                HOPE_SYMBOL: CANONICAL_HOPE_DESCRIPTION,
+            },
+            self.descriptions(game),
+        )
+
+    def test_shared_and_overlapping_slices_install_with_canonical_descriptions(self) -> None:
+        game, _transcript = self.install(
+            GameOptions(
+                symbols="both",
+                courage_variant=("shared_slice",),
+                hope_variant=("overlap_slice",),
+            )
+        )
+        for resref in (COURAGE_RESREF, HOPE_RESREF):
+            count, coverage = _raw_partition_coverage(
+                game.original_bytes(resref, "SPL"), SPL_ABILITY_SIZE
+            )
+            self.assertEqual(list(range(count)), sorted(set(coverage)), resref)
+            self.assertNotEqual(len(coverage), len(set(coverage)), resref)
+            self.assertEqual(2, len(read_spl(game.override / f"{resref}.SPL").abilities))
+        self.assert_provider_variant_semantics(game)
         self.assertEqual(
             {
                 COURAGE_SYMBOL: CANONICAL_COURAGE_DESCRIPTION,

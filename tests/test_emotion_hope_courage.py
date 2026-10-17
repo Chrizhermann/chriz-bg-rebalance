@@ -534,6 +534,8 @@ BENEFICIAL_VARIANTS = frozenset(
         "target_1",  # first header becomes creature-targeted (unsupported)
         "second_target_1",  # second header becomes creature-targeted
         "no_abilities",  # no header to carry the recipient package
+        "shared_slice",  # an extra level header reuses the last header's slice
+        "overlap_slice",  # an extra level header starts inside the last slice
     }
 )
 SECOND_HEADER_REQUIRED_LEVEL = 9
@@ -620,9 +622,117 @@ def apply_beneficial_variant(data: bytes, variants: tuple[str, ...]) -> bytes:
         header[0x25] = 11
     if "no_abilities" in variants:
         abilities = []
-    return dataclasses.replace(
+    data = dataclasses.replace(
         spell, abilities=tuple(abilities), header_raw=bytes(header)
     ).to_bytes()
+    # SplFile.to_bytes always stores disjoint slices.  These two variants
+    # store a valid layout it cannot express: a further level header whose
+    # (first, count) reuses, or starts inside, the last header's slice.
+    if "shared_slice" in variants or "overlap_slice" in variants:
+        last = abilities[-1]
+        first, count = _last_ability_slice(data)
+        extra_header = _second_header(last, disagree=False)
+        if "shared_slice" in variants:
+            data = append_slice_header(
+                data, extra_header.to_bytes(0), first=first, count=count
+            )
+        else:
+            skip = count // 2
+            own = extra_header.effects
+            data = append_slice_header(
+                data,
+                extra_header.to_bytes(0),
+                first=first + skip,
+                count=count - skip + len(own),
+                extra_effects=own,
+            )
+    return data
+
+
+def _last_ability_slice(data: bytes) -> tuple[int, int]:
+    """(first, count) of the last ability header, which must end the table."""
+    ability_offset = struct.unpack_from("<I", data, 0x64)[0]
+    ability_count = struct.unpack_from("<H", data, 0x68)[0]
+    effect_offset = struct.unpack_from("<I", data, 0x6A)[0]
+    effect_count = (len(data) - effect_offset) // 0x30
+    last = ability_offset + (ability_count - 1) * SPL_ABILITY_SIZE
+    count, first = struct.unpack_from("<HH", data, last + 0x1E)
+    if first + count != effect_count:
+        raise AssertionError(("last ability slice does not end the table", first, count))
+    return first, count
+
+
+def append_slice_header(
+    data: bytes,
+    ability_raw: bytes,
+    *,
+    first: int,
+    count: int,
+    extra_effects: tuple[SplEffect, ...] = (),
+) -> bytes:
+    """Append one SPL ability header with an explicit effect slice.
+
+    ``extra_effects`` are appended to the end of the effect table first, so
+    ``first``/``count`` may reference them.  The ability table must directly
+    precede the effect table, as SplFile.to_bytes writes it.
+    """
+    raw = bytearray(data)
+    ability_offset = struct.unpack_from("<I", raw, 0x64)[0]
+    ability_count = struct.unpack_from("<H", raw, 0x68)[0]
+    effect_offset = struct.unpack_from("<I", raw, 0x6A)[0]
+    if effect_offset != ability_offset + ability_count * SPL_ABILITY_SIZE:
+        raise AssertionError("ability table does not directly precede the effects")
+    raw.extend(b"".join(effect.to_bytes() for effect in extra_effects))
+    effect_count = (len(raw) - effect_offset) // 0x30
+    if first + count > effect_count:
+        raise AssertionError((first, count, effect_count))
+    record = bytearray(ability_raw)
+    struct.pack_into("<HH", record, 0x1E, count, first)
+    raw[effect_offset:effect_offset] = record
+    struct.pack_into("<H", raw, 0x68, ability_count + 1)
+    struct.pack_into("<I", raw, 0x6A, effect_offset + SPL_ABILITY_SIZE)
+    return bytes(raw)
+
+
+def share_last_header_slice(data: bytes, source_index: int) -> bytes:
+    """Point the last ability header at header ``source_index``'s slice and
+    drop the last header's own records, which must end the effect table."""
+    raw = bytearray(data)
+    ability_offset = struct.unpack_from("<I", raw, 0x64)[0]
+    ability_count = struct.unpack_from("<H", raw, 0x68)[0]
+    if not 0 <= source_index < ability_count - 1:
+        raise AssertionError((source_index, ability_count))
+    _last_first, last_count = _last_ability_slice(data)
+    source = ability_offset + source_index * SPL_ABILITY_SIZE
+    count, first = struct.unpack_from("<HH", raw, source + 0x1E)
+    last = ability_offset + (ability_count - 1) * SPL_ABILITY_SIZE
+    struct.pack_into("<HH", raw, last + 0x1E, count, first)
+    del raw[len(raw) - last_count * 0x30 :]
+    return bytes(raw)
+
+
+def overlap_casting_and_first_ability(data: bytes) -> bytes:
+    """Start ability header 0 one record earlier, on the last casting record.
+
+    The record then belongs to both the casting-feature slice and header 0,
+    without orphaning any record."""
+    raw = bytearray(data)
+    casting_first, casting_count = struct.unpack_from("<HH", raw, 0x6E)
+    ability_offset = struct.unpack_from("<I", raw, 0x64)[0]
+    count, first = struct.unpack_from("<HH", raw, ability_offset + 0x1E)
+    if casting_count < 1 or first != casting_first + casting_count:
+        raise AssertionError((casting_first, casting_count, first, count))
+    struct.pack_into("<HH", raw, ability_offset + 0x1E, count + 1, first - 1)
+    return bytes(raw)
+
+
+def materialized(data: bytes) -> bytes:
+    """The same spell with every slice stored as its own disjoint copy.
+
+    The engine reads each header's (first, count) independently, so this is
+    semantically identical to ``data``; a correct rebuild cannot tell the
+    two apart."""
+    return SplFile.from_bytes(data).to_bytes()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -819,15 +929,13 @@ def build_fixture(root: Path, options: FixtureOptions = FixtureOptions()) -> Non
         ability_offset = struct.unpack_from("<I", data, 0x64)[0]
         struct.pack_into("<H", data, ability_offset + 0x1E, 0x7FFF)
         path.write_bytes(data)
-    elif options.malformed in {"beneficial_gap", "beneficial_overlap", "beneficial_trailing"}:
+    elif options.malformed in {"beneficial_gap", "beneficial_trailing"}:
         path = root / f"{COURAGE}.SPL"
         data = bytearray(path.read_bytes())
         ability_offset = struct.unpack_from("<I", data, 0x64)[0]
         count, first = struct.unpack_from("<HH", data, ability_offset + 0x1E)
         if options.malformed == "beneficial_gap":
             count, first = count - 1, first + 1
-        elif options.malformed == "beneficial_overlap":
-            count, first = count + 1, first - 1
         else:
             count -= 1
         struct.pack_into("<HH", data, ability_offset + 0x1E, count, first)
@@ -1114,7 +1222,6 @@ class EmotionHopeCourageTests(unittest.TestCase):
         malformed_cases = (
             ("beneficial_slice", COURAGE, ".SPL", SPL_ABILITY_SIZE),
             ("beneficial_gap", COURAGE, ".SPL", SPL_ABILITY_SIZE),
-            ("beneficial_overlap", COURAGE, ".SPL", SPL_ABILITY_SIZE),
             ("beneficial_trailing", COURAGE, ".SPL", SPL_ABILITY_SIZE),
             ("beneficial_partial", COURAGE, ".SPL", SPL_ABILITY_SIZE),
             ("casting_orphan", HOPE, ".SPL", SPL_ABILITY_SIZE),
@@ -1520,7 +1627,6 @@ class EmotionHopeCourageTests(unittest.TestCase):
             ("courage_signature", ERR_SPL_SIGNATURE),
             ("beneficial_slice", ERR_BENEFICIAL_PARTITION),
             ("beneficial_gap", ERR_BENEFICIAL_PARTITION),
-            ("beneficial_overlap", ERR_BENEFICIAL_PARTITION),
             ("beneficial_trailing", ERR_BENEFICIAL_PARTITION),
             ("beneficial_partial", ERR_BENEFICIAL_PARTITION),
             ("casting_slice", ERR_CASTING_PARTITION),
