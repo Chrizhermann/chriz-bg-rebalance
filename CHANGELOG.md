@@ -8,6 +8,23 @@
   The SR copy lasts as long as the bracers' own activation (20 seconds on the
   stock item). Changes a self-only copy cannot represent stop the installation
   with a message instead of producing a different spell.
+- Elemental arrows (130) find each arrow's elemental damage by what it does.
+  Other damage types, helper effects, extra or reordered abilities and effects
+  from other mods are kept. An arrow without that damage is left unchanged with
+  a warning; two such damage effects in one ability stop the installation.
+  Descriptions change only where they state the old values.
+- Emotion, Courage / Emotion, Hope (301) accept other casting times, ranges,
+  schools and several level headers. Their descriptions state the spell's own
+  school, level, range and casting time; unchanged spells keep the old text.
+- Tempus weapon training (400) completes every level header that carries
+  Artisan's axe grant, wherever its effects sit, and keeps longsword or
+  crossbow grants that are already there.
+- Holy Power (401–403) keeps the first five Holy Power grants in any row of the
+  kit table, so Artisan's Kitpack and other table layouts work; other grants in
+  the table stay as they are.
+- Chaos of Battle (404) builds its tides from any number of donor tiers and
+  keeps other mods' visuals, sounds and markers; each tier's strength follows
+  its minimum level as before.
 
 ## v0.8.3 — 2026-10-14
 
