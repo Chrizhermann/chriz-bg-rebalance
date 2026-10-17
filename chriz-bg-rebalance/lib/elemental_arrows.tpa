@@ -26,6 +26,21 @@
 // untouched with a warning: its promised change cannot be established and no
 // damage is invented.
 //
+// Effect records can be shared: a slice is only (first index, count) into one
+// table, so a foreign header or the equipped effects may reference the very
+// record an owned header carries as its package. Writing it in place would
+// change that foreign ability. Copy-on-write: such an owned header gets a
+// private copy of its whole slice appended to the effect table and its first
+// index repointed, and only the copy is patched; every other slice keeps its
+// records byte-identical. A record shared only by owned headers is patched in
+// place once, since every slice that reads it is meant to change. Each owned
+// header that shares with a foreign slice gets its own copy (owned slices may
+// differ in extent, so a per-header copy is always exact). A rerun sees the
+// owned header on its private, already-patched copy and copies nothing.
+// Appending is only possible when the effect table ends the file (the normal
+// ITM layout, nothing after it); otherwise, or past the 16-bit first-index
+// limit, the item is left unchanged with a warning.
+//
 // Text: only the owned clauses change - the one "+NdM <element> damage"
 // clause, the save statement attached to it, the one weapon-damage bonus
 // ("1d6+2", not an added "+1d4+2"/"1d4+2 acid damage" rider) and the one
@@ -43,6 +58,32 @@ BEGIN
     READ_BYTE ability_at cea_kind
     READ_BYTE (ability_at+0x10) cea_launcher
     SET owned = (cea_kind = 2 AND cea_launcher = 1) ? 1 : 0
+END
+
+// 1 if effect record index `record` is read by the equipped-effect slice or
+// by the slice of any extended header other than `self` that is not owned.
+DEFINE_PATCH_FUNCTION cbr_elemental_arrow_foreign_ref
+    INT_VAR ability_offset=0 ability_count=0 self=0 record=0
+    RET shared
+BEGIN
+    SET shared = 0
+    READ_SHORT 0x6e cea_ref_first
+    READ_SHORT 0x70 cea_ref_count
+    PATCH_IF record >= cea_ref_first AND record < cea_ref_first + cea_ref_count BEGIN
+        SET shared = 1
+    END
+    FOR (cea_k=0; cea_k<ability_count; cea_k+=1) BEGIN
+        PATCH_IF cea_k != self BEGIN
+            SET cea_b = ability_offset + cea_k * 0x38
+            LPF cbr_elemental_arrow_owned INT_VAR ability_at=cea_b RET cea_b_owned=owned END
+            READ_SHORT (cea_b+0x1e) cea_ref_count
+            READ_SHORT (cea_b+0x20) cea_ref_first
+            PATCH_IF NOT cea_b_owned AND
+                record >= cea_ref_first AND record < cea_ref_first + cea_ref_count BEGIN
+                SET shared = 1
+            END
+        END
+    END
 END
 
 // Count the package records of one extended header (bounds checked by caller).
@@ -266,7 +307,47 @@ BEGIN
         PATCH_WARN ~Elemental arrows: %cea_item% has no %element% damage package (opcode 12, %element% damage, normal damage mode, projectile target) on its bow-fired extended header (attack type ranged, launcher bow), so its 1d%elemental_size% change cannot be established%cea_foreign_note%; this item was left unchanged.~
     END
 
+    // Copy-on-write pre-pass: decide before any write whether every owned
+    // package read by a foreign slice can get a private copy.
+    SET cea_separable = 1
     PATCH_IF cea_packages > 0 AND apply BEGIN
+        SET cea_copy_records = 0
+        SET cea_first_shared = 0 - 1
+        FOR (cea_i=0; cea_i<cea_ability_count; cea_i+=1) BEGIN
+            SET cea_a = cea_ability_offset + cea_i * 0x38
+            LPF cbr_elemental_arrow_owned INT_VAR ability_at=cea_a RET cea_owned=owned END
+            LPF cbr_elemental_arrow_scan
+                INT_VAR ability_at=cea_a effect_offset=cea_effect_offset damage_type=damage_type
+                RET cea_found=package_count cea_at=package_at
+            END
+            PATCH_IF cea_owned AND cea_found = 1 BEGIN
+                LPF cbr_elemental_arrow_foreign_ref
+                    INT_VAR ability_offset=cea_ability_offset ability_count=cea_ability_count
+                        self=cea_i record=((cea_at - cea_effect_offset) / 0x30)
+                    RET cea_shared=shared
+                END
+                PATCH_IF cea_shared BEGIN
+                    READ_SHORT (cea_a+0x1e) cea_count
+                    SET cea_copy_records += cea_count
+                    PATCH_IF cea_first_shared < 0 BEGIN SET cea_first_shared = cea_i END
+                END
+            END
+        END
+        PATCH_IF cea_copy_records > 0 BEGIN
+            SPRINT cea_obstacle ~~
+            PATCH_IF ((BUFFER_LENGTH - cea_effect_offset) MODULO 0x30) != 0 BEGIN
+                SPRINT cea_obstacle ~the effect table is not at the end of the file~
+            END ELSE PATCH_IF (BUFFER_LENGTH - cea_effect_offset) / 0x30 + cea_copy_records > 0xffff BEGIN
+                SPRINT cea_obstacle ~the copies would exceed the 16-bit first-effect index~
+            END
+            PATCH_IF NOT (~%cea_obstacle%~ STRING_EQUAL ~~) BEGIN
+                SET cea_separable = 0
+                PATCH_WARN ~Elemental arrows: %cea_item% extended header %cea_first_shared% (0-based) shares its %element% damage record with another ability or the equipped effects, so it needs a private copy; the shared records cannot be separated because %cea_obstacle%; this item was left unchanged.~
+            END
+        END
+    END
+
+    PATCH_IF cea_packages > 0 AND apply AND cea_separable BEGIN
         // A header without the package that shares a removed bonus value makes
         // the bonus text impossible to attribute to the package header.
         SET cea_bonus_shared = 0
@@ -278,6 +359,25 @@ BEGIN
                 RET cea_found=package_count cea_at=package_at
             END
             PATCH_IF cea_owned AND cea_found = 1 BEGIN
+                LPF cbr_elemental_arrow_foreign_ref
+                    INT_VAR ability_offset=cea_ability_offset ability_count=cea_ability_count
+                        self=cea_i record=((cea_at - cea_effect_offset) / 0x30)
+                    RET cea_shared=shared
+                END
+                PATCH_IF cea_shared BEGIN
+                    // Append a private copy of this header's whole slice.
+                    READ_SHORT (cea_a+0x1e) cea_count
+                    READ_SHORT (cea_a+0x20) cea_first
+                    SET cea_src = cea_effect_offset + cea_first * 0x30
+                    SET cea_dst = BUFFER_LENGTH
+                    INSERT_BYTES cea_dst (cea_count * 0x30)
+                    FOR (cea_q=0; cea_q<cea_count * 0x30; cea_q+=4) BEGIN
+                        READ_LONG (cea_src+cea_q) cea_w
+                        WRITE_LONG (cea_dst+cea_q) cea_w
+                    END
+                    WRITE_SHORT (cea_a+0x20) ((cea_dst - cea_effect_offset) / 0x30)
+                    SET cea_at = cea_dst + (cea_at - cea_src)
+                END
                 WRITE_LONG (cea_at+0x1c) 1
                 WRITE_LONG (cea_at+0x20) elemental_size
                 PATCH_IF remove_bonus BEGIN

@@ -71,3 +71,22 @@ for several EE languages) is rewritten from its own text instead of
 receiving the male result; if either string cannot be rewritten, neither
 changes. Unrecognized bonus wording can still stay stale (known limitation).
 Evidence: `tests/test_elemental_arrows.py`, synthetic real-WeiDU games only.
+
+### Re-review: shared effect records (copy-on-write)
+
+A Codex re-review found finding A still open: an ITM slice is only (first
+index, count) into one effect table, so a type-3 activation can reference
+the very fire record of the bow-fired header, and the in-place write still
+changed it. Now, before any write, every owned package record read by a
+foreign slice (a non-owned header or the equipped effects) is detected.
+That owned header gets a private copy of its whole slice appended to the
+effect table, its first index is repointed, and only the copy is patched.
+Every other slice keeps its records byte-identical. A record shared only by
+owned headers is patched in place, since every reader is meant to change.
+Each owned header sharing with a foreign slice gets its own copy, because
+owned slices may differ in extent. A rerun finds the owned header on its
+private, already-patched copy and is byte-exact. Appending needs the effect
+table to end the file (the normal ITM layout) and the copies to fit the
+16-bit first index; otherwise that item is left unchanged with a warning
+naming the obstacle. Evidence: `test_shared_package_records_are_copied_on_write`
+and `test_shared_records_without_a_trailing_effect_table_warn_and_keep_the_item`.

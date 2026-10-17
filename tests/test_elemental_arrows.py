@@ -88,6 +88,36 @@ def pointer(blob, offset):
     return struct.unpack_from("<i", blob, offset)[0]
 
 
+def point(blob, h, first, count):
+    """Repoint header h at an existing effect slice (shared records)."""
+    raw = bytearray(blob)
+    struct.pack_into("<HH", raw, offsets(raw, h) + 0x1e, count, first)
+    return bytes(raw)
+
+
+def equip(blob, first, count):
+    raw = bytearray(blob)
+    struct.pack_into("<HH", raw, 0x6e, first, count)
+    return bytes(raw)
+
+
+def copied(old, new, size, copies, in_place=(), bonus_headers=(), *, name=True, desc=True):
+    """Copy-on-write oracle: every header in `copies` (h, package index in its
+    slice), in header order, gets its whole old slice appended as a private
+    copy with the package dice patched; nothing else moves or changes."""
+    raw = bytearray(expected(old, new, size, in_place, bonus_headers, name=name, desc=desc))
+    effects, = struct.unpack_from("<I", old, 0x6a)
+    for h, k in copies:
+        a = offsets(old, h)
+        count, first = struct.unpack_from("<HH", old, a + 0x1e)
+        total = (len(raw) - effects) // 48
+        block = bytearray(old[effects + first * 48:effects + (first + count) * 48])
+        struct.pack_into("<II", block, k * 48 + 0x1c, 1, size)
+        raw += block
+        struct.pack_into("<H", raw, a + 0x20, total)
+    return bytes(raw)
+
+
 class ElementalArrowVariantTests(unittest.TestCase):
     def game(self, resources, texts=TEXTS):
         temporary = tempfile.TemporaryDirectory(prefix="cbr-elemental-arrows-")
@@ -507,6 +537,116 @@ class ElementalArrowVariantTests(unittest.TestCase):
                 self.reference_others_patched(g, after, skip=("AROW08",) if new_desc is None else ())
                 self.uninstall_restores(g)
                 self.assertEqual(female_texts, strings(female)[:len(female_texts)])
+
+    def rerun(self, g):
+        """Apply the library again in an independent tail transaction."""
+        folder = g.root / "cbr_arrow_repeat"
+        folder.mkdir()
+        (folder / "cbr_arrow_repeat.tp2").write_text(REPEAT_TP2)
+        p = subprocess.run([str(WEIDU), "cbr_arrow_repeat/cbr_arrow_repeat.tp2",
+                            "--force-install-list", "0", "--use-lang", "en_us",
+                            "--no-exit-pause", "--quick-log"],
+                           cwd=g.root, capture_output=True, text=True, timeout=60)
+        output = p.stdout + p.stderr
+        self.assertNotIn("NOT INSTALLED", output)
+        p = subprocess.run([str(WEIDU), "cbr_arrow_repeat/cbr_arrow_repeat.tp2",
+                            "--force-uninstall-list", "0", "--use-lang", "en_us",
+                            "--no-exit-pause", "--quick-log"],
+                           cwd=g.root, capture_output=True, text=True, timeout=60)
+        self.assertEqual(0, p.returncode, p.stdout + p.stderr)
+        return output
+
+    def test_shared_package_records_are_copied_on_write(self):
+        """Re-review of finding A: a foreign slice that references the owned
+        package record keeps the original; the owned header gets a private
+        copy of its whole slice appended to the effect table."""
+        bow = header((damage(FIRE, 1, 6, save=1), troll("DWTROLFI")), hit=2, dmg=2)
+        bare_bow = header((), hit=2, dmg=2)
+        activation = header((), kind=3, hit=1, dmg=3)
+        base = arrow([bow, activation], 5, 6)
+        cases = (
+            # label, AROW08 bytes, copies (header, package index in its slice), in place
+            ("activation shares the whole bow slice", point(base, 1, 0, 2), [(0, 0)], []),
+            ("activation shares only the package record", point(base, 1, 0, 1), [(0, 0)], []),
+            ("activation listed first", point(arrow([activation, bow], 5, 6), 0, 0, 1),
+             [(1, 0)], []),
+            ("equipped effects share the package", equip(base, 0, 1), [(0, 0)], []),
+            ("two bow headers share one slice, nothing foreign",
+             point(arrow([bow, bare_bow, activation], 5, 6), 1, 0, 2), [], [(0, 0), (1, 0)]),
+            ("two bow headers and an activation share one slice",
+             point(point(arrow([bow, bare_bow, activation], 5, 6), 1, 0, 2), 2, 0, 1),
+             [(0, 0), (1, 0)], []),
+            ("helper is shared, the package is not", point(base, 1, 1, 1), [], [(0, 0)]),
+        )
+        for label, blob, copies, in_place in cases:
+            with self.subTest(label):
+                resources = arrow_resources()
+                resources["AROW08.ITM"] = blob
+                g = self.game(resources)
+                self.install(g)
+                after = g.snapshot()
+                old, new = g.original["AROW08.ITM"], after["AROW08.ITM"]
+                bows = sorted({h for h, _ in copies + in_place})
+                self.assertEqual(copied(old, new, 2, copies, in_place, bows), new)
+                # Every foreign slice still reads the original records.
+                before, item = ItmFile.from_bytes(old), ItmFile.from_bytes(new)
+                for h, ability in enumerate(item.abilities):
+                    if h not in bows:
+                        self.assertEqual(before.abilities[h].effects, ability.effects, h)
+                    else:
+                        fire = ability.effects[0]
+                        self.assertEqual((1, 2, 1), (fire.dice_number, fire.dice_size,
+                                                     fire.save_type), h)
+                self.assertEqual(before.global_effects, item.global_effects)
+                self.assertEqual("Damage: 1d6, +1d2 fire damage (Save vs. Spell negates)\n"
+                                 "THAC0: +0", strings(g.tlk)[pointer(new, 0x54)])
+                self.reference_others_patched(g, after, skip=("AROW08",))
+                tlk_before = g.tlk.read_bytes()
+                output = self.rerun(g)
+                self.assertNotIn("was not updated", output)
+                self.assertNotIn("cannot be separated", output)
+                self.assertEqual(after, g.snapshot())
+                self.assertEqual(tlk_before, g.tlk.read_bytes())
+                self.uninstall_restores(g)
+
+    def test_shared_records_without_a_trailing_effect_table_warn_and_keep_the_item(self):
+        bow = header((damage(FIRE, 1, 6, save=1), troll("DWTROLFI")), hit=2, dmg=2)
+        activation = header((), kind=3)
+        shared = point(arrow([bow, activation], 5, 6), 1, 0, 1) + b"TRAILER"
+        unshared = arrow([bow, activation], 5, 6) + b"TRAILER"
+        with self.subTest("shared package"):
+            resources = arrow_resources()
+            resources["AROW08.ITM"] = shared
+            g = self.game(resources)
+            self.install(g, warnings=(
+                "AROW08.ITM extended header 0 (0-based) shares its fire damage record",
+                "cannot be separated because the effect table is not at the end of the file",
+                "this item was left unchanged"))
+            after = g.snapshot()
+            self.assertEqual(g.original["AROW08.ITM"], after["AROW08.ITM"])
+            self.reference_others_patched(g, after, skip=("AROW08",))
+            self.uninstall_restores(g)
+        with self.subTest("copies would pass the 16-bit first-effect index"):
+            blob = point(arrow([bow, activation], 5, 6), 1, 0, 1)
+            effects, = struct.unpack_from("<I", blob, 0x6a)
+            blob += bytes(48 * (0xffff - (len(blob) - effects) // 48))  # unreferenced
+            resources = arrow_resources()
+            resources["AROW08.ITM"] = blob
+            g = self.game(resources)
+            self.install(g, warnings=(
+                "cannot be separated because the copies would exceed the 16-bit first-effect index",
+                "this item was left unchanged"))
+            self.assertEqual(g.original["AROW08.ITM"], g.snapshot()["AROW08.ITM"])
+            self.uninstall_restores(g)
+        with self.subTest("nothing shared: patched in place despite the trailer"):
+            resources = arrow_resources()
+            resources["AROW08.ITM"] = unshared
+            g = self.game(resources)
+            self.install(g)
+            after = g.snapshot()
+            old, new = g.original["AROW08.ITM"], after["AROW08.ITM"]
+            self.assertEqual(expected(old, new, 2, [(0, 0)], [0], name=True, desc=True), new)
+            self.uninstall_restores(g)
 
     def test_repeat_application_is_byte_identical(self):
         resources = arrow_resources()
