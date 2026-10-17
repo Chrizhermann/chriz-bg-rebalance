@@ -1,0 +1,877 @@
+// REJECTED RESEARCH DRAFT -- disposable synthetic fixtures only.
+// Native review found source/caster-level/duration and guard defects. This is
+// deliberately outside the installable/package tree. See ../../2026-10-09-potion-uniqueness.md.
+
+INCLUDE ~research/prototypes/potion-uniqueness/potion_identity.tpa~
+
+// Bounds, not a reference fixture, define a valid V1 record table. Shared
+// effect slices and unused trailing bytes are legal and remain untouched.
+DEFINE_PATCH_FUNCTION cbr_pq_v1_bounds
+  STR_VAR context = ~potion resource~
+  RET ability_offset ability_count ability_size effect_offset global_first global_count
+BEGIN
+  PATCH_IF BUFFER_LENGTH < 0x72 BEGIN
+    PATCH_FAIL ~CBR_POTION_FORMAT: %context% has a truncated V1 header.~
+  END
+  READ_ASCII 0 pq_signature (8)
+  PATCH_IF ~%pq_signature%~ STRING_EQUAL ~ITM V1  ~ BEGIN
+    SET ability_size = 0x38
+  END ELSE PATCH_IF ~%pq_signature%~ STRING_EQUAL ~SPL V1  ~ BEGIN
+    SET ability_size = 0x28
+  END ELSE BEGIN
+    PATCH_FAIL ~CBR_POTION_FORMAT: %context% is not an ITM/SPL V1 resource.~
+  END
+  READ_LONG 0x64 ability_offset
+  READ_SHORT 0x68 ability_count
+  READ_LONG 0x6a effect_offset
+  READ_SHORT 0x6e global_first
+  READ_SHORT 0x70 global_count
+  PATCH_IF ability_offset < 0x72 OR ability_offset > BUFFER_LENGTH OR
+      ability_count > (BUFFER_LENGTH - ability_offset) / ability_size OR
+      effect_offset < 0x72 OR
+      effect_offset > BUFFER_LENGTH BEGIN
+    PATCH_FAIL ~CBR_POTION_FORMAT: %context% has an invalid ability/effect table.~
+  END
+  SET pq_available = (BUFFER_LENGTH - effect_offset) / 0x30
+  SET pq_extent = global_first + global_count
+  PATCH_IF global_first + global_count > pq_available BEGIN
+    PATCH_FAIL ~CBR_POTION_FORMAT: %context% has an out-of-bounds global/casting slice.~
+  END
+  FOR (pq_i = 0; pq_i < ability_count; ++pq_i) BEGIN
+    SET pq_a = ability_offset + pq_i * ability_size
+    READ_SHORT (pq_a + 0x1e) pq_count
+    READ_SHORT (pq_a + 0x20) pq_first
+    PATCH_IF pq_first + pq_count > pq_extent BEGIN SET pq_extent = pq_first + pq_count END
+    PATCH_IF pq_first + pq_count > pq_available BEGIN
+      PATCH_FAIL ~CBR_POTION_FORMAT: %context% ability %pq_i% has an out-of-bounds effect slice.~
+    END
+  END
+  PATCH_IF ability_count>0 AND pq_extent>0 AND
+      ability_offset < effect_offset + pq_extent*0x30 AND
+      effect_offset < ability_offset + ability_count*ability_size BEGIN
+    PATCH_FAIL ~CBR_POTION_FORMAT: %context% has overlapping ability/effect tables.~
+  END
+END
+
+// Classify an existing V1 effect without changing it. kind 1 = an accumulating
+// benefit, 2 = finite companion metadata, 3 = an HP-sensitive benefit, 4 = a
+// supported delivery whose payload needs separate inspection. Flat stat sets
+// remain native: multiple copies do not add their values together.
+DEFINE_PATCH_FUNCTION cbr_pq_effect_kind
+  INT_VAR offset=0
+  RET kind opcode duration timing target link
+BEGIN
+  SET kind=0
+  SET link=0
+  READ_SHORT offset opcode
+  READ_BYTE (offset+2) target
+  READ_LONG (offset+4) p1
+  READ_LONG (offset+8) p2
+  READ_BYTE (offset+0xc) timing
+  READ_LONG (offset+0xe) duration
+  PATCH_IF opcode=146 OR opcode=177 BEGIN SET kind=4 SET link=opcode END
+  PATCH_IF (timing=0 OR timing=10) AND duration>0 BEGIN
+    PATCH_IF opcode=98 BEGIN
+      PATCH_IF p1>0 AND (p2=2 OR p2=3) BEGIN SET kind=1 END
+      PATCH_IF p1>0 AND (p2=0 OR p2=1) BEGIN SET kind=7 END
+    END ELSE PATCH_IF opcode=18 OR opcode=10 BEGIN
+      // CON and regeneration also have HP lifecycle consequences.
+      PATCH_IF (opcode=10 AND ((p2=0 AND p1>0) OR (p2=2 AND p1>100))) OR
+          (opcode=18 AND ((p2=0 AND p1>0) OR (p2=2 AND p1>100) OR (p2=3 AND p1>0) OR (p2=5 AND p1>100) OR p2=6)) BEGIN
+        SET kind=3
+      END
+      PATCH_IF p2=1 BEGIN SET kind=6 END
+    END ELSE PATCH_IF opcode=0 BEGIN
+      PATCH_IF p1>0 AND p2<16 BEGIN SET kind=1 END
+    END ELSE PATCH_IF opcode=1 OR opcode=6 OR opcode=15 OR opcode=19 OR opcode=22 OR
+        opcode=27 OR opcode=28 OR opcode=29 OR opcode=30 OR opcode=31 OR
+        opcode=33 OR opcode=34 OR opcode=35 OR opcode=36 OR opcode=37 OR
+        opcode=44 OR opcode=49 OR opcode=54 OR opcode=59 OR
+        opcode=73 OR opcode=86 OR opcode=87 OR opcode=88 OR opcode=89 OR
+        opcode=90 OR opcode=91 OR opcode=92 OR opcode=126 OR opcode=130 OR
+        opcode=166 OR opcode=176 OR opcode=189 OR opcode=191 OR opcode=275 OR opcode=276 OR
+        opcode=277 OR opcode=278 OR opcode=284 OR opcode=285 OR opcode=286 OR opcode=325 BEGIN
+      PATCH_IF (p2=0 AND p1>0) OR
+          (p2=2 AND ((opcode=54 AND p1>0 AND p1<100) OR (opcode!=54 AND p1>100))) BEGIN SET kind=1 END
+      PATCH_IF p2=1 BEGIN SET kind=6 END
+      PATCH_IF opcode=191 AND p1>0 AND (p2=0 OR p2=1) BEGIN SET kind=6 END
+      PATCH_IF (opcode=126 OR opcode=176) AND p2=2 BEGIN SET kind=6 END
+      PATCH_IF (opcode=126 OR opcode=176) AND p2=5 AND p1>100 BEGIN SET kind=1 END
+      PATCH_IF (opcode>=33 AND opcode<=37) OR opcode=325 BEGIN
+        PATCH_IF p2=2 BEGIN
+          SET kind=0 PATCH_IF p1>0 AND p1<100 BEGIN SET kind=1 END
+        END
+        PATCH_IF p2=3 AND p1>0 BEGIN SET kind=1 END
+      END
+      PATCH_IF opcode=130 BEGIN SET kind=6 END
+    END ELSE PATCH_IF opcode=16 OR opcode=20 OR opcode=38 OR opcode=48 OR
+        opcode=62 OR opcode=69 OR opcode=83 OR opcode=101 OR opcode=102 OR
+        opcode=109 OR opcode=120 OR opcode=129 OR opcode=153 OR opcode=163 OR
+        opcode=206 OR opcode=318 OR opcode=324 BEGIN
+      SET kind=6
+    END ELSE PATCH_IF opcode=7 OR opcode=8 OR opcode=9 OR opcode=50 OR opcode=51 OR
+        opcode=52 OR opcode=61 OR opcode=142 OR opcode=169 OR opcode=215 OR
+        opcode=267 OR opcode=282 OR opcode=296 OR opcode=328 BEGIN
+      SET kind=2
+    END
+  END
+END
+
+// Cache a bounded potion payload graph, including existing op177 carriers.
+// Existing EFF wrappers are carried intact; no direct stat is converted to177.
+DEFINE_ACTION_FUNCTION cbr_pq_eff_context
+  INT_VAR timing=1 duration=0 depth=0
+  STR_VAR file=~~
+  RET bonuses hp
+BEGIN
+  ACTION_IF depth>16 BEGIN FAIL ~CBR_POTION_GRAPH: EFF context depth exceeded at %file%.~ END
+  OUTER_SET bonuses=0 OUTER_SET hp=0
+  OUTER_SPRINT normalized $pq_eff_v1(~%file%~)
+  OUTER_PATCH ~%normalized%~ BEGIN
+    WRITE_BYTE 0xc timing WRITE_LONG 0xe duration
+    LPF cbr_pq_effect_kind RET kind opcode END
+    PATCH_IF kind=1 OR kind=3 BEGIN SET bonuses=1 SET hp=(kind=3) END
+    PATCH_IF opcode=177 BEGIN
+      READ_ASCII 0x14 child (8) NULL TO_UPPER child
+      INNER_ACTION BEGIN
+        LAF cbr_pq_eff_context INT_VAR timing=timing duration=duration depth=depth+1
+          STR_VAR file=EVAL ~%child%.EFF~ RET bonuses hp END
+      END
+    END ELSE PATCH_IF opcode=146 BEGIN
+      READ_ASCII 0x14 child (8) NULL TO_UPPER child
+      SET bonuses=$pq_bonus(~%child%.SPL~) SET hp=$pq_hp(~%child%.SPL~)
+      PATCH_IF bonuses BEGIN
+        PATCH_FAIL ~CBR_POTION_GRAPH: %file% dispatches an independently sourced bonus SPL from an EFF; unchanged177 cannot give that child private ownership.~
+      END
+    END
+    PATCH_IF bonuses BEGIN
+      READ_BYTE 0x12 chance_hi READ_BYTE 0x13 chance_lo READ_LONG 0x24 save
+      READ_LONG 4 filter_value READ_LONG 8 filter_type
+      PATCH_IF chance_hi!=100 OR chance_lo!=0 OR (save BAND 31)!=0 OR
+          (opcode=177 AND (filter_value!=0 OR filter_type!=2)) BEGIN
+        PATCH_FAIL ~CBR_POTION_CONDITIONAL: %file% has a conditional EFF payload/filter; cleanup cannot safely precede its eligibility decision.~
+      END
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_pq_read_node
+  INT_VAR depth=0
+  STR_VAR file=~~
+  RET bonuses hp
+  RET_ARRAY pq_state pq_raw pq_eff_v1 pq_referenced pq_kind pq_child pq_bonus pq_hp
+    pq_duration pq_native pq_flat pq_int_bonus pq_record pq_pieces pq_fingerprint pq_semantic
+BEGIN
+  OUTER_SPRINT file EVAL ~%file%~
+  ACTION_TO_UPPER file
+  OUTER_PATCH ~%file%~ BEGIN READ_ASCII 0 pq_self (STRING_LENGTH ~%file%~ - 4) END
+  ACTION_IF depth>16 BEGIN FAIL ~CBR_POTION_GRAPH: %file% exceeds the bounded payload depth (16).~ END
+  ACTION_IF VARIABLE_IS_SET $pq_state(~%file%~) BEGIN
+    ACTION_IF $pq_state(~%file%~)=1 BEGIN FAIL ~CBR_POTION_GRAPH: cyclic delivery at %file%.~ END
+  END ELSE BEGIN
+    OUTER_SET $pq_state(~%file%~)=1
+    ACTION_IF NOT FILE_EXISTS_IN_GAME ~%file%~ BEGIN FAIL ~CBR_POTION_GRAPH: missing linked resource %file%.~ END
+    OUTER_SET bonuses=0 OUTER_SET hp=0 OUTER_SET pq_ticks=0
+    OUTER_SET pq_native=0 OUTER_SET pq_int=0 OUTER_SET pq_flat=0
+    COPY_EXISTING - ~%file%~ ~override~
+      READ_ASCII 0 pq_data (BUFFER_LENGTH)
+      SPRINT $pq_raw(~%file%~) ~%pq_data%~
+      READ_ASCII 0 pq_sig (8)
+      PATCH_IF ~%pq_sig%~ STRING_EQUAL ~EFF V2.0~ BEGIN
+        PATCH_IF BUFFER_LENGTH<0x110 BEGIN PATCH_FAIL ~CBR_POTION_FORMAT: truncated %file%.~ END
+        // Normalize a private inspection buffer only; preserve original EFF.
+        READ_LONG 0x10 pq_op READ_LONG 0x14 pq_tgt READ_LONG 0x18 pq_power
+        READ_LONG 0x1c pq_p1 READ_LONG 0x20 pq_p2 READ_SHORT 0x24 pq_timing
+        READ_LONG 0x28 pq_duration READ_SHORT 0x2c pq_pr1 READ_SHORT 0x2e pq_pr2
+        READ_ASCII 0x30 pq_res (8) NULL
+        READ_LONG 0x38 pq_dn READ_LONG 0x3c pq_ds READ_LONG 0x40 pq_save
+        READ_LONG 0x44 pq_sb READ_LONG 0x48 pq_special READ_LONG 0x5c pq_resist
+        INNER_PATCH_SAVE pq_norm ~~ BEGIN
+          LPF cbr_pq_append_effect INT_VAR opcode=pq_op target=pq_tgt power=pq_power
+            parameter1=pq_p1 parameter2=pq_p2 timing=pq_timing duration=pq_duration
+            probability1=pq_pr1 probability2=pq_pr2 dice_number=pq_dn dice_size=pq_ds
+            save_type=pq_save save_bonus=pq_sb special=pq_special resist_dispel=pq_resist
+            STR_VAR resource=EVAL ~%pq_res%~ END
+        END
+        SPRINT $pq_eff_v1(~%file%~) ~%pq_norm%~
+        SET pq_eo=0 SET pq_num=1
+        SET $pq_referenced(~%file%~ ~0~)=1
+        SPRINT pq_scan ~%pq_norm%~
+      END ELSE BEGIN
+        LPF cbr_pq_v1_bounds STR_VAR context=EVAL ~%file%~
+          RET ability_offset ability_count ability_size effect_offset global_first global_count END
+        // Only referenced slices are considered. Padding/orphans are preserved.
+        SET pq_max=0
+        PATCH_IF ability_size=0x28 BEGIN
+          FOR (pq_r=global_first; pq_r<global_first+global_count; ++pq_r) BEGIN
+            SET $pq_referenced(~%file%~ ~%pq_r%~)=1
+          END
+          SET pq_max=global_first+global_count
+        END
+        FOR (pq_aidx=0; pq_aidx<ability_count; ++pq_aidx) BEGIN
+          READ_SHORT (ability_offset+pq_aidx*ability_size+0x1e) pq_n
+          READ_SHORT (ability_offset+pq_aidx*ability_size+0x20) pq_f
+          PATCH_IF pq_f+pq_n>pq_max BEGIN SET pq_max=pq_f+pq_n END
+          FOR (pq_r=pq_f; pq_r<pq_f+pq_n; ++pq_r) BEGIN
+            SET $pq_referenced(~%file%~ ~%pq_r%~)=1
+          END
+        END
+        SET pq_eo=effect_offset SET pq_num=pq_max
+        SPRINT pq_scan ~%pq_data%~
+      END
+      INNER_PATCH ~%pq_scan%~ BEGIN
+        FOR (pq_eidx=0; pq_eidx<pq_num; ++pq_eidx) BEGIN
+          PATCH_IF VARIABLE_IS_SET $pq_referenced(~%file%~ ~%pq_eidx%~) BEGIN
+          SET pq_e=pq_eo+pq_eidx*0x30
+          LPF cbr_pq_effect_kind INT_VAR offset=pq_e RET kind opcode duration timing target link END
+          PATCH_IF kind=4 BEGIN
+            READ_ASCII (pq_e+0x14) pq_child (8) NULL TO_UPPER pq_child
+            SPRINT pq_ext ~SPL~ PATCH_IF opcode=177 BEGIN SPRINT pq_ext ~EFF~ END
+            INNER_ACTION BEGIN
+              LAF cbr_pq_read_node INT_VAR depth=depth+1 STR_VAR file=EVAL ~%pq_child%.%pq_ext%~
+                RET pq_cb=bonuses pq_ch=hp
+                RET_ARRAY pq_state pq_raw pq_eff_v1 pq_referenced pq_kind pq_child pq_bonus pq_hp
+                  pq_duration pq_native pq_flat pq_int_bonus pq_record pq_pieces pq_fingerprint pq_semantic END
+            END
+            PATCH_IF opcode=177 BEGIN
+              INNER_ACTION BEGIN
+                LAF cbr_pq_eff_context INT_VAR timing=timing duration=duration
+                  STR_VAR file=EVAL ~%pq_child%.EFF~ RET pq_cb=bonuses pq_ch=hp END
+              END
+            END
+            PATCH_IF pq_cb>0 BEGIN
+              PATCH_IF opcode=146 BEGIN
+                READ_LONG (pq_e+8) pq_mode
+                PATCH_IF (timing!=1 AND timing!=9 AND NOT(timing=0 AND duration=0)) OR
+                    (pq_mode!=1 AND pq_mode!=2) BEGIN
+                  PATCH_FAIL ~CBR_POTION_GRAPH: %file% effect %pq_eidx% has a delayed/non-instant SPL delivery with accumulating bonuses.~
+                END
+                SET kind=5
+              END ELSE BEGIN
+                PATCH_IF pq_ch BEGIN
+                  PATCH_FAIL ~CBR_POTION_HP: existing timed EFF carrier %file% -> %pq_child% changes HP; its first-use state requires an explicit adapter.~
+                END
+                SET kind=1
+              END
+              SET bonuses+=pq_cb SET hp=hp OR pq_ch
+              SPRINT $pq_child(~%file%~ ~%pq_eidx%~) ~%pq_child%.%pq_ext%~
+              SET pq_child_ticks=$pq_duration(~%pq_child%.%pq_ext%~)
+              PATCH_IF opcode=177 BEGIN
+                SET pq_child_ticks=duration PATCH_IF timing=0 BEGIN SET pq_child_ticks*=15 END
+              END
+              PATCH_IF pq_child_ticks>pq_ticks BEGIN SET pq_ticks=pq_child_ticks END
+              SET pq_int=pq_int OR $pq_int_bonus(~%pq_child%.%pq_ext%~)
+            END ELSE BEGIN SET kind=0 END
+          END ELSE PATCH_IF kind=1 OR kind=3 BEGIN
+            SET bonuses+=1 PATCH_IF kind=3 BEGIN SET hp=1 END
+          END
+          PATCH_IF kind=6 BEGIN SET pq_native+=1 END
+          READ_LONG (pq_e+8) pq_p2
+          PATCH_IF kind=6 AND pq_p2=1 AND (opcode=6 OR opcode=10 OR opcode=15 OR opcode=19 OR opcode=44 OR opcode=49) BEGIN SET pq_flat=1 END
+          PATCH_IF kind=7 BEGIN PATCH_FAIL ~CBR_POTION_PERIODIC: %file% effect %pq_eidx% uses total-amount regeneration; refreshing its healing budget is not proven safe.~ END
+          PATCH_IF (kind=1 OR kind=3 OR kind=6) AND duration>0 BEGIN
+            SET pq_d=duration PATCH_IF timing=0 BEGIN SET pq_d=duration*15 END
+            PATCH_IF pq_d>pq_ticks BEGIN SET pq_ticks=pq_d END
+          END
+          PATCH_IF opcode=19 AND kind=1 BEGIN SET pq_int=1 END
+          SET $pq_kind(~%file%~ ~%pq_eidx%~)=kind
+          READ_ASCII pq_e pq_record (0x30)
+          SPRINT $pq_record(~%file%~ ~%pq_eidx%~) ~%pq_record%~
+          // Preserve every gameplay/envelope field for identity. Presentation
+          // text and animation are irrelevant to potion-family membership.
+          // Linked identity is its payload graph, not a private clone's name.
+          SPRINT pq_piece ~~
+          PATCH_IF opcode!=139 AND opcode!=174 BEGIN
+            SET pq_self_block=0
+            PATCH_IF opcode=206 BEGIN
+              READ_ASCII (pq_e+0x14) pq_block_res (8) NULL TO_UPPER pq_block_res
+              PATCH_IF ~%pq_block_res%~ STRING_EQUAL ~%pq_self%~ BEGIN SET pq_self_block=1 END
+            END
+            FOR (pq_b=0; pq_b<0x30; ++pq_b) BEGIN
+              READ_BYTE (pq_e+pq_b) pq_v
+              PATCH_IF (opcode=146 OR opcode=177 OR pq_self_block) AND pq_b>=0x14 AND pq_b<0x1c BEGIN SET pq_v=0 END
+              SPRINT pq_piece ~%pq_piece%%pq_v%,~
+            END
+            PATCH_IF opcode=146 OR opcode=177 BEGIN
+              SPRINT child_semantic $pq_fingerprint(~%pq_child%.%pq_ext%~)
+              PATCH_IF ~%child_semantic%~ STRING_EQUAL ~~ BEGIN SPRINT pq_piece ~~ END
+              ELSE BEGIN SPRINT pq_piece ~%pq_piece%{%child_semantic%}~ END
+            END
+            PATCH_IF pq_self_block BEGIN SPRINT pq_piece ~%pq_piece%SELF~ END
+          END
+          SPRINT $pq_semantic(~%file%~ ~%pq_eidx%~) ~%pq_piece%~
+          END
+        END
+      END
+    OUTER_SET $pq_bonus(~%file%~)=bonuses
+    OUTER_SET $pq_hp(~%file%~)=hp
+    OUTER_SET $pq_duration(~%file%~)=pq_ticks
+    OUTER_SET $pq_native(~%file%~)=pq_native
+    OUTER_SET $pq_int_bonus(~%file%~)=pq_int
+    OUTER_SET $pq_flat(~%file%~)=pq_flat
+    OUTER_SPRINT pq_fingerprint ~~
+    ACTION_IF ~%pq_sig%~ STRING_EQUAL ~EFF V2.0~ BEGIN
+      OUTER_SPRINT pq_fingerprint $pq_semantic(~%file%~ ~0~)
+      // V2-only fields (secondary operands, resource2/3, flags, parent data)
+      // remain part of identity even though the benefit classifier needs only
+      // the V1 subset. Do not merge EFFs that differ in native extended data.
+      ACTION_IF NOT(~%pq_fingerprint%~ STRING_EQUAL ~~) BEGIN
+        OUTER_PATCH ~%pq_data%~ BEGIN
+          FOR (pq_b=0x4c; pq_b<BUFFER_LENGTH; ++pq_b) BEGIN
+            READ_BYTE pq_b pq_v SPRINT pq_fingerprint ~%pq_fingerprint%%pq_v%,~
+          END
+          READ_SHORT 0x26 pq_v SPRINT pq_fingerprint ~%pq_fingerprint%H%pq_v%~
+        END
+      END
+    END ELSE BEGIN
+      OUTER_PATCH ~%pq_data%~ BEGIN
+        LPF cbr_pq_v1_bounds STR_VAR context=EVAL ~%file%~
+          RET ability_offset ability_count ability_size effect_offset global_first global_count END
+        SET pq_begin=0 PATCH_IF ability_size=0x28 AND global_count>0 BEGIN SET pq_begin=0 - 1 END
+        FOR (pq_aidx=pq_begin; pq_aidx<ability_count; ++pq_aidx) BEGIN
+          PATCH_CLEAR_ARRAY pq_slice_parts
+          SPRINT pq_ability_signature ~~
+          PATCH_IF pq_aidx<0 BEGIN
+            SET pq_f=global_first SET pq_n=global_count SPRINT pq_ability_signature ~CAST:~
+          END ELSE BEGIN
+            SET pq_a=ability_offset+pq_aidx*ability_size
+            READ_SHORT (pq_a+0x1e) pq_n READ_SHORT (pq_a+0x20) pq_f
+            // Keep ability delivery parameters. Icons, charges, effect indices,
+            // and otherwise-unused trailing ability bytes are not type identity.
+            FOR (pq_b=0; pq_b<0x1e; ++pq_b) BEGIN
+              PATCH_IF pq_b<4 OR pq_b>=12 BEGIN
+                READ_BYTE (pq_a+pq_b) pq_v
+                SPRINT pq_ability_signature ~%pq_ability_signature%%pq_v%,~
+              END
+            END
+          END
+          SET pq_semantic_count=0
+          FOR (pq_j=pq_f; pq_j<pq_f+pq_n; ++pq_j) BEGIN
+            SPRINT pq_piece $pq_semantic(~%file%~ ~%pq_j%~)
+            PATCH_IF NOT(~%pq_piece%~ STRING_EQUAL ~~) BEGIN
+              SET pq_semantic_count+=1
+              PATCH_IF VARIABLE_IS_SET $pq_slice_parts(~%pq_piece%~) BEGIN SET $pq_slice_parts(~%pq_piece%~)+=1 END
+              ELSE BEGIN SET $pq_slice_parts(~%pq_piece%~)=1 END
+            END
+          END
+          SORT_ARRAY_INDICES pq_slice_parts LEXICOGRAPHICALLY
+          PHP_EACH pq_slice_parts AS pq_piece => pq_pc BEGIN
+            SPRINT pq_ability_signature ~%pq_ability_signature%[%pq_pc%:%pq_piece%]~
+          END
+          PATCH_IF pq_semantic_count>0 BEGIN
+            PATCH_IF VARIABLE_IS_SET $pq_pieces(~%file%~ ~%pq_ability_signature%~) BEGIN
+              SET $pq_pieces(~%file%~ ~%pq_ability_signature%~)+=1
+            END ELSE BEGIN SET $pq_pieces(~%file%~ ~%pq_ability_signature%~)=1 END
+          END
+        END
+      END
+      ACTION_SORT_ARRAY_INDICES pq_pieces LEXICOGRAPHICALLY
+      ACTION_PHP_EACH pq_pieces AS pq_pf => pq_pc BEGIN
+        ACTION_IF ~%pq_pf%~ STRING_EQUAL ~%file%~ BEGIN
+          OUTER_SPRINT pq_fingerprint ~%pq_fingerprint%[%pq_pc%:%pq_pf_1%]~
+        END
+      END
+    END
+    OUTER_SPRINT $pq_fingerprint(~%file%~) ~%pq_fingerprint%~
+    OUTER_SET $pq_state(~%file%~)=2
+  END
+  OUTER_SET bonuses=$pq_bonus(~%file%~)
+  OUTER_SET hp=$pq_hp(~%file%~)
+END
+
+// Emit a V1 effect. Kept independent of the library's classification policy.
+DEFINE_PATCH_FUNCTION cbr_pq_append_effect
+  INT_VAR opcode=0 target=1 power=0 parameter1=0 parameter2=0 timing=1
+          resist_dispel=2 duration=0 probability1=100 probability2=0
+          dice_number=0 dice_size=0 save_type=0 save_bonus=0 special=0
+  STR_VAR resource=~~
+  RET appended_offset
+BEGIN
+  SET appended_offset = BUFFER_LENGTH
+  INSERT_BYTES appended_offset 0x30
+  WRITE_SHORT appended_offset opcode
+  WRITE_BYTE (appended_offset + 2) target
+  WRITE_BYTE (appended_offset + 3) power
+  WRITE_LONG (appended_offset + 4) parameter1
+  WRITE_LONG (appended_offset + 8) parameter2
+  WRITE_BYTE (appended_offset + 0xc) timing
+  WRITE_BYTE (appended_offset + 0xd) resist_dispel
+  WRITE_LONG (appended_offset + 0xe) duration
+  WRITE_BYTE (appended_offset + 0x12) probability1
+  WRITE_BYTE (appended_offset + 0x13) probability2
+  WRITE_ASCIIE (appended_offset + 0x14) ~%resource%~ #8
+  WRITE_LONG (appended_offset + 0x1c) dice_number
+  WRITE_LONG (appended_offset + 0x20) dice_size
+  WRITE_LONG (appended_offset + 0x24) save_type
+  WRITE_LONG (appended_offset + 0x28) save_bonus
+  WRITE_LONG (appended_offset + 0x2c) special
+END
+
+// A helper is an invisible, non-hostile, innate SPL with one instant, self
+// ability. Callers append effects and finish by writing the ability count.
+// The original parent effect remains responsible for delivery to its target.
+DEFINE_PATCH_FUNCTION cbr_pq_blank_spell
+  INT_VAR school=0 secondary=0
+BEGIN
+  DELETE_BYTES 0 BUFFER_LENGTH
+  INSERT_BYTES 0 0x9a
+  WRITE_ASCII 0 ~SPL V1  ~ #8
+  WRITE_LONG 0x8 0xffffffff
+  WRITE_LONG 0xc 0xffffffff
+  WRITE_LONG 0x18 0x00004000 // Ignore dead/wild magic; not hostile.
+  WRITE_SHORT 0x1c 4       // Innate, not arcane/divine duration scaling.
+  WRITE_BYTE 0x25 school
+  WRITE_BYTE 0x27 secondary
+  WRITE_LONG 0x50 0xffffffff
+  WRITE_LONG 0x54 0xffffffff
+  WRITE_LONG 0x64 0x72
+  WRITE_SHORT 0x68 1
+  WRITE_LONG 0x6a 0x9a
+  WRITE_BYTE 0x72 1
+  WRITE_BYTE (0x72 + 0xc) 1
+  WRITE_BYTE (0x72 + 0xd) 1
+  WRITE_SHORT (0x72 + 0x26) 1
+END
+
+DEFINE_ACTION_FUNCTION cbr_pq_allocate RET resref RET_ARRAY pq_control BEGIN
+  OUTER_SET $pq_control(~serial~)+=1
+  OUTER_SET serial=$pq_control(~serial~)
+  ACTION_IF serial>99999 BEGIN FAIL ~CBR_POTION_LIMIT: private resource limit exceeded.~ END
+  OUTER_SPRINT resref ~CBQ%serial%~
+  ACTION_FOR_EACH extension IN ~SPL~ ~ITM~ ~EFF~ BEGIN
+    ACTION_IF FILE_EXISTS_IN_GAME ~%resref%.%extension%~ BEGIN
+      FAIL ~CBR_POTION_COLLISION: reserved private resource %resref%.%extension% already exists.~
+    END
+  END
+END
+
+// Each call owns a distinct path through the graph. Shared original SPL/EFF
+// resources are never edited, and existing op177 records are never flattened.
+// The first/last flags follow delivery into a child, so chance/save checks on
+// the existing op146 run before the private child's cleanup or HP lock.
+DEFINE_ACTION_FUNCTION cbr_pq_plan_node
+  INT_VAR first=1 last=1 hp=0 lock_ticks=0 depth=0
+  STR_VAR file=~~ family=~~
+  RET buffer resref
+  RET_ARRAY pq_output pq_cloned pq_control pq_run pq_run_family pq_run_first pq_run_last
+    pq_run_hp pq_run_ticks pq_run_count pq_run_school pq_run_secondary
+BEGIN
+  ACTION_IF depth>16 BEGIN FAIL ~CBR_POTION_GRAPH: planning depth exceeded at %file%.~ END
+  LAF cbr_pq_assert_identity INT_VAR allow_self_remove=(depth=0)
+    STR_VAR file=EVAL ~%file%~ family=EVAL ~%family%~ END
+  OUTER_SPRINT original $pq_raw(~%file%~)
+  OUTER_SPRINT resref ~~
+  OUTER_PATCH_SAVE buffer ~%original%~ BEGIN
+    LPF cbr_pq_v1_bounds STR_VAR context=EVAL ~%file%~
+      RET ability_offset ability_count ability_size effect_offset global_first global_count END
+    PATCH_IF hp AND $pq_flat(~%file%~) BEGIN
+      PATCH_FAIL ~CBR_POTION_HP: %file% combines HP bonuses with flat stat sets of ambiguous benefit/adverse polarity.~
+    END
+    // Retain every original byte, including padding and unreferenced records.
+    // New referenced slices are appended after the entire existing resource.
+    SET append_base=BUFFER_LENGTH
+    SET append_padding = (0x30 - ((append_base - effect_offset) MODULO 0x30)) MODULO 0x30
+    INSERT_BYTES BUFFER_LENGTH append_padding
+    FOR (aidx=0; aidx<ability_count; ++aidx) BEGIN
+      SET ao=ability_offset+aidx*ability_size
+      READ_SHORT (ao+0x1e) count READ_SHORT (ao+0x20) start
+      READ_BYTE (ao+0xc) ability_target
+      SET owned_first = 0 - 1 SET owned_last = 0 - 1 SET ability_ticks=0
+      FOR (j=0; j<count; ++j) BEGIN
+        SET idx=start+j SET k=$pq_kind(~%file%~ ~%idx%~)
+        PATCH_IF k=1 OR k=3 OR k=5 OR (hp AND k=6) BEGIN
+          PATCH_IF owned_first<0 BEGIN SET owned_first=j END
+          SET owned_last=j
+          PATCH_IF k=5 BEGIN
+            SPRINT lifetime_child $pq_child(~%file%~ ~%idx%~)
+            SET effect_ticks=$pq_duration(~%lifetime_child%~)
+          END ELSE BEGIN
+            READ_BYTE (effect_offset+idx*0x30+0xc) effect_timing
+            READ_LONG (effect_offset+idx*0x30+0xe) effect_ticks
+            PATCH_IF effect_timing=0 BEGIN SET effect_ticks*=15 END
+          END
+          PATCH_IF effect_ticks>ability_ticks BEGIN SET ability_ticks=effect_ticks END
+        END
+      END
+      PATCH_IF owned_first>=0 BEGIN
+        SET dose_ticks=lock_ticks PATCH_IF depth=0 BEGIN SET dose_ticks=ability_ticks END
+        PATCH_IF ability_target!=1 AND ability_target!=5 BEGIN
+          PATCH_FAIL ~CBR_POTION_TARGET: %file% ability %aidx% delivers bonuses to a non-self target; private self delivery cannot preserve this target.~
+        END
+        PATCH_IF hp AND ability_count>1 AND depth>0 BEGIN
+          PATCH_FAIL ~CBR_POTION_HP: %file% has level/ability alternatives; the HP lock needs an ability-specific lifetime proof.~
+        END
+        SET new_first=(BUFFER_LENGTH - effect_offset)/0x30
+        SET new_count=0 SET j=0
+        WHILE j<count BEGIN
+          SET idx=start+j SET k=$pq_kind(~%file%~ ~%idx%~)
+          SPRINT record $pq_record(~%file%~ ~%idx%~)
+          PATCH_IF k=5 BEGIN
+            SPRINT child $pq_child(~%file%~ ~%idx%~)
+            INNER_PATCH ~%record%~ BEGIN
+              READ_BYTE 0x12 chance_hi READ_BYTE 0x13 chance_lo READ_LONG 0x24 save
+              PATCH_IF chance_hi!=100 OR chance_lo!=0 OR (save BAND 31)!=0 BEGIN
+                PATCH_FAIL ~CBR_POTION_CONDITIONAL: %file% effect %idx% can reject its linked bonus after another dose run; atomic refresh/HP eligibility is not established.~
+              END
+            END
+            INNER_ACTION BEGIN
+              LAF cbr_pq_plan_node INT_VAR first=first AND (j=owned_first)
+                last=last AND (j=owned_last) hp=hp lock_ticks=dose_ticks depth=depth+1
+                STR_VAR file=EVAL ~%child%~ family=EVAL ~%family%~ RET child_ref=resref
+                RET_ARRAY pq_output pq_cloned pq_control pq_run pq_run_family pq_run_first pq_run_last
+                  pq_run_hp pq_run_ticks pq_run_count pq_run_school pq_run_secondary END
+            END
+            INNER_PATCH_SAVE record ~%record%~ BEGIN WRITE_ASCIIE 0x14 ~%child_ref%~ #8 END
+            SET pos=BUFFER_LENGTH INSERT_BYTES pos 0x30 WRITE_ASCIIE pos ~%record%~
+            SET new_count+=1 SET j+=1
+          END ELSE PATCH_IF k=1 OR k=3 OR (hp AND k=6) BEGIN
+            SET run_start=j SPRINT run ~~ SET run_count=0 SET j_stop=count
+            WHILE j<count BEGIN
+              SET idx=start+j SET k=$pq_kind(~%file%~ ~%idx%~)
+              PATCH_IF k=1 OR k=2 OR k=3 OR (hp AND k=6) BEGIN
+                SPRINT record $pq_record(~%file%~ ~%idx%~)
+                INNER_PATCH ~%record%~ BEGIN
+                  READ_SHORT 0 effect_opcode READ_LONG 4 filter_value READ_LONG 8 filter_type
+                  READ_BYTE 2 effect_target READ_BYTE 0x12 chance_hi
+                  READ_BYTE 0x13 chance_lo READ_LONG 0x24 save
+                  PATCH_IF effect_target!=1 AND effect_target!=2 BEGIN
+                    PATCH_FAIL ~CBR_POTION_TARGET: %file% effect %idx% uses a non-local effect target.~
+                  END
+                  PATCH_IF chance_hi!=100 OR chance_lo!=0 OR (save BAND 31)!=0 BEGIN
+                    PATCH_FAIL ~CBR_POTION_CONDITIONAL: %file% effect %idx% can reject a bonus after cleanup or fail to establish the HP lock; this needs a conditional-group adapter.~
+                  END
+                  PATCH_IF effect_opcode=177 AND (filter_value!=0 OR filter_type!=2) BEGIN
+                    PATCH_FAIL ~CBR_POTION_CONDITIONAL: %file% effect %idx% has a conditional EFF target filter; cleanup cannot precede a filter that may reject the replacement.~
+                  END
+                END
+                SPRINT run ~%run%%record%~ SET run_count+=1 SET j+=1
+              END ELSE BEGIN SET j_stop=j SET j=count END
+            END
+            SET j=j_stop
+            INNER_ACTION BEGIN LAF cbr_pq_allocate RET helper=resref RET_ARRAY pq_control END END
+            SPRINT $pq_run(~%helper%~) ~%run%~
+            SPRINT $pq_run_family(~%helper%~) ~%family%~
+            SET $pq_run_first(~%helper%~)=first AND run_start=owned_first
+            SET $pq_run_last(~%helper%~)=last AND j>owned_last
+            SET $pq_run_hp(~%helper%~)=hp
+            SET $pq_run_ticks(~%helper%~)=dose_ticks
+            SET $pq_run_count(~%helper%~)=run_count
+            PATCH_IF ability_size=0x38 BEGIN
+              READ_BYTE (ao+0x17) school READ_BYTE (ao+0x19) secondary
+            END ELSE BEGIN READ_BYTE 0x25 school READ_BYTE 0x27 secondary END
+            SET $pq_run_school(~%helper%~)=school SET $pq_run_secondary(~%helper%~)=secondary
+            LPF cbr_pq_append_effect INT_VAR opcode=146 parameter2=1
+              STR_VAR resource=EVAL ~%helper%~ END
+            SET new_count+=1
+          END ELSE BEGIN
+            SET pos=BUFFER_LENGTH INSERT_BYTES pos 0x30 WRITE_ASCIIE pos ~%record%~
+            SET new_count+=1 SET j+=1
+          END
+        END
+        PATCH_IF new_first>65535 OR new_count>65535 BEGIN
+          PATCH_FAIL ~CBR_POTION_FORMAT: %file% would exceed V1 effect indices.~
+        END
+        WRITE_SHORT (ao+0x1e) new_count WRITE_SHORT (ao+0x20) new_first
+      END
+    END
+    // Casting effects execute before a selected SPL ability. A positive casting
+    // payload requires shared-first/last planning across both slices, not a
+    // silent omission or an extra cast. Diagnose it until that adapter exists.
+    PATCH_IF ability_size=0x28 BEGIN
+      FOR (j=global_first; j<global_first+global_count; ++j) BEGIN
+        SET k=$pq_kind(~%file%~ ~%j%~)
+        PATCH_IF k=1 OR k=3 OR k=5 BEGIN
+          PATCH_FAIL ~CBR_POTION_GRAPH: %file% has bonus casting effects requiring a casting/ability lifetime adapter.~
+        END
+      END
+    END
+  END
+  ACTION_IF depth>0 BEGIN
+    LAF cbr_pq_allocate RET resref RET_ARRAY pq_control END
+    OUTER_SPRINT $pq_output(~%resref%.SPL~) ~%buffer%~
+    OUTER_SPRINT $pq_cloned(~%file%~) ~%resref%~
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_pq_lock_row RET row RET_ARRAY pq_output BEGIN
+  OUTER_SET row = 0 - 1
+  ACTION_IF NOT FILE_EXISTS_IN_GAME ~SPLPROT.2DA~ BEGIN
+    FAIL ~CBR_POTION_CAPABILITY: HP-safe repeat blocking needs the EE SPLPROT.2DA table.~
+  END
+  COPY_EXISTING - ~SPLPROT.2DA~ ~override~
+    COUNT_2DA_ROWS 4 rows
+    FOR (i=0; i<rows; ++i) BEGIN
+      READ_2DA_ENTRY i 1 4 stat READ_2DA_ENTRY i 2 4 value READ_2DA_ENTRY i 3 4 relation
+      PATCH_IF IS_AN_INT ~%stat%~ AND IS_AN_INT ~%value%~ AND IS_AN_INT ~%relation%~ BEGIN
+        PATCH_IF (~%stat%~ = 0x10a) AND (~%value%~ = 0) AND (~%relation%~ = 4) BEGIN SET row=i END
+      END
+    END
+    PATCH_IF row<0 BEGIN
+      SET row=rows
+      INSERT_2DA_ROW rows 4 ~CBRPQ_EA 0x10a 0 4~
+      READ_ASCII 0 content (BUFFER_LENGTH)
+      SPRINT $pq_output(~SPLPROT.2DA~) ~%content%~
+    END
+END
+
+// The state file is data for this installer, never an engine resource. Exact
+// expected output bytes permit a verified no-op and diagnose post-install edits.
+DEFINE_ACTION_FUNCTION cbr_pq_check_state INT_VAR genius_exception=0 RET present BEGIN
+  OUTER_SET present=FILE_EXISTS ~override/CBRPQST.bin~
+  ACTION_IF present BEGIN
+    COPY - ~override/CBRPQST.bin~ ~override/CBRPQST.bin~
+      PATCH_IF BUFFER_LENGTH<16 BEGIN PATCH_FAIL ~CBR_POTION_STATE: truncated state file.~ END
+      READ_ASCII 0 magic (8) READ_LONG 8 option READ_LONG 12 entries
+      PATCH_IF NOT(~%magic%~ STRING_EQUAL ~CBRPQ001~) OR option!=genius_exception BEGIN
+        PATCH_FAIL ~CBR_POTION_STATE: existing state belongs to another version or potion policy.~
+      END
+      SET cursor=16
+      FOR (i=0; i<entries; ++i) BEGIN
+        PATCH_IF cursor+16>BUFFER_LENGTH BEGIN PATCH_FAIL ~CBR_POTION_STATE: truncated entry.~ END
+        READ_ASCII cursor filename (12) NULL READ_LONG (cursor+12) length
+        SET cursor+=16
+        PATCH_IF length>BUFFER_LENGTH - cursor BEGIN PATCH_FAIL ~CBR_POTION_STATE: truncated resource bytes.~ END
+        READ_ASCII cursor expected (length) SET cursor+=length
+        INNER_ACTION BEGIN
+          ACTION_IF NOT FILE_EXISTS_IN_GAME ~%filename%~ BEGIN
+            FAIL ~CBR_POTION_STATE: owned output %filename% is missing.~
+          END
+          COPY_EXISTING - ~%filename%~ ~override~
+            READ_ASCII 0 actual (BUFFER_LENGTH)
+            PATCH_IF NOT(~%actual%~ STRING_EQUAL ~%expected%~) BEGIN
+              PATCH_FAIL ~CBR_POTION_STATE: %filename% changed after potion uniqueness; refusing to overwrite another mod's changes.~
+            END
+        END
+      END
+      PATCH_IF cursor!=BUFFER_LENGTH BEGIN PATCH_FAIL ~CBR_POTION_STATE: unexpected trailing state bytes.~ END
+    PRINT ~CBR potions: verified existing transformation; no changes required.~
+  END
+END
+
+// Recognize the existing Item Revisions pattern without cloning its identity:
+// every bonus delivery from this item reaches one shared, self-blocking SPL.
+// Native immunity interactions and its no-refresh rule are explicitly retained.
+DEFINE_ACTION_FUNCTION cbr_pq_native_barrier STR_VAR file=~~ RET barrier BEGIN
+  OUTER_SPRINT barrier ~~ OUTER_SET compatible=1
+  OUTER_SPRINT source $pq_raw(~%file%~)
+  OUTER_PATCH ~%source%~ BEGIN
+    LPF cbr_pq_v1_bounds STR_VAR context=EVAL ~%file%~
+      RET ability_offset ability_count ability_size effect_offset global_first global_count END
+    FOR (a=0; a<ability_count; ++a) BEGIN
+      READ_SHORT (ability_offset+a*ability_size+0x1e) n
+      READ_SHORT (ability_offset+a*ability_size+0x20) first_index
+      FOR (j=first_index; j<first_index+n; ++j) BEGIN
+        SET k=$pq_kind(~%file%~ ~%j%~)
+        PATCH_IF k=1 OR k=3 OR k=6 BEGIN SET compatible=0 END
+        PATCH_IF k=5 BEGIN
+          SPRINT child $pq_child(~%file%~ ~%j%~)
+          PATCH_IF ~%barrier%~ STRING_EQUAL ~~ BEGIN SPRINT barrier ~%child%~ END
+          ELSE PATCH_IF NOT(~%barrier%~ STRING_EQUAL ~%child%~) BEGIN SET compatible=0 END
+        END
+      END
+    END
+  END
+  ACTION_IF compatible AND NOT(~%barrier%~ STRING_EQUAL ~~) BEGIN
+    OUTER_SPRINT source $pq_raw(~%barrier%~)
+    OUTER_PATCH ~%barrier%~ BEGIN READ_ASCII 0 self_res (STRING_LENGTH ~%barrier%~ - 4) END
+    OUTER_PATCH ~%source%~ BEGIN
+      LPF cbr_pq_v1_bounds STR_VAR context=EVAL ~%barrier%~
+        RET ability_offset ability_count ability_size effect_offset global_first global_count END
+      PATCH_IF ability_count=0 BEGIN SET compatible=0 END
+      FOR (a=0; a<ability_count; ++a) BEGIN
+        READ_BYTE (ability_offset+a*ability_size+0xc) tgt
+        PATCH_IF tgt!=1 AND tgt!=5 BEGIN SET compatible=0 END
+        READ_SHORT (ability_offset+a*ability_size+0x1e) n
+        READ_SHORT (ability_offset+a*ability_size+0x20) first_index
+        SET guarded=0 SET last_index=first_index+n
+        PATCH_IF global_first+global_count>last_index BEGIN SET last_index=global_first+global_count END
+        FOR (j=0; j<last_index; ++j) BEGIN
+          PATCH_IF (j>=first_index AND j<first_index+n) OR
+              (j>=global_first AND j<global_first+global_count) BEGIN
+          SET e=effect_offset+j*0x30 READ_SHORT e op
+          PATCH_IF op=206 BEGIN
+            READ_ASCII (e+0x14) resource (8) NULL TO_UPPER resource
+            READ_BYTE (e+2) tgt READ_BYTE (e+0xc) timing READ_LONG (e+0xe) dur
+            READ_BYTE (e+0x12) hi READ_BYTE (e+0x13) lo READ_LONG (e+0x24) save
+            PATCH_IF timing=0 BEGIN SET dur*=15 END
+            PATCH_IF (~%resource%~ STRING_EQUAL ~%self_res%~) AND
+                (timing=0 OR timing=10) AND dur>=$pq_duration(~%barrier%~) AND
+                (tgt=1 OR tgt=2) AND hi=100 AND lo=0 AND (save BAND 31)=0 BEGIN SET guarded=1 END
+          END
+          END
+        END
+        PATCH_IF NOT guarded BEGIN SET compatible=0 END
+      END
+    END
+  END
+  ACTION_IF NOT compatible BEGIN OUTER_SPRINT barrier ~~ END
+END
+
+DEFINE_ACTION_FUNCTION cbr_install_potion_uniqueness INT_VAR genius_exception=0 BEGIN
+  ACTION_IF genius_exception!=0 AND genius_exception!=1 BEGIN FAIL ~CBR_POTION_POLICY: Genius option must be 0 or 1.~ END
+  LAF cbr_pq_check_state INT_VAR genius_exception=genius_exception RET present END
+  ACTION_IF NOT present BEGIN
+    LAF cbr_pq_index_identity_references RET cbr_pqi_indexed
+      RET_ARRAY cbr_pqi_refs cbr_pqi_immunities END
+    ACTION_CLEAR_ARRAY pq_roots ACTION_CLEAR_ARRAY pq_state ACTION_CLEAR_ARRAY pq_raw
+    ACTION_CLEAR_ARRAY pq_kind ACTION_CLEAR_ARRAY pq_child ACTION_CLEAR_ARRAY pq_referenced
+    ACTION_CLEAR_ARRAY pq_bonus ACTION_CLEAR_ARRAY pq_hp ACTION_CLEAR_ARRAY pq_duration
+    ACTION_CLEAR_ARRAY pq_native ACTION_CLEAR_ARRAY pq_flat ACTION_CLEAR_ARRAY pq_int_bonus
+    ACTION_CLEAR_ARRAY pq_pieces ACTION_CLEAR_ARRAY pq_fingerprint ACTION_CLEAR_ARRAY pq_record
+    ACTION_CLEAR_ARRAY pq_semantic
+    ACTION_CLEAR_ARRAY pq_output ACTION_CLEAR_ARRAY pq_run ACTION_CLEAR_ARRAY pq_run_family
+    ACTION_CLEAR_ARRAY pq_run_first ACTION_CLEAR_ARRAY pq_run_last ACTION_CLEAR_ARRAY pq_run_hp
+    ACTION_CLEAR_ARRAY pq_run_ticks ACTION_CLEAR_ARRAY pq_run_count ACTION_CLEAR_ARRAY pq_run_school
+    ACTION_CLEAR_ARRAY pq_run_secondary ACTION_CLEAR_ARRAY pq_family ACTION_CLEAR_ARRAY pq_cloned
+    ACTION_CLEAR_ARRAY pq_family_hp
+    ACTION_CLEAR_ARRAY pq_native_barrier ACTION_CLEAR_ARRAY pq_native_family
+    OUTER_SET $pq_control(~serial~)=0
+    COPY_EXISTING_REGEXP - GLOB ~^.+\.itm$~ ~override~
+      PATCH_IF BUFFER_LENGTH>=0x1e BEGIN
+        READ_SHORT 0x1c category
+        PATCH_IF category=9 BEGIN
+          SPRINT resource ~%SOURCE_RES%.ITM~ TO_UPPER resource
+          SET $pq_roots(~%resource%~)=1
+        END
+      END
+    ACTION_SORT_ARRAY_INDICES pq_roots LEXICOGRAPHICALLY
+    ACTION_PHP_EACH pq_roots AS file => ignored BEGIN
+      LAF cbr_pq_read_node STR_VAR file=EVAL ~%file%~ RET bonuses hp
+        RET_ARRAY pq_state pq_raw pq_eff_v1 pq_referenced pq_kind pq_child pq_bonus pq_hp
+          pq_duration pq_native pq_flat pq_int_bonus pq_record pq_pieces pq_fingerprint pq_semantic END
+      OUTER_SPRINT $pq_family(~%file%~) ~%file%~
+    END
+    // SCS publishes these as canonical potion copies. Match the explicit
+    // clone source map, not a prefix shared by arbitrary mod items.
+    ACTION_PHP_EACH pq_roots AS file => ignored BEGIN
+      ACTION_IF ~%file%~ STRING_MATCHES_REGEXP ~^DW#PTN[0-9][0-9]\.ITM$~=0 BEGIN
+        OUTER_PATCH ~%file%~ BEGIN READ_ASCII 6 number (2) END
+        OUTER_SPRINT anchor ~POTN%number%.ITM~
+        ACTION_IF VARIABLE_IS_SET $pq_roots(~%anchor%~) BEGIN OUTER_SPRINT $pq_family(~%file%~) ~%anchor%~ END
+      END ELSE ACTION_IF NOT(~%file%~ STRING_MATCHES_REGEXP ~^POTN[0-9][0-9]\.ITM$~=0) BEGIN
+        OUTER_SET matches=0 OUTER_SPRINT match ~~
+        OUTER_SPRINT signature $pq_fingerprint(~%file%~)
+        ACTION_PHP_EACH pq_roots AS anchor => ignored_anchor BEGIN
+          ACTION_IF ~%anchor%~ STRING_MATCHES_REGEXP ~^POTN[0-9][0-9]\.ITM$~=0 BEGIN
+            OUTER_SPRINT anchor_sig $pq_fingerprint(~%anchor%~)
+            ACTION_IF ~%signature%~ STRING_EQUAL ~%anchor_sig%~ BEGIN OUTER_SET matches+=1 OUTER_SPRINT match ~%anchor%~ END
+          END
+        END
+        ACTION_IF matches=1 BEGIN OUTER_SPRINT $pq_family(~%file%~) ~%match%~ END
+        ACTION_IF matches>1 AND $pq_bonus(~%file%~)>0 BEGIN FAIL ~CBR_POTION_IDENTITY: %file% matches multiple distinct canonical potion types.~ END
+      END
+    END
+    // Identical unanchored mod payloads do not prove whether two names denote
+    // copies or distinct potion types. Stop with both identities, rather than
+    // silently granting a stacking bypass or merging unrelated mod types.
+    ACTION_PHP_EACH pq_roots AS file => ignored BEGIN
+      OUTER_SPRINT family $pq_family(~%file%~)
+      ACTION_IF $pq_bonus(~%file%~)>0 AND (~%family%~ STRING_EQUAL ~%file%~) AND
+          NOT(~%file%~ STRING_MATCHES_REGEXP ~^POTN[0-9][0-9]\.ITM$~=0) BEGIN
+        OUTER_SPRINT signature $pq_fingerprint(~%file%~)
+        ACTION_PHP_EACH pq_roots AS other => ignored_other BEGIN
+          OUTER_SPRINT other_family $pq_family(~%other%~)
+          ACTION_IF (~%other%~ STRING_COMPARE ~%file%~)<0 AND
+              (~%other_family%~ STRING_EQUAL ~%other%~) AND
+              NOT(~%other%~ STRING_MATCHES_REGEXP ~^POTN[0-9][0-9]\.ITM$~=0) BEGIN
+            OUTER_SPRINT other_signature $pq_fingerprint(~%other%~)
+            ACTION_IF ~%signature%~ STRING_EQUAL ~%other_signature%~ BEGIN
+              FAIL ~CBR_POTION_IDENTITY: %file% and %other% have identical gameplay payloads without a canonical/provenance anchor; copy-versus-distinct-type identity is unresolved.~
+            END
+          END
+        END
+      END
+    END
+    ACTION_PHP_EACH pq_roots AS file => ignored BEGIN
+      OUTER_SPRINT family $pq_family(~%file%~)
+      ACTION_IF NOT VARIABLE_IS_SET $pq_family_hp(~%family%~) BEGIN OUTER_SET $pq_family_hp(~%family%~)=0 END
+      OUTER_SET $pq_family_hp(~%family%~)=$pq_family_hp(~%family%~) OR $pq_hp(~%file%~)
+      LAF cbr_pq_native_barrier STR_VAR file=EVAL ~%file%~ RET barrier END
+      OUTER_SPRINT $pq_native_barrier(~%file%~) ~%barrier%~
+      ACTION_IF NOT VARIABLE_IS_SET $pq_native_family(~%family%~) BEGIN
+        OUTER_SPRINT $pq_native_family(~%family%~) ~%barrier%~
+      END ELSE BEGIN
+        OUTER_SPRINT old_barrier $pq_native_family(~%family%~)
+        ACTION_IF NOT(~%old_barrier%~ STRING_EQUAL ~%barrier%~) BEGIN OUTER_SPRINT $pq_native_family(~%family%~) ~~ END
+      END
+    END
+    OUTER_SET has_hp=0
+    OUTER_SET has_safe=0
+    ACTION_PHP_EACH pq_roots AS file => ignored BEGIN
+      OUTER_SPRINT family $pq_family(~%file%~)
+      OUTER_SET exempt=0
+      OUTER_SPRINT native_barrier $pq_native_family(~%family%~)
+      ACTION_IF genius_exception AND (~%family%~ STRING_EQUAL ~POTN29.ITM~) BEGIN
+        OUTER_SET exempt=$pq_int_bonus(~POTN29.ITM~)
+      END
+      ACTION_IF NOT(~%native_barrier%~ STRING_EQUAL ~~) BEGIN
+        PRINT ~CBR potions: %file% retains shared native blocker %native_barrier%; repeat bonuses remain blocked, with no refresh and native immunity interactions unchanged.~
+      END ELSE ACTION_IF $pq_bonus(~%file%~)>0 AND NOT exempt BEGIN
+        OUTER_SET hp=$pq_family_hp(~%family%~)
+        OUTER_SET has_hp=has_hp OR hp
+        OUTER_SET has_safe=has_safe OR NOT hp
+        LAF cbr_pq_plan_node INT_VAR hp=hp lock_ticks=$pq_duration(~%file%~)
+          STR_VAR file=EVAL ~%file%~ family=EVAL ~%family%~ RET buffer
+          RET_ARRAY pq_output pq_cloned pq_control pq_run pq_run_family pq_run_first pq_run_last
+            pq_run_hp pq_run_ticks pq_run_count pq_run_school pq_run_secondary END
+        OUTER_SPRINT $pq_output(~%file%~) ~%buffer%~
+        ACTION_IF hp BEGIN PRINT ~CBR potions: %file% -> %family%; HP-sensitive bonuses ignore repeats until expiry.~ END
+        ELSE BEGIN PRINT ~CBR potions: %file% -> %family%; finite additive bonuses refresh.~ END
+      END ELSE ACTION_IF exempt BEGIN PRINT ~CBR potions: %file% is a proven Genius family member; stacking retained.~ END
+      ELSE ACTION_IF $pq_native(~%file%~)>0 BEGIN PRINT ~CBR potions: %file% retains native non-accumulating flat/boolean bonuses and their native expiry.~ END
+    END
+    OUTER_SET lock_row=0
+    ACTION_IF has_hp OR has_safe BEGIN LAF cbr_pq_assert_control_opcode INT_VAR opcode=146 END END
+    ACTION_IF has_hp BEGIN LAF cbr_pq_assert_control_opcode INT_VAR opcode=318 END END
+    ACTION_IF has_safe BEGIN LAF cbr_pq_assert_control_opcode INT_VAR opcode=321 END END
+    ACTION_IF has_hp BEGIN LAF cbr_pq_lock_row RET lock_row=row RET_ARRAY pq_output END END
+    // Family membership is complete before any helper is emitted. Thus a
+    // canonical item and an SCS/semantic copy replace or block one another.
+    ACTION_PHP_EACH pq_run AS helper => run BEGIN
+      OUTER_SPRINT family $pq_run_family(~%helper%~)
+      OUTER_SET hp=$pq_run_hp(~%helper%~)
+      OUTER_PATCH_SAVE data ~~ BEGIN
+        LPF cbr_pq_blank_spell INT_VAR school=$pq_run_school(~%helper%~)
+          secondary=$pq_run_secondary(~%helper%~) END
+        SET n=0
+        PATCH_IF NOT hp AND $pq_run_first(~%helper%~) BEGIN
+          PHP_EACH pq_run_family AS other => other_family BEGIN
+            PATCH_IF ~%other_family%~ STRING_EQUAL ~%family%~ BEGIN
+              LPF cbr_pq_append_effect INT_VAR opcode=321 STR_VAR resource=EVAL ~%other%~ END SET n+=1
+            END
+          END
+        END
+        SET pos=BUFFER_LENGTH INSERT_BYTES pos (STRING_LENGTH ~%run%~) WRITE_ASCIIE pos ~%run%~
+        SET n+=$pq_run_count(~%helper%~)
+        PATCH_IF hp AND $pq_run_last(~%helper%~) BEGIN
+          PHP_EACH pq_run_family AS other => other_family BEGIN
+            PATCH_IF ~%other_family%~ STRING_EQUAL ~%family%~ BEGIN
+              LPF cbr_pq_append_effect INT_VAR opcode=318 parameter2=lock_row timing=10
+                duration=$pq_run_ticks(~%helper%~) STR_VAR resource=EVAL ~%other%~ END SET n+=1
+            END
+          END
+        END
+        WRITE_SHORT (0x72+0x1e) n
+      END
+      OUTER_SPRINT $pq_output(~%helper%.SPL~) ~%data%~
+    END
+    // All validation precedes the first publication. WeiDU's ordinary backup
+    // mechanism still provides rollback should a later filesystem write fail.
+    OUTER_PATCH_SAVE state ~~ BEGIN
+      INSERT_BYTES 0 16 WRITE_ASCII 0 ~CBRPQ001~ #8 WRITE_LONG 8 genius_exception
+      SET entries=0
+      PHP_EACH pq_output AS filename => data BEGIN
+        SET pos=BUFFER_LENGTH SET length=STRING_LENGTH ~%data%~
+        INSERT_BYTES pos (16+length) WRITE_ASCIIE pos ~%filename%~ #12
+        WRITE_LONG (pos+12) length WRITE_ASCIIE (pos+16) ~%data%~ SET entries+=1
+      END
+      WRITE_LONG 12 entries
+    END
+    ACTION_PHP_EACH pq_output AS filename => data BEGIN
+      COPY ~research/prototypes/potion-uniqueness/potion_uniqueness.tpa~ ~override/%filename%~
+        DELETE_BYTES 0 BUFFER_LENGTH INSERT_BYTES 0 (STRING_LENGTH ~%data%~) WRITE_ASCIIE 0 ~%data%~
+    END
+    COPY ~research/prototypes/potion-uniqueness/potion_uniqueness.tpa~ ~override/CBRPQST.bin~
+      DELETE_BYTES 0 BUFFER_LENGTH INSERT_BYTES 0 (STRING_LENGTH ~%state%~) WRITE_ASCIIE 0 ~%state%~
+  END
+END

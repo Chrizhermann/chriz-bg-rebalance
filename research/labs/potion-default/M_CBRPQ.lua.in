@@ -1,0 +1,96 @@
+-- LOCAL DISPOSABLE PILOT. Original resources remain untouched.
+-- Loaded in includes/M_ before CInfGame; no delayed or live-console arming.
+assert(CBRPQTrialStatus==nil,"CBR potion pilot was already loaded; restart required")
+local status={phase="preflight",policy="%cbr_trial_policy%"}
+function CBRPQTrialStatus()
+    local enabled,failure=false,status.error
+    if status.lab then enabled,failure=status.lab.runtime.status() end
+    local names={}
+    for i,name in ipairs(status.names or {}) do names[i]=name end
+    return {phase=status.phase,armed=status.phase=="armed",enabled=enabled,
+        failure=failure or status.error,policy=status.policy,sources=names,binaryProfile=status.binaryProfile}
+end
+local function report(reason)
+    status.phase="failed";status.error=tostring(reason)
+    print("CBR POTION PILOT: "..tostring(reason))
+end
+local function startupPhase()
+    assert(EEex_Active==true,"CBR_POTION_TRIAL_STARTUP: EEex is not active")
+    assert(type(EEex_ReadPtr)=="function" and type(EEex_GetImageBase)=="function",
+        "CBR_POTION_TRIAL_STARTUP: native pointer readers missing")
+    local base=EEex_GetImageBase()
+    assert(type(base)=="number" and base>0 and base==math.floor(base),"CBR_POTION_TRIAL_STARTUP: invalid image base")
+    local chitin=EEex_ReadPtr(base+0x667548)
+    assert(type(chitin)=="number" and chitin>0 and chitin==math.floor(chitin),
+        "CBR_POTION_TRIAL_STARTUP: CBaldurChitin is unavailable")
+    assert(EEex_ReadPtr(chitin+0x1090)==0,
+        "CBR_POTION_TRIAL_STARTUP: CInfGame already exists; restart with the M_ loader")
+end
+local ok,why=pcall(function()
+    assert(EEex_Active==true,"CBR_POTION_TRIAL_STARTUP: EEex is not active")
+    assert(type(EEex_DoFile)=="function","CBR_POTION_TRIAL_MODULE: EEex_DoFile unavailable")
+    assert(CBRPQTrialModules==nil,"CBR_POTION_TRIAL_MODULE: registry is already occupied")
+    CBRPQTrialModules={}
+    local parts=CBRPQTrialModules
+    local modules={
+    @@MODULES@@
+    }
+    for _,entry in ipairs(modules) do
+        EEex_DoFile(entry.name) -- No return value, including protected failures.
+        assert(type(parts[entry.key])==entry.kind,
+            "CBR_POTION_TRIAL_MODULE: "..entry.name.." did not populate its module slot")
+    end
+    local profiles={
+@@BINARIES@@
+    }
+    local actual={}
+    for _,profile in ipairs(profiles) do
+        local matches=true
+        for _,entry in ipairs(profile.files) do
+            if actual[entry.name]==nil then
+                local stream,reason=io.open(entry.name,"rb")
+                assert(stream,"CBR_POTION_TRIAL_BINARY: cannot read "..entry.name..": "..tostring(reason))
+                local bytes=stream:read("*a");stream:close()
+                assert(type(bytes)=="string","CBR_POTION_TRIAL_BINARY: cannot read bytes: "..entry.name)
+                actual[entry.name]=parts.hash.sha256(bytes)
+            end
+            matches=matches and actual[entry.name]==entry.sha256
+        end
+        if matches then status.binaryProfile=profile.name end
+    end
+    assert(status.binaryProfile,"CBR_POTION_TRIAL_BINARY: changed or mixed engine/EEex files; one coherent pinned set is required")
+    startupPhase() -- Never dereference pinned native offsets before binary identity.
+    local names={}
+    for _,suffix in ipairs({"09","29","36","37","39","41"}) do
+        local canonical="POTN"..suffix
+        assert(EEex_Resource_Fetch(canonical,"ITM")~=nil,
+            "CBR_POTION_TRIAL_RESOURCE: required pilot family is missing: "..canonical)
+        names[#names+1]=canonical..".ITM"
+        local copy="DW#PTN"..suffix
+        if EEex_Resource_Fetch(copy,"ITM")~=nil then names[#names+1]=copy..".ITM" end
+    end
+    local nativeLab=parts.lab
+    local guardedParts={}
+    for key,value in pairs(parts) do guardedParts[key]=value end
+    guardedParts.lab={prepare=function(api,p,manifest,diagnostic)
+        for source,item in pairs(manifest.sources) do
+            for _,record in pairs(item.records) do
+                assert(record.nativeSourceType==nil,
+                    "CBR_POTION_TRIAL_SCOPE: "..source.." has linked owned effects; this pilot covers direct records only")
+                assert(record.opcode~=98,
+                    "CBR_POTION_TRIAL_SCOPE: "..source.." has regeneration98; this pilot has no periodic-cache adapter")
+            end
+            assert(item.calls==nil or next(item.calls)==nil,
+                "CBR_POTION_TRIAL_SCOPE: "..source.." requires linked delivery outside the direct pilot")
+        end
+        startupPhase()
+        return nativeLab.prepare(api,p,manifest,diagnostic)
+    end}
+    local lab,manifest=parts.boot.prepare(_G,guardedParts,{version=1,policy=status.policy,names=names},report)
+    startupPhase()
+    status.lab,status.manifest,status.names=lab,manifest,names
+    lab.arm()
+    status.phase="armed"
+    print("CBR POTION PILOT ARMED: "..status.policy.."; six selected families and present SCS copies only")
+end)
+if not ok then report(why);error(why,0) end

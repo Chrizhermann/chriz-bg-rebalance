@@ -67,6 +67,27 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
 
+### Potion uniqueness — local engine prototype
+
+The intended choices are unique temporary bonuses per potion type, with an
+optional exception specifically for Potions of Genius. Heroism, Power and other
+HP-sensitive packages must ignore repeat bonuses until expiry; other safe
+packages may refresh. Different potion types retain their native interactions.
+
+The private-spell draft failed native review and remains as regression evidence.
+The replacement [engine prototype](research/prototypes/potion-admission/README.md)
+retains original effects: after native admission succeeds, safe repeats update
+only the existing expiry; HP repeats are rejected before application. It has
+offline Lua and copied-instruction checks, with native acceptance still pending.
+Both prototype trees are excluded from normal installation and release packages. **330/331
+are draft identifiers, not available components.** No collection integration or
+existing-save safety is claimed. See the [diagnosis](research/2026-10-09-potion-uniqueness.md) and
+[owner handover](docs/handovers/2026-10-09-potion-uniqueness.md).
+
+A separate [six-family disposable trial](research/labs/potion-default/README.md)
+can be built locally for native acceptance. It preserves the agreed two policies,
+leaves other potions unchanged, and is not the finished all-potion component.
+
 ### Components 210–211 — SR anti-magic
 
 Requires **SR main component 0**; component 210 also requires **EEex** and launching

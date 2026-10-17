@@ -1,0 +1,47 @@
+// Read-only installer inventory for the original-effect Lua compiler.
+// This library does not install, patch resources or expose a public component.
+// Semantic validation happens against effective resource bytes before hooks arm.
+DEFINE_ACTION_FUNCTION cbr_pq_inventory
+  STR_VAR policy = ~unique~
+  RET inventory_lua inventory_count
+BEGIN
+  ACTION_IF NOT (~%policy%~ STRING_EQUAL ~unique~) AND
+      NOT (~%policy%~ STRING_EQUAL ~except_genius~) BEGIN
+    FAIL ~CBR potion inventory: unknown repeat policy.~
+  END
+  ACTION_CLEAR_ARRAY cbr_pq_inventory_names
+  COPY_EXISTING_REGEXP - GLOB ~^.+\.itm$~ ~override~
+    PATCH_IF BUFFER_LENGTH < 0x1e BEGIN
+      PATCH_FAIL ~CBR potion inventory: %SOURCE_FILE% is too short to read its item category.~
+    END
+    READ_SHORT 0x1c cbr_pq_category
+    PATCH_IF cbr_pq_category = 9 BEGIN
+      SPRINT cbr_pq_name ~%SOURCE_RES%~
+      TO_UPPER cbr_pq_name
+      SET $cbr_pq_inventory_names(~%cbr_pq_name%.ITM~) = 1
+    END
+  OUTER_SET inventory_count = 0
+  OUTER_SPRINT cbr_pq_names_lua ~~
+  ACTION_PHP_EACH cbr_pq_inventory_names AS cbr_pq_name => cbr_pq_unused BEGIN
+    // Encode every filename byte numerically: quotes, percent signs and Lua
+    // delimiters in valid resource names cannot become executable Lua source.
+    OUTER_SPRINT cbr_pq_escaped ~~
+    OUTER_INNER_PATCH ~%cbr_pq_name%~ BEGIN
+      FOR (cbr_pq_i=0; cbr_pq_i<BUFFER_LENGTH; ++cbr_pq_i) BEGIN
+        READ_BYTE cbr_pq_i cbr_pq_byte
+        PATCH_IF cbr_pq_byte < 10 BEGIN
+          SPRINT cbr_pq_digits ~00%cbr_pq_byte%~
+        END ELSE PATCH_IF cbr_pq_byte < 100 BEGIN
+          SPRINT cbr_pq_digits ~0%cbr_pq_byte%~
+        END ELSE BEGIN
+          SPRINT cbr_pq_digits ~%cbr_pq_byte%~
+        END
+        SPRINT cbr_pq_escaped ~%cbr_pq_escaped%\%cbr_pq_digits%~
+      END
+    END
+    OUTER_SPRINT cbr_pq_names_lua ~%cbr_pq_names_lua%"%cbr_pq_escaped%",~
+    OUTER_SET inventory_count += 1
+  END
+  OUTER_SPRINT inventory_lua ~return {version=1,policy="%policy%",names={%cbr_pq_names_lua%}}
+~
+END

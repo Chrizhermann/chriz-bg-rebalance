@@ -1,0 +1,165 @@
+// Research-only read-only inverse references for private potion payloads. Changing a source
+// resource changes native admission/removal semantics even if its records match.
+// These guards identify a concrete conflict; they never patch unrelated users.
+// This index covers effective ITM/SPL/EFF resources, not scripts, Lua or CRE
+// embedded effects. It is a bounded preflight, not a complete runtime proof.
+
+DEFINE_PATCH_FUNCTION cbr_pqi_record
+  INT_VAR offset=0 external=0
+  STR_VAR owner=~~
+  RET_ARRAY cbr_pqi_refs cbr_pqi_immunities
+BEGIN
+  PATCH_IF external BEGIN
+    READ_LONG (offset+0x10) pqi_op
+    READ_LONG (offset+0x20) pqi_p2
+    SET pqi_resoff=offset+0x30
+  END ELSE BEGIN
+    READ_SHORT offset pqi_op
+    READ_LONG (offset+8) pqi_p2
+    SET pqi_resoff=offset+0x14
+  END
+  PATCH_IF pqi_op=206 OR pqi_op=318 OR pqi_op=321 OR pqi_op=324 BEGIN
+    READ_ASCII pqi_resoff pqi_target (8) NULL
+    TO_UPPER pqi_target
+    PATCH_IF NOT (~%pqi_target%~ STRING_EQUAL ~~) BEGIN
+      SPRINT $cbr_pqi_refs(~%pqi_target%~ ~%pqi_op%~ ~%owner%~) ~%owner% at byte %offset% (opcode %pqi_op%)~
+    END
+  END
+  PATCH_IF pqi_op=101 BEGIN
+    SPRINT $cbr_pqi_immunities(~%pqi_p2%~ ~%owner%~) ~%owner% at byte %offset%~
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_pqi_index_v1
+  STR_VAR owner=~~
+  RET_ARRAY cbr_pqi_refs cbr_pqi_immunities
+BEGIN
+  PATCH_IF BUFFER_LENGTH<0x72 BEGIN
+    PATCH_FAIL ~CBR_POTION_IDENTITY_FORMAT: %owner% has a truncated V1 header.~
+  END
+  READ_ASCII 0 pqi_signature (8)
+  SET pqi_stride=0
+  PATCH_IF ~%pqi_signature%~ STRING_EQUAL ~ITM V1  ~ BEGIN SET pqi_stride=0x38 END
+  PATCH_IF ~%pqi_signature%~ STRING_EQUAL ~SPL V1  ~ BEGIN SET pqi_stride=0x28 END
+  PATCH_IF pqi_stride=0 BEGIN
+    PATCH_FAIL ~CBR_POTION_IDENTITY_FORMAT: cannot index %owner% (requires ITM/SPL V1).~
+  END
+  READ_LONG 0x64 pqi_ab
+  READ_SHORT 0x68 pqi_nab
+  READ_LONG 0x6a pqi_fx
+  READ_SHORT 0x6e pqi_first
+  READ_SHORT 0x70 pqi_count
+  PATCH_IF pqi_nab>0 AND (pqi_ab<0x72 OR pqi_ab>BUFFER_LENGTH OR
+      pqi_nab>(BUFFER_LENGTH - pqi_ab)/pqi_stride) BEGIN
+    PATCH_FAIL ~CBR_POTION_IDENTITY_FORMAT: %owner% has an invalid ability table.~
+  END
+  PATCH_CLEAR_ARRAY pqi_used
+  FOR (pqi_i=0; pqi_i<pqi_count; ++pqi_i) BEGIN
+    SET pqi_idx=pqi_first+pqi_i
+    SET $pqi_used(~%pqi_idx%~)=1
+  END
+  FOR (pqi_h=0; pqi_h<pqi_nab; ++pqi_h) BEGIN
+    READ_SHORT (pqi_ab+pqi_h*pqi_stride+0x1e) pqi_count
+    READ_SHORT (pqi_ab+pqi_h*pqi_stride+0x20) pqi_first
+    FOR (pqi_i=0; pqi_i<pqi_count; ++pqi_i) BEGIN
+      SET pqi_idx=pqi_first+pqi_i
+      SET $pqi_used(~%pqi_idx%~)=1
+    END
+  END
+  PATCH_PHP_EACH pqi_used AS pqi_idx => pqi_unused BEGIN
+    SET pqi_at=pqi_fx+pqi_idx*0x30
+    PATCH_IF pqi_fx<0x72 OR pqi_fx>BUFFER_LENGTH OR
+        pqi_idx> (BUFFER_LENGTH - pqi_fx)/0x30 - 1 OR
+        (pqi_nab>0 AND pqi_at<pqi_ab+pqi_nab*pqi_stride AND pqi_at+0x30>pqi_ab) BEGIN
+      PATCH_FAIL ~CBR_POTION_IDENTITY_FORMAT: %owner% has an invalid referenced effect %pqi_idx%.~
+    END
+    LPF cbr_pqi_record INT_VAR offset=pqi_at STR_VAR owner=EVAL ~%owner%~
+      RET_ARRAY cbr_pqi_refs cbr_pqi_immunities END
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_pq_index_identity_references
+  RET cbr_pqi_indexed
+  RET_ARRAY cbr_pqi_refs cbr_pqi_immunities
+BEGIN
+  ACTION_CLEAR_ARRAY cbr_pqi_refs
+  ACTION_CLEAR_ARRAY cbr_pqi_immunities
+  COPY_EXISTING_REGEXP - GLOB ~^.+\.itm$~ ~override~
+    SPRINT pqi_owner ~%SOURCE_FILE%~
+    TO_UPPER pqi_owner
+    LPF cbr_pqi_index_v1 STR_VAR owner=EVAL ~%pqi_owner%~
+      RET_ARRAY cbr_pqi_refs cbr_pqi_immunities END
+  IF_EXISTS
+  COPY_EXISTING_REGEXP - GLOB ~^.+\.spl$~ ~override~
+    SPRINT pqi_owner ~%SOURCE_FILE%~
+    TO_UPPER pqi_owner
+    LPF cbr_pqi_index_v1 STR_VAR owner=EVAL ~%pqi_owner%~
+      RET_ARRAY cbr_pqi_refs cbr_pqi_immunities END
+  IF_EXISTS
+  COPY_EXISTING_REGEXP - GLOB ~^.+\.eff$~ ~override~
+    SPRINT pqi_owner ~%SOURCE_FILE%~
+    TO_UPPER pqi_owner
+    PATCH_IF BUFFER_LENGTH<0x110 BEGIN
+      PATCH_FAIL ~CBR_POTION_IDENTITY_FORMAT: %pqi_owner% has a truncated EFF V2 header.~
+    END
+    READ_ASCII 0 pqi_signature (8)
+    PATCH_IF NOT (~%pqi_signature%~ STRING_EQUAL ~EFF V2.0~) BEGIN
+      PATCH_FAIL ~CBR_POTION_IDENTITY_FORMAT: cannot index %pqi_owner% (requires EFF V2).~
+    END
+    LPF cbr_pqi_record INT_VAR external=1 STR_VAR owner=EVAL ~%pqi_owner%~
+      RET_ARRAY cbr_pqi_refs cbr_pqi_immunities END
+  IF_EXISTS
+  OUTER_SET cbr_pqi_indexed=1
+END
+
+DEFINE_ACTION_FUNCTION cbr_pq_assert_identity
+  INT_VAR allow_self_remove=0
+  STR_VAR file=~~ family=~~
+BEGIN
+  ACTION_IF NOT VARIABLE_IS_SET cbr_pqi_indexed BEGIN
+    FAIL ~CBR_POTION_INTERNAL: identity preflight called before building its index.~
+  END
+  OUTER_SPRINT pqi_original ~%file%~
+  ACTION_TO_UPPER pqi_original
+  OUTER_SPRINT pqi_base ~%pqi_original%~
+  OUTER_PATCH_SAVE pqi_base ~%pqi_base%~ BEGIN
+    REPLACE_TEXTUALLY ~\.\(ITM\|SPL\|EFF\)$~ ~~
+  END
+  OUTER_SET pqi_item=(~%pqi_original%~ STRING_MATCHES_REGEXP ~^.+\.ITM$~)=0
+  ACTION_PHP_EACH cbr_pqi_refs AS pqi_key => pqi_evidence BEGIN
+    OUTER_SET pqi_op=pqi_key_1
+    OUTER_SPRINT pqi_owner ~%pqi_key_2%~
+    ACTION_IF ~%pqi_key_0%~ STRING_EQUAL ~%pqi_base%~ BEGIN
+      OUTER_SET pqi_adapted_remove=allow_self_remove AND pqi_op=321 AND
+        (~%pqi_owner%~ STRING_EQUAL ~%pqi_original%~)
+      // A converted SCS/member item still executes its original removal and
+      // adds cleanup for all owned family helpers. Only that known item path
+      // adapts the reference; unrelated source removers remain a conflict.
+      ACTION_IF allow_self_remove AND pqi_op=321 AND pqi_item AND
+          NOT (~%family%~ STRING_EQUAL ~~) AND
+          VARIABLE_IS_SET $pq_family(~%pqi_owner%~) BEGIN
+        ACTION_IF $pq_family(~%pqi_owner%~) STRING_EQUAL ~%family%~ BEGIN
+          OUTER_SET pqi_adapted_remove=1
+        END
+      END
+      // Item 318/324 checks still occur at the original outer item record;
+      // op206 only admits spell sources. Source-specific removal is different.
+      ACTION_IF (pqi_op=321 OR NOT pqi_item) AND NOT pqi_adapted_remove BEGIN
+        FAIL ~CBR_POTION_IDENTITY: moving %pqi_original% changes a native source reference: %pqi_evidence%. Preserve that relationship with an explicit adapter before changing this potion.~
+      END
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_pq_assert_control_opcode
+  INT_VAR opcode=0
+BEGIN
+  ACTION_IF NOT VARIABLE_IS_SET cbr_pqi_indexed BEGIN
+    FAIL ~CBR_POTION_INTERNAL: control preflight called before building its index.~
+  END
+  ACTION_PHP_EACH cbr_pqi_immunities AS pqi_key => pqi_evidence BEGIN
+    ACTION_IF pqi_key_0=opcode BEGIN
+      FAIL ~CBR_POTION_ADMISSION: a required new opcode %opcode% can be blocked by %pqi_evidence%. A private wrapper would change native potion admission on affected actors; an explicit adapter is required.~
+    END
+  END
+END

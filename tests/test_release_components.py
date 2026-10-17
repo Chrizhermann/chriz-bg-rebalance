@@ -190,3 +190,24 @@ class ReleaseComponentsTests(unittest.TestCase):
         self.assertTrue((g.override / "CBRBIH.SPL").exists())
         self.assertEqual(expected_form(resources["DVGASFRM.ITM"]),
                          g.snapshot()["DVGASFRM.ITM"])
+
+    def test_full_archive_excludes_both_potion_research_prototypes(self):
+        from tools.package_sr_antimagic import build
+
+        holder = tempfile.TemporaryDirectory(prefix="cbr-potion-package-")
+        self.addCleanup(holder.cleanup)
+        root = Path(holder.name)
+        full = next(p for p in build(root / "archives")
+                    if p.name.startswith("chriz-bg-rebalance-"))
+        for library in ("potion_uniqueness.tpa", "potion_identity.tpa"):
+            self.assertTrue((ROOT / "research/prototypes/potion-uniqueness" / library).is_file())
+        self.assertTrue((ROOT / "research/prototypes/potion-admission/CBRPQLab.lua").is_file())
+        with zipfile.ZipFile(full) as bundle:
+            names = bundle.namelist()
+            self.assertFalse(any("potion_uniqueness" in name or "potion_identity" in name
+                                 or "CBRPQ" in name or name.startswith("research/") for name in names))
+            setup = bundle.read("setup-chriz-bg-rebalance.tp2").decode("utf-8")
+            ids = [int(x) for x in re.findall(r"DESIGNATED\s+(\d+)", setup)]
+            self.assertNotIn(330, ids)
+            self.assertNotIn(331, ids)
+            self.assertNotIn("cbr_install_potion_uniqueness", setup)

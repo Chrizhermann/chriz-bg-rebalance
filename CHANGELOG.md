@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — isolated potion admission prototype
+
+- Record the approved same-potion policy, resource inventory and native-engine
+  counterexamples. The private-spell draft changes dispel level/duration scaling
+  and has HP-guard defects; it is not an available gameplay component.
+- Preserve the rejected draft and failing reproductions under research only.
+  Normal installers and packages exclude it; 330/331 remain draft identifiers.
+- Implement a separate, explicit EEex lab prototype that retains original item
+  effects and changes only an existing safe bonus's expiry after native checks.
+  Track native item-use messages and reject HP repeats without reapplication.
+  Offline policy, lifetime, hook-generation and copied-instruction checks are
+  separate from the pending native acceptance and broader potion coverage.
+- Add read-only payload auditing and disposable fixture checks. Resource-model
+  success does not establish native effect delivery or save/load correctness.
+- Record Wish/SR Improved Haste's actual party-result path as a design check only.
+  No Wish component, collection default or release is included.
+
 ## v0.8.1 — 2026-10-07
 
 - Add EET elemental arrows (130): acid deals 1d3; cold and fire deal 1d2.
