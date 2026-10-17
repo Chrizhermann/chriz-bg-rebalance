@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+- Bracers of Blinding Strike (220) now keep other mods' changes to the bracers
+  and to SR's Improved Haste: equipped bonuses, extra abilities, reordered or
+  extra effects, level-scaled, reordered or longer SR Improved Haste and casting
+  features. The SR copy lasts as long as the bracers' own activation (20 seconds
+  on the stock item) and keeps the activation's chance, saving throw and power.
+  Changes a self-only copy cannot represent stop the installation with a
+  message instead of producing a different spell.
+- Elemental arrows (130) change only each arrow's bow-fired hit and find its
+  elemental damage by what it does. Other damage types, helper effects, other
+  abilities such as activations, reordered abilities and effects from other
+  mods are kept. An arrow without that damage on its bow-fired hit is left
+  unchanged with a warning; two such damage effects in one ability stop the
+  installation. If another ability or the equipped effects share that damage
+  record, the bow-fired hit gets its own copy, so the other ability keeps its
+  damage. Descriptions change only the clauses for that damage, its save and
+  the removed bonuses, in the male and female text; other riders and claims
+  keep their wording.
+- Emotion, Courage / Emotion, Hope (301) accept other casting times, ranges,
+  schools and several level headers, also headers that share or overlap effect
+  records. Their descriptions state the spell's own school, level, range and
+  casting time; unchanged spells keep the old text.
+- Tempus weapon training (400) completes every level header that carries
+  Artisan's axe grant, wherever its effects sit, and keeps longsword or
+  crossbow grants that are already there.
+- Holy Power (401–403) keeps the first five Holy Power grants in any row of the
+  kit table, so Artisan's Kitpack and other table layouts work; other grants in
+  the table stay as they are.
+- Chaos of Battle (404) builds its tides from any number of donor tiers and
+  keeps other mods' visuals, sounds and markers; each tier's strength follows
+  its minimum level as before. A new tide clears the previous one from every
+  recipient, also when the donor has other self-removers.
+- Combat cloud forms (320) change only resistances of 100% or more, to 75%.
+  Lower values from other mods, including vulnerabilities, stay as they are;
+  forms without regeneration or with fewer resistances are supported. The
+  English genie description changes only when the worn genie form ends up at
+  75% on all its resistances, with poison immunity; otherwise it is kept with a
+  warning.
+
 ## v0.8.3 — 2026-10-14
 
 - Add potion uniqueness (330, or 331 where Potions of Genius still stack): each

@@ -1,6 +1,19 @@
 // Component 320: native, resource-local combat cloud resistance.
 // No animation-wide sweep, scripts, normal-form CREs, or death escapes are edited.
 // Flat-set 75 is intentional: this is the cloud's resistance, not a runtime floor.
+//
+// Owned values (2026-10-17): immunity, i.e. a resistance of 100 or more, which
+// becomes 75. A lower value is another mod's or an earlier decision and stays
+// as it is, so a weaker cloud is never strengthened and no cap is imposed.
+// Values are read signed: a negative resistance is a vulnerability.
+
+DEFINE_PATCH_FUNCTION cbr_cloud_resistance
+  INT_VAR value = 0
+  RET new_value
+BEGIN
+  SET new_value = value
+  PATCH_IF value >= 100 BEGIN SET new_value = 75 END
+END
 
 DEFINE_PATCH_MACRO cbr_cloud_layout
 BEGIN
@@ -23,10 +36,13 @@ BEGIN
   READ_SHORT 0x70 cf_count
   PATCH_IF cf_first + cf_count > cf_total BEGIN PATCH_FAIL ~Cloud forms: invalid global effects.~ END
   // Validate every slice, then visit only referenced effects (never trailing data).
+  // cf_global marks the global slice: an item's equipped effects.
   PATCH_CLEAR_ARRAY cf_used
+  FOR (cf_i = 0; cf_i < cf_total; ++cf_i) BEGIN SET $cf_global(~%cf_i%~) = 0 END
   FOR (cf_i = 0; cf_i < cf_count; ++cf_i) BEGIN
     SET cf_index = cf_first + cf_i
     SET $cf_used(~%cf_index%~) = 1
+    SET $cf_global(~%cf_index%~) = 1
   END
   FOR (cf_h = 0; cf_h < cf_nab; ++cf_h) BEGIN
     READ_SHORT (cf_ab + cf_h * cf_kind + 0x1e) cf_count
@@ -39,44 +55,55 @@ BEGIN
   END
 END
 
+// immunities: owned records at 100 or more. claims_75 = 1 when the changed
+// item's equipped records match the new genie text: every resistance record
+// is 75, each of the nine channels the stock genie form sets has one (acid,
+// cold, electricity, fire, magic damage, the four physical types) and poison
+// immunity remains. An item's activations and other abilities apply only when
+// used, so they never count for the claim; a spell never claims.
 DEFINE_PATCH_FUNCTION cbr_cloud_patch_effects
   INT_VAR apply = 0
+  RET immunities claims_75
 BEGIN
   LPM cbr_cloud_layout
-  SET cf_regen = 0
   SET cf_form = 0
-  SET cf_physical = 0
-  PATCH_CLEAR_ARRAY cf_phys_seen
+  SET cf_poison_immunity = 0
+  SET cf_poison_resistance = 0
+  SET immunities = 0
+  SET cf_all_75 = 1
+  PATCH_CLEAR_ARRAY cf_channel_seen
   PATCH_PHP_EACH cf_used AS cf_index => cf_used_value BEGIN
     SET cf_at = cf_fx + cf_index * 48
     READ_SHORT cf_at cf_op
-    READ_LONG (cf_at + 4) cf_p1
+    READ_SLONG (cf_at + 4) cf_p1
     READ_LONG (cf_at + 8) cf_p2
     READ_BYTE (cf_at + 2) cf_target
     READ_BYTE (cf_at + 12) cf_timing
     READ_LONG (cf_at + 14) cf_duration
     READ_ASCII (cf_at + 20) cf_res (8) NULL
-    PATCH_IF cf_op = 98 BEGIN SET cf_regen += 1 END
+    SET cf_claimed = (cf_kind = 56 AND $cf_global(~%cf_index%~) = 1)
     PATCH_IF ((cf_op = 53 AND cf_p1 = 0x7f39 AND cf_p2 = 0)
       OR (cf_op = 135 AND cf_p2 = 1 AND ~%cf_res%~ STRING_EQUAL_CASE ~GASFORM4~)) BEGIN
       SET cf_form += 1
     END
+    PATCH_IF cf_claimed AND cf_op = 101 AND cf_p2 = 25 BEGIN SET cf_poison_immunity = 1 END
+    PATCH_IF cf_claimed AND cf_op = 173 BEGIN SET cf_poison_resistance += cf_p1 END
     PATCH_IF (cf_op = 208 OR cf_op = 120 OR (cf_op = 101 AND cf_p2 = 12)) BEGIN
-      PATCH_FAIL ~Cloud forms: unreviewed damage/weapon/minimum-HP immunity; resource left unchanged.~
+      PATCH_FAIL ~Cloud forms: %SOURCE_FILE% has a further damage, weapon or minimum-HP immunity (opcode %cf_op%) that would keep the cloud invulnerable; nothing was installed.~
     END
     PATCH_IF ((cf_op >= 27 AND cf_op <= 31) OR (cf_op >= 84 AND cf_op <= 89)) BEGIN
-      PATCH_IF (cf_p2 != 1 OR cf_p1 > 100 OR cf_target != 1
+      // Only a set value on the cloud itself, for as long as the form lasts,
+      // is the cloud's own resistance; another delivery cannot be classified.
+      PATCH_IF (cf_p2 != 1 OR cf_target != 1
         OR (cf_kind = 56 AND cf_timing != 2)
         OR (cf_kind = 40 AND (cf_timing != 0 OR cf_duration = 0))) BEGIN
-        PATCH_FAIL ~Cloud forms: unsupported resistance effect; resource left unchanged.~
+        PATCH_FAIL ~Cloud forms: %SOURCE_FILE% opcode %cf_op% is not a set resistance on the cloud for the form's duration (mode %cf_p2%, target %cf_target%, timing %cf_timing%); nothing was installed.~
       END
-      PATCH_IF (cf_op >= 86 AND cf_op <= 89) BEGIN
-        PATCH_IF (cf_p1 != 100 AND cf_p1 != 75) BEGIN
-          PATCH_FAIL ~Cloud forms: unreviewed physical resistance layout.~
-        END
-        SET $cf_phys_seen(~%cf_op%~) = 1
-      END
-      PATCH_IF apply AND cf_p1 = 100 BEGIN WRITE_LONG (cf_at + 4) 75 END
+      LPF cbr_cloud_resistance INT_VAR value = cf_p1 RET cf_new = new_value END
+      PATCH_IF cf_new != cf_p1 BEGIN SET immunities += 1 END
+      PATCH_IF cf_claimed AND cf_new != 75 BEGIN SET cf_all_75 = 0 END
+      PATCH_IF cf_claimed BEGIN SET $cf_channel_seen(~%cf_op%~) = 1 END
+      PATCH_IF apply AND cf_new != cf_p1 BEGIN WRITE_LONG (cf_at + 4) cf_new END
     END
     PATCH_IF cf_op = 166 BEGIN
       // Neutral additive zero removes only the cloud's MR100 setter, preserving
@@ -84,13 +111,24 @@ BEGIN
       PATCH_IF (cf_p1 = 100 AND cf_p2 = 1) BEGIN
         PATCH_IF apply BEGIN WRITE_LONG (cf_at + 4) 0 WRITE_LONG (cf_at + 8) 0 END
       END ELSE PATCH_IF cf_p1 != 0 BEGIN
-        PATCH_FAIL ~Cloud forms: unreviewed magic resistance bonus.~
+        PATCH_FAIL ~Cloud forms: %SOURCE_FILE% grants a magic resistance bonus (%cf_p1%, mode %cf_p2%) outside the reviewed design, where the combat form has no magic resistance; nothing was installed.~
       END
     END
   END
-  PATCH_PHP_EACH cf_phys_seen AS cf_index => cf_used_value BEGIN SET cf_physical += 1 END
-  PATCH_IF (cf_regen = 0 OR cf_form = 0 OR cf_physical != 4) BEGIN
-    PATCH_FAIL ~Cloud forms: expected combat transformation, regeneration and four physical resistances.~
+  // The gas form is what makes these resistances the combat cloud's.
+  PATCH_IF cf_form = 0 BEGIN
+    PATCH_FAIL ~Cloud forms: %SOURCE_FILE% no longer turns its user into the gas cloud (no opcode 53 gas animation or opcode 135 GASFORM4 polymorph), so its resistances cannot be attributed to a combat cloud; nothing was installed.~
+  END
+  SET cf_channels = 0
+  PATCH_FOR_EACH cf_channel IN 27 28 29 30 31 86 87 88 89 BEGIN
+    PATCH_IF VARIABLE_IS_SET $cf_channel_seen(~%cf_channel%~) BEGIN SET cf_channels += 1 END
+  END
+  // Opcode 173 has no mode and adds up on EE 2.5 and later: only the total of
+  // the form's records says whether it is immune to poison.
+  SET cf_poison = (cf_poison_immunity OR cf_poison_resistance >= 100)
+  SET claims_75 = (cf_kind = 56 AND cf_all_75 AND cf_channels = 9 AND cf_poison)
+  PATCH_IF apply AND immunities = 0 BEGIN
+    PATCH_PRINT ~Cloud forms: %SOURCE_FILE% has no resistance at immunity level (100% or more); it is left as it is.~
   END
 END
 
@@ -102,10 +140,6 @@ BEGIN
   READ_LONG 0x2c0 cf_items
   PATCH_IF (NOT (~%cf_sig%~ STRING_EQUAL ~CRE V1.0~) OR cf_animation != 0x7f39 OR cf_items != 0) BEGIN
     PATCH_FAIL ~Cloud forms: unsupported GASFORM4 donor.~
-  END
-  FOR (cf_at = 0x59; cf_at <= 0x63; ++cf_at) BEGIN
-    READ_BYTE cf_at cf_resist
-    PATCH_IF cf_resist != 100 BEGIN PATCH_FAIL ~Cloud forms: unreviewed mist donor resistance.~ END
   END
   READ_BYTE 0x33 cf_effver
   READ_LONG 0x2c4 cf_effoff
@@ -129,7 +163,14 @@ BEGIN
       PATCH_FAIL ~Cloud forms: mist donor has additional unreviewed defenses.~
     END
   END
-  FOR (cf_at = 0x59; cf_at <= 0x63; ++cf_at) BEGIN WRITE_BYTE cf_at 75 END
+  // CRE V1.0 resistance bytes 0x59-0x63 (0x5d is magic resistance); signed.
+  FOR (cf_at = 0x59; cf_at <= 0x63; ++cf_at) BEGIN
+    PATCH_IF cf_at != 0x5d BEGIN
+      READ_SBYTE cf_at cf_resist
+      LPF cbr_cloud_resistance INT_VAR value = cf_resist RET cf_new = new_value END
+      PATCH_IF cf_new != cf_resist BEGIN WRITE_BYTE cf_at cf_new END
+    END
+  END
   // Mode-0 polymorph imports donor MR. The combat form has zero MR, not a
   // second 75% chance to reject spells; native MR returns with the normal form.
   WRITE_BYTE 0x5d 0
@@ -167,7 +208,7 @@ BEGIN
 END
 
 DEFINE_ACTION_FUNCTION cbr_cloud_descriptions
-  INT_VAR apply = 0
+  INT_VAR apply = 0 genie_claims_75 = 0
 BEGIN
   // Only the SR wording associated with the patched shared genie item is owned.
   // Preflight BOTH descriptions before allocating either TLK entry. WeiDU can
@@ -189,7 +230,11 @@ BEGIN
             INNER_PATCH_SAVE cf_new_description ~%cf_description%~ BEGIN
               REPLACE_TEXTUALLY ~immune to almost all forms of damage~ ~75% resistant to physical, elemental and magic damage while retaining poison immunity~
             END
-            PATCH_IF apply AND NOT (~%cf_description%~ STRING_EQUAL ~%cf_new_description%~) BEGIN
+            // The new text states 75% for every damage type; it is only true
+            // when the changed genie form has exactly that.
+            PATCH_IF apply AND NOT (~%cf_description%~ STRING_EQUAL ~%cf_new_description%~) AND NOT genie_claims_75 BEGIN
+              PATCH_WARN ~Cloud forms: %cf_symbol% description unchanged: the changed DVGASFRM.ITM is not exactly 75% resistant to every damage type with poison immunity, as the new text would say.~
+            END ELSE PATCH_IF apply AND NOT (~%cf_description%~ STRING_EQUAL ~%cf_new_description%~) BEGIN
               WRITE_LONG 0x50 (RESOLVE_STR_REF (~%cf_new_description%~))
             END ELSE PATCH_IF apply AND NOT (~%cf_description%~ STRING_CONTAINS_REGEXP ~75% resistant to physical~ = 0) BEGIN
               PATCH_WARN ~Cloud forms: %cf_symbol% has different or untranslated text; description unchanged.~
@@ -204,11 +249,17 @@ END
 DEFINE_ACTION_FUNCTION cbr_install_cloud_forms
 BEGIN
   OUTER_SET cf_found = 0
+  OUTER_SET cf_genie_claims_75 = 0
   // First validate all present packages without publishing anything.
   ACTION_FOR_EACH cf_file IN ~DVGASFRM.ITM~ ~OHBEGASF.SPL~ ~BDGASFOR.SPL~ ~OHGASFRM.SPL~ ~FINBODGF.ITM~ BEGIN
     ACTION_IF FILE_EXISTS_IN_GAME ~%cf_file%~ BEGIN
       OUTER_SET cf_found += 1
-      COPY_EXISTING ~%cf_file%~ ~override~ LPF cbr_cloud_patch_effects END BUT_ONLY
+      COPY_EXISTING ~%cf_file%~ ~override~
+        LPF cbr_cloud_patch_effects RET cf_file_claims_75 = claims_75 END
+        PATCH_IF (~%cf_file%~ STRING_EQUAL_CASE ~DVGASFRM.ITM~) BEGIN
+          SET cf_genie_claims_75 = cf_file_claims_75
+        END
+      BUT_ONLY
     END
   END
   ACTION_IF FILE_EXISTS_IN_GAME ~DW#VMGAS.SPL~ BEGIN
@@ -229,7 +280,7 @@ BEGIN
     END
   END
   ACTION_IF cf_found = 0 BEGIN FAIL ~No supported combat cloud form is installed.~ END
-  LAF cbr_cloud_descriptions END
+  LAF cbr_cloud_descriptions INT_VAR genie_claims_75 = cf_genie_claims_75 END
 
   ACTION_FOR_EACH cf_file IN ~DVGASFRM.ITM~ ~OHBEGASF.SPL~ ~BDGASFOR.SPL~ ~OHGASFRM.SPL~ ~FINBODGF.ITM~ BEGIN
     ACTION_IF FILE_EXISTS_IN_GAME ~%cf_file%~ BEGIN
@@ -240,6 +291,6 @@ BEGIN
     COPY_EXISTING ~GASFORM4.CRE~ ~override/CBRGAS75.CRE~ LPF cbr_cloud_donor END
     COPY_EXISTING ~DW#VMGAS.SPL~ ~override~ LPF cbr_cloud_vampire_spell INT_VAR apply = 1 END BUT_ONLY
   END
-  LAF cbr_cloud_descriptions INT_VAR apply = 1 END
-  PRINT ~Combat cloud forms: invulnerability replaced with 75% damage resistance. Poison and scripted escape protections are unchanged.~
+  LAF cbr_cloud_descriptions INT_VAR apply = 1 genie_claims_75 = cf_genie_claims_75 END
+  PRINT ~Combat cloud forms: resistances of 100% or more are now 75% and the form's own magic resistance is removed. Lower values, poison and scripted escape protections are unchanged.~
 END
