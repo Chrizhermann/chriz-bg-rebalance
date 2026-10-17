@@ -86,7 +86,7 @@ owned headers is patched in place, since every reader is meant to change.
 Each owned header sharing with a foreign slice gets its own copy, because
 owned slices may differ in extent. A rerun finds the owned header on its
 private, already-patched copy and is byte-exact. Appending needs the effect
-table to end the file (the normal ITM layout) and the copies to fit the
-16-bit first index; otherwise that item is left unchanged with a warning
+table to end the file (the normal ITM layout) and each copy's first index to
+fit its 16-bit field; otherwise that item is left unchanged with a warning
 naming the obstacle. Evidence: `test_shared_package_records_are_copied_on_write`
 and `test_shared_records_without_a_trailing_effect_table_warn_and_keep_the_item`.

@@ -680,18 +680,40 @@ class ElementalArrowVariantTests(unittest.TestCase):
             self.assertEqual(g.original["AROW08.ITM"], after["AROW08.ITM"])
             self.reference_others_patched(g, after, skip=("AROW08",))
             self.uninstall_restores(g)
-        with self.subTest("copies would pass the 16-bit first-effect index"):
-            blob = point(arrow([bow, activation], 5, 6), 1, 0, 1)
-            effects, = struct.unpack_from("<I", blob, 0x6a)
-            blob += bytes(48 * (0xffff - (len(blob) - effects) // 48))  # unreferenced
-            resources = arrow_resources()
-            resources["AROW08.ITM"] = blob
-            g = self.game(resources)
-            self.install(g, warnings=(
-                "cannot be separated because the copies would exceed the 16-bit first-effect index",
-                "this item was left unchanged"))
-            self.assertEqual(g.original["AROW08.ITM"], g.snapshot()["AROW08.ITM"])
-            self.uninstall_restores(g)
+        # Only each copy's first index is a 16-bit field. Copies are appended in
+        # header order: (label, AROW08 before padding, records after padding,
+        # copies, whether the last copy still starts within 16 bits).
+        bare_bow = header((), hit=2, dmg=2)
+        one = point(arrow([bow, activation], 5, 6), 1, 0, 1)
+        two = point(point(arrow([bow, bare_bow, activation], 5, 6), 1, 0, 2), 2, 0, 1)
+        for label, blob, records, copies, fits in (
+            ("the copy starts at index 0xffff", one, 0xffff, [(0, 0)], True),
+            ("the copy would start at index 0x10000", one, 0x10000, [(0, 0)], False),
+            ("the second copy starts at index 0xffff", two, 0xfffd, [(0, 0), (1, 0)], True),
+            ("the second copy would start at index 0x10000", two, 0xfffe, [(0, 0), (1, 0)],
+             False),
+        ):
+            with self.subTest(label):
+                effects, = struct.unpack_from("<I", blob, 0x6a)
+                blob += bytes(48 * (records - (len(blob) - effects) // 48))  # unreferenced
+                resources = arrow_resources()
+                resources["AROW08.ITM"] = blob
+                g = self.game(resources)
+                if fits:
+                    self.install(g)
+                    old, new = g.original["AROW08.ITM"], g.snapshot()["AROW08.ITM"]
+                    bows = sorted(h for h, _ in copies)
+                    self.assertEqual(copied(old, new, 2, copies, (), bows), new)
+                    last = offsets(new, copies[-1][0])
+                    self.assertEqual(records + 2 * (len(copies) - 1),
+                                     struct.unpack_from("<H", new, last + 0x20)[0])
+                else:
+                    self.install(g, warnings=(
+                        "cannot be separated because a copy would start beyond the 16-bit "
+                        "first-effect index",
+                        "this item was left unchanged"))
+                    self.assertEqual(g.original["AROW08.ITM"], g.snapshot()["AROW08.ITM"])
+                self.uninstall_restores(g)
         with self.subTest("nothing shared: patched in place despite the trailer"):
             resources = arrow_resources()
             resources["AROW08.ITM"] = unshared

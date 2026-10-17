@@ -311,7 +311,11 @@ BEGIN
     // package read by a foreign slice can get a private copy.
     SET cea_separable = 1
     PATCH_IF cea_packages > 0 AND apply BEGIN
+        // Copies are appended in header order. Only each copy's first index
+        // is a 16-bit field (records inside a slice may lie beyond it, as in
+        // any ITM), so the last copy's first index decides.
         SET cea_copy_records = 0
+        SET cea_last_copy_at = 0
         SET cea_first_shared = 0 - 1
         FOR (cea_i=0; cea_i<cea_ability_count; cea_i+=1) BEGIN
             SET cea_a = cea_ability_offset + cea_i * 0x38
@@ -328,6 +332,7 @@ BEGIN
                 END
                 PATCH_IF cea_shared BEGIN
                     READ_SHORT (cea_a+0x1e) cea_count
+                    SET cea_last_copy_at = cea_copy_records
                     SET cea_copy_records += cea_count
                     PATCH_IF cea_first_shared < 0 BEGIN SET cea_first_shared = cea_i END
                 END
@@ -337,8 +342,8 @@ BEGIN
             SPRINT cea_obstacle ~~
             PATCH_IF ((BUFFER_LENGTH - cea_effect_offset) MODULO 0x30) != 0 BEGIN
                 SPRINT cea_obstacle ~the effect table is not at the end of the file~
-            END ELSE PATCH_IF (BUFFER_LENGTH - cea_effect_offset) / 0x30 + cea_copy_records > 0xffff BEGIN
-                SPRINT cea_obstacle ~the copies would exceed the 16-bit first-effect index~
+            END ELSE PATCH_IF (BUFFER_LENGTH - cea_effect_offset) / 0x30 + cea_last_copy_at > 0xffff BEGIN
+                SPRINT cea_obstacle ~a copy would start beyond the 16-bit first-effect index~
             END
             PATCH_IF NOT (~%cea_obstacle%~ STRING_EQUAL ~~) BEGIN
                 SET cea_separable = 0
