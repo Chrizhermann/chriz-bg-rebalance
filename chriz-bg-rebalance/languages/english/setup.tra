@@ -205,6 +205,9 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9477 = ~Bard defaults require KITLIST.2DA, CLASTEXT.2DA and KIT.IDS.~
 
 @310 = ~Party physical resistance: half effectiveness above 80%, maximum 90% (EEex)~
+@320 = ~Combat cloud forms: 75% damage resistance instead of invulnerability~
+@9320 = ~Combat cloud forms supports BG2:EE / EET only.~
+@9321 = ~No supported combat cloud form is installed.~
 @9315 = ~Party physical resistance supports BG2:EE / EET only.~
 @9316 = ~Party physical resistance requires EEex. Install EEex before this component.~
 @9317 = ~Party physical resistance requires SPLSTATE.IDS to reserve its rebuild marker.~

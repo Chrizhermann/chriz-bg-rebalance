@@ -51,9 +51,30 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 301 | Cross-cutting audits | Emotion, Courage / Emotion, Hope: mutually exclusive beneficial emotions | ✅ implemented and automated-verified; delivery/mutual exclusion live-verified, status-entry retest pending |
 | 302 | Cross-cutting audits | Flail of the Ages: saves against Slow; +5 allows Haste | Isolated WeiDU checks passed; in-game check pending |
 | 310 | Cross-cutting audits | Party physical resistance: half effectiveness above 80%, maximum 90% | Automated checks passed; not released or live-tested |
+| 320 | Cross-cutting audits | Combat clouds: 75% damage resistance instead of invulnerability | 27 WeiDU tests passed; private stream adapter applied; unreleased, combat untested |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
+
+### Component 320 — Damageable combat clouds (unreleased)
+
+Combat cloud forms take damage: their 100% damage resistances become **75%**.
+Regeneration, duration, poison immunity and AI stay unchanged. Install after
+SCS, Spell Revisions, Ascension and other cloud-form changes. No EEex required.
+
+Supports the SR/SCS genie form, the known EE/SoD combat forms, Ascension Bodhi's
+combat form and SCS vampire tactical mist. The latter uses a private donor;
+scripted vampire death escapes and quest protections are not changed. Existing
+lower resistances remain lower; no protection is added to previously open channels.
+Cloud-added MR100 is neutralized; SCS tactical mist has MR0 while transformed.
+These are cloud-form values, not a floor preserving stronger natural resistances.
+Normal-form creature data and saves remain unchanged. Already-active saved spell
+effects expire normally; the next transformation uses the updated resources.
+
+English SR summon descriptions are updated locally; different/localized wording
+is left intact with a warning. Unknown present resource structures stop the
+component transaction rather than being guessed. See
+`research/2026-10-06-damageable-cloud-forms.md` for exact scope and exclusions.
 
 ### Component 310 — Party physical resistance (unreleased)
 

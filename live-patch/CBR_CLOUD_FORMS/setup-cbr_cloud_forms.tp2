@@ -1,0 +1,7 @@
+BACKUP ~CBR_CLOUD_FORMS/backup~
+AUTHOR ~Chriz~
+VERSION ~private-2026-10-06~
+BEGIN ~Combat cloud forms: 75% damage resistance instead of invulnerability~
+REQUIRE_PREDICATE GAME_IS ~bg2ee eet~ ~This patch requires BG2:EE or EET.~
+INCLUDE ~CBR_CLOUD_FORMS/lib/cloud_forms.tpa~
+LAF cbr_install_cloud_forms END

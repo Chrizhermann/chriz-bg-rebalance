@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Add optional component 320: combat cloud forms use 75% damage resistance
+  instead of invulnerability. Keep regeneration, duration and poison immunity;
+  leave normal forms, quest protections and scripted death escapes unchanged.
+  Includes SR/SCS genies, known EE/SoD combat clouds, Ascension's combat Bodhi
+  form and SCS tactical vampire mist. Update the English SR summon descriptions.
+
 ## v0.7.1 — 2026-09-30
 
 - Fix Apex Dragons (110) failing to install when SCS uses its GLOBAL-based

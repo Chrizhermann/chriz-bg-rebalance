@@ -3,6 +3,32 @@
 Live entry point for anyone (user, future agent) picking up work on this repo.
 Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
 
+## October 6 — damageable combat clouds implemented and applied privately
+
+- Christopher chose **75% damage resistance**. New public component **320**,
+  label `cbr_damageable_combat_clouds`, shares its library with the independent
+  `CBR_CLOUD_FORMS:0` stream adapter. Install after relevant SR/SCS/Ascension forms.
+- Existing flat-set cloud damage resistances of 100 become 75; lower values and
+  open channels stay unchanged. Poison immunity, regeneration and timings stay.
+  The shared genie MR100 grant becomes neutral; tactical vampire mist uses MR0.
+  This is cloud-form resistance, NOT a continuous floor preserving stronger
+  natural resistance. Normal-form CREs/items are not changed.
+- Covered: SR/SCS genies, known EE/SoD combat clouds, Ascension's Bodhi combat
+  form and SCS tactical vampire mist. The latter uses private CBRGAS75, never
+  overwriting GASFORM4 or scripted death-escape resources. Quest protections stay.
+- **27 cloud real-WeiDU tests + 23 related regressions pass**, plus independent
+  review and exact captured-current-stack checks. Includes rollback, clone
+  collisions, repeat application, private description strings and exclusions.
+- Applied to `%USERPROFILE%\Games\Chriz Easy BG\game` after checking it was
+  closed. Exit 0; all 441 old log rows and 330,156 TLK entries retained, two new
+  descriptions. Nine changed resources match tested outputs exactly. Backup:
+  `%USERPROFILE%\Games\Chriz Easy BG\repair-backups\oct06-cloud-forms`.
+- Saves untouched, no game launch or combat acceptance claimed. Source is local
+  on `codex/physical-resistance-softcap`, not released/pushed. Integrate this
+  independently from the SR anti-magic worktree before the next owner release;
+  CEBG must pin that release, not absorb this library/private adapter. See
+  `research/2026-10-06-damageable-cloud-forms.md` for exact scope/evidence.
+
 ## Status (2026-09-30) — v0.7.1 Apex Dragons compatibility fix
 
 - Component 110 now supports both legitimate SCS difficulty backends: INI and
@@ -208,7 +234,7 @@ Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Ap
   stamped runtime `9957348E...B3D08`. `WeiDU.log` remained byte-identical at `6C988DE3...`;
   the final runtime parses with the bundled Lua interpreter and matches the production suffix
   exactly.
-  Evidence is under `C:\Users\chris\Documents\Codex\2026-09-02\cbr-ambient-v12-accounting-hotfix-20260902-215413`.
+  Evidence is under `%USERPROFILE%\Documents\Codex\2026-09-02\cbr-ambient-v12-accounting-hotfix-20260902-215413`.
   This avoided uninstalling an entry or relying on `--force-install-list 121`, which is a
   silent no-op for an already installed component. Ambient accounting and the primary urgent
   path have cleared their live gates; do not deploy into the active playthrough without
