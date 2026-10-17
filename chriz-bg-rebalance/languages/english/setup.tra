@@ -16,7 +16,7 @@
 @202 = ~Hardiness: also grant 20% elemental and magic damage resistance (optional)~
 @210 = ~EEex + SR: Pierce Magic - bounded MR reduction for five rounds~
 @211 = ~SR: Spellstrike - 15% spell failure for two rounds~
-@220 = ~Bracers of Blinding Strike: Spell Revisions Improved Haste, 20 seconds~
+@220 = ~Bracers of Blinding Strike: self-only Spell Revisions Improved Haste~
 @9220 = ~This component requires BG2:EE or EET.~
 @9221 = ~This component requires Spell Revisions' main component.~
 @9222 = ~This component requires Bracers of Blinding Strike and SPELL.IDS.~

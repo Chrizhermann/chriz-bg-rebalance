@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Bracers of Blinding Strike (220) now keep other mods' changes to the bracers
+  and to SR's Improved Haste: equipped bonuses, extra abilities, reordered or
+  extra effects, level-scaled or longer SR Improved Haste and casting features.
+  The SR copy lasts as long as the bracers' own activation (20 seconds on the
+  stock item). Changes a self-only copy cannot represent stop the installation
+  with a message instead of producing a different spell.
+
 ## v0.8.3 — 2026-10-14
 
 - Add potion uniqueness (330, or 331 where Potions of Genius still stack): each

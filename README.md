@@ -60,7 +60,7 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 202 | SR adjustments | Hardiness: optional extra 20% damage resistances | Requires 200 or 201; live acceptance pending |
 | 210 | SR adjustments | EEex Pierce Magic: halve MR, bounded to 10-40 points, for five rounds | Automated checks passed; live acceptance pending |
 | 211 | SR adjustments | Spellstrike: 15% spell failure for two rounds | Automated checks passed; live acceptance pending |
-| 220 | SR adjustments | Bracers of Blinding Strike: SR Improved Haste, 20 seconds | Automated checks passed; in-engine check pending |
+| 220 | SR adjustments | Bracers of Blinding Strike: self-only SR Improved Haste | Automated checks passed; in-engine check pending |
 | 301 | Cross-cutting audits | Emotion, Courage / Emotion, Hope: mutually exclusive beneficial emotions | ✅ implemented and automated-verified; delivery/mutual exclusion live-verified, status-entry retest pending |
 | 302 | Cross-cutting audits | Flail of the Ages: saves against Slow; +5 allows Haste | Isolated WeiDU checks passed; in-game check pending |
 | 310 | Cross-cutting audits | Party physical resistance: half effectiveness above 80%, maximum 90% | Automated checks passed; in-engine check pending |
@@ -100,8 +100,11 @@ SCS general spell tweaks (2000). Install after other arrow/item changes.
 
 ### Component 220 — SR Bracers of Blinding Strike
 
-The bracers grant **SR Improved Haste (+1 APR)**, still self-only for 20 seconds
-and once per day. The effective SR bonuses and existing Tempus bridge are retained.
+The bracers grant **SR Improved Haste (+1 APR)**, still self-only and once per day,
+for as long as their own activation lasts (20 seconds on the stock item). The
+effective SR bonuses and existing Tempus bridge are retained. Other mods' changes
+to the bracers or to SR's Improved Haste are kept; a change a self-only copy
+cannot represent stops the installation with a message instead.
 Ordinary/Improved Haste cannot stack with the bracers by changing cast order.
 Requires SR main component 0; install after other Haste/item changes.
 Wish's mechanics are not changed by this component.

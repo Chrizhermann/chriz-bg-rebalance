@@ -128,3 +128,48 @@ Backup and verification:
 `%USERPROFILE%\Games\Chriz Easy BG\repair-backups\oct06-resistance-bracers\bracers`.
 This confirms deployment, not in-game delivery/stacking acceptance. Existing
 saved active effects are not retroactively rewritten; use a fresh activation.
+
+## Compatibility revision, 2026-10-17
+
+Follow-up 1 of `docs/audits/2026-10-08-sr-rebalance-compatibility.md`: the
+installer rebuilt BRAC16 from a fixed shape and accepted only one donor layout,
+so valid changes by other mods were rejected or lost.
+
+- **Item, patched in place.** In each self-targeted activation, only the native
+  Improved Haste record (opcode 16, mode 1) becomes the opcode 146 call, at the
+  same position. The recognized old presentation records of that activation
+  are removed. Equipped effects, other abilities, charges, recharge flags and
+  unrecognized records stay byte-identical.
+- **Duration from the item.** The helper lasts as long as the activation's own
+  opcode 16 record (20 seconds on the stock item), not a constant. A repeat run
+  reads the duration back from the existing CBRBIH.
+- **Helper from every donor header.** All level headers of the effective SR
+  Improved Haste are read; they may differ only in their spell duration, and
+  the helper keeps one level-0 header. Casting features are copied verbatim, in
+  either storage order. Payload records are carried in order: target 2 becomes
+  self, records lasting the spell's duration last the bracers' duration, other
+  timers keep theirs, the donor's own opcode 321 refresh names CBRBIH, and
+  target-0 records stay as they are.
+- **Guards kept, each with a reason.** Native Haste or no additive APR in the
+  donor (not SR's Improved Haste); group-targeted records and timing modes
+  without a fixed-duration equivalent (a self-only copy cannot deliver them);
+  level headers that differ beyond their duration (choosing one would be
+  arbitrary); an activation that does not target its user; a changed record
+  shared with another slice; a transformed item whose CBRBIH is missing; plus
+  the existing namespace-collision and rollback checks. Each failure names the
+  resource and the obstacle and leaves every file unchanged.
+
+Validation: `python -B -m unittest tests.test_sr_bracers -v` runs 23 tests,
+22 pass and the private-capture test is skipped. The 14 `BracersVariationTests`
+cover equipped bonuses and an extra ability, reordered item and donor records,
+casting features stored first and last, level-scaled donor headers, divergent
+headers, a changed donor duration with an independent short timer, a 30-second
+activation, foreign donor records (318, 321, 50% chance, target 0, saved
+damage), group targeting, a normal-Haste item, a non-self activation, a shared
+activation slice and a missing helper. 13 of the 14 fail against the previous
+library; reordered records already worked. Every successful case repeats
+byte-identically.
+
+Limits: synthetic fixtures only, no in-engine check. The component label no
+longer names a fixed duration. The item description is not edited; a mod that
+changes the duration is expected to update it.
