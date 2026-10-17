@@ -188,8 +188,9 @@ now defined by the policy above, not by the stock numbers:
   damage with poison immunity. It is written only when the changed DVGASFRM.ITM
   has exactly 75 on every resistance record, covers the nine channels the stock
   item sets (27-31, 86-89; the stock item has no 84/85) and still has poison
-  immunity (opcode 101/25 or opcode 173 at 100 or more). Otherwise the text is
-  kept and the installer warns.
+  immunity: opcode 101 against opcode 25, or opcode 173 records adding up to
+  100 or more (opcode 173 has no mode and stacks on EE 2.5 and later).
+  Otherwise the text is kept and the installer warns.
 
 Open balance question for Christopher: the audit asked whether 75% is a target
 or a maximum. This revision keeps the documented policy, so a cloud at 76-99%

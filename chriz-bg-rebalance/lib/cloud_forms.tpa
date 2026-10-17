@@ -62,7 +62,8 @@ DEFINE_PATCH_FUNCTION cbr_cloud_patch_effects
 BEGIN
   LPM cbr_cloud_layout
   SET cf_form = 0
-  SET cf_poison = 0
+  SET cf_poison_immunity = 0
+  SET cf_poison_resistance = 0
   SET immunities = 0
   SET cf_all_75 = 1
   PATCH_CLEAR_ARRAY cf_channel_seen
@@ -79,9 +80,8 @@ BEGIN
       OR (cf_op = 135 AND cf_p2 = 1 AND ~%cf_res%~ STRING_EQUAL_CASE ~GASFORM4~)) BEGIN
       SET cf_form += 1
     END
-    PATCH_IF ((cf_op = 101 AND cf_p2 = 25) OR (cf_op = 173 AND cf_p1 >= 100)) BEGIN
-      SET cf_poison = 1
-    END
+    PATCH_IF (cf_op = 101 AND cf_p2 = 25) BEGIN SET cf_poison_immunity = 1 END
+    PATCH_IF cf_op = 173 BEGIN SET cf_poison_resistance += cf_p1 END
     PATCH_IF (cf_op = 208 OR cf_op = 120 OR (cf_op = 101 AND cf_p2 = 12)) BEGIN
       PATCH_FAIL ~Cloud forms: %SOURCE_FILE% has a further damage, weapon or minimum-HP immunity (opcode %cf_op%) that would keep the cloud invulnerable; nothing was installed.~
     END
@@ -117,6 +117,9 @@ BEGIN
   PATCH_FOR_EACH cf_channel IN 27 28 29 30 31 86 87 88 89 BEGIN
     PATCH_IF VARIABLE_IS_SET $cf_channel_seen(~%cf_channel%~) BEGIN SET cf_channels += 1 END
   END
+  // Opcode 173 has no mode and adds up on EE 2.5 and later: only the total of
+  // the form's records says whether it is immune to poison.
+  SET cf_poison = (cf_poison_immunity OR cf_poison_resistance >= 100)
   SET claims_75 = (cf_all_75 AND cf_channels = 9 AND cf_poison)
   PATCH_IF apply AND immunities = 0 BEGIN
     PATCH_PRINT ~Cloud forms: %SOURCE_FILE% has no resistance at immunity level (100% or more); it is left as it is.~

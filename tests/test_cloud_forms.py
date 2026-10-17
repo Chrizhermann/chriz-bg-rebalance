@@ -573,9 +573,20 @@ class CloudFormsTests(unittest.TestCase):
         def poison_resistance_only(blob):  # op 173 at 100 is poison immunity too
             return mutate_effect(blob, 101, opcode=142)
 
+        def poison_resistance_reduced(blob):  # op 173 adds up: 100 - 50 is not immunity
+            parsed = ItmFile.from_bytes(mutate_effect(blob, 101, opcode=142))
+            weaker = effect(173, -50, item=True)
+            return dataclasses.replace(parsed, global_effects=(*parsed.global_effects, weaker)).to_bytes()
+
+        def poison_resistance_in_parts(blob):  # 60 + 40 is immunity
+            parsed = ItmFile.from_bytes(mutate_effect(mutate_effect(blob, 101, opcode=142), 173, parameter1=60))
+            rest = effect(173, 40, item=True)
+            return dataclasses.replace(parsed, global_effects=(*parsed.global_effects, rest)).to_bytes()
+
         cases = ((partial_slashing, False), (immune_crushing_above_100, True),
                  (no_magical_fire_or_cold, True), (no_slashing, False),
-                 (no_poison_defense, False), (poison_resistance_only, True))
+                 (no_poison_defense, False), (poison_resistance_only, True),
+                 (poison_resistance_reduced, False), (poison_resistance_in_parts, True))
         for change, described in cases:
             with self.subTest(change=change.__name__):
                 resources = synthetic()
