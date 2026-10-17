@@ -594,15 +594,23 @@ class BracersReviewTests(unittest.TestCase):
         self.assertEqual(expected, [e.canonical() for e in fx[:len(expected)]])
         self.repeat_is_exact(g)
 
-    def test_level_headers_moving_a_removal_or_protection_fail(self):
+    def test_level_headers_reordering_dependent_records_fail(self):
         r = synthetic()
         base = _donor(r).abilities[0]
         protection = next(i for i, e in enumerate(base.effects) if e.opcode == 206)
         moved = (base.effects[protection],) + base.effects[:protection] + base.effects[protection + 1:]
         refresh = base.effects + (_fx(321, resource="SPWI677", duration=0, timing=1),)
         late = (refresh[-1],) + refresh[:-1]
-        for name, (first, second) in {"protection": (base.effects, moved),
-                                      "refresh": (refresh, late)}.items():
+        # Re-review finding: a cure (opcode 11 removes opcode 25) is not on the
+        # explicit list of removals, and an unlisted opcode must not move.
+        poison, cure = _fx(25, p1=1), _fx(11, duration=0, timing=1)
+        # Same stat, set then bonus versus bonus then set.
+        set_ac, more_ac = _fx(0, p1=5, p2=16), _fx(0, p1=2)
+        cases = {"protection": (base.effects, moved),
+                 "refresh": (refresh, late),
+                 "cure-after-poison": (base.effects + (poison, cure), base.effects + (cure, poison)),
+                 "same-opcode": (base.effects + (set_ac, more_ac), base.effects + (more_ac, set_ac))}
+        for name, (first, second) in cases.items():
             with self.subTest(name=name):
                 g = self.game(_with_donor(synthetic(), abilities=(
                     self.scaled(base, 1, 60, first), self.scaled(base, 10, 120, second))))

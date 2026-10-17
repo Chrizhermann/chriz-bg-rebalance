@@ -179,16 +179,23 @@ Independent review, same day (Codex source review), two more cases:
   (power 3, 100%, no save) gives the same bytes as before; the call stays
   dispellable and bypasses MR as before.
 - **Level headers in another order.** Headers that store the same payload in
-  another order are accepted. Records that remove effects or grant protection
-  (opcodes 58, 101, 102, 206, 220, 221, 229, 230, 318, 321, 324, 337) act on
-  what is already on the target, so they keep their place; the records between
-  two of them may be in any order. The helper keeps header 0's order. Moving
-  such a record still fails as headers that differ.
+  another order are accepted where order cannot matter. Only records that each
+  change one stat of their own or only present the spell may move: opcodes 0,
+  1, 6, 10, 15, 19, 21, 22, 27-31, 33-37, 44, 49, 54, 73, 84-89, 139, 141, 142,
+  166, 173, 174, 176 and 215. Records of one opcode keep their order (a set
+  value and a bonus to the same stat do not commute). Every other record
+  (removals, cures, protections, casts, any unlisted opcode) keeps its place,
+  because it can act on what is already on the target: a re-review showed that
+  a list of order-bound opcodes misses cures such as opcode 11, which removes
+  opcode 25. The helper keeps header 0's order; any other difference still
+  fails as headers that differ.
 
 `BracersReviewTests` adds four tests: carried conditions, the stock call,
-reordered independent records with level-scaled durations, and a moved
-protection or refresh record (still rejected). Three fail against the previous
-library; the moved-record case is rejected by both.
+reordered independent records with level-scaled durations, and reordered
+dependent records (a moved protection or refresh, cure and poison swapped, a
+set value and a bonus to AC swapped), which are still rejected. Three fail
+against the previous library; of the rejected cases, the cure and same-opcode
+swaps were wrongly accepted by the first version of this fix.
 
 Limits: synthetic fixtures only, no in-engine check. The component label no
 longer names a fixed duration. The item description is not edited; a mod that
