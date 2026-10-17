@@ -36,10 +36,13 @@ BEGIN
   READ_SHORT 0x70 cf_count
   PATCH_IF cf_first + cf_count > cf_total BEGIN PATCH_FAIL ~Cloud forms: invalid global effects.~ END
   // Validate every slice, then visit only referenced effects (never trailing data).
+  // cf_global marks the global slice: an item's equipped effects.
   PATCH_CLEAR_ARRAY cf_used
+  FOR (cf_i = 0; cf_i < cf_total; ++cf_i) BEGIN SET $cf_global(~%cf_i%~) = 0 END
   FOR (cf_i = 0; cf_i < cf_count; ++cf_i) BEGIN
     SET cf_index = cf_first + cf_i
     SET $cf_used(~%cf_index%~) = 1
+    SET $cf_global(~%cf_index%~) = 1
   END
   FOR (cf_h = 0; cf_h < cf_nab; ++cf_h) BEGIN
     READ_SHORT (cf_ab + cf_h * cf_kind + 0x1e) cf_count
@@ -53,9 +56,11 @@ BEGIN
 END
 
 // immunities: owned records at 100 or more. claims_75 = 1 when the changed
-// form matches the new genie text: every resistance record is 75, each of the
-// nine channels the stock genie form sets has one (acid, cold, electricity,
-// fire, magic damage, the four physical types) and poison immunity remains.
+// item's equipped records match the new genie text: every resistance record
+// is 75, each of the nine channels the stock genie form sets has one (acid,
+// cold, electricity, fire, magic damage, the four physical types) and poison
+// immunity remains. An item's activations and other abilities apply only when
+// used, so they never count for the claim; a spell never claims.
 DEFINE_PATCH_FUNCTION cbr_cloud_patch_effects
   INT_VAR apply = 0
   RET immunities claims_75
@@ -76,12 +81,13 @@ BEGIN
     READ_BYTE (cf_at + 12) cf_timing
     READ_LONG (cf_at + 14) cf_duration
     READ_ASCII (cf_at + 20) cf_res (8) NULL
+    SET cf_claimed = (cf_kind = 56 AND $cf_global(~%cf_index%~) = 1)
     PATCH_IF ((cf_op = 53 AND cf_p1 = 0x7f39 AND cf_p2 = 0)
       OR (cf_op = 135 AND cf_p2 = 1 AND ~%cf_res%~ STRING_EQUAL_CASE ~GASFORM4~)) BEGIN
       SET cf_form += 1
     END
-    PATCH_IF (cf_op = 101 AND cf_p2 = 25) BEGIN SET cf_poison_immunity = 1 END
-    PATCH_IF cf_op = 173 BEGIN SET cf_poison_resistance += cf_p1 END
+    PATCH_IF cf_claimed AND cf_op = 101 AND cf_p2 = 25 BEGIN SET cf_poison_immunity = 1 END
+    PATCH_IF cf_claimed AND cf_op = 173 BEGIN SET cf_poison_resistance += cf_p1 END
     PATCH_IF (cf_op = 208 OR cf_op = 120 OR (cf_op = 101 AND cf_p2 = 12)) BEGIN
       PATCH_FAIL ~Cloud forms: %SOURCE_FILE% has a further damage, weapon or minimum-HP immunity (opcode %cf_op%) that would keep the cloud invulnerable; nothing was installed.~
     END
@@ -95,8 +101,8 @@ BEGIN
       END
       LPF cbr_cloud_resistance INT_VAR value = cf_p1 RET cf_new = new_value END
       PATCH_IF cf_new != cf_p1 BEGIN SET immunities += 1 END
-      PATCH_IF cf_new != 75 BEGIN SET cf_all_75 = 0 END
-      SET $cf_channel_seen(~%cf_op%~) = 1
+      PATCH_IF cf_claimed AND cf_new != 75 BEGIN SET cf_all_75 = 0 END
+      PATCH_IF cf_claimed BEGIN SET $cf_channel_seen(~%cf_op%~) = 1 END
       PATCH_IF apply AND cf_new != cf_p1 BEGIN WRITE_LONG (cf_at + 4) cf_new END
     END
     PATCH_IF cf_op = 166 BEGIN
@@ -120,7 +126,7 @@ BEGIN
   // Opcode 173 has no mode and adds up on EE 2.5 and later: only the total of
   // the form's records says whether it is immune to poison.
   SET cf_poison = (cf_poison_immunity OR cf_poison_resistance >= 100)
-  SET claims_75 = (cf_all_75 AND cf_channels = 9 AND cf_poison)
+  SET claims_75 = (cf_kind = 56 AND cf_all_75 AND cf_channels = 9 AND cf_poison)
   PATCH_IF apply AND immunities = 0 BEGIN
     PATCH_PRINT ~Cloud forms: %SOURCE_FILE% has no resistance at immunity level (100% or more); it is left as it is.~
   END

@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.ie_formats import ItmFile, SplAbility, SplEffect, SplFile, make_spl
+from tests.ie_formats import ItmAbility, ItmFile, SplAbility, SplEffect, SplFile, make_spl
 from tests.test_flail_of_ages import strings, tlk
 from tests.test_tempus_holy_power_installer import _write_key_and_bif
 
@@ -578,6 +578,20 @@ class CloudFormsTests(unittest.TestCase):
             weaker = effect(173, -50, item=True)
             return dataclasses.replace(parsed, global_effects=(*parsed.global_effects, weaker)).to_bytes()
 
+        def with_activation(blob, *effects):
+            raw = bytearray(56)
+            raw[0] = 3  # magical activation, applies only when used
+            parsed = ItmFile.from_bytes(blob)
+            used = ItmAbility(raw=bytes(raw), effects=tuple(effects))
+            return dataclasses.replace(parsed, abilities=(*parsed.abilities, used)).to_bytes()
+
+        def poison_part_only_on_activation(blob):  # equipped 60, +40 only when used
+            equipped = mutate_effect(mutate_effect(blob, 101, opcode=142), 173, parameter1=60)
+            return with_activation(equipped, effect(173, 40, item=True))
+
+        def missile_only_on_activation(blob):
+            return with_activation(mutate_effect(blob, 89, opcode=142), effect(89, 100, 1, item=True))
+
         def poison_resistance_in_parts(blob):  # 60 + 40 is immunity
             parsed = ItmFile.from_bytes(mutate_effect(mutate_effect(blob, 101, opcode=142), 173, parameter1=60))
             rest = effect(173, 40, item=True)
@@ -586,7 +600,8 @@ class CloudFormsTests(unittest.TestCase):
         cases = ((partial_slashing, False), (immune_crushing_above_100, True),
                  (no_magical_fire_or_cold, True), (no_slashing, False),
                  (no_poison_defense, False), (poison_resistance_only, True),
-                 (poison_resistance_reduced, False), (poison_resistance_in_parts, True))
+                 (poison_resistance_reduced, False), (poison_resistance_in_parts, True),
+                 (poison_part_only_on_activation, False), (missile_only_on_activation, False))
         for change, described in cases:
             with self.subTest(change=change.__name__):
                 resources = synthetic()

@@ -185,9 +185,10 @@ now defined by the policy above, not by the stock numbers:
   resistances, and exact stock values. A form without immunity-level values is
   left as it is with a message.
 - The English SR summon text claims 75% against physical, elemental and magic
-  damage with poison immunity. It is written only when the changed DVGASFRM.ITM
-  has exactly 75 on every resistance record, covers the nine channels the stock
-  item sets (27-31, 86-89; the stock item has no 84/85) and still has poison
+  damage with poison immunity. It is written only when the changed DVGASFRM.ITM's
+  equipped effects (its activations apply only when used and do not count)
+  have exactly 75 on every resistance record, cover the nine channels the stock
+  item sets (27-31, 86-89; the stock item has no 84/85) and still give poison
   immunity: opcode 101 against opcode 25, or opcode 173 records adding up to
   100 or more (opcode 173 has no mode and stacks on EE 2.5 and later).
   Otherwise the text is kept and the installer warns.
