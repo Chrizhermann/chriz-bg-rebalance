@@ -47,6 +47,7 @@ from tests.test_emotion_hope_courage import (
     _old_removal,
     _scroll_item,
     _spell,
+    apply_beneficial_variant,
 )
 
 
@@ -586,6 +587,10 @@ class GameOptions:
     innate_horror_id: int = 163
     hold_missile_id: int = HOLD_MISSILE_ID
     statdesc_layout: str = "valid"  # valid | malformed_shape | courage_d_collision
+    # Valid or rejected alternate layouts of an installed beneficial spell;
+    # see BENEFICIAL_VARIANTS.  Applied only where that spell is installed.
+    courage_variant: tuple[str, ...] = ()
+    hope_variant: tuple[str, ...] = ()
 
 
 class SyntheticEmotionGame:
@@ -674,6 +679,10 @@ class SyntheticEmotionGame:
         courage_payload = _beneficial(
             COURAGE_RESREF, HOPE_RESREF, courage=True, marker=courage_input_marker
         )
+        if options.courage_variant:
+            courage_payload = apply_beneficial_variant(
+                courage_payload, options.courage_variant
+            )
         if options.malformed == "wrong_level":
             raw = bytearray(courage_payload)
             struct.pack_into("<I", raw, 0x34, 5)
@@ -826,14 +835,17 @@ class SyntheticEmotionGame:
         # Override half of the matrix: Hope and its scroll when installed,
         # Hopelessness and its donor scroll, plus a donor-bearing store.
         if options.symbols in {"both", "hope_only"}:
-            (self.override / f"{HOPE_RESREF}.SPL").write_bytes(
-                _beneficial(
-                    HOPE_RESREF,
-                    COURAGE_RESREF,
-                    courage=False,
-                    marker=hope_input_marker,
-                )
+            hope_payload = _beneficial(
+                HOPE_RESREF,
+                COURAGE_RESREF,
+                courage=False,
+                marker=hope_input_marker,
             )
+            if options.hope_variant:
+                hope_payload = apply_beneficial_variant(
+                    hope_payload, options.hope_variant
+                )
+            (self.override / f"{HOPE_RESREF}.SPL").write_bytes(hope_payload)
             (self.override / f"{HOPE_EXISTING_SCROLL}.ITM").write_bytes(
                 _scroll(HOPE_RESREF, HOPE_RESREF, 12, "HTGICO")
             )

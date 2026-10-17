@@ -519,6 +519,112 @@ def _scroll_item(
     )
 
 
+# Valid alternate layouts of an installed beneficial Emotion spell.  Each
+# variant changes only fields that component 301 preserves rather than owns,
+# so the rebuilt recipient semantics must match the canonical rebuild.
+BENEFICIAL_VARIANTS = frozenset(
+    {
+        "casting_time_3",  # every header casts in 3 instead of 4
+        "range_60",  # every header has range 60 instead of 50
+        "school_8",  # Alteration instead of Enchantment/Charm
+        "school_11",  # a nonstandard school value without a known name
+        "two_headers",  # a second level header with its own fields/chrome
+        "two_headers_disagree",  # second header with another range/casting
+        "reordered",  # presentation and markers in another donor order
+        "target_1",  # first header becomes creature-targeted (unsupported)
+        "second_target_1",  # second header becomes creature-targeted
+        "no_abilities",  # no header to carry the recipient package
+    }
+)
+SECOND_HEADER_REQUIRED_LEVEL = 9
+SECOND_HEADER_PROJECTILE_DELTA = 7
+EXTRA_FOREIGN_MARKER = SplEffect(
+    opcode=328,
+    target=2,
+    power=4,
+    parameter1=1,
+    parameter2=777,
+    timing=0,
+    resist_dispel=3,
+    duration=5,
+    special=1,
+)
+
+
+def second_header_effect(effect: SplEffect) -> SplEffect:
+    """Derive a distinct second-header presentation/foreign record."""
+    if effect.opcode in {174, 215}:
+        return dataclasses.replace(effect, resource=f"{effect.resource[:7]}2")
+    if effect.opcode in {141, 142}:
+        return dataclasses.replace(effect, parameter2=effect.parameter2 + 1)
+    if effect.opcode == 328 and effect.parameter2 in {
+        COURAGE_FOREIGN_MARKER.parameter2,
+        HOPE_FOREIGN_MARKER.parameter2,
+    }:
+        return dataclasses.replace(effect, parameter2=effect.parameter2 + 100)
+    return effect
+
+
+def _second_header(ability: SplAbility, *, disagree: bool) -> SplAbility:
+    raw = bytearray(ability.raw)
+    # Distinct non-effect bytes that component 301 must preserve verbatim.
+    raw[0x01] = 0x5A
+    struct.pack_into("<H", raw, 0x14, 8)
+    struct.pack_into("<H", raw, 0x16, 2)
+    struct.pack_into("<H", raw, 0x22, 3)
+    if disagree:
+        struct.pack_into("<H", raw, 0x0E, 70)
+        struct.pack_into("<H", raw, 0x12, 2)
+    return SplAbility(
+        required_level=SECOND_HEADER_REQUIRED_LEVEL,
+        target=ability.target,
+        projectile=ability.projectile + SECOND_HEADER_PROJECTILE_DELTA,
+        effects=tuple(second_header_effect(effect) for effect in ability.effects),
+        icon=f"{ability.icon[:6]}L9",
+        raw=bytes(raw),
+    )
+
+
+def apply_beneficial_variant(data: bytes, variants: tuple[str, ...]) -> bytes:
+    unknown = set(variants) - BENEFICIAL_VARIANTS
+    if unknown:
+        raise ValueError(sorted(unknown))
+    spell = SplFile.from_bytes(data)
+    header = bytearray(spell.header_raw)
+    abilities = list(spell.abilities)
+    if "reordered" in variants:
+        first = abilities[0]
+        abilities[0] = dataclasses.replace(
+            first, effects=(EXTRA_FOREIGN_MARKER, *reversed(first.effects))
+        )
+    if "two_headers" in variants or "two_headers_disagree" in variants:
+        abilities.append(
+            _second_header(abilities[0], disagree="two_headers_disagree" in variants)
+        )
+    if "second_target_1" in variants:
+        if len(abilities) < 2:
+            abilities.append(_second_header(abilities[0], disagree=False))
+        abilities[1] = dataclasses.replace(abilities[1], target=1)
+    if "target_1" in variants:
+        abilities[0] = dataclasses.replace(abilities[0], target=1)
+    for index, ability in enumerate(abilities):
+        raw = bytearray(ability.raw)
+        if "casting_time_3" in variants:
+            struct.pack_into("<H", raw, 0x12, 3)
+        if "range_60" in variants:
+            struct.pack_into("<H", raw, 0x0E, 60)
+        abilities[index] = dataclasses.replace(ability, raw=bytes(raw))
+    if "school_8" in variants:
+        header[0x25] = 8
+    if "school_11" in variants:
+        header[0x25] = 11
+    if "no_abilities" in variants:
+        abilities = []
+    return dataclasses.replace(
+        spell, abilities=tuple(abilities), header_raw=bytes(header)
+    ).to_bytes()
+
+
 @dataclasses.dataclass(frozen=True)
 class FixtureOptions:
     markers: bool = True

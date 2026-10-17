@@ -80,11 +80,11 @@ DEFINE_PATCH_FUNCTION cbr_em_validate_v1_partition
     global_count
 BEGIN
   PATCH_IF (BUFFER_LENGTH < 0x72) BEGIN
-    PATCH_FAIL ~%error_token%~
+    PATCH_FAIL ~%error_token%: %SOURCE_FILE% is truncated before the end of its V1 header.~
   END
   READ_ASCII 0 cbr_em_signature (8)
   PATCH_IF !(~%cbr_em_signature%~ STRING_EQUAL ~%signature%~) BEGIN
-    PATCH_FAIL ~%error_token%~
+    PATCH_FAIL ~%error_token%: %SOURCE_FILE% does not have the expected V1 signature.~
   END
   READ_LONG 0x64 ability_offset
   READ_SHORT 0x68 ability_count
@@ -95,11 +95,11 @@ BEGIN
   PATCH_IF (ability_offset < 0x72 || cbr_em_ability_end > BUFFER_LENGTH
          || effect_offset < cbr_em_ability_end || effect_offset > BUFFER_LENGTH
          || ((BUFFER_LENGTH - effect_offset) MODULO 0x30) != 0) BEGIN
-    PATCH_FAIL ~%error_token%~
+    PATCH_FAIL ~%error_token%: %SOURCE_FILE% has an ability or effect table outside the file, or a partial trailing effect record.~
   END
   SET effect_count = (BUFFER_LENGTH - effect_offset) / 0x30
   PATCH_IF (global_first + global_count > effect_count) BEGIN
-    PATCH_FAIL ~%error_token%~
+    PATCH_FAIL ~%error_token%: %SOURCE_FILE% global/casting effect slice runs past its %effect_count% effect records.~
   END
   FOR (cbr_em_cov_i = 0; cbr_em_cov_i < effect_count; ++cbr_em_cov_i) BEGIN
     SET $cbr_em_coverage(~%cbr_em_cov_i%~) = 0
@@ -112,7 +112,7 @@ BEGIN
     READ_SHORT (cbr_em_ab_offset + 0x1e) cbr_em_ab_count
     READ_SHORT (cbr_em_ab_offset + 0x20) cbr_em_ab_first
     PATCH_IF (cbr_em_ab_first + cbr_em_ab_count > effect_count) BEGIN
-      PATCH_FAIL ~%error_token%~
+      PATCH_FAIL ~%error_token%: %SOURCE_FILE% ability header %cbr_em_ab% effect slice runs past its %effect_count% effect records.~
     END
     FOR (cbr_em_cov_i = cbr_em_ab_first; cbr_em_cov_i < cbr_em_ab_first + cbr_em_ab_count; ++cbr_em_cov_i) BEGIN
       SET $cbr_em_coverage(~%cbr_em_cov_i%~) = $cbr_em_coverage(~%cbr_em_cov_i%~) + 1
@@ -120,7 +120,7 @@ BEGIN
   END
   FOR (cbr_em_cov_i = 0; cbr_em_cov_i < effect_count; ++cbr_em_cov_i) BEGIN
     PATCH_IF ($cbr_em_coverage(~%cbr_em_cov_i%~) != 1) BEGIN
-      PATCH_FAIL ~%error_token%~
+      PATCH_FAIL ~%error_token%: %SOURCE_FILE% effect record %cbr_em_cov_i% is not owned by exactly one casting or ability slice (orphaned or overlapping).~
     END
   END
 END
@@ -137,11 +137,11 @@ DEFINE_PATCH_FUNCTION cbr_em_validate_spl
     casting_count
 BEGIN
   PATCH_IF (BUFFER_LENGTH < 8) BEGIN
-    PATCH_FAIL ~CBR_EM_ERR_SPL_SIGNATURE~
+    PATCH_FAIL ~CBR_EM_ERR_SPL_SIGNATURE: %SOURCE_FILE% is too short to be an SPL file.~
   END
   READ_ASCII 0 cbr_em_spl_signature (8)
   PATCH_IF !(~%cbr_em_spl_signature%~ STRING_EQUAL ~SPL V1  ~) BEGIN
-    PATCH_FAIL ~CBR_EM_ERR_SPL_SIGNATURE~
+    PATCH_FAIL ~CBR_EM_ERR_SPL_SIGNATURE: %SOURCE_FILE% is not an SPL V1 file.~
   END
   LPF cbr_em_validate_v1_partition
     INT_VAR ability_size = 0x28
@@ -156,6 +156,15 @@ BEGIN
   END
 END
 
+// Validate only what the beneficial rebuild and its installer depend on:
+// a well-formed SPL V1 effect partition, a wizard spell (the installer maps
+// the symbols to wizard slots), spell level 4 (ADD_SPELL ... 2 4 and the
+// SPWI4xx slot check would otherwise relocate or contradict the header), at
+// least one ability header to receive the recipient package, and point-
+// targeted area delivery (target 4) in every header.  The installed
+// description and the area delivery assume that targeting; analysing other
+// delivery shapes is outside this component.  School, range, casting time,
+// projectile, and the number of headers are preserved, not authenticated.
 DEFINE_PATCH_FUNCTION cbr_em_validate_beneficial
 BEGIN
   // Diagnose corruption of the casting-feature slice distinctly.  The full
@@ -172,17 +181,25 @@ BEGIN
            && ((BUFFER_LENGTH - cbr_em_bc_effect_offset) MODULO 0x30) = 0) BEGIN
       SET cbr_em_bc_total = (BUFFER_LENGTH - cbr_em_bc_effect_offset) / 0x30
       PATCH_IF (cbr_em_bc_first + cbr_em_bc_count > cbr_em_bc_total) BEGIN
-        PATCH_FAIL ~CBR_EM_ERR_CASTING_PARTITION~
+        PATCH_FAIL ~CBR_EM_ERR_CASTING_PARTITION: %SOURCE_FILE% casting-feature slice (first %cbr_em_bc_first%, count %cbr_em_bc_count%) runs past its %cbr_em_bc_total% effect records.~
       END
-      PATCH_IF (cbr_em_bc_ability_count = 1
-             && cbr_em_bc_ability_offset + 0x28 <= BUFFER_LENGTH) BEGIN
+      PATCH_IF (cbr_em_bc_ability_count >= 1
+             && cbr_em_bc_ability_offset >= 0x72
+             && cbr_em_bc_ability_offset + cbr_em_bc_ability_count * 0x28 <= BUFFER_LENGTH) BEGIN
+        // The earliest ability slice bounds the leading casting prefix.
         READ_SHORT (cbr_em_bc_ability_offset + 0x20) cbr_em_bc_ability_first
+        FOR (cbr_em_bc_ab = 1; cbr_em_bc_ab < cbr_em_bc_ability_count; ++cbr_em_bc_ab) BEGIN
+          READ_SHORT (cbr_em_bc_ability_offset + cbr_em_bc_ab * 0x28 + 0x20) cbr_em_bc_other_first
+          PATCH_IF (cbr_em_bc_other_first < cbr_em_bc_ability_first) BEGIN
+            SET cbr_em_bc_ability_first = cbr_em_bc_other_first
+          END
+        END
         PATCH_IF (cbr_em_bc_first = 0 && cbr_em_bc_count < cbr_em_bc_ability_first
                && cbr_em_bc_count < cbr_em_bc_total) BEGIN
           SET cbr_em_bc_gap_fx = cbr_em_bc_effect_offset + cbr_em_bc_count * 0x30
           READ_SHORT cbr_em_bc_gap_fx cbr_em_bc_gap_opcode
           PATCH_IF (cbr_em_bc_gap_opcode = 146 || cbr_em_bc_gap_opcode = 215) BEGIN
-            PATCH_FAIL ~CBR_EM_ERR_CASTING_PARTITION~
+            PATCH_FAIL ~CBR_EM_ERR_CASTING_PARTITION: %SOURCE_FILE% has a casting-feature record (opcode %cbr_em_bc_gap_opcode%) orphaned between its %cbr_em_bc_count%-record casting slice and the first ability slice.~
           END
         END
       END
@@ -196,22 +213,49 @@ BEGIN
   END
   READ_SHORT 0x1c cbr_em_bv_type
   PATCH_IF (cbr_em_bv_type != 1) BEGIN
-    PATCH_FAIL ~CBR_EM_ERR_BENEFICIAL_TYPE~
+    PATCH_FAIL ~CBR_EM_ERR_BENEFICIAL_TYPE: %SOURCE_FILE% has spell type %cbr_em_bv_type%; Emotion, Courage and Emotion, Hope must be wizard spells (type 1) because the installer maps them to wizard spell slots.~
   END
   READ_LONG 0x34 cbr_em_bv_level
   PATCH_IF (cbr_em_bv_level != 4) BEGIN
-    PATCH_FAIL ~CBR_EM_ERR_BENEFICIAL_LEVEL~
+    PATCH_FAIL ~CBR_EM_ERR_BENEFICIAL_LEVEL: %SOURCE_FILE% has spell level %cbr_em_bv_level%; it must be level 4 to match its level-4 wizard slot; spell allocation would otherwise relocate or contradict it.~
   END
-  PATCH_IF (cbr_em_bv_ability_count != 1) BEGIN
-    PATCH_FAIL ~CBR_EM_ERR_BENEFICIAL_PARTITION~
+  PATCH_IF (cbr_em_bv_ability_count < 1) BEGIN
+    PATCH_FAIL ~CBR_EM_ERR_BENEFICIAL_NO_ABILITY: %SOURCE_FILE% has no ability header to carry the recipient effects.~
   END
-  READ_BYTE 0x25 cbr_em_bv_school
-  READ_BYTE (cbr_em_bv_ability_offset + 0x0c) cbr_em_bv_target
-  READ_SHORT (cbr_em_bv_ability_offset + 0x0e) cbr_em_bv_range
-  READ_SHORT (cbr_em_bv_ability_offset + 0x12) cbr_em_bv_casting
-  PATCH_IF (cbr_em_bv_school != 4 || cbr_em_bv_target != 4
-         || cbr_em_bv_range != 50 || cbr_em_bv_casting != 4) BEGIN
-    PATCH_FAIL ~CBR_EM_ERR_BENEFICIAL_PARTITION~
+  FOR (cbr_em_bv_ab = 0; cbr_em_bv_ab < cbr_em_bv_ability_count; ++cbr_em_bv_ab) BEGIN
+    READ_BYTE (cbr_em_bv_ability_offset + cbr_em_bv_ab * 0x28 + 0x0c) cbr_em_bv_target
+    PATCH_IF (cbr_em_bv_target != 4) BEGIN
+      PATCH_FAIL ~CBR_EM_ERR_BENEFICIAL_TARGET: %SOURCE_FILE% ability header %cbr_em_bv_ab% has target type %cbr_em_bv_target%; component 301 supports only point-targeted area delivery (target type 4) for Emotion, Courage and Emotion, Hope.~
+    END
+  END
+END
+
+// Read the header facts that the installed description states: school,
+// spell level, and the first ability header's range and casting time.
+// headers_agree is 0 when a later header has another range or casting time.
+DEFINE_PATCH_FUNCTION cbr_em_description_stats
+  RET
+    school
+    level
+    range
+    casting_time
+    headers_agree
+BEGIN
+  LPF cbr_em_validate_beneficial END
+  READ_BYTE 0x25 school
+  READ_LONG 0x34 level
+  READ_LONG 0x64 cbr_em_ds_ability_offset
+  READ_SHORT 0x68 cbr_em_ds_ability_count
+  READ_SHORT (cbr_em_ds_ability_offset + 0x0e) range
+  READ_SHORT (cbr_em_ds_ability_offset + 0x12) casting_time
+  SET headers_agree = 1
+  FOR (cbr_em_ds_ab = 1; cbr_em_ds_ab < cbr_em_ds_ability_count; ++cbr_em_ds_ab) BEGIN
+    SET cbr_em_ds_header = cbr_em_ds_ability_offset + cbr_em_ds_ab * 0x28
+    READ_SHORT (cbr_em_ds_header + 0x0e) cbr_em_ds_range
+    READ_SHORT (cbr_em_ds_header + 0x12) cbr_em_ds_casting
+    PATCH_IF (cbr_em_ds_range != range || cbr_em_ds_casting != casting_time) BEGIN
+      SET headers_agree = 0
+    END
   END
 END
 
@@ -355,15 +399,12 @@ BEGIN
     STR_VAR partition_error = ~CBR_EM_ERR_BENEFICIAL_PARTITION~
     RET
       cbr_em_bb_ability_offset = ability_offset
+      cbr_em_bb_ability_count = ability_count
       cbr_em_bb_effect_offset = effect_offset
       cbr_em_bb_effect_count = effect_count
       cbr_em_bb_cast_first = casting_first
       cbr_em_bb_cast_count = casting_count
   END
-  SET cbr_em_bb_header = cbr_em_bb_ability_offset
-  READ_SHORT (cbr_em_bb_header + 0x1e) cbr_em_bb_old_count
-  READ_SHORT (cbr_em_bb_header + 0x20) cbr_em_bb_old_first
-  SET cbr_em_bb_new_count = 0
 
   // Casting features remain an exact opaque prefix.
   FOR (cbr_em_bb_i = 0; cbr_em_bb_i < cbr_em_bb_cast_count; ++cbr_em_bb_i) BEGIN
@@ -371,105 +412,125 @@ BEGIN
       INT_VAR source_offset = cbr_em_bb_effect_offset + (cbr_em_bb_cast_first + cbr_em_bb_i) * 0x30
     END
   END
+  SET cbr_em_bb_total = cbr_em_bb_cast_count
 
-  // Last cast wins, including a same-spell refresh.
-  PATCH_IF (is_courage = 1) BEGIN
-    LPF cbr_em_append_transition STR_VAR resource = EVAL ~%courage_resref%~ END
-    LPF cbr_em_append_transition STR_VAR resource = EVAL ~%hope_resref%~ END
-  END ELSE BEGIN
-    LPF cbr_em_append_transition STR_VAR resource = EVAL ~%hope_resref%~ END
-    LPF cbr_em_append_transition STR_VAR resource = EVAL ~%courage_resref%~ END
-  END
-  SET cbr_em_bb_new_count = 2
+  // Every ability (level) header receives its own rebuilt recipient slice:
+  // the owned administrative and payload records are canonical, while each
+  // header keeps its own presentation and foreign markers in donor order.
+  // Appending after the original table leaves every source offset readable;
+  // the original table is deleted only after all headers are rebuilt.
+  FOR (cbr_em_bb_ab = 0; cbr_em_bb_ab < cbr_em_bb_ability_count; ++cbr_em_bb_ab) BEGIN
+    SET cbr_em_bb_header = cbr_em_bb_ability_offset + cbr_em_bb_ab * 0x28
+    READ_SHORT (cbr_em_bb_header + 0x1e) cbr_em_bb_old_count
+    READ_SHORT (cbr_em_bb_header + 0x20) cbr_em_bb_old_first
+    SET $cbr_em_bb_first(~%cbr_em_bb_ab%~) = cbr_em_bb_total
 
-  PATCH_IF (is_courage = 1) BEGIN
-    PATCH_IF (have_fear = 1) BEGIN
-      LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%fear_resref%~ END
-      ++cbr_em_bb_new_count
+    // Last cast wins, including a same-spell refresh.
+    PATCH_IF (is_courage = 1) BEGIN
+      LPF cbr_em_append_transition STR_VAR resource = EVAL ~%courage_resref%~ END
+      LPF cbr_em_append_transition STR_VAR resource = EVAL ~%hope_resref%~ END
+    END ELSE BEGIN
+      LPF cbr_em_append_transition STR_VAR resource = EVAL ~%hope_resref%~ END
+      LPF cbr_em_append_transition STR_VAR resource = EVAL ~%courage_resref%~ END
     END
-    PATCH_IF (have_horror = 1) BEGIN
-      LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%horror_resref%~ END
-      ++cbr_em_bb_new_count
-    END
-    PATCH_IF (have_innate_horror = 1) BEGIN
-      LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%innate_horror_resref%~ END
-      ++cbr_em_bb_new_count
-    END
-  END ELSE BEGIN
-    PATCH_IF (have_hopelessness = 1) BEGIN
-      LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%hopelessness_resref%~ END
-      ++cbr_em_bb_new_count
-    END
-    PATCH_IF (have_symbol = 1) BEGIN
-      LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%symbol_resref%~ END
-      ++cbr_em_bb_new_count
-    END
-  END
+    SET cbr_em_bb_new_count = 2
 
-  // Preserve installed visual/audio presentation, in donor order.
-  FOR (cbr_em_bb_i = 0; cbr_em_bb_i < cbr_em_bb_old_count; ++cbr_em_bb_i) BEGIN
-    SET cbr_em_bb_fx = cbr_em_bb_effect_offset + (cbr_em_bb_old_first + cbr_em_bb_i) * 0x30
-    READ_SHORT cbr_em_bb_fx cbr_em_bb_opcode
-    PATCH_IF (cbr_em_bb_opcode = 61 || cbr_em_bb_opcode = 141
-           || (cbr_em_bb_opcode = 142 && portrait_icon < 0)
-           || cbr_em_bb_opcode = 174 || cbr_em_bb_opcode = 215) BEGIN
-      LPF cbr_em_append_raw_effect INT_VAR source_offset = cbr_em_bb_fx END
-      ++cbr_em_bb_new_count
+    PATCH_IF (is_courage = 1) BEGIN
+      PATCH_IF (have_fear = 1) BEGIN
+        LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%fear_resref%~ END
+        ++cbr_em_bb_new_count
+      END
+      PATCH_IF (have_horror = 1) BEGIN
+        LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%horror_resref%~ END
+        ++cbr_em_bb_new_count
+      END
+      PATCH_IF (have_innate_horror = 1) BEGIN
+        LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%innate_horror_resref%~ END
+        ++cbr_em_bb_new_count
+      END
+    END ELSE BEGIN
+      PATCH_IF (have_hopelessness = 1) BEGIN
+        LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%hopelessness_resref%~ END
+        ++cbr_em_bb_new_count
+      END
+      PATCH_IF (have_symbol = 1) BEGIN
+        LPF cbr_em_append_cleanse STR_VAR resource = EVAL ~%symbol_resref%~ END
+        ++cbr_em_bb_new_count
+      END
     END
-  END
 
-  // Standalone spells receive one canonical BG2EE character-sheet status
-  // entry. Provider spells pass -1 and retain their existing opcode 142
-  // bytes above, including the provider's own dynamically allocated row.
-  PATCH_IF (portrait_icon >= 0) BEGIN
-    LPF cbr_em_append_effect
-      INT_VAR opcode = 142 target = 2 power = 4 parameter2 = portrait_icon
-              timing = 0 resist_dispel = 3 duration = 300
-    END
-    ++cbr_em_bb_new_count
-  END
-
-  PATCH_IF (is_courage = 1) BEGIN
-    LPF cbr_em_append_effect INT_VAR opcode = 54 target = 2 power = 4 parameter1 = 1 timing = 0 resist_dispel = 3 duration = 300 END
-    LPF cbr_em_append_effect INT_VAR opcode = 73 target = 2 power = 4 parameter1 = 3 timing = 0 resist_dispel = 3 duration = 300 END
-    LPF cbr_em_append_effect INT_VAR opcode = 18 target = 2 power = 4 parameter1 = 5 timing = 0 resist_dispel = 3 duration = 300 END
-    LPF cbr_em_append_effect INT_VAR opcode = 23 target = 2 power = 4 parameter1 = 20 parameter2 = 1 timing = 0 resist_dispel = 3 duration = 300 END
-    LPF cbr_em_append_effect INT_VAR opcode = 240 target = 2 power = 4 parameter2 = 36 timing = 1 resist_dispel = 3 END
-    LPF cbr_em_append_effect INT_VAR opcode = 161 target = 2 power = 4 timing = 1 resist_dispel = 3 END
-    SET cbr_em_bb_new_count += 6
-  END ELSE BEGIN
-    LPF cbr_em_append_effect INT_VAR opcode = 23 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
-    LPF cbr_em_append_effect INT_VAR opcode = 54 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
-    LPF cbr_em_append_effect INT_VAR opcode = 73 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
-    LPF cbr_em_append_effect INT_VAR opcode = 325 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
-    SET cbr_em_bb_new_count += 4
-  END
-
-  // Replace duplicate owned markers with one canonical marker.
-  PATCH_IF (spell_state >= 0) BEGIN
-    LPF cbr_em_append_effect
-      INT_VAR opcode = 328 target = 2 power = 4 parameter1 = 1 parameter2 = spell_state
-              timing = 0 resist_dispel = 3 duration = 300 special = 1
-    END
-    ++cbr_em_bb_new_count
-  END
-  FOR (cbr_em_bb_i = 0; cbr_em_bb_i < cbr_em_bb_old_count; ++cbr_em_bb_i) BEGIN
-    SET cbr_em_bb_fx = cbr_em_bb_effect_offset + (cbr_em_bb_old_first + cbr_em_bb_i) * 0x30
-    READ_SHORT cbr_em_bb_fx cbr_em_bb_opcode
-    PATCH_IF (cbr_em_bb_opcode = 328) BEGIN
-      READ_LONG (cbr_em_bb_fx + 0x08) cbr_em_bb_state
-      PATCH_IF (spell_state < 0 || cbr_em_bb_state != spell_state) BEGIN
+    // Preserve this header's installed visual/audio presentation, in
+    // donor order.
+    FOR (cbr_em_bb_i = 0; cbr_em_bb_i < cbr_em_bb_old_count; ++cbr_em_bb_i) BEGIN
+      SET cbr_em_bb_fx = cbr_em_bb_effect_offset + (cbr_em_bb_old_first + cbr_em_bb_i) * 0x30
+      READ_SHORT cbr_em_bb_fx cbr_em_bb_opcode
+      PATCH_IF (cbr_em_bb_opcode = 61 || cbr_em_bb_opcode = 141
+             || (cbr_em_bb_opcode = 142 && portrait_icon < 0)
+             || cbr_em_bb_opcode = 174 || cbr_em_bb_opcode = 215) BEGIN
         LPF cbr_em_append_raw_effect INT_VAR source_offset = cbr_em_bb_fx END
         ++cbr_em_bb_new_count
       END
     END
+
+    // Standalone spells receive one canonical BG2EE character-sheet status
+    // entry. Provider spells pass -1 and retain their existing opcode 142
+    // bytes above, including the provider's own dynamically allocated row.
+    PATCH_IF (portrait_icon >= 0) BEGIN
+      LPF cbr_em_append_effect
+        INT_VAR opcode = 142 target = 2 power = 4 parameter2 = portrait_icon
+                timing = 0 resist_dispel = 3 duration = 300
+      END
+      ++cbr_em_bb_new_count
+    END
+
+    PATCH_IF (is_courage = 1) BEGIN
+      LPF cbr_em_append_effect INT_VAR opcode = 54 target = 2 power = 4 parameter1 = 1 timing = 0 resist_dispel = 3 duration = 300 END
+      LPF cbr_em_append_effect INT_VAR opcode = 73 target = 2 power = 4 parameter1 = 3 timing = 0 resist_dispel = 3 duration = 300 END
+      LPF cbr_em_append_effect INT_VAR opcode = 18 target = 2 power = 4 parameter1 = 5 timing = 0 resist_dispel = 3 duration = 300 END
+      LPF cbr_em_append_effect INT_VAR opcode = 23 target = 2 power = 4 parameter1 = 20 parameter2 = 1 timing = 0 resist_dispel = 3 duration = 300 END
+      LPF cbr_em_append_effect INT_VAR opcode = 240 target = 2 power = 4 parameter2 = 36 timing = 1 resist_dispel = 3 END
+      LPF cbr_em_append_effect INT_VAR opcode = 161 target = 2 power = 4 timing = 1 resist_dispel = 3 END
+      SET cbr_em_bb_new_count += 6
+    END ELSE BEGIN
+      LPF cbr_em_append_effect INT_VAR opcode = 23 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
+      LPF cbr_em_append_effect INT_VAR opcode = 54 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
+      LPF cbr_em_append_effect INT_VAR opcode = 73 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
+      LPF cbr_em_append_effect INT_VAR opcode = 325 target = 2 power = 4 parameter1 = 2 timing = 0 resist_dispel = 3 duration = 300 END
+      SET cbr_em_bb_new_count += 4
+    END
+
+    // Replace duplicate owned markers with one canonical marker; this
+    // header's foreign markers follow in donor order.
+    PATCH_IF (spell_state >= 0) BEGIN
+      LPF cbr_em_append_effect
+        INT_VAR opcode = 328 target = 2 power = 4 parameter1 = 1 parameter2 = spell_state
+                timing = 0 resist_dispel = 3 duration = 300 special = 1
+      END
+      ++cbr_em_bb_new_count
+    END
+    FOR (cbr_em_bb_i = 0; cbr_em_bb_i < cbr_em_bb_old_count; ++cbr_em_bb_i) BEGIN
+      SET cbr_em_bb_fx = cbr_em_bb_effect_offset + (cbr_em_bb_old_first + cbr_em_bb_i) * 0x30
+      READ_SHORT cbr_em_bb_fx cbr_em_bb_opcode
+      PATCH_IF (cbr_em_bb_opcode = 328) BEGIN
+        READ_LONG (cbr_em_bb_fx + 0x08) cbr_em_bb_state
+        PATCH_IF (spell_state < 0 || cbr_em_bb_state != spell_state) BEGIN
+          LPF cbr_em_append_raw_effect INT_VAR source_offset = cbr_em_bb_fx END
+          ++cbr_em_bb_new_count
+        END
+      END
+    END
+    SET $cbr_em_bb_count(~%cbr_em_bb_ab%~) = cbr_em_bb_new_count
+    SET cbr_em_bb_total += cbr_em_bb_new_count
   END
 
   DELETE_BYTES cbr_em_bb_effect_offset (cbr_em_bb_effect_count * 0x30)
   WRITE_SHORT 0x6e 0
   WRITE_SHORT 0x70 cbr_em_bb_cast_count
-  WRITE_SHORT (cbr_em_bb_header + 0x1e) cbr_em_bb_new_count
-  WRITE_SHORT (cbr_em_bb_header + 0x20) cbr_em_bb_cast_count
+  FOR (cbr_em_bb_ab = 0; cbr_em_bb_ab < cbr_em_bb_ability_count; ++cbr_em_bb_ab) BEGIN
+    SET cbr_em_bb_header = cbr_em_bb_ability_offset + cbr_em_bb_ab * 0x28
+    WRITE_SHORT (cbr_em_bb_header + 0x1e) $cbr_em_bb_count(~%cbr_em_bb_ab%~)
+    WRITE_SHORT (cbr_em_bb_header + 0x20) $cbr_em_bb_first(~%cbr_em_bb_ab%~)
+  END
   WRITE_LONG 0x08 name_strref
   WRITE_LONG 0x0c name_strref
   WRITE_LONG 0x50 desc_strref
