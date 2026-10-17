@@ -26,6 +26,15 @@ AUTHOR ~synthetic test~
 BEGIN ~repeat elemental arrows~
 INCLUDE ~chriz-bg-rebalance/lib/elemental_arrows.tpa~
 """
+# A later mod patching the arrow with WeiDU's own item-effect functions.
+LATER_TP2 = """BACKUP ~cbr_arrow_later/backup~
+AUTHOR ~synthetic test~
+BEGIN ~later item-effect patches~
+COPY_EXISTING ~AROW08.ITM~ ~override~
+  LPF ADD_ITEM_EFFECT INT_VAR type = 3 opcode = 139 target = 1 timing = 1 parameter1 = 7 END
+  LPF ADD_ITEM_EQEFFECT INT_VAR opcode = 1 target = 1 timing = 2 parameter1 = 1 END
+  LPF ADD_ITEM_EFFECT INT_VAR type = 2 opcode = 139 target = 2 timing = 1 parameter1 = 8 END
+"""
 
 
 def damage(kind, n, s, *, mode=0, target=2, save=0, **fields):
@@ -607,6 +616,51 @@ class ElementalArrowVariantTests(unittest.TestCase):
                 self.assertNotIn("cannot be separated", output)
                 self.assertEqual(after, g.snapshot())
                 self.assertEqual(tlk_before, g.tlk.read_bytes())
+                self.uninstall_restores(g)
+
+    def test_copied_records_stay_patchable_by_later_mods(self):
+        """The private copy ends the effect table. WeiDU's ADD_ITEM_EFFECT and
+        ADD_ITEM_EQEFFECT in a later mod shift every slice by its index, so the
+        bow header keeps its patched copy and the activation its original."""
+        bow = header((damage(FIRE, 1, 6, save=1), troll("DWTROLFI")), hit=2, dmg=2)
+        activation = header((), kind=3, hit=1, dmg=3)
+        for label, blob, h_bow in (
+            ("bow header first", point(arrow([bow, activation], 5, 6), 1, 0, 1), 0),
+            ("activation listed first", point(arrow([activation, bow], 5, 6), 0, 0, 1), 1),
+        ):
+            with self.subTest(label):
+                resources = arrow_resources()
+                resources["AROW08.ITM"] = blob
+                g = self.game(resources)
+                self.install(g)
+                after = g.snapshot()
+                patched = ItmFile.from_bytes(after["AROW08.ITM"])
+                foreign = ItmFile.from_bytes(blob).abilities[1 - h_bow].effects
+                folder = g.root / "cbr_arrow_later"
+                folder.mkdir()
+                (folder / "cbr_arrow_later.tp2").write_text(LATER_TP2)
+                command = [str(WEIDU), "cbr_arrow_later/cbr_arrow_later.tp2", "--use-lang",
+                           "en_us", "--no-exit-pause", "--quick-log"]
+                p = subprocess.run(command + ["--force-install-list", "0"], cwd=g.root,
+                                   capture_output=True, text=True, timeout=60)
+                self.assertEqual(0, p.returncode, p.stdout + p.stderr)
+                later = ItmFile.from_bytes((g.override / "AROW08.ITM").read_bytes())
+                fire, helper = patched.abilities[h_bow].effects
+                self.assertEqual((1, 2), (fire.dice_number, fire.dice_size))
+                self.assertEqual((fire, helper),
+                                 later.abilities[h_bow].effects[:2])
+                self.assertEqual((139, 8), (later.abilities[h_bow].effects[2].opcode,
+                                            later.abilities[h_bow].effects[2].parameter1))
+                self.assertEqual(foreign, later.abilities[1 - h_bow].effects[:1])
+                self.assertEqual((1, 6), (foreign[0].dice_number, foreign[0].dice_size))
+                self.assertEqual((139, 7), (later.abilities[1 - h_bow].effects[1].opcode,
+                                            later.abilities[1 - h_bow].effects[1].parameter1))
+                self.assertEqual([(1, 1)], [(e.opcode, e.parameter1)
+                                            for e in later.global_effects])
+                p = subprocess.run(command + ["--force-uninstall-list", "0"], cwd=g.root,
+                                   capture_output=True, text=True, timeout=60)
+                self.assertEqual(0, p.returncode, p.stdout + p.stderr)
+                self.assertEqual(after, g.snapshot())
                 self.uninstall_restores(g)
 
     def test_shared_records_without_a_trailing_effect_table_warn_and_keep_the_item(self):
