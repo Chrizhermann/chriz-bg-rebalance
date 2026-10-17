@@ -43,3 +43,31 @@ with a warning. The reference install's AROWKC text ("+1d2 fire damage", no
 THAC0 line) is accepted as already correct apart from the breath save.
 Evidence: synthetic real-WeiDU tests in `tests/test_elemental_arrows.py`; no
 game or save was used.
+
+## 2026-10-17: owned ability and owned text clauses (review findings A and B)
+
+An independent source review found two defects in the behavior-based matcher.
+
+A. The classifier never checked the ability type, so a separate type-3
+activation dealing fire damage was also reduced to 1d2 and lost its bonuses.
+The owned ability is now the arrow's own hit only: every ITM extended header
+with attack type 2 (ranged, byte 0x00) and launcher 1 (bow, byte 0x10), which
+is what the reference AROW04/08/09/KC carry. Activations, melee headers and
+ranged headers without the bow launcher keep every byte, in any order and
+number. Several bow-fired headers with the package are all patched, as
+before. An item whose only package sits on another header warns, names how
+many such records were left alone and stays unchanged.
+
+B. The description rewrite stripped every `NdM+K` bonus and changed every
+"Save vs. Spell" for the kobold arrow, so a preserved `+1d4+2 acid damage`
+rider lost its `+2` and unrelated save claims became Breath. Only the owned
+clauses change now: the one "+NdM <element> damage" clause, the save
+statement attached to it, the one weapon-damage bonus (riders written as
+"+NdM+K" or followed by a non-physical "<type> damage" are never touched) and
+the one THAC0 claim. An owned claim stated more than once leaves the text
+unchanged with a warning. A "Save vs. Spell" claim elsewhere in a breath-save
+arrow's text is kept with a warning. The female string (dialogF.tlk, present
+for several EE languages) is rewritten from its own text instead of
+receiving the male result; if either string cannot be rewritten, neither
+changes. Unrecognized bonus wording can still stay stale (known limitation).
+Evidence: `tests/test_elemental_arrows.py`, synthetic real-WeiDU games only.

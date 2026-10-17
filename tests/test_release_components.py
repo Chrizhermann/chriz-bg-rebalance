@@ -37,7 +37,8 @@ def arrow_resources():
         struct.pack_into("<I", header, 0x0c, desc - 1)
         struct.pack_into("<I", header, 0x54, desc)
         ab = bytearray(56)
-        ab[0] = 2
+        ab[0] = 2  # attack type: ranged
+        ab[0x10] = 1  # launcher: bow (as on the reference arrows)
         struct.pack_into("<H", ab, 0x14, bonus)
         struct.pack_into("<H", ab, 0x1a, bonus)
         result[name + ".ITM"] = ItmFile(

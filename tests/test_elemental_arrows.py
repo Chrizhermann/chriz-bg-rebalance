@@ -15,7 +15,7 @@ from pathlib import Path
 
 from tests.ie_formats import ItmAbility, ItmFile, SplEffect
 from tests.test_cloud_forms import Game, WEIDU
-from tests.test_flail_of_ages import strings
+from tests.test_flail_of_ages import strings, tlk
 from tests.test_release_components import TEXTS, arrow_resources, run_public
 
 SCS_LOG = "~STRATAGEMS/SETUP-STRATAGEMS.TP2~ #0 #2000\n"
@@ -38,9 +38,12 @@ def troll(resource):
                      resource=resource)
 
 
-def header(effects, *, kind=2, hit=0, dmg=0):
+def header(effects, *, kind=2, launcher=None, hit=0, dmg=0):
+    """ITM extended header; ranged headers default to the bow launcher (byte
+    0x10 = 1), as on the reference AROW04/08/09/KC."""
     raw = bytearray(56)
     raw[0] = kind
+    raw[0x10] = (1 if kind == 2 else 0) if launcher is None else launcher
     struct.pack_into("<h", raw, 0x14, hit)
     struct.pack_into("<h", raw, 0x1a, dmg)
     raw[0x16] = 6  # physical dice size: never owned, must survive
@@ -336,17 +339,196 @@ class ElementalArrowVariantTests(unittest.TestCase):
                              new)
             self.uninstall_restores(g)
 
+    def test_only_bow_fired_ranged_headers_are_owned(self):
+        """Review finding A: a magical activation dealing the element is not the
+        arrow's hit. Only attack type 2 (ranged) with launcher 1 (bow) is owned;
+        activations, melee and ranged headers without the bow launcher keep
+        every byte, in any order and however many there are."""
+        activation = header((damage(FIRE, 3, 6, save=1),
+                             SplEffect(opcode=139, target=2, parameter1=4321)),
+                            kind=3, hit=1, dmg=3)
+        hit = header((damage(FIRE, 1, 6, save=1), troll("DWTROLFI")), hit=2, dmg=2)
+        melee = header((damage(FIRE, 1, 6),), kind=1, hit=1, dmg=1)
+        thrown = header((damage(FIRE, 1, 6),), kind=2, launcher=0, hit=3)
+        crossbow = header((damage(FIRE, 1, 6),), kind=2, launcher=2, dmg=3)
+        for label, headers, owned in (
+            ("activation after the hit header", [hit, activation], 0),
+            ("activation before the hit header", [activation, hit], 1),
+            ("several foreign headers around the hit header",
+             [melee, activation, hit, thrown, crossbow], 2),
+            ("second bow-fired header without the package",
+             [hit, header((troll("DWTROLFI"),), hit=1, dmg=1), activation], 0),
+        ):
+            with self.subTest(label):
+                resources = arrow_resources()
+                resources["AROW08.ITM"] = arrow(headers, 5, 6)
+                g = self.game(resources)
+                self.install(g)
+                after = g.snapshot()
+                old, new = g.original["AROW08.ITM"], after["AROW08.ITM"]
+                self.assertEqual(expected(old, new, 2, [(owned, 0)], [owned],
+                                          name=True, desc=True), new)
+                before, item = ItmFile.from_bytes(old), ItmFile.from_bytes(new)
+                for h, ability in enumerate(item.abilities):
+                    if h != owned:
+                        self.assertEqual(before.abilities[h].raw, ability.raw, h)
+                        self.assertEqual(before.abilities[h].effects, ability.effects, h)
+                self.assertEqual("Damage: 1d6, +1d2 fire damage (Save vs. Spell negates)\n"
+                                 "THAC0: +0", strings(g.tlk)[pointer(new, 0x54)])
+                self.reference_others_patched(g, after, skip=("AROW08",))
+                self.uninstall_restores(g)
+
+    def test_package_only_on_a_foreign_header_warns_and_keeps_the_item(self):
+        resources = arrow_resources()
+        resources["AROW09.ITM"] = arrow([
+            header((troll("DWTROLCO"),)),
+            header((damage(COLD, 1, 6),), kind=3),
+        ], 3, 4)
+        g = self.game(resources)
+        self.install(g, warnings=(
+            "AROW09.ITM has no cold damage package",
+            "bow-fired extended header (attack type ranged, launcher bow)",
+            "1 such record(s) on other extended headers were not changed",
+            "this item was left unchanged"))
+        after = g.snapshot()
+        self.assertEqual(g.original["AROW09.ITM"], after["AROW09.ITM"])
+        self.reference_others_patched(g, after, skip=("AROW09",))
+        self.uninstall_restores(g)
+
+    def described(self, item, headers, desc, *, warnings=(), save=None):
+        """Install with one custom description for `item`; return the new text
+        (None when the description pointer was kept) and the install output."""
+        resources = arrow_resources()
+        name = 1 if item == "AROW04" else 5 if item in ("AROW08", "AROWKC") else 3
+        resources[item + ".ITM"] = arrow(headers, name, len(TEXTS))
+        g = self.game(resources, TEXTS + [desc])
+        output = self.install(g, warnings=warnings)
+        after = g.snapshot()
+        new = after[item + ".ITM"]
+        kept = pointer(new, 0x54) == len(TEXTS)
+        if kept:
+            self.assertIn(item + ".ITM description was not updated", output)
+        self.reference_others_patched(g, after, skip=(item,))
+        self.uninstall_restores(g)
+        return (None if kept else strings(g.tlk)[pointer(new, 0x54)]), output
+
+    def test_description_keeps_other_riders_text(self):
+        """Review finding B: only the weapon-damage bonus, the fire clause and
+        the fire clause's own save are owned. Other riders' "+K" survive."""
+        fire_acid = [header((damage(FIRE, 1, 6, save=1),
+                             damage(ACID, 1, 4, parameter1=2)), hit=2, dmg=2)]
+        for label, desc, text in (
+            ("added rider", "Damage: 1d6+2, +1d6 fire damage, +1d4+2 acid damage\nTHAC0: +2",
+             "Damage: 1d6, +1d2 fire damage, +1d4+2 acid damage\nTHAC0: +0"),
+            ("rider written without a plus",
+             "Damage: 1d6+2, +1d6 fire damage, plus 1d4+2 Acid Damage\nTHAC0: +2",
+             "Damage: 1d6, +1d2 fire damage, plus 1d4+2 Acid Damage\nTHAC0: +0"),
+            ("weapon damage named piercing",
+             "Damage: 1d6+2 piercing damage, +1d6 fire damage, +1d4+2 acid damage",
+             "Damage: 1d6 piercing damage, +1d2 fire damage, +1d4+2 acid damage"),
+        ):
+            with self.subTest(label):
+                self.assertEqual(text, self.described("AROW08", fire_acid, desc)[0])
+
+    def test_breath_save_text_changes_only_the_fire_clause(self):
+        kobold = [header((troll("DWTROLFI"), damage(FIRE, 1, 6, save=2)), hit=2, dmg=2)]
+        with self.subTest("save attached to the fire clause; another Spell save"):
+            text, _ = self.described("AROWKC", kobold,
+                                     "Damage: 1d6+2, +1d6 fire damage (Save vs. Spell for none)\n"
+                                     "Special: Save vs. Spell or be dazed\nTHAC0: +2")
+            self.assertEqual("Damage: 1d6, +1d2 fire damage (Save vs. Breath for none)\n"
+                             "Special: Save vs. Spell or be dazed\nTHAC0: +0", text)
+        with self.subTest("unattributable Spell save is kept with a warning"):
+            text, _ = self.described(
+                "AROWKC", kobold,
+                "Damage: 1d6+2, +1d6 fire damage\nSave vs. Spell for no fire damage\nTHAC0: +2",
+                warnings=("AROWKC.ITM description states \"Save vs. Spell\" outside its fire "
+                          "damage clause",))
+            self.assertEqual("Damage: 1d6, +1d2 fire damage\nSave vs. Spell for no fire damage\n"
+                             "THAC0: +0", text)
+        with self.subTest("a spell save on a spell-save package is never touched"):
+            spell = [header((damage(FIRE, 1, 6, save=1),), hit=2, dmg=2)]
+            text, _ = self.described("AROW08", spell,
+                                     "Damage: 1d6+2, +1d6 fire damage (Save vs. Spell for none)")
+            self.assertEqual("Damage: 1d6, +1d2 fire damage (Save vs. Spell for none)", text)
+
+    def test_unattributable_owned_claims_keep_the_text(self):
+        fire = [header((damage(FIRE, 1, 6),), hit=2, dmg=2)]
+        cold = [header((damage(COLD, 1, 6),))]
+        for label, item, headers, desc in (
+            ("two fire clauses", "AROW08", fire,
+             "Damage: 1d6+2, +1d6 fire damage\nWhen charged: +1d6 fire damage\nTHAC0: +2"),
+            ("two cold clauses", "AROW09", cold,
+             "Damage: 1d6, +1d6 cold damage\nVs. fire creatures: +1d6 cold damage"),
+            ("two THAC0 claims", "AROW08", fire,
+             "Damage: 1d6+2, +1d6 fire damage\nTHAC0: +2\nOff-hand THAC0: +2"),
+            ("two weapon-damage bonuses", "AROW08", fire,
+             "Damage: 1d6+2, +1d6 fire damage\nWith a long bow: 1d6+2\nTHAC0: +2"),
+        ):
+            with self.subTest(label):
+                text, _ = self.described(item, headers, desc, warnings=(
+                    "description was not updated", "cannot be identified"))
+                self.assertIsNone(text)
+
+    def test_female_text_is_rewritten_from_its_own_string(self):
+        """SAY writes both dialog.tlk and dialogf.tlk. Each gendered string is
+        rewritten on its own, or neither is changed."""
+        male = TEXTS[6]
+        for label, female_name, female_desc, warning, new_name, new_desc in (
+            ("gendered variant", "Feuerpfeil der Hexe +2",
+             "Her arrow.\nDamage: 1d6+2, +1d6 fire damage (Save vs. Spell negates)\nTHAC0: +2",
+             None, "Feuerpfeil der Hexe",
+             "Her arrow.\nDamage: 1d6, +1d2 fire damage (Save vs. Spell negates)\nTHAC0: +0"),
+            ("female wording not recognized", "Arrow of Fire +2",
+             "Schaden: 1W6+2, +1W6 Feuerschaden\nETW0: +2",
+             "female (dialogF.tlk) text: no \"+NdM fire damage\" text", "Arrow of Fire", None),
+        ):
+            with self.subTest(label):
+                resources = arrow_resources()
+                g = self.game(resources)
+                female = g.root / "lang/en_us/dialogf.tlk"
+                female_texts = list(TEXTS)
+                female_texts[5], female_texts[6] = female_name, female_desc
+                female.write_bytes(tlk(female_texts))
+                self.install(g, warnings=(warning,) if warning else ())
+                after = g.snapshot()
+                new = after["AROW08.ITM"]
+                males, females = strings(g.tlk), strings(female)
+                self.assertEqual(female_texts, females[:len(female_texts)])
+                self.assertEqual(("Arrow of Fire", new_name),
+                                 (males[pointer(new, 0x0c)], females[pointer(new, 0x0c)]))
+                if new_desc is None:
+                    self.assertEqual(6, pointer(new, 0x54))
+                else:
+                    self.assertEqual(
+                        ("Damage: 1d6, +1d2 fire damage (Save vs. Spell negates)\nTHAC0: +0",
+                         new_desc), (males[pointer(new, 0x54)], females[pointer(new, 0x54)]))
+                self.assertEqual(male, males[6])
+                self.reference_others_patched(g, after, skip=("AROW08",) if new_desc is None else ())
+                self.uninstall_restores(g)
+                self.assertEqual(female_texts, strings(female)[:len(female_texts)])
+
     def test_repeat_application_is_byte_identical(self):
         resources = arrow_resources()
         resources["AROW08.ITM"] = arrow([
             header((SplEffect(opcode=139, target=2, parameter1=4321),), kind=3, hit=3),
+            header((damage(FIRE, 3, 6, save=1),), kind=3),
             header((troll("DWTROLFI"), damage(FIRE, 1, 6, save=1),
-                    damage(ACID, 1, 4)), hit=2, dmg=2),
-        ], 5, 6)
+                    damage(ACID, 1, 4, parameter1=2)), hit=2, dmg=2),
+        ], 5, 7)
         resources["AROW09.ITM"] = arrow([header((damage(COLD, 1, 6, mode=1),))], 3, 4)
-        g = self.game(resources)
+        desc = "Damage: 1d6+2, +1d6 fire damage (Save vs. Spell negates), +1d4+2 acid damage"
+        g = self.game(resources, TEXTS + [desc + "\nTHAC0: +2"])
+        female = g.root / "lang/en_us/dialogf.tlk"
+        female.write_bytes(tlk(TEXTS + ["Hers. " + desc]))
         self.install(g, warnings=("AROW09.ITM has no cold damage package",))
-        first, first_tlk = g.snapshot(), g.tlk.read_bytes()
+        first, first_tlk, first_female = g.snapshot(), g.tlk.read_bytes(), female.read_bytes()
+        new = first["AROW08.ITM"]
+        self.assertEqual(expected(g.original["AROW08.ITM"], new, 2, [(2, 1)], [2],
+                                  name=True, desc=True), new)
+        text = "Damage: 1d6, +1d2 fire damage (Save vs. Spell negates), +1d4+2 acid damage"
+        self.assertEqual((text + "\nTHAC0: +0", "Hers. " + text),
+                         (strings(g.tlk)[pointer(new, 0x54)], strings(female)[pointer(new, 0x54)]))
         folder = g.root / "cbr_arrow_repeat"
         folder.mkdir()
         (folder / "cbr_arrow_repeat.tp2").write_text(REPEAT_TP2)
@@ -360,6 +542,7 @@ class ElementalArrowVariantTests(unittest.TestCase):
         self.assertNotIn("was not updated", output)
         self.assertEqual(first, g.snapshot())
         self.assertEqual(first_tlk, g.tlk.read_bytes())
+        self.assertEqual(first_female, female.read_bytes())
         p = subprocess.run([str(WEIDU), "cbr_arrow_repeat/cbr_arrow_repeat.tp2",
                             "--force-uninstall-list", "0", "--use-lang", "en_us",
                             "--no-exit-pause", "--quick-log"],
