@@ -431,3 +431,24 @@ output. Synthetic variants exercise a third visual, sound/state markers, a moved
 headers at other levels, SCS 318/324 self-protection, partial-window outcomes, foreign op321s,
 a tier without icon/pulse/reset/op54, and rejected cases. Automated `--nogame` evidence
 only; no in-game check of carried records.
+
+### Correction 2026-10-17 — the recipient reset is chosen by whom it reaches
+
+Review finding (independent source review): the scanner took the tier's *first* op321
+against the donor's resref as the trio template. A donor with a full-window, caster-aimed
+self-remover (target 1) ahead of its recipient reset (target 2) therefore produced three
+caster-only resets and dropped the real one, so a new tide no longer cleared the previous
+tide's bonus from the other recipients; the verifier never looked at reset targets.
+
+Now only an own-resref op321 aimed at **target 2** — the preset target, i.e. every creature
+the tier's projectile reaches, which is where every tide stat lands — is the recipient reset
+(class 3) and the clone template. A self-remover aimed anywhere else (caster 1/9, group
+targets) is not a recipient reset: it is carried byte-identically in donor order (it names
+only the donor resref, never a tide, so it cannot interfere with tide replacement). A tier
+with no target-2 self-remover gets the synthesized target-2 trio as before. The verifier
+now requires each trio record to reach target 2 and to equal reset 0 in every byte but the
+resource, rejects an own-resref op321 at target 2 outside the trio (leftover recipient
+reset), and accepts a carried self-remover aimed elsewhere. Reference donors are unchanged
+(same SHA-256). Tests: `RecipientResetTests` (caster remover before / after / without the
+recipient reset, a party-aimed lower-case remover, vanilla + live, byte-exact rerun) and
+`VerifierTests.test_verifier_checks_reset_targets`.

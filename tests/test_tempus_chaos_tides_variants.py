@@ -178,6 +178,15 @@ FOREIGN_PROTECTION = SplEffect(
 )
 
 
+def caster_self_remover(donor: str, target: int = 1) -> SplEffect:
+    """Full-window op321 of the donor's own resref aimed at the caster (target
+    1 = self, 9 = original caster), not at the projectile's recipients."""
+    return SplEffect(
+        opcode=321, target=target, power=1, timing=1, resist_dispel=1, resource=donor,
+        save_bonus=7,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Independent model of the design
 # ---------------------------------------------------------------------------
@@ -205,8 +214,13 @@ def classify(effect: SplEffect, donor: str) -> str:
     if effect.probability1 < 100 or effect.probability2 > 0:
         return "lottery"
     own = effect.opcode in (321, 206, 318, 324) and effect.resource.upper() == donor
-    if own:
-        return "reset" if effect.opcode == 321 else "control"
+    if own and effect.opcode != 321:
+        return "control"
+    if own and effect.target == 2:
+        # Removes the previous bonus from each creature the tier's projectile
+        # reaches (the target every tide stat uses): the recipient reset. A
+        # self-remover aimed anywhere else is an ordinary carried record.
+        return "reset"
     if effect.opcode == 215:
         return "visual"
     if effect.opcode in (142, 9):
@@ -446,6 +460,134 @@ class OwnedRecordTests(ChaosTidesVariantTestCase):
         self.assert_matches_model(run)
 
 
+class RecipientResetTests(ChaosTidesVariantTestCase):
+    """The tide trio is cloned from the donor's recipient reset, identified by
+    what it removes (the donor's own resref) and whom it reaches (target 2,
+    the stats' recipients), never by its position among the tier's records."""
+
+    def assert_recipient_trio(self, run, names, donor_spell: SplFile, donor: str) -> None:
+        for name in names:
+            spell = read_spl(run.output / f"{name}.SPL")
+            for tier, (ability, donor_ability) in enumerate(
+                zip(spell.abilities, donor_spell.abilities)
+            ):
+                trio = ability.effects[:3]
+                self.assertEqual(
+                    [(e.opcode, e.target, e.resource) for e in trio],
+                    [(321, 2, resref) for resref in names],
+                    f"{name} tier {tier}: every reset reaches the stat recipients",
+                )
+                source = next(
+                    (e for e in donor_ability.effects
+                     if e.opcode == 321 and e.target == 2 and e.resource.upper() == donor),
+                    None,
+                )
+                if source is not None:
+                    for effect, resref in zip(trio, names):
+                        clone = bytearray(_fx_bytes(source))
+                        clone[0x14:0x1C] = resref.encode("ascii").ljust(8, b"\0")
+                        self.assertEqual(effect.raw, bytes(clone), f"{name} tier {tier} clone source")
+
+    def assert_caster_remover_carried(self, run, names, remover: SplEffect, position) -> None:
+        for name in names:
+            for tier, ability in enumerate(read_spl(run.output / f"{name}.SPL").abilities):
+                raws = [e.raw for e in ability.effects]
+                self.assertEqual(
+                    raws.count(_fx_bytes(remover)), 1,
+                    f"{name} tier {tier}: the caster-side remover is carried once, unchanged",
+                )
+                self.assertEqual(raws.index(_fx_bytes(remover)), position(tier), f"{name} tier {tier}")
+
+    def test_caster_side_self_remover_before_recipient_reset(self) -> None:
+        # The review finding: a caster-targeted self-remover ahead of the
+        # recipient reset used to become the clone template, so all three
+        # resets reached only the caster and recipients kept old tides.
+        for shape in ("vanilla", "live"):
+            with self.subTest(shape=shape):
+                removers = {d: caster_self_remover(d) for d in ("OHTMPS2D", "OHTMPS2E")}
+
+                def mutate(donor):
+                    return lambda spell: map_tiers(
+                        spell, lambda _i, fx: (removers[donor],) + fx + (SOUND,)
+                    )
+
+                run = self.build(
+                    shape=shape, ally=mutate("OHTMPS2D"), enemy=mutate("OHTMPS2E"),
+                    rerun_on_output=True,
+                )
+                self.assert_matches_model(run)
+                for donor, names in (("OHTMPS2D", TIDE_ALLY), ("OHTMPS2E", TIDE_ENEMY)):
+                    donor_spell = read_spl(run.fixture / f"{donor}.SPL")
+                    self.assert_recipient_trio(run, names, donor_spell, donor)
+                    # Carried records follow the trio in donor order: the
+                    # remover was the tier's first record.
+                    self.assert_caster_remover_carried(run, names, removers[donor], lambda _t: 3)
+                    for name in names:
+                        for ability in read_spl(run.output / f"{name}.SPL").abilities:
+                            self.assertIn(SOUND.to_bytes(), [e.raw for e in ability.effects])
+                self.assertIn(
+                    "ally donor OHTMPS2D: 5 tiers, 10 unowned records carried, "
+                    "0 tiers with synthesized resets.",
+                    run.transcript,
+                )
+
+    def test_caster_side_self_remover_after_recipient_reset(self) -> None:
+        remover = caster_self_remover("OHTMPS2D", target=9)
+
+        def mutate(spell: SplFile) -> SplFile:
+            return map_tiers(spell, lambda _i, fx: insert_after(fx, 321, remover))
+
+        run = self.build(ally=mutate, rerun_on_output=True)
+        self.assert_matches_model(run)
+        self.assert_recipient_trio(run, TIDE_ALLY, read_spl(run.fixture / "OHTMPS2D.SPL"), "OHTMPS2D")
+        self.assert_caster_remover_carried(run, TIDE_ALLY, remover, lambda _t: 3)
+        self.assertEqual(tide_digests(run.output)["CBRCHT1E.SPL"], reference_tides("vanilla")["CBRCHT1E.SPL"])
+
+    def test_caster_side_self_remover_without_recipient_reset(self) -> None:
+        remover = caster_self_remover("OHTMPS2E")
+
+        def mutate(spell: SplFile) -> SplFile:
+            # Tier 1 keeps only the caster-side remover (recipient reset
+            # replaced in place); the other tiers keep the stock reset.
+            return map_tiers(
+                spell, lambda i, fx: (remover,) + without(fx, 321) if i == 1 else fx
+            )
+
+        run = self.build(shape="live", enemy=mutate, rerun_on_output=True)
+        self.assert_matches_model(run)
+        for name in TIDE_ENEMY:
+            tiers = read_spl(run.output / f"{name}.SPL").abilities
+            for effect, resref in zip(tiers[1].effects[:3], TIDE_ENEMY):
+                self.assertEqual(
+                    effect.canonical(),
+                    (321, 2, 1, 0, 0, 1, 3, 0, 100, 0, resref, 0, 0, 0, 0, 0),
+                    "no recipient reset in the donor tier: synthesized target-2 trio",
+                )
+            self.assertEqual(tiers[1].effects[3].raw, remover.to_bytes())
+            for tier in (0, 2, 3, 4):
+                self.assertNotIn(remover.to_bytes(), [e.raw for e in tiers[tier].effects])
+        self.assert_recipient_trio(run, TIDE_ENEMY, read_spl(run.fixture / "OHTMPS2E.SPL"), "OHTMPS2E")
+        self.assertIn(
+            "enemy donor OHTMPS2E: 5 tiers, 1 unowned records carried, 1 tiers with synthesized resets.",
+            run.transcript,
+        )
+
+    def test_group_aimed_self_remover_is_not_the_template(self) -> None:
+        # A self-remover aimed at a group target (3 = party) reaches other
+        # creatures than the stats; it is carried, and the trio still clones
+        # the target-2 recipient reset. Lower-case resref: own-resref
+        # recognition is case-insensitive.
+        remover = with_raw_resource(caster_self_remover("OHTMPS2D", target=3), b"ohtmps2d")
+
+        def mutate(spell: SplFile) -> SplFile:
+            return map_tiers(spell, lambda _i, fx: (remover,) + fx)
+
+        run = self.build(shape="live", ally=mutate)
+        self.assert_matches_model(run)
+        self.assert_recipient_trio(run, TIDE_ALLY, read_spl(run.fixture / "OHTMPS2D.SPL"), "OHTMPS2D")
+        self.assert_caster_remover_carried(run, TIDE_ALLY, remover, lambda _t: 3)
+
+
 class TierShapeTests(ChaosTidesVariantTestCase):
     LEVELS = (1, 5, 9, 15, 21, 31)
 
@@ -611,10 +753,33 @@ class VerifierTests(ChaosTidesVariantTestCase):
     def test_verifier_accepts_carried_records(self) -> None:
         spell = self._built_onslaught_ally()
         sibling_reset = SplEffect(opcode=321, target=2, power=1, timing=1, resource="CBRCHT2D")
-        accepted = self._verify(
-            spell, 0, lambda fx: fx[:3] + (SOUND, STATE_MARKER, FOREIGN_RESET, sibling_reset) + fx[3:]
-        )
+        carried = (SOUND, STATE_MARKER, FOREIGN_RESET, sibling_reset, caster_self_remover("OHTMPS2D"))
+        accepted = self._verify(spell, 0, lambda fx: fx[:3] + carried + fx[3:])
         self.assertTrue(accepted.succeeded, accepted.transcript)
+
+    def test_verifier_checks_reset_targets(self) -> None:
+        spell = self._built_onslaught_ally()
+
+        def retarget(index: int, **fields):
+            return lambda fx: (
+                fx[:index] + (dataclasses.replace(fx[index], **fields),) + fx[index + 1 :]
+            )
+
+        cases = {
+            "reset 0 reaches target 1, not the stat recipients (target 2)": (0, retarget(0, target=1)),
+            "reset 2 reaches target 9, not the stat recipients (target 2)": (3, retarget(2, target=9)),
+            "reset 1 delivery differs from reset 0": (2, retarget(1, resist_dispel=0)),
+            "still targets the donor OHTMPS2D (leftover recipient reset)": (
+                1, lambda fx: fx + (SplEffect(opcode=321, target=2, power=1, timing=1, resource="OHTMPS2D"),)
+            ),
+        }
+        for message, (tier, change) in cases.items():
+            with self.subTest(message=message):
+                rejected = self._verify(spell, tier, change)
+                self.assertFalse(rejected.succeeded)
+                self.assertIn("NOT INSTALLED DUE TO ERRORS", rejected.transcript)
+                self.assertIn(f"verify input tier {tier}", rejected.transcript)
+                self.assertIn(message, rejected.transcript)
 
     def test_verifier_rejects_leftovers(self) -> None:
         spell = self._built_onslaught_ally()
