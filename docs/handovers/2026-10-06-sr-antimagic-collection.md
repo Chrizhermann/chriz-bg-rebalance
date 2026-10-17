@@ -1,8 +1,11 @@
 # SR anti-magic: collection integration handover
 
 Owner: `Chrizhermann/chriz-bg-rebalance`, SR adjustments. Date: 2026-10-06.
-User approved the following balance choices and implementation. Publication and
-game modification remain unauthorized. Entropy Shield remains research only.
+User approved the following balance choices and implementation. Publication
+remains unauthorized. Later October 6, the collection chat received authorization
+and applied **210 only** privately to the closed stream game; see the deployment
+record below. This does not authorize other games or 211 deployment. Entropy
+Shield remains research only.
 
 | ID | Stable main label | Behavior | Prerequisite |
 |---|---|---|---|
@@ -65,6 +68,21 @@ EEex disabled (210 unavailable, 211 still possible), ordering, and that the pin
 actually contains IDs210/211. No collection files were edited by this task.
 
 ## Evidence boundary
+
+### Private stream deployment, October 6
+
+Collection chat applied `CBR_SR_ANTIMAGIC:210` from commit `48938d1` to
+`%USERPROFILE%\Games\Chriz Easy BG\game`. Independent copied-live fixture and
+37 focused runtime-model/installer checks passed. WeiDU exit 0; all 440 previous
+log rows exact; only `SPWI608.SPL`, `SPWI608B.SPL`, `M_CBRPM.lua` changed in override.
+One new description at strref 330155, all old text/sound entries preserved.
+Payload and TLK match the copied-live fixture. Saves untouched, no game launch;
+native acceptance remains. Backup and `verified.json`:
+`%USERPROFILE%\Games\Chriz Easy BG\repair-backups\oct06-pierce-magic`.
+The matching concise website rule is published. Component 211 remains unapplied
+in this game; source availability must not be confused with installed state.
+
+### Prepared-source evidence
 
 Focused tests exercise the real WeiDU installer on disposable synthetic games,
 binary preservation, guards/rollback, public/tail parity and runtime simulations.
