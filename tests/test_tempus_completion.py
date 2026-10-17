@@ -477,16 +477,32 @@ class WeaponTrainingTests(TempusCompletionTestCase):
             extra_args=(str(LS_PERM_STAT),),
             expect_success=False,
         )
-        self.assertIn("exactly one Artisan axe permission gate", run.transcript)
+        self.assertIn(
+            "no ability header carries Artisan's axe permission gate", run.transcript
+        )
+        self.assertIn("C0PR#C4.SPL", run.transcript)
 
-    def test_duplicated_longsword_gate_fails(self) -> None:
+    def test_duplicated_longsword_gate_is_preserved_and_completed(self) -> None:
+        # A doubled longsword gate (another mod's or an earlier run's record)
+        # is existing data, not a malformed grant: keep both copies, add no
+        # third, and complete only the missing pips.
         run = self.run_component(
             "training",
             lambda root: build_training_fixture(root, grant_shape="duplicate_longsword_gate"),
             extra_args=(str(LS_PERM_STAT),),
-            expect_success=False,
+            rerun_on_output=True,
         )
-        self.assertIn("duplicated longsword/crossbow grants", run.transcript)
+        before = read_spl(run.fixture / "C0PR#C4.SPL").abilities[0].effects
+        after = read_spl(run.output / "C0PR#C4.SPL").abilities[0].effects
+        self.assertEqual(
+            [effect.raw for effect in after[: len(before)]],
+            [effect.raw for effect in before],
+            "existing grant records must stay byte-identical",
+        )
+        self.assertEqual(
+            [(e.opcode, e.parameter2, e.resource) for e in after[len(before):]],
+            [(233, 90, ""), (233, 103, "")],
+        )
 
 
 # ---------------------------------------------------------------------------

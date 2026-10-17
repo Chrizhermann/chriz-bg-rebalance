@@ -564,167 +564,174 @@ BEGIN
   END
 END
 
+// Holy Power five-use cap, located by meaning.
+//
+// Owned cells: every data cell whose token is GA_OHTMPS1 (case-insensitive),
+// in any row and at any level.  A CLAB row label is not engine-addressed:
+// the engine walks every row at each level, and Artisan's Kitpack packs its
+// per-level grants into the first free ABILITY* row, so neither the row name
+// nor a fixed level list identifies a Holy Power use.  The level of a cell is
+// its data-column index (1 = first level column).  Uses are ordered by
+// (level, file row order); the first five are kept and every later one is
+// replaced by ****.  Every other cell, every row, the header, whitespace, and
+// line endings stay byte-identical, so another mod's grants (AP_CDHLYSYM,
+// AP_C0PR#CL, ...) are neither validated nor touched.
+//
+// The scanner tokenizes the raw buffer itself instead of using
+// READ_2DA_ENTRIES_NOW: WeiDU's row filter is "at least N tokens", which
+// counts the signature line as a data row in very narrow tables, and the
+// deferred 2DA writers renormalize whitespace.  Format positions follow the
+// 2DA V1 layout: nonblank line 0 = signature, 1 = default value, 2 = column
+// labels, 3.. = data rows (token 0 = row label).
+//
+// apply_cap = 0 is a read-only classification; apply_cap = 1 clears every use
+// beyond the fifth, editing from the end of the buffer so recorded offsets of
+// earlier cells stay valid.
+DEFINE_PATCH_FUNCTION cbr_scan_tempus_clab
+  INT_VAR
+    apply_cap = 0
+  RET
+    grant_count
+    capped_shape
+    cleared_count
+BEGIN
+  SET grant_count = 0
+  SET capped_shape = 0
+  SET cleared_count = 0
+  SET cbr_clab_line = 0
+  SET cbr_clab_token = 0
+  SET cbr_clab_width = "-1"
+  SET cbr_clab_pos = 0
+  WHILE (cbr_clab_pos < BUFFER_LENGTH) BEGIN
+    READ_BYTE cbr_clab_pos cbr_clab_byte
+    PATCH_IF (cbr_clab_byte = 10 || cbr_clab_byte = 13) BEGIN
+      PATCH_IF (cbr_clab_token > 0) BEGIN
+        PATCH_IF (cbr_clab_line = 2) BEGIN
+          SET cbr_clab_width = cbr_clab_token
+        END
+        ++cbr_clab_line
+      END
+      SET cbr_clab_token = 0
+      ++cbr_clab_pos
+    END ELSE PATCH_IF (cbr_clab_byte = 9 || cbr_clab_byte = 32) BEGIN
+      ++cbr_clab_pos
+    END ELSE BEGIN
+      SET cbr_clab_start = cbr_clab_pos
+      SET cbr_clab_in_token = 1
+      WHILE (cbr_clab_in_token && cbr_clab_pos < BUFFER_LENGTH) BEGIN
+        READ_BYTE cbr_clab_pos cbr_clab_byte
+        PATCH_IF (cbr_clab_byte = 9 || cbr_clab_byte = 10 || cbr_clab_byte = 13 || cbr_clab_byte = 32) BEGIN
+          SET cbr_clab_in_token = 0
+        END ELSE BEGIN
+          ++cbr_clab_pos
+        END
+      END
+      SET cbr_clab_length = cbr_clab_pos - cbr_clab_start
+      PATCH_IF (cbr_clab_line = 0 && cbr_clab_token = 0) BEGIN
+        SET cbr_clab_signature_ok = 0
+        PATCH_IF (cbr_clab_length = 3) BEGIN
+          READ_ASCII cbr_clab_start cbr_clab_signature (3)
+          PATCH_IF (~%cbr_clab_signature%~ STRING_EQUAL_CASE ~2DA~) BEGIN
+            SET cbr_clab_signature_ok = 1
+          END
+        END
+        PATCH_IF (!cbr_clab_signature_ok) BEGIN
+          PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA cannot be parsed: it does not start with a 2DA signature line (encrypted, binary, or not a 2DA table).~
+        END
+      END
+      PATCH_IF (cbr_clab_line >= 3 && cbr_clab_token >= 1 && cbr_clab_length = 10) BEGIN
+        READ_ASCII cbr_clab_start cbr_clab_cell (10)
+        PATCH_IF (~%cbr_clab_cell%~ STRING_EQUAL_CASE ~GA_OHTMPS1~) BEGIN
+          SET cbr_clab_row = cbr_clab_line - 3
+          PATCH_IF (cbr_clab_token > cbr_clab_width) BEGIN
+            PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA data row %cbr_clab_row% has GA_OHTMPS1 in cell %cbr_clab_token%, beyond the %cbr_clab_width% level columns its header declares; whether the engine grants that use is undefined, so the five-use cap cannot be established.~
+          END
+          SET $cbr_clab_grant_offset(~%grant_count%~) = cbr_clab_start
+          SET $cbr_clab_grant_level(~%grant_count%~) = cbr_clab_token
+          SET $cbr_clab_grant_row(~%grant_count%~) = cbr_clab_row
+          ++grant_count
+        END
+      END
+      ++cbr_clab_token
+    END
+  END
+  PATCH_IF (cbr_clab_token > 0) BEGIN
+    PATCH_IF (cbr_clab_line = 2) BEGIN
+      SET cbr_clab_width = cbr_clab_token
+    END
+    ++cbr_clab_line
+  END
+  PATCH_IF (cbr_clab_line < 3 || cbr_clab_width < 1) BEGIN
+    PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA cannot be parsed: expected a 2DA signature line, a default-value line, and a column-label line before the level rows.~
+  END
+  // No GA_OHTMPS1 cell means this kit table does not grant the Holy Power
+  // innate this component reworks (it may grant another resref, or none).
+  // The five-use promise of the reworked spell cannot be established, so the
+  // component refuses instead of reporting a cap it did not apply.
+  PATCH_IF (grant_count = 0) BEGIN
+    PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA grants no GA_OHTMPS1 use in any row; this kit table does not grant the Holy Power innate (OHTMPS1) this component caps at five uses, so the cap cannot be established.~
+  END
+  SET capped_shape = (grant_count <= 5)
+  PATCH_IF (apply_cap && grant_count > 5) BEGIN
+    // Recorded in file order, so walking the list backwards edits from the
+    // end of the buffer and never invalidates an offset still to be used.
+    FOR (cbr_clab_index = grant_count - 1; cbr_clab_index >= 0; SET cbr_clab_index = cbr_clab_index - 1) BEGIN
+      SET cbr_clab_level = $cbr_clab_grant_level(~%cbr_clab_index%~)
+      SET cbr_clab_row = $cbr_clab_grant_row(~%cbr_clab_index%~)
+      SET cbr_clab_rank = 0
+      FOR (cbr_clab_other = 0; cbr_clab_other < grant_count; ++cbr_clab_other) BEGIN
+        SET cbr_clab_other_level = $cbr_clab_grant_level(~%cbr_clab_other%~)
+        SET cbr_clab_other_row = $cbr_clab_grant_row(~%cbr_clab_other%~)
+        PATCH_IF (cbr_clab_other_level < cbr_clab_level
+               || (cbr_clab_other_level = cbr_clab_level && cbr_clab_other_row < cbr_clab_row)) BEGIN
+          ++cbr_clab_rank
+        END
+      END
+      PATCH_IF (cbr_clab_rank >= 5) BEGIN
+        SET cbr_clab_offset = $cbr_clab_grant_offset(~%cbr_clab_index%~)
+        READ_ASCII cbr_clab_offset cbr_clab_cell (10)
+        PATCH_IF !(~%cbr_clab_cell%~ STRING_EQUAL_CASE ~GA_OHTMPS1~) BEGIN
+          PATCH_FAIL ~CBR Tempus CLAB cap lost track of the GA_OHTMPS1 cell at data row %cbr_clab_row% level %cbr_clab_level%.~
+        END
+        WRITE_ASCII cbr_clab_offset ~****~ #4
+        DELETE_BYTES (cbr_clab_offset + 4) 6
+        ++cleared_count
+      END
+    END
+  END
+END
+
+// Read-only classification used by the preflight and the post-validation.
+// capped_shape = 1 when the table grants at most five Holy Power uses.
 DEFINE_PATCH_FUNCTION cbr_validate_tempus_clab
   RET
     capped_shape
-    ability1_row
+    grant_count
 BEGIN
-  SET capped_shape = 0
-  SET ability1_row = "-1"
-  COUNT_2DA_COLS cbr_clab_cols
-  PATCH_IF (cbr_clab_cols != 51) BEGIN
-    PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: expected row label plus levels 1 through 50.~
-  END
-  READ_2DA_ENTRIES_NOW cbr_clab_rows 51
-  SET cbr_ability1_row = "-1"
-  SET cbr_ability1_count = 0
-  FOR (cbr_row = 0; cbr_row < cbr_clab_rows; ++cbr_row) BEGIN
-    READ_2DA_ENTRY_FORMER cbr_clab_rows cbr_row 0 cbr_clab_label
-    PATCH_IF (~%cbr_clab_label%~ STR_EQ ~ABILITY1~) BEGIN
-      SET cbr_ability1_row = cbr_row
-      ++cbr_ability1_count
-    END
-  END
-  PATCH_IF (cbr_ability1_count != 1) BEGIN
-    PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: expected exactly one ABILITY1 row.~
-  END
-  SET ability1_row = cbr_ability1_row
-
-  SET cbr_late_original = 0
-  SET cbr_late_capped = 0
-  FOR (cbr_level = 1; cbr_level <= 50; ++cbr_level) BEGIN
-    READ_2DA_ENTRY_FORMER cbr_clab_rows cbr_ability1_row cbr_level cbr_clab_cell
-    SET cbr_early_grant = (cbr_level = 1 || cbr_level = 6 || cbr_level = 11 || cbr_level = 16 || cbr_level = 21)
-    SET cbr_late_grant = (cbr_level = 26 || cbr_level = 31 || cbr_level = 36 || cbr_level = 41 || cbr_level = 46)
-    PATCH_IF (cbr_early_grant) BEGIN
-      PATCH_IF !(~%cbr_clab_cell%~ STR_EQ ~GA_OHTMPS1~) BEGIN
-        PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: ABILITY1 level %cbr_level% must grant GA_OHTMPS1.~
-      END
-    END ELSE PATCH_IF (cbr_level = 25) BEGIN
-      PATCH_IF !(~%cbr_clab_cell%~ STR_EQ ~AP_CDHLYSYM~) BEGIN
-        PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: ABILITY1 level 25 must preserve AP_CDHLYSYM.~
-      END
-    END ELSE PATCH_IF (cbr_late_grant) BEGIN
-      PATCH_IF (~%cbr_clab_cell%~ STR_EQ ~GA_OHTMPS1~) BEGIN
-        ++cbr_late_original
-      END ELSE PATCH_IF (~%cbr_clab_cell%~ STR_EQ ~****~) BEGIN
-        ++cbr_late_capped
-      END ELSE BEGIN
-        PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: ABILITY1 level %cbr_level% has an unrecognized Holy Power grant.~
-      END
-    // Artisan's proficiency infrastructure may pack its per-level cleric
-    // permission grant into ABILITY1 wherever the Holy Power row is empty.
-    END ELSE PATCH_IF !(~%cbr_clab_cell%~ STR_EQ ~****~
-                     || ~%cbr_clab_cell%~ STR_EQ ~AP_C0PR#CL~) BEGIN
-      PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: ABILITY1 level %cbr_level% must be empty or grant AP_C0PR#CL.~
-    END
-  END
-  PATCH_IF !((cbr_late_original = 5 && cbr_late_capped = 0) || (cbr_late_original = 0 && cbr_late_capped = 5)) BEGIN
-    PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: late Holy Power grants are partially cleared.~
-  END
-  PATCH_IF (cbr_late_capped = 5) BEGIN
-    SET capped_shape = 1
+  LPF cbr_scan_tempus_clab
+    INT_VAR apply_cap = 0
+    RET
+      capped_shape = capped_shape
+      grant_count = grant_count
   END
 END
 
 DEFINE_PATCH_FUNCTION cbr_cap_tempus_clab
 BEGIN
-  LPF cbr_validate_tempus_clab
-    RET cbr_cap_already_capped = capped_shape
+  LPF cbr_scan_tempus_clab
+    INT_VAR apply_cap = 1
+    RET
+      cbr_cap_before = grant_count
+      cbr_cap_cleared = cleared_count
   END
-  PATCH_IF (!cbr_cap_already_capped) BEGIN
-    // Deferred 2DA writers normalize whitespace/newlines globally.  Walk the
-    // already validated ABILITY1 row instead and shrink only the five literal
-    // GA_OHTMPS1 tokens to ****, preserving every surrounding byte.
-    SET cbr_cap_scan = 0
-    SET cbr_cap_position = "-1"
-    WHILE (cbr_cap_position < 0 && cbr_cap_scan < BUFFER_LENGTH) BEGIN
-      SET cbr_cap_candidate = cbr_cap_scan
-      SET cbr_cap_skipping_indent = 1
-      WHILE (cbr_cap_skipping_indent && cbr_cap_candidate < BUFFER_LENGTH) BEGIN
-        READ_BYTE cbr_cap_candidate cbr_cap_byte
-        PATCH_IF (cbr_cap_byte = 9 || cbr_cap_byte = 32) BEGIN
-          ++cbr_cap_candidate
-        END ELSE BEGIN
-          SET cbr_cap_skipping_indent = 0
-        END
-      END
-      PATCH_IF ((cbr_cap_candidate + 8) < BUFFER_LENGTH) BEGIN
-        READ_ASCII cbr_cap_candidate cbr_cap_line_label (8)
-        READ_BYTE (cbr_cap_candidate + 8) cbr_cap_after_label
-        PATCH_IF (~%cbr_cap_line_label%~ STR_EQ ~ABILITY1~
-               && (cbr_cap_after_label = 9 || cbr_cap_after_label = 32)) BEGIN
-          SET cbr_cap_position = cbr_cap_candidate
-        END
-      END
-      PATCH_IF (cbr_cap_position < 0) BEGIN
-        SET cbr_cap_at_eol = 0
-        WHILE (!cbr_cap_at_eol && cbr_cap_scan < BUFFER_LENGTH) BEGIN
-          READ_BYTE cbr_cap_scan cbr_cap_byte
-          PATCH_IF (cbr_cap_byte = 10 || cbr_cap_byte = 13) BEGIN
-            SET cbr_cap_at_eol = 1
-          END ELSE BEGIN
-            ++cbr_cap_scan
-          END
-        END
-        SET cbr_cap_skipping_eol = 1
-        WHILE (cbr_cap_skipping_eol && cbr_cap_scan < BUFFER_LENGTH) BEGIN
-          READ_BYTE cbr_cap_scan cbr_cap_byte
-          PATCH_IF (cbr_cap_byte = 10 || cbr_cap_byte = 13) BEGIN
-            ++cbr_cap_scan
-          END ELSE BEGIN
-            SET cbr_cap_skipping_eol = 0
-          END
-        END
-      END
-    END
-    PATCH_IF (cbr_cap_position < 0) BEGIN
-      PATCH_FAIL ~CBR Tempus CLAB cap could not relocate the validated ABILITY1 row.~
-    END
-    FOR (cbr_cap_level = 0; cbr_cap_level <= 50; ++cbr_cap_level) BEGIN
-      SET cbr_cap_target = (cbr_cap_level = 26
-                         || cbr_cap_level = 31
-                         || cbr_cap_level = 36
-                         || cbr_cap_level = 41
-                         || cbr_cap_level = 46)
-      PATCH_IF (cbr_cap_target) BEGIN
-        READ_ASCII cbr_cap_position cbr_cap_token (10)
-        PATCH_IF !(~%cbr_cap_token%~ STR_EQ ~GA_OHTMPS1~) BEGIN
-          PATCH_FAIL ~CBR Tempus CLAB cap expected GA_OHTMPS1 at validated ABILITY1 level %cbr_cap_level%, found %cbr_cap_token%.~
-        END
-        WRITE_ASCII cbr_cap_position ~****~ #4
-        DELETE_BYTES (cbr_cap_position + 4) 6
-      END
-      SET cbr_cap_at_separator = 0
-      WHILE (!cbr_cap_at_separator && cbr_cap_position < BUFFER_LENGTH) BEGIN
-        READ_BYTE cbr_cap_position cbr_cap_byte
-        PATCH_IF (cbr_cap_byte = 9 || cbr_cap_byte = 10 || cbr_cap_byte = 13 || cbr_cap_byte = 32) BEGIN
-          SET cbr_cap_at_separator = 1
-        END ELSE BEGIN
-          ++cbr_cap_position
-        END
-      END
-      PATCH_IF (cbr_cap_level < 50) BEGIN
-        SET cbr_cap_at_token = 0
-        WHILE (!cbr_cap_at_token && cbr_cap_position < BUFFER_LENGTH) BEGIN
-          READ_BYTE cbr_cap_position cbr_cap_byte
-          PATCH_IF (cbr_cap_byte = 9 || cbr_cap_byte = 10 || cbr_cap_byte = 13 || cbr_cap_byte = 32) BEGIN
-            ++cbr_cap_position
-          END ELSE BEGIN
-            SET cbr_cap_at_token = 1
-          END
-        END
-        PATCH_IF (!cbr_cap_at_token) BEGIN
-          PATCH_FAIL ~CBR Tempus CLAB cap reached EOF before ABILITY1 level 50.~
-        END
-      END
-    END
-    LPF cbr_validate_tempus_clab
-      RET cbr_cap_verified = capped_shape
-    END
-    PATCH_IF (!cbr_cap_verified) BEGIN
-      PATCH_FAIL ~CBR Tempus CLAB cap did not produce the exact five-use shape.~
-    END
+  LPF cbr_scan_tempus_clab
+    INT_VAR apply_cap = 0
+    RET
+      cbr_cap_verified = capped_shape
+      cbr_cap_after = grant_count
+  END
+  PATCH_IF (!cbr_cap_verified || (cbr_cap_before > 5 && cbr_cap_after != 5)) BEGIN
+    PATCH_FAIL ~CBR Tempus CLAB cap did not leave exactly the first five of %cbr_cap_before% GA_OHTMPS1 uses (found %cbr_cap_after% after clearing %cbr_cap_cleared%).~
   END
 END
 
