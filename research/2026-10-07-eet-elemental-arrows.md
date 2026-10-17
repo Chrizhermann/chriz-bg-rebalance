@@ -90,3 +90,9 @@ table to end the file (the normal ITM layout) and each copy's first index to
 fit its 16-bit field; otherwise that item is left unchanged with a warning
 naming the obstacle. Evidence: `test_shared_package_records_are_copied_on_write`
 and `test_shared_records_without_a_trailing_effect_table_warn_and_keep_the_item`.
+
+The copy leaves the owned slice out of header order. WeiDU's own
+`ADD_ITEM_EFFECT` and `ADD_ITEM_EQEFFECT` shift every slice by its index, so a
+later mod still patches both headers correctly; on the shared layout without a
+copy, the same later call corrupts the bow header. Evidence:
+`test_copied_records_stay_patchable_by_later_mods`.

@@ -95,6 +95,9 @@ the new source pin, dependencies, selections and recipe checks still required.
 Acid arrows deal **1d3 acid**, cold arrows **1d2 cold**, and standard/kobold
 fire arrows **1d2 fire** without their +2 attack/physical-damage bonus.
 Other special arrows, original saving throws and SCS troll helpers are unchanged.
+Only each arrow's bow-fired hit changes: other abilities, other damage riders and
+their description text stay as they are, in the male and female strings. If
+another ability shares the hit's damage effect, the hit gets its own copy first.
 This fills the EET gap in SCS's own elemental-arrow option; requires EET and
 SCS general spell tweaks (2000). Install after other arrow/item changes.
 
