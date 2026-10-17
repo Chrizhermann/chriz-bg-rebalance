@@ -1,97 +1,256 @@
 // EET adaptation of installed SCS 35.21 component 3017.
 // Upstream elemental_arrows.tpa changes AROW04 to 1d3 acid, AROW09 to
-// 1d2 cold, and removes AROW08/AROWKC's physical/attack +2 bonuses.
+// 1d2 cold, and removes AROW08/AROWKC's physical/attack bonuses.
 // Also reduce those two fire effects to 1d2, verified in BG2's AROW08
 // in data/ITEMS.BIF and the SCS @16011 description. SCS omits that
 // write, and its component gate excludes EET. No item replacement.
 // ARROPHE2 and special arrows are intentionally outside the SCS list.
+//
+// Behavior, not fixture shape: per extended header, the "elemental package"
+// is the opcode-12 record whose damage type (param2 high word) is the
+// component's element, damage mode (param2 low word) is 0 (normal dice
+// damage) and target is 2 (projectile target = the victim). Only its dice
+// (+0x1c/+0x20) are owned; for fire, also the to-hit/damage bonuses
+// (+0x14/+0x1a) of the headers that carry the package. Every other record,
+// header and byte is preserved: other damage types (e.g. an acid rider on a
+// fire arrow), same-element records with other delivery, SCS troll helpers
+// and headers without the package. Two package records in one header are
+// genuinely ambiguous (writing each would multiply the damage, picking one
+// would discard another mod's data) and fail the component. An item without
+// any package is left untouched with a warning: its promised change cannot
+// be established and no damage is invented. Text updates are derived from
+// the actual old/new values; unrecognized claims leave the text unchanged
+// with a warning rather than publishing a false description.
 
-DEFINE_PATCH_FUNCTION cbr_elemental_arrow
-    INT_VAR elemental_type=0 elemental_size=0 remove_bonus=0
-    STR_VAR element=~~
+// Count the package records of one extended header (bounds checked by caller).
+DEFINE_PATCH_FUNCTION cbr_elemental_arrow_scan
+    INT_VAR ability_at=0 effect_offset=0 damage_type=0
+    RET package_count package_at
 BEGIN
-    PATCH_IF BUFFER_LENGTH < 0x72 BEGIN PATCH_FAIL ~Truncated arrow resource.~ END
-    READ_ASCII 0 signature (8)
-    PATCH_IF NOT (~%signature%~ STRING_EQUAL ~ITM V1  ~) BEGIN
-        PATCH_FAIL ~Unsupported arrow format.~
-    END
-    READ_SHORT 0x1c category
-    PATCH_IF category != 5 BEGIN PATCH_FAIL ~Target resource is not an arrow.~ END
-    READ_LONG 0x64 ability_offset
-    READ_SHORT 0x68 ability_count
-    READ_LONG 0x6a effect_offset
-    PATCH_IF ability_count < 1 OR ability_offset < 0x72 OR
-        ability_offset + ability_count * 0x38 > BUFFER_LENGTH OR
-        effect_offset < ability_offset + ability_count * 0x38 BEGIN
-        PATCH_FAIL ~Malformed arrow ability table.~
-    END
-    SET matched = 0
-    SET damage_save = 0
-    FOR (i=0; i<ability_count; i+=1) BEGIN
-        SET a=ability_offset+i*0x38
-        READ_BYTE a ability_type
-        READ_SHORT (a+0x1e) effect_count
-        READ_SHORT (a+0x20) first_effect
-        PATCH_IF effect_offset+(first_effect+effect_count)*0x30 > BUFFER_LENGTH BEGIN
-            PATCH_FAIL ~Malformed arrow effect table.~
-        END
-        PATCH_IF ability_type != 2 BEGIN PATCH_FAIL ~Unexpected non-projectile arrow ability.~ END
-        SET ability_matches=0
-        FOR (j=0; j<effect_count; j+=1) BEGIN
-            SET e=effect_offset+(first_effect+j)*0x30
-            READ_SHORT e opcode
-            PATCH_IF opcode=12 BEGIN
-                READ_LONG (e+8) damage_type
-                READ_BYTE (e+2) effect_target
-                PATCH_IF damage_type != elemental_type OR effect_target != 2 BEGIN
-                    PATCH_FAIL ~Unexpected damage effect; no arrow was installed.~
-                END
-                READ_LONG (e+0x24) damage_save
-                WRITE_LONG (e+0x1c) 1
-                WRITE_LONG (e+0x20) elemental_size
-                SET ability_matches+=1
-                SET matched+=1
+    READ_SHORT (ability_at+0x1e) cea_scan_count
+    READ_SHORT (ability_at+0x20) cea_scan_first
+    SET package_count = 0
+    SET package_at = 0
+    FOR (cea_j=0; cea_j<cea_scan_count; cea_j+=1) BEGIN
+        SET cea_e = effect_offset + (cea_scan_first + cea_j) * 0x30
+        READ_SHORT cea_e cea_opcode
+        PATCH_IF cea_opcode = 12 BEGIN
+            READ_SHORT (cea_e+0x08) cea_mode
+            READ_SHORT (cea_e+0x0a) cea_type
+            READ_BYTE (cea_e+0x02) cea_target
+            PATCH_IF cea_type = damage_type AND cea_mode = 0 AND cea_target = 2 BEGIN
+                SET package_count += 1
+                SET package_at = cea_e
             END
         END
-        PATCH_IF ability_matches != 1 BEGIN
-            PATCH_FAIL ~Expected one elemental damage effect per arrow ability.~
-        END
-        PATCH_IF remove_bonus BEGIN
-            WRITE_SHORT (a+0x14) 0
-            WRITE_SHORT (a+0x1a) 0
-        END
-    END
-    READ_STRREF 0x54 old_description
-    INNER_PATCH_SAVE description ~%old_description%~ BEGIN
-        REPLACE_TEXTUALLY CASE_INSENSITIVE ~\+[0-9]+d[0-9]+ %element% damage~ ~+1d%elemental_size% %element% damage~
-        PATCH_IF remove_bonus BEGIN
-            REPLACE_TEXTUALLY CASE_INSENSITIVE ~THAC0: \+2~ ~THAC0: +0~
-            REPLACE_TEXTUALLY CASE_INSENSITIVE ~1d6\+2~ ~1d6~
-            // The special kobold arrow keeps its original save vs. breath.
-            PATCH_IF damage_save = 2 BEGIN
-                REPLACE_TEXTUALLY CASE_INSENSITIVE ~Save vs\. Spell~ ~Save vs. Breath~
-            END
-        END
-    END
-    SAY DESC ~%description%~
-    PATCH_IF remove_bonus BEGIN
-        READ_STRREF 0x0c old_name
-        INNER_PATCH_SAVE new_name ~%old_name%~ BEGIN
-            REPLACE_TEXTUALLY ~ *\+[0-9]+$~ ~~
-        END
-        SAY NAME2 ~%new_name%~
     END
 END
 
-COPY_EXISTING ~arow04.itm~ ~override~
-    LPF cbr_elemental_arrow INT_VAR elemental_type=65536 elemental_size=3 STR_VAR element=acid END
-BUT_ONLY
+// damage_type is the opcode-12 damage-type word (acid 1, cold 2, fire 8).
+// apply=0 validates without writing or warning, so all items are checked
+// before any item or TLK string is published.
+DEFINE_PATCH_FUNCTION cbr_elemental_arrow
+    INT_VAR damage_type=0 elemental_size=0 remove_bonus=0 apply=1
+    STR_VAR element=~~
+BEGIN
+    SPRINT cea_item ~%SOURCE_FILE%~
+    TO_UPPER cea_item
+    PATCH_IF BUFFER_LENGTH < 0x72 BEGIN
+        PATCH_FAIL ~Elemental arrows: %cea_item% is truncated (shorter than an ITM V1 header); nothing was installed.~
+    END
+    READ_ASCII 0 cea_signature (8)
+    PATCH_IF NOT (~%cea_signature%~ STRING_EQUAL ~ITM V1  ~) BEGIN
+        PATCH_FAIL ~Elemental arrows: %cea_item% is not an ITM V1 resource; nothing was installed.~
+    END
+    READ_SHORT 0x1c cea_category
+    PATCH_IF cea_category != 5 BEGIN
+        PATCH_FAIL ~Elemental arrows: %cea_item% is not an arrow (item category %cea_category%); nothing was installed.~
+    END
+    READ_LONG 0x64 cea_ability_offset
+    READ_SHORT 0x68 cea_ability_count
+    READ_LONG 0x6a cea_effect_offset
+    PATCH_IF cea_ability_offset < 0x72 OR
+        cea_ability_offset + cea_ability_count * 0x38 > BUFFER_LENGTH OR
+        cea_effect_offset < cea_ability_offset + cea_ability_count * 0x38 BEGIN
+        PATCH_FAIL ~Elemental arrows: %cea_item% has a malformed extended-header table; nothing was installed.~
+    END
 
-COPY_EXISTING ~arow09.itm~ ~override~
-    LPF cbr_elemental_arrow INT_VAR elemental_type=131072 elemental_size=2 STR_VAR element=cold END
-BUT_ONLY
+    // Classify every header. Old package values drive the text updates.
+    SET cea_packages = 0
+    SET cea_text_conflict = 0
+    SET cea_old_n = 0
+    SET cea_old_s = 0
+    SET cea_old_save = 0
+    SET cea_old_hit = 0
+    SET cea_old_dmg = 0
+    FOR (cea_i=0; cea_i<cea_ability_count; cea_i+=1) BEGIN
+        SET cea_a = cea_ability_offset + cea_i * 0x38
+        READ_SHORT (cea_a+0x1e) cea_count
+        READ_SHORT (cea_a+0x20) cea_first
+        PATCH_IF cea_effect_offset + (cea_first + cea_count) * 0x30 > BUFFER_LENGTH BEGIN
+            PATCH_FAIL ~Elemental arrows: %cea_item% extended header %cea_i% (0-based) has an effect slice outside the file; nothing was installed.~
+        END
+        LPF cbr_elemental_arrow_scan
+            INT_VAR ability_at=cea_a effect_offset=cea_effect_offset damage_type=damage_type
+            RET cea_found=package_count cea_at=package_at
+        END
+        PATCH_IF cea_found > 1 BEGIN
+            PATCH_FAIL ~Elemental arrows: %cea_item% extended header %cea_i% (0-based) has %cea_found% %element% damage records of the same kind (opcode 12, %element% damage, normal damage mode, projectile target). Setting each to 1d%elemental_size% would multiply the damage and choosing one would discard another mod's data; nothing was installed.~
+        END
+        PATCH_IF cea_found = 1 BEGIN
+            READ_LONG (cea_at+0x1c) cea_n
+            READ_LONG (cea_at+0x20) cea_s
+            READ_LONG (cea_at+0x24) cea_save
+            READ_SSHORT (cea_a+0x14) cea_hit
+            READ_SSHORT (cea_a+0x1a) cea_dmg
+            PATCH_IF cea_packages = 0 BEGIN
+                SET cea_old_n = cea_n
+                SET cea_old_s = cea_s
+                SET cea_old_save = cea_save
+                SET cea_old_hit = cea_hit
+                SET cea_old_dmg = cea_dmg
+            END ELSE PATCH_IF cea_n != cea_old_n OR cea_s != cea_old_s OR
+                (remove_bonus AND (cea_save != cea_old_save OR cea_hit != cea_old_hit OR cea_dmg != cea_old_dmg)) BEGIN
+                SET cea_text_conflict = 1
+            END
+            SET cea_packages += 1
+        END
+    END
 
-COPY_EXISTING ~arow08.itm~ ~override~
-              ~arowkc.itm~ ~override~
-    LPF cbr_elemental_arrow INT_VAR elemental_type=524288 elemental_size=2 remove_bonus=1 STR_VAR element=fire END
-BUT_ONLY
+    PATCH_IF cea_packages = 0 AND apply BEGIN
+        PATCH_WARN ~Elemental arrows: %cea_item% has no %element% damage package (opcode 12, %element% damage, normal damage mode, projectile target) on any extended header, so its 1d%elemental_size% change cannot be established; this item was left unchanged.~
+    END
+
+    PATCH_IF cea_packages > 0 AND apply BEGIN
+        // A header without the package that shares a removed bonus value makes
+        // the bonus text impossible to attribute to the package header.
+        SET cea_bonus_shared = 0
+        FOR (cea_i=0; cea_i<cea_ability_count; cea_i+=1) BEGIN
+            SET cea_a = cea_ability_offset + cea_i * 0x38
+            LPF cbr_elemental_arrow_scan
+                INT_VAR ability_at=cea_a effect_offset=cea_effect_offset damage_type=damage_type
+                RET cea_found=package_count cea_at=package_at
+            END
+            PATCH_IF cea_found = 1 BEGIN
+                WRITE_LONG (cea_at+0x1c) 1
+                WRITE_LONG (cea_at+0x20) elemental_size
+                PATCH_IF remove_bonus BEGIN
+                    WRITE_SHORT (cea_a+0x14) 0
+                    WRITE_SHORT (cea_a+0x1a) 0
+                END
+            END ELSE PATCH_IF remove_bonus BEGIN
+                READ_SSHORT (cea_a+0x14) cea_hit
+                READ_SSHORT (cea_a+0x1a) cea_dmg
+                PATCH_IF (cea_old_hit != 0 AND cea_hit = cea_old_hit) OR
+                    (cea_old_dmg != 0 AND cea_dmg = cea_old_dmg) BEGIN
+                    SET cea_bonus_shared = 1
+                END
+            END
+        END
+
+        // Description: every recognized claim must state either the old value
+        // (rewritten) or the new value (kept); anything else keeps the text.
+        READ_STRREF 0x54 cea_old_description
+        SET cea_hits = 0
+        SET cea_bad_dice = 0
+        SET cea_bad_hit = 0
+        SET cea_bad_dmg = 0
+        INNER_PATCH_SAVE cea_description ~%cea_old_description%~ BEGIN
+            REPLACE_EVALUATE CASE_INSENSITIVE ~\+\([0-9]+\)d\([0-9]+\)\( %element% damage\)~ BEGIN
+                SET cea_hits += 1
+                PATCH_IF MATCH1 = cea_old_n AND MATCH2 = cea_old_s BEGIN
+                    SPRINT cea_r ~+1d%elemental_size%%MATCH3%~
+                END ELSE BEGIN
+                    PATCH_IF MATCH1 != 1 OR MATCH2 != elemental_size BEGIN SET cea_bad_dice = 1 END
+                    SPRINT cea_r ~%MATCH0%~
+                END
+            END ~%cea_r%~
+            PATCH_IF remove_bonus BEGIN
+                REPLACE_EVALUATE CASE_INSENSITIVE ~\(THAC0: *\)\([+-]?\)\([0-9]+\)~ BEGIN
+                    SET cea_v = MATCH3
+                    PATCH_IF ~%MATCH2%~ STRING_EQUAL ~-~ BEGIN SET cea_v = 0 - cea_v END
+                    PATCH_IF cea_v != 0 AND cea_v = cea_old_hit BEGIN
+                        SPRINT cea_r ~%MATCH1%+0~
+                    END ELSE BEGIN
+                        PATCH_IF cea_v != 0 BEGIN SET cea_bad_hit = 1 END
+                        SPRINT cea_r ~%MATCH0%~
+                    END
+                END ~%cea_r%~
+                REPLACE_EVALUATE ~\([0-9]+d[0-9]+\)\([+-]\)\([0-9]+\)~ BEGIN
+                    SET cea_v = MATCH3
+                    PATCH_IF ~%MATCH2%~ STRING_EQUAL ~-~ BEGIN SET cea_v = 0 - cea_v END
+                    PATCH_IF cea_v != 0 AND cea_v = cea_old_dmg BEGIN
+                        SPRINT cea_r ~%MATCH1%~
+                    END ELSE BEGIN
+                        PATCH_IF cea_v != 0 BEGIN SET cea_bad_dmg = 1 END
+                        SPRINT cea_r ~%MATCH0%~
+                    END
+                END ~%cea_r%~
+                // The special kobold arrow keeps its original save vs. breath.
+                PATCH_IF (cea_old_save BAND 0x1f) = 2 BEGIN
+                    REPLACE_TEXTUALLY CASE_INSENSITIVE ~Save vs\. Spell~ ~Save vs. Breath~
+                END
+            END
+        END
+        SPRINT cea_reason ~~
+        PATCH_IF cea_text_conflict BEGIN
+            SPRINT cea_reason ~its %element% packages or bonuses differ between extended headers~
+        END ELSE PATCH_IF cea_hits = 0 BEGIN
+            SPRINT cea_reason ~no "+NdM %element% damage" text was found; different wording or language~
+        END ELSE PATCH_IF cea_bad_dice BEGIN
+            SPRINT cea_reason ~it states %element% damage dice that match neither the old nor the new package~
+        END ELSE PATCH_IF cea_bad_hit OR cea_bad_dmg BEGIN
+            SPRINT cea_reason ~its THAC0 or damage-bonus text matches neither the old nor the new bonus~
+        END ELSE PATCH_IF cea_bonus_shared BEGIN
+            SPRINT cea_reason ~another extended header has the same to-hit or damage bonus, so the bonus text cannot be attributed~
+        END
+        PATCH_IF NOT (~%cea_reason%~ STRING_EQUAL ~~) BEGIN
+            PATCH_WARN ~Elemental arrows: %cea_item% description was not updated (%cea_reason%); its text was left unchanged.~
+        END ELSE PATCH_IF NOT (~%cea_description%~ STRING_EQUAL ~%cea_old_description%~) BEGIN
+            SAY DESC ~%cea_description%~
+        END
+
+        // Name: drop a "+N" suffix that states a removed bonus.
+        PATCH_IF remove_bonus BEGIN
+            READ_STRREF 0x0c cea_old_name
+            SET cea_bad_name = 0
+            INNER_PATCH_SAVE cea_name ~%cea_old_name%~ BEGIN
+                REPLACE_EVALUATE ~ *\+\([0-9]+\)$~ BEGIN
+                    PATCH_IF cea_text_conflict = 0 AND
+                        ((cea_old_hit != 0 AND MATCH1 = cea_old_hit) OR (cea_old_dmg != 0 AND MATCH1 = cea_old_dmg)) BEGIN
+                        SPRINT cea_r ~~
+                    END ELSE BEGIN
+                        SET cea_bad_name = 1
+                        SPRINT cea_r ~%MATCH0%~
+                    END
+                END ~%cea_r%~
+            END
+            PATCH_IF cea_bad_name BEGIN
+                PATCH_WARN ~Elemental arrows: %cea_item% name was not updated (its "+N" suffix does not state the removed bonus); its name was left unchanged.~
+            END ELSE PATCH_IF NOT (~%cea_name%~ STRING_EQUAL ~%cea_old_name%~) BEGIN
+                SAY NAME2 ~%cea_name%~
+            END
+        END
+    END
+END
+
+DEFINE_ACTION_FUNCTION cbr_elemental_arrows
+    INT_VAR apply=0
+BEGIN
+    COPY_EXISTING ~arow04.itm~ ~override~
+        LPF cbr_elemental_arrow INT_VAR damage_type=1 elemental_size=3 apply=apply STR_VAR element=acid END
+    BUT_ONLY
+
+    COPY_EXISTING ~arow09.itm~ ~override~
+        LPF cbr_elemental_arrow INT_VAR damage_type=2 elemental_size=2 apply=apply STR_VAR element=cold END
+    BUT_ONLY
+
+    COPY_EXISTING ~arow08.itm~ ~override~
+                  ~arowkc.itm~ ~override~
+        LPF cbr_elemental_arrow INT_VAR damage_type=8 elemental_size=2 remove_bonus=1 apply=apply STR_VAR element=fire END
+    BUT_ONLY
+END
+
+// Validate all four items first; publish items and TLK strings only afterwards.
+LAF cbr_elemental_arrows INT_VAR apply=0 END
+LAF cbr_elemental_arrows INT_VAR apply=1 END

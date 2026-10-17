@@ -23,3 +23,23 @@ malformed-last-item rollback. No new game or save was modified for publication.
 
 This is an EET implementation of the user's chosen SCS balance rule, not a new
 global item overhaul or a claim that upstream SCS 3017 now supports EET.
+
+## 2026-10-17: behavior-based matching (audit 2026-10-08, item 3)
+
+The balance values are unchanged; the input matching no longer fingerprints
+the captured shape. Per extended header, the elemental package is the opcode-12
+record with the component's damage type (param2 high word), normal damage mode
+(low word 0) and projectile target (2). Only its dice are owned (1d3 acid,
+1d2 cold/fire); fire also owns the to-hit/damage bonus of the headers that
+carry the package. Other damage types (an acid rider on a fire arrow),
+same-element records with other delivery, helpers and headers without the
+package stay byte-identical, whatever their type or order. Two package records
+in one header are ambiguous (writing both multiplies damage) and fail the
+component; malformed tables still fail. Validation of all four items runs
+before any item or TLK string is written. An item without any package is left
+unchanged with a warning. Description edits are derived from the old and new
+values; text that states other values or uses other wording is left unchanged
+with a warning. The reference install's AROWKC text ("+1d2 fire damage", no
+THAC0 line) is accepted as already correct apart from the breath save.
+Evidence: synthetic real-WeiDU tests in `tests/test_elemental_arrows.py`; no
+game or save was used.
