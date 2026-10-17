@@ -539,4 +539,74 @@ class BracersVariationTests(unittest.TestCase):
         self.assertEqual(before, g.snapshot())
 
 
+class BracersReviewTests(unittest.TestCase):
+    """Independent review findings (2026-10-17)."""
+    game = BracersTests.game
+    installed = BracersTests.installed
+    helper = BracersVariationTests.helper
+    failed = BracersVariationTests.failed
+    repeat_is_exact = BracersVariationTests.repeat_is_exact
+
+    def test_activation_conditions_carry_over_to_the_helper_call(self):
+        r = synthetic()
+        stock = ItmFile.from_bytes(r["BRAC16.ITM"]).abilities[0]
+        conditional = dataclasses.replace(stock, effects=tuple(
+            dataclasses.replace(e, power=4, probability1=50, probability2=10, save_type=1, save_bonus=-2)
+            if e.opcode == 16 else e for e in stock.effects))
+        g = self.game(_with_item(r, abilities=(conditional,)))
+        self.installed(g)
+        new = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"]).abilities[0].effects
+        cast, = [e for e in new if e.opcode == 146 and e.resource == "CBRBIH"]
+        self.assertEqual(
+            (1, 4, 0, 1, 1, 3, 0, 50, 10, 1, -2, 0, 0, 0),
+            (cast.target, cast.power, cast.parameter1, cast.parameter2, cast.timing,
+             cast.resist_dispel, cast.duration, cast.probability1, cast.probability2,
+             cast.save_type, cast.save_bonus, cast.dice_number, cast.dice_size, cast.special))
+        self.repeat_is_exact(g)
+
+    def test_stock_activation_keeps_full_probability_and_no_save(self):
+        g = self.game()
+        self.installed(g)
+        stock = next(e for e in ItmFile.from_bytes(g.original["BRAC16.ITM"]).abilities[0].effects if e.opcode == 16)
+        new = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"]).abilities[0].effects
+        cast, = [e for e in new if e.opcode == 146 and e.resource == "CBRBIH"]
+        self.assertEqual((stock.power, 100, 0, 0, 0), (cast.power, cast.probability1, cast.probability2,
+                                                      cast.save_type, cast.save_bonus))
+
+    @staticmethod
+    def scaled(base, level, seconds, effects):
+        return dataclasses.replace(base, required_level=level, effects=tuple(
+            dataclasses.replace(e, duration=seconds) if e.timing in (0, 4) else e for e in effects))
+
+    def test_level_headers_storing_the_payload_in_another_order(self):
+        r = synthetic()
+        base = _donor(r).abilities[0]
+        # The stock payload starts with five independent records, then opcode
+        # 101, two opcode-206 records and a delayed sound.
+        independent, rest = base.effects[:5], base.effects[5:]
+        self.assertFalse(any(e.opcode in (101, 206, 321) for e in independent))
+        shuffled = tuple(reversed(independent)) + rest
+        g = self.game(_with_donor(r, abilities=(
+            self.scaled(base, 1, 60, base.effects), self.scaled(base, 10, 120, shuffled))))
+        self.installed(g)
+        expected = _expected_payload(base.effects)
+        fx = self.helper(g).abilities[0].effects
+        self.assertEqual(expected, [e.canonical() for e in fx[:len(expected)]])
+        self.repeat_is_exact(g)
+
+    def test_level_headers_moving_a_removal_or_protection_fail(self):
+        r = synthetic()
+        base = _donor(r).abilities[0]
+        protection = next(i for i, e in enumerate(base.effects) if e.opcode == 206)
+        moved = (base.effects[protection],) + base.effects[:protection] + base.effects[protection + 1:]
+        refresh = base.effects + (_fx(321, resource="SPWI677", duration=0, timing=1),)
+        late = (refresh[-1],) + refresh[:-1]
+        for name, (first, second) in {"protection": (base.effects, moved),
+                                      "refresh": (refresh, late)}.items():
+            with self.subTest(name=name):
+                g = self.game(_with_donor(synthetic(), abilities=(
+                    self.scaled(base, 1, 60, first), self.scaled(base, 10, 120, second))))
+                self.failed(g, "differ beyond their duration")
+
+
 if __name__ == "__main__": unittest.main()

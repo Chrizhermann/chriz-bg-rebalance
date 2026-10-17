@@ -170,6 +170,26 @@ activation slice and a missing helper. 13 of the 14 fail against the previous
 library; reordered records already worked. Every successful case repeats
 byte-identically.
 
+Independent review, same day (Codex source review), two more cases:
+
+- **Activation conditions.** The opcode 146 call used to be written with full
+  probability, no saving throw and power 3, whatever the activation had. It now
+  keeps the activation's power (level-based protections such as Minor Globe),
+  both probability bounds and its saving throw (type and bonus). The stock item
+  (power 3, 100%, no save) gives the same bytes as before; the call stays
+  dispellable and bypasses MR as before.
+- **Level headers in another order.** Headers that store the same payload in
+  another order are accepted. Records that remove effects or grant protection
+  (opcodes 58, 101, 102, 206, 220, 221, 229, 230, 318, 321, 324, 337) act on
+  what is already on the target, so they keep their place; the records between
+  two of them may be in any order. The helper keeps header 0's order. Moving
+  such a record still fails as headers that differ.
+
+`BracersReviewTests` adds four tests: carried conditions, the stock call,
+reordered independent records with level-scaled durations, and a moved
+protection or refresh record (still rejected). Three fail against the previous
+library; the moved-record case is rejected by both.
+
 Limits: synthetic fixtures only, no in-engine check. The component label no
 longer names a fixed duration. The item description is not edited; a mod that
 changes the duration is expected to update it.
