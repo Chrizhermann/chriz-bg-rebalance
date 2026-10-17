@@ -138,17 +138,21 @@ stack one more time; new doses behave as described.
 
 ### Component 320 — Damageable combat clouds
 
-Cloud-granted 100% damage resistances become **75%**. Regeneration, duration,
-poison immunity and AI remain unchanged. Supported forms include SR/SCS genies,
+Cloud-granted damage immunity (a resistance of 100% or more) becomes **75%**.
+Regeneration, duration, poison immunity and AI remain unchanged. Supported forms include SR/SCS genies,
 the known EE/SoD combat clouds, Ascension Bodhi's combat form and SCS vampire
 tactical mist. Scripted death escapes and quest protections stay intact.
 
-Existing lower resistances stay lower; no protection is added to open channels.
+Lower resistances stay as they are, including other mods' partial values and
+vulnerabilities; no protection is added to open channels.
 Cloud-added MR100 is neutralized; SCS tactical mist has MR0 while transformed.
 Normal-form data is unchanged, but a cloud's flat-set values can temporarily
 replace stronger natural resistance. Install after the cloud-form providers.
-No EEex is required. English SR summon descriptions are updated; other wording
-is left intact with a warning. Unknown resource layouts reject transactionally.
+No EEex is required. English SR summon descriptions are updated when the genie
+form ends up exactly 75% on its nine damage channels with poison immunity; other
+wording or values keep the text, with a warning. Resistances the component cannot
+attribute to the cloud, further immunities and malformed resources stop the
+installation without changes.
 See [scope and exclusions](research/2026-10-06-damageable-cloud-forms.md).
 
 ### Component 310 — Party physical resistance
