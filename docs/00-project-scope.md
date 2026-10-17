@@ -21,6 +21,15 @@ rationale, fully reversible, idempotent, testable without wrecking a live save.
   unintentional. Component restores the Adventurer's Mart five, idempotently; live saves
   with the store cached were patched directly (34 saves; backups kept). Diagnosis:
   `research/03`.
+- **121 — EEex ambient readiness at load** (user request 2026-08-23, research done,
+  **primary**). Hostile casters (option: neutral casters carrying an SCS combat script) get
+  their hour-plus buffs (Stoneskin/Ironskins, Mirror Image, Spell Shield, Armor, AoF,
+  Barkskin…) applied instantly on sprite load via EEex, consuming slots and reusing SCS's own
+  `_PREBUFF` clones — zero reaction latency, no `See()` gate, no polling. Optional measured
+  "reaction" sub-feature later. Diagnosis + design: `research/08` §5-B/§7.
+- **120 — SCS readiness vs. stealth openers** (optional, demoted): patch the compiled SCS
+  scripts so the long tier + priests get the `Detect()/Range-20` path. Only if 121's
+  ambient package leaves a gap. `research/08` §5-A.
 - **Backlog:** catalog SCS components active in the target install + their balance
   touchpoints; identify small high-value tweaks. (Migrated from chriz-sod-rebalance "Part 3",
   which now points here.)
@@ -32,6 +41,14 @@ collaborative wishlist session** — the user has strong opinions here. Research
 (`research/10-sr-wishlist.md`): walk SR's component/spell list against the user's experience,
 collect concrete gripes with numbers, then design per-spell adjustments.
 
+- **200 — Hardiness restored** (user request 2026-08-19; live hotfix already applied).
+  SR #65 "Revised Warrior HLAs" turns Hardiness (SPCL907 + Wish clone SPWISH12) from 40%
+  physical into 20%-everything. Subcomponents: **40% physical (default)** or **30%**;
+  whether to keep SR's 20% elemental/magic rider is an **open user decision**; fixes
+  descriptions; idempotent over the live hotfix; predicate on SR #65. First of the 2xx
+  "SR balances" family — each 2xx component gates on SR being installed. Diagnosis +
+  hotfix record: `research/06`.
+
 ## Part 3 — Cross-cutting audits (components 300–399)
 
 - **Save-for-half audit (candidate 300):** the generalized sweep from `research/scripts/`
@@ -39,7 +56,15 @@ collect concrete gripes with numbers, then design per-spell adjustments.
   + CDTweaks 2H clones; Aura's yuki-onna breath). The Aura items are parked as issues on
   `Aura_BG1_BG2_EET-Chriz-Balance-Patch` (user: low priority). A WeiDU-native generalized
   audit component is possible later but YAGNI until new offenders appear.
-
+- **301 — Physical-resistance cap** (user request 2026-08-19, design phase). Stop
+  physical-resistance stacking (Dwarven Defender-style kits + Defender of Easthaven + gear)
+  from trivially reaching ~100% without nerfing individual abilities: hard cap at **90%
+  (default)** or **80%** via an EEex listsResolved stat clamp (absolute writes only — see
+  `research/07` cadence), **party members only** (enemy designed immunities — golems etc. —
+  untouched; most are op120 anyway). **Planned 301c:** soft knee — points above 60% count
+  half, then cap (user-endorsed). Reference build: the AK-overhauled Dwarven Defender reaches
+  **90% physical while stanced** (kit passives 20 + stance 50 + Defender of Easthaven 20)
+  without ever using Hardiness — cap 80 trims it, cap 90 doesn't. Sketch: `research/06` §4.
 ## Part 4 — Class and kit revisions (components 400–499)
 
 - **401–403 — Cleric of Tempus Holy Power** ✅ IMPLEMENTED, pending independent review and live

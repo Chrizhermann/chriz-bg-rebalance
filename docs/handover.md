@@ -6,8 +6,30 @@ Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
 ## What this is
 
 SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-install WeiDU mod.
-Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
+Component numbering: 100s SCS / 200s SR / 300s cross-cutting / 400s class-kit revisions of
+base-game+SoD kits (rework, not new kits); labels `cbr_*`. Approved design:
 `docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `CLAUDE.md`.
+
+## Status (2026-08-23)
+
+- **Hardiness live hotfix applied 2026-08-19 (user-approved in-session)** — SR #65's
+  20%-everything Hardiness restored to **40% physical** (SR's 20% elemental rider kept) by
+  direct override edit of `SPCL907.spl` + `SPWISH12.spl`; byte-exact verified, pristine copies
+  in `research/originals/`. In-game description still says 20% until comp 200 ships.
+  `research/06`: diagnosis, comp 200 spec (40/30 subcomponents; open: keep the elemental
+  rider?), comp 301 phys-res cap sketch (90/80, party-only EEex clamp, planned 301c soft
+  knee). Verified: Hardiness / Defensive Stance / Wish-Hardiness op321-remove each other in
+  both directions (vanilla EE, kept by AK's DwD overhaul); DwD unkillability = passives 20 +
+  stance 50 + DoE 20, not Hardiness stacking.
+- **Ambient readiness research (`research/08`)** — SCS pre-buff internals + EEex hook inventory
+  for "no one-click assassination of casters": user already at SCS top prep tier (engine
+  slider 5, prep globals unset); gap = See()-gated tiers vs stealth, no Detect path for
+  priests, nothing for non-casters. User clarified 2026-08-23: the pain is reaction latency; primary candidate is now
+  121 ambient-at-load (EEex), 120 optional. Open: ambient for neutral casters with SCS scripts?
+- **Process:** the 2026-08-22 session's doc rewrite dropped this session's uncommitted
+  scope/handover edits — re-merged 2026-08-23; commit doc edits promptly when sessions
+  overlap. User directive 2026-08-23: no multi-agent research/verify fan-outs unless asked;
+  spend tokens only on work that lands as durable docs/components.
 
 ## Status (2026-08-22)
 
@@ -29,6 +51,22 @@ Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Ap
 - **Live check still owed by the user after 409 is installed + game restarted:** Branwen
   wielding a 2-pip weapon reads a *steady* 1.5 (stat 8 = 7; 2.5 under Holy Power tier-1),
   no cycling; swapping to a 0-pip weapon drops it within a second.
+## Status (2026-08-19)
+
+- **Hardiness live hotfix applied (user-approved in-session)** — SR #65's 20%-everything
+  Hardiness restored to **40% physical** (SR's 20% elemental rider kept) by direct override
+  edit of `SPCL907.spl` + `SPWISH12.spl`; byte-exact verified (60+60 dwords), pristine
+  copies in `research/originals/`. In-game description still reads 20% until comp 200
+  ships. Diagnosis + specs: `research/06`.
+- **New backlog components:** 200 — SR Hardiness restore (subcomponents 40%/30%);
+  301 — physical-resistance cap (90%/80%, EEex party-only stat clamp; research needed;
+  301c soft-knee variant user-endorsed).
+- **Verified (user challenged it):** Hardiness / Defensive Stance / Wish-Hardiness
+  mutually remove each other via op321 in *both* directions (vanilla EE design, kept by
+  AK's Dwarven Defender Overhaul). DwD unkillability comes from passives (+20%) + stance
+  (50% all damage) + items instead — `research/06` §1/§4.
+- **Open user decisions:** comp 200 — keep SR's 20% elemental rider on Hardiness or
+  strip to vanilla-pure physical (deferred 2026-08-19).
 
 ## Status (2026-07-20)
 
@@ -103,11 +141,19 @@ session — always `--exclude` them.
    `docs/plans/*-dragons-design.md` → implement per `research/05-dragons.md` §5.
    Then the rest of the triage order (310/311 EEex feasibility, 410+ deity weapons, 320
    weapon dice) per `docs/plans/2026-07-20-community-ideas-triage.md`.
-1. **SR wishlist session** — *needs the user live*: walk Spell Revisions' changes, collect
-   which to keep/revert/re-tune → `research/10-sr-wishlist.md` → design 200-series.
-2. **SCS component catalog** — solo-able: from the game install's WeiDU.log (414 entries;
+1. **Component 200 build** — formalize the Hardiness hotfix as `cbr_sr_hardiness`
+   (subcomponents 40/30, spwish12 + description strings, idempotent over the live edit)
+   per `research/06` §3.
+2. **Component 301 research** — EEex listsResolved phys-res clamp feasibility + install
+   stacking-source audit per `research/06` §4; then design → user sign-off.
+   Then **Component 121 design** — EEex ambient-at-load per `research/08` §7 (open:
+   ambient for neutral casters with SCS scripts?); 120 optional afterwards.
+3. **SR wishlist session** — *needs the user live*: walk Spell Revisions' changes, collect
+   which to keep/revert/re-tune → `research/10-sr-wishlist.md` → design 200-series
+   (SR #65 also revises Whirlwinds — flag there).
+4. **SCS component catalog** — solo-able: from the game install's WeiDU.log (414 entries;
    read-only) catalog the 77 installed SCS components + balance touchpoints; propose 1xx
    candidates. (Scope inherited from chriz-sod-rebalance "Part 3".)
-3. **Formal install of comp 100 into the live game** — pending user sign-off; tail-install.
-4. **Umbrella / collection** — see `docs/plans/2026-07-03-umbrella-analysis.md`; decision
+5. **Formal install of comp 100 into the live game** — pending user sign-off; tail-install.
+6. **Umbrella / collection** — see `docs/plans/2026-07-03-umbrella-analysis.md`; decision
    pending user, work deferred until 2xx/3xx mature.

@@ -1,0 +1,6 @@
+; Shared BG2EE/IWDEE bard C2DArray selection; installer checks uniqueness.
+; Use the loader's pattern map instead of an absolute virtual address.
+; Only the relative CALL destination varies; instructions remain exact.
+[CBR-BardSpellTable]
+Pattern=488D8E380700004C8D45F0488D55F8E8????????4C8D45E4
+NoCache=1
