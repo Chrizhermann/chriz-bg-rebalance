@@ -10,8 +10,8 @@ function Get-LabConfiguration {
         EngineName = 'CBR TimeStop Lab 2730'
         ProfileRoot = Join-Path $documents 'CBR TimeStop Lab 2730'
         ExeSha256 = 'b51093a49140b2b8a7c046b4652bb8e535be24ebbc12b1d735e0b94217a14d57'
-        EEexCommit = '9e8098ee696ca4b0bc055e7ff74b283704a8c02e'
-        EEexVersion = '1.3.0'
+        EEexCommit = 'a6d21abe44e20509f5d0259ccc6c7e7f9d12b285'
+        EEexVersion = '1.3.1'
         MarkerName = '.cbr-timestop-lab.json'
     }
 }
@@ -224,7 +224,7 @@ function Get-LabEEexComponents {
     $components = @()
     foreach ($line in ($LogText -split '\r?\n')) {
         if ($line -match '^\s*(?://.*)?$') { continue }
-        if ($line -notmatch '^\s*~(?:EEEX[/\\])?EEEX\.TP2~\s+#0\s+#(0|1|8)\s+//.*\bv1\.3\.0\s*$') {
+        if ($line -notmatch '^\s*~(?:EEEX[/\\])?EEEX\.TP2~\s+#0\s+#(0|1|8)\s+//.*\bv1\.3\.1\s*$') {
             throw 'CBR_LAB UNEXPECTED_WEIDU_COMPONENT_OR_VERSION'
         }
         $components += [int] $Matches[1]

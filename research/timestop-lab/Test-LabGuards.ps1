@@ -79,6 +79,9 @@ Check 'Ownership marker binds root, profile and version' {
         Must-Reject { Assert-LabManifestValues $bad } 'INVALID_OWNERSHIP_MARKER'
     }
     Must-Reject { Assert-LabManifestValues ([pscustomobject]@{LabId='cbr-timestop-2730'}) } 'INVALID_OWNERSHIP_MARKER'
+    $previousPin = $valid | ConvertTo-Json | ConvertFrom-Json
+    $previousPin.EEexCommit = '9e8098ee696ca4b0bc055e7ff74b283704a8c02e' # EEex v1.3.0
+    Must-Reject { Assert-LabManifestValues $previousPin } 'INVALID_OWNERSHIP_MARKER'
 }
 Check 'WeiDU late errors and skipped components fail even with exit zero' {
     Assert-LabWeiDUResult -ExitCode 0 -Text 'SUCCESSFULLY INSTALLED'
@@ -88,14 +91,33 @@ Check 'WeiDU late errors and skipped components fail even with exit zero' {
     }
     Must-Reject { Assert-LabWeiDUResult -ExitCode 1 -Text 'SUCCESSFULLY INSTALLED' } 'WEIDU_INSTALL_FAILED_REVIEW_LOG'
 }
-$fullLog = "~EEEX/EEEX.TP2~ #0 #0 // Quick Menu Core: v1.3.0`n~EEEX/EEEX.TP2~ #0 #1 // EEex: v1.3.0`n~EEEX/EEEX.TP2~ #0 #8 // LuaJIT: v1.3.0"
-Check 'Only official 1.3.0 components in installation order are accepted' {
+# WeiDU's own CRLF log format, with the English component names of EEex v1.3.1.
+$logHeader = "// Log of Currently Installed WeiDU Mods`r`n// The top of the file is the 'oldest' mod`r`n" +
+    "// ~TP2_File~ #language_number #component_number // [Subcomponent Name -> ] Component Name [ : Version]"
+$eeexLine = @{
+    0 = '~EEEX/EEEX.TP2~ #0 #0 // Quick Menu Core: v1.3.1'
+    1 = '~EEEX/EEEX.TP2~ #0 #1 // EEex: v1.3.1'
+    8 = '~EEEX/EEEX.TP2~ #0 #8 // Experimental - Use LuaJIT: Can help stuttering | WARNING: May cause crashes when combined with certain mods: v1.3.1'
+    9 = '~EEEX/EEEX.TP2~ #0 #9 // Enable attack info module: Show to-hit chances when hovering attack cursor over target: v1.3.1'
+}
+$fullLog = (@($logHeader, $eeexLine[0], $eeexLine[1], $eeexLine[8]) -join "`r`n") + "`r`n"
+Check 'Only official 1.3.1 components in installation order are accepted' {
     if ((@(Get-LabEEexComponents $fullLog) -join ',') -cne '0,1,8') { throw 'Correct stack rejected.' }
-    if (@(Get-LabEEexComponents "// ~EEEX.TP2~ #0 #0 // removed: v1.3.0").Count -ne 0) { throw 'Inactive entry accepted.' }
-    Must-Reject { Get-LabEEexComponents ($fullLog + "`n~EEEX.TP2~ #0 #8 // duplicate: v1.3.0") } 'INVALID_COMPONENT_ORDER_OR_DUPLICATE'
-    Must-Reject { Get-LabEEexComponents '~EEEX.TP2~ #0 #8 // wrong order: v1.3.0' } 'INVALID_COMPONENT_ORDER_OR_DUPLICATE'
-    Must-Reject { Get-LabEEexComponents '~ANOTHER.TP2~ #0 #0 // another: v1.3.0' } 'UNEXPECTED_WEIDU_COMPONENT_OR_VERSION'
+    if ((@(Get-LabEEexComponents ($fullLog -replace "`r`n", "`n")) -join ',') -cne '0,1,8') { throw 'LF stack rejected.' }
+    if ((@(Get-LabEEexComponents "~EEEX/EEEX.TP2~ #0 #0 // Quick Menu Core: v$($config.EEexVersion)") -join ',') -cne '0') {
+        throw 'Log version pin disagrees with the configured EEex version.'
+    }
+    if (@(Get-LabEEexComponents "// ~EEEX.TP2~ #0 #0 // removed: v1.3.1").Count -ne 0) { throw 'Inactive entry accepted.' }
+    Must-Reject { Get-LabEEexComponents ($fullLog + '~EEEX.TP2~ #0 #8 // duplicate: v1.3.1') } 'INVALID_COMPONENT_ORDER_OR_DUPLICATE'
+    Must-Reject { Get-LabEEexComponents '~EEEX.TP2~ #0 #8 // wrong order: v1.3.1' } 'INVALID_COMPONENT_ORDER_OR_DUPLICATE'
+    Must-Reject { Get-LabEEexComponents '~ANOTHER.TP2~ #0 #0 // another: v1.3.1' } 'UNEXPECTED_WEIDU_COMPONENT_OR_VERSION'
     Must-Reject { Get-LabEEexComponents '~EEEX.TP2~ #0 #0 // old: v1.2.0' } 'UNEXPECTED_WEIDU_COMPONENT_OR_VERSION'
+}
+Check 'Previous 1.3.0 pin and the unrequested Attack Info component are refused' {
+    Must-Reject { Get-LabEEexComponents $fullLog.Replace(': v1.3.1', ': v1.3.0') } 'UNEXPECTED_WEIDU_COMPONENT_OR_VERSION'
+    # Component 9 only enables an in-game UI module; this lab installs exactly 0, 1 and 8.
+    Must-Reject { Get-LabEEexComponents $eeexLine[9] } 'UNEXPECTED_WEIDU_COMPONENT_OR_VERSION'
+    Must-Reject { Get-LabEEexComponents (@($eeexLine[0], $eeexLine[1], $eeexLine[9], $eeexLine[8]) -join "`r`n") } 'UNEXPECTED_WEIDU_COMPONENT_OR_VERSION'
 }
 
 $tempParent = ConvertTo-LabFullPath ([IO.Path]::GetTempPath())

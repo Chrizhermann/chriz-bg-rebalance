@@ -58,6 +58,13 @@ The selected current executable has now been inspected directly: the relevant de
 retain the same control flow with relocated addresses. The current map below replaces
 the old map for prototype planning. No old-version fallback is required.
 
+Update 2026-10-18: Christopher chose EEex **1.3.1** for everything, and the
+[observation lab](timestop-lab/README.md) is re-pinned to tag commit
+`a6d21abe44e20509f5d0259ccc6c7e7f9d12b285`. The 2.7.3.0 `function_names.db` and the
+`Data-CGameEffect::vftable` pattern are byte-identical in 1.3.1, so the names and
+instruction evidence below still apply. The tagged 2.7 `EEex.dll` and `LuaBindings.dll`
+changed; their hashes below describe the 1.3.0 audit.
+
 ## Evidence identity and method
 
 The current executable inspected was
@@ -308,7 +315,7 @@ Binary anchors for the compatibility reading (all under the read-only game direc
 
 ## Smallest isolated prototype and acceptance plan — proposed only
 
-Use a disposable BG2:EE **2.7.3.0 / EEex 1.3.0** copy and establish unmodified controls.
+Use a disposable BG2:EE **2.7.3.0 / EEex 1.3.1** copy and establish unmodified controls.
 Match its executable to the current fingerprint above, then validate candidate patch
 windows in the presence of EEex. No older-version support is required. Do not upgrade
 or probe the active installation. Disable the prototype on an unexpected patch site.
