@@ -18,14 +18,31 @@ The diagnosis, instruction evidence and open design questions are in
   saves or settings are imported. The source tree is hashed before and after setup.
 - Executable SHA256:
   `b51093a49140b2b8a7c046b4652bb8e535be24ebbc12b1d735e0b94217a14d57`.
-- EEex 1.3.0, commit `9e8098ee696ca4b0bc055e7ff74b283704a8c02e`;
-  official components 0, 1 and 8 (core, main, LuaJIT).
+- EEex 1.3.1, tag commit `a6d21abe44e20509f5d0259ccc6c7e7f9d12b285`, the version
+  Christopher chose for everything on 2026-10-18; official components 0, 1 and 8
+  (core, main, LuaJIT). The staged `EEex` tree (134 files, 33,554,881 bytes) has the
+  lab digest `cd776455c2c9202dcffa526d7ccd81c496bbf8c99d9cd4e260e9ed4bc3b826bd`.
+  This replaces the earlier EEex 1.3.0 pin (`9e8098ee696ca4b0bc055e7ff74b283704a8c02e`).
 - WeiDU 25100, SHA256
   `0d17e26e3f3ef5b36796eb0ee8ae73cb851d8b62c9702c2e224da2945caafb75`.
 - Remote Console 0.2.0, commit
   `661927e56e28435541a3128568cd4ee6d5d80164`; only its Lua/menu files are
   staged in this lab. Diagnostic resources are also staged directly and recorded
   separately from the official EEex installation.
+
+EEex component 9 (Attack Info) is not installed, and a WeiDU.log line for it is
+refused. The component only sets `Enable=1` for the Attack Info module in `EEex.ini`
+(default `0`), an in-game to-hit display this observation does not need. Its TP2
+declaration is unchanged since 1.3.0, which excluded it in the same way.
+
+Compared with 1.3.0, the 1.3.1 tag changes the TP2 version line, UI, keybinding and
+utility Lua modules, translations, the pattern database and the loader/EEex DLLs.
+Every Lua file that defines an EEex function `CBRTObs.lua` calls, the
+`Data-CGameEffect::vftable` pattern and the 2.7.3.0 `function_names.db` are
+byte-identical, so the instruction evidence in the research note still applies.
+The native primitives (`EEex_Read32`, `EEex_Malloc` and others) come from the changed
+DLLs. This is a static comparison; only `CBRTS.Inspect()` and `CBRTS.Install()` in the
+engine show that the observer works with 1.3.1.
 
 The game and profile carry matching ownership markers. Paths outside the exact
 lab are rejected. Junctions, symlinks and hard links are rejected; verified
@@ -41,9 +58,21 @@ The active modded game remains a read-only reference.
 Use PowerShell 7 from the repository root. Inputs must match the fingerprints
 above. The archive argument is the parent of the extracted `EEex` directory.
 
+The EEex input is a `git archive` export of the pinned tag commit, extracted with
+`Expand-Archive`. With `core.autocrlf=true`, Git writes its text files with CRLF line
+endings on every platform, as the digest requires. The same command reproduces the
+1.3.0 digest from that tag. The release asset `eeex-v1.3.1.zip` (SHA256
+`9c8104bd63fe7e7dfff889d89ab2d98e158b6e552846370a924ed7eacea4ecf3`) contains the same
+134 files, but 113 text files have LF line endings, so its tree digest
+`67e86dbabefa412ce0d510270e95d99e45b9a0356308802b687918fa37609e1a` is refused.
+
 ```powershell
+$eeex = Join-Path $env:TEMP 'cbr-timestop-lab-20261018'
+git clone https://github.com/Bubb13/EEex.git "$eeex\repo"
+git -c core.autocrlf=true -C "$eeex\repo" archive --format=zip "--output=$eeex\EEex-v1.3.1.zip" a6d21abe44e20509f5d0259ccc6c7e7f9d12b285
+Expand-Archive -LiteralPath "$eeex\EEex-v1.3.1.zip" -DestinationPath "$eeex\EEex-v1.3.1"
 pwsh -NoProfile -File research/timestop-lab/Prepare-Lab.ps1 -Phase Copy `
-  -EEexArchiveRoot '%USERPROFILE%\AppData\Local\Temp\cbr-timestop-lab-20260926\EEex-v1.3.0' `
+  -EEexArchiveRoot "$eeex\EEex-v1.3.1" `
   -WeiduPath "C:\Games\Baldur's Gate II Enhanced Edition modded\Setup-Branwen.exe"
 pwsh -NoProfile -File research/timestop-lab/Prepare-Lab.ps1 -Phase Install
 pwsh -NoProfile -File research/timestop-lab/Prepare-Lab.ps1 -Phase Validate
@@ -53,7 +82,10 @@ pwsh -NoProfile -File research/timestop-lab/Invoke-Lab.ps1
 
 These commands do not launch the game. Copy resumes only matching owned files;
 an uncertain installation stops for inspection. There is no uninstall or reset
-operation. Staging refuses differing assets unless `-Refresh` is supplied and the
+operation. The ownership markers bind the EEex commit, so a lab created under the
+1.3.0 pin is refused (`INVALID_OWNERSHIP_MARKER`). A leftover profile folder without
+its lab blocks Copy (`PROFILE_ALREADY_EXISTS_UNRELATED`). Neither is removed
+automatically. Staging refuses differing assets unless `-Refresh` is supplied and the
 existing hashes still match its previous ownership manifest.
 
 The manifests, source inventory and installation logs remain in the disposable

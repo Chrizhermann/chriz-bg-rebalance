@@ -4,7 +4,7 @@ Creates only the fixed disposable lab. Explicit phases keep the copy, official E
 installation and final verification independently reviewable. This script never
 launches the game, imports a save, uninstalls a component or removes a file.
 
-Copy accepts the extracted EEex/ directory's parent from the pinned v1.3.0 tag.
+Copy accepts the extracted EEex/ directory's parent from the pinned v1.3.1 tag.
 Copy may resume its own files when their hashes match. A differing existing file
 or an interrupted install stops for review; there is no destructive reset path.
 #>
@@ -21,7 +21,7 @@ $config = Get-LabConfiguration
 $lab = Assert-LabRoot
 $manifestPath = Join-Path $lab $config.MarkerName
 $utf8 = [Text.UTF8Encoding]::new($false)
-$expectedEEexTree = '29334ddcdbc622775444cf587928b692d3125e296e529537e9e3eda8a89b3b7c'
+$expectedEEexTree = 'cd776455c2c9202dcffa526d7ccd81c496bbf8c99d9cd4e260e9ed4bc3b826bd'
 $expectedWeidu = '0d17e26e3f3ef5b36796eb0ee8ae73cb851d8b62c9702c2e224da2945caafb75'
 
 function Write-OwnedJson {
