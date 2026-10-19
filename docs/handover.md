@@ -14,10 +14,11 @@ Verified: full regression 693 tests, OK, 26 skipped (private
 captures/Lua); SR fork suite 182 passed. WeiDU 249, synthetic fixtures
 and `--nogame` only; no lab install or in-game check.
 
+Decided (Christopher, 2026-10-20): in cloud forms 320, 75% is the target for
+immunity, not a cap. Only resistances of 100% or more become 75%; 76–99% from
+other mods stays. The branch already implements this.
+
 Open:
-- Christopher: cloud forms 320, is 75% a target or a maximum? The branch keeps
-  the documented policy: only immunity (100% or more) becomes 75%, and 76–99%
-  from other mods stays. `cbr_cloud_resistance` is the one place to change.
 - In-game checks of the changed components.
 - Version, tag and release, and the CEBG pin, need Christopher's approval; the
   collection coordinator updates the pin after a release.

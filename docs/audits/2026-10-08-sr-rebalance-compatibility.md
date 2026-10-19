@@ -212,7 +212,7 @@ are fixed with tests as well.
 | 3 | Elemental arrows 130 | `8650b01`, review `c74c2a5`, `aa9734f`, `c1e88b9`, `56989a2` | Elemental damage found by behavior on the bow-fired hit only; other abilities, riders and their text kept; a damage record shared with another ability is copied first. |
 | 4 | RR/SR adapter | SR fork `5fee801`, review `85cc02d` | Records recognized by the spell they name, any count; empty rows and hexadecimal IDS handled. |
 | 5 | Tempus helpers 400–404 | `c6cbcd1`, `9ae46aa`, review `1f55115` | Grants and CLAB cells located by meaning; Chaos tides built from any donor tiers, recipient resets kept. |
-| 6 | Cloud forms 320 | `27d6ba9`, `6e2b038`, `1ad7ea4` | Immunity (100% or more) becomes 75%; lower values kept. **Open:** Christopher decides whether 75% is a target or a maximum (76–99% from other mods currently stays). |
+| 6 | Cloud forms 320 | `27d6ba9`, `6e2b038`, `1ad7ea4` | Immunity (100% or more) becomes 75%; lower values kept. Decided by Christopher (2026-10-20): 75% is the target for immunity, not a cap, so 76–99% from other mods stays. |
 | 7 | SR classic Lightning Bolt | SR fork `19fd5c9`, review `26ad3e1` | SR's damage pair identified by meaning; foreign damage kept; repeat byte-exact. |
 
 Verification: rebalance full regression 693 tests, OK, 26 skipped

@@ -193,10 +193,10 @@ now defined by the policy above, not by the stock numbers:
   100 or more (opcode 173 has no mode and stacks on EE 2.5 and later).
   Otherwise the text is kept and the installer warns.
 
-Open balance question for Christopher: the audit asked whether 75% is a target
-or a maximum. This revision keeps the documented policy, so a cloud at 76-99%
-from another mod stays there. If 75% should be a maximum, `cbr_cloud_resistance`
-is the single place to change.
+Balance decision (Christopher, 2026-10-20): the audit asked whether 75% is a
+target or a maximum. It is the target for immunity, not a cap: only resistances
+of 100% or more become 75%, and a cloud at 76-99% from another mod stays there.
+`cbr_cloud_resistance` is the single place that applies this rule.
 
 ## Applied private repair — October 6
 
