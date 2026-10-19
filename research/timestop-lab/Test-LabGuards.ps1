@@ -120,6 +120,26 @@ Check 'Previous 1.3.0 pin and the unrequested Attack Info component are refused'
     Must-Reject { Get-LabEEexComponents (@($eeexLine[0], $eeexLine[1], $eeexLine[9], $eeexLine[8]) -join "`r`n") } 'UNEXPECTED_WEIDU_COMPONENT_OR_VERSION'
 }
 
+# Shortened from the lab's InfinityLoader.ini before and after its first launch on 2026-10-20;
+# the loader mixes LF and CRLF lines and appends its cache lines with CRLF.
+$loaderValidated = "[General]`n`nLuaPatchMode=REPLACE_INTERNAL_WITH_EXTERNAL`n`n; auto-generated below`n`n" +
+    "[Auto-Generated]`n`n[Hardcoded_free]`r`nPattern=743753`r`nOperations=ADD -3`r`n"
+$loaderLaunched = $loaderValidated.Replace("[Auto-Generated]`n", "[Auto-Generated]`nCachedExeTime=13426715583127`r`n").
+    Replace("Operations=ADD -3`r`n", "Operations=ADD -3`r`nCachedAddress=5374075924`r`n")
+Check 'Loader address cache is ignored, loader configuration changes are not' {
+    if ((ConvertTo-LabLoaderConfiguration $loaderLaunched) -cne $loaderValidated) { throw 'Loader cache not removed exactly.' }
+    if ((ConvertTo-LabLoaderConfiguration $loaderValidated) -cne $loaderValidated) { throw 'Validated configuration changed.' }
+    foreach ($changed in @(
+            $loaderLaunched.Replace('REPLACE_INTERNAL_WITH_EXTERNAL', 'INTERNAL'),
+            $loaderLaunched.Replace("[General]`n", "[General]`nCachedAddress=1`n"),
+            $loaderLaunched.Replace('CachedAddress=5374075924', 'CachedAddress=0x140000000'),
+            $loaderLaunched.Replace('CachedAddress=5374075924', 'CachedAddress=1 ; note'),
+            ($loaderLaunched + "LuaLibrary=other.dll`r`n"))) {
+        if ((ConvertTo-LabLoaderConfiguration $changed) -ceq $loaderValidated) { throw 'Configuration change accepted.' }
+    }
+    Must-Reject { ConvertTo-LabLoaderConfiguration ($loaderLaunched + "[Auto-Generated]`r`n") } 'LOADER_CONFIGURATION_AMBIGUOUS'
+}
+
 $tempParent = ConvertTo-LabFullPath ([IO.Path]::GetTempPath())
 Assert-LabNoReparsePath $tempParent
 $fixture = Join-Path $tempParent ('cbr-lab-guards-' + [guid]::NewGuid().ToString('N'))
@@ -144,6 +164,17 @@ try {
     Check 'Hard-linked files cannot enter or become write targets in the lab' {
         Must-Reject { Assert-LabNoReparsePath (Join-Path $fixture 'hardlink.txt') } 'HARDLINK_REJECTED'
         Must-Reject { Get-LabPhysicalFiles $fixture } 'LINKED_TREE_ENTRY_REJECTED'
+    }
+    $loaderDirectory = Join-Path $fixture 'loader'
+    $null = [IO.Directory]::CreateDirectory($loaderDirectory)
+    Check 'Launched loader file hashes to the validated loader bytes' {
+        $latin1 = [Text.Encoding]::Latin1
+        $validatedPath = Join-Path $loaderDirectory 'validated.ini'
+        $launchedPath = Join-Path $loaderDirectory 'launched.ini'
+        [IO.File]::WriteAllBytes($validatedPath, $latin1.GetBytes($loaderValidated))
+        [IO.File]::WriteAllBytes($launchedPath, $latin1.GetBytes($loaderLaunched))
+        if ((Get-LabLoaderConfigurationSha256 $validatedPath) -cne (Get-LabSha256 $validatedPath)) { throw 'Validated loader hash changed.' }
+        if ((Get-LabLoaderConfigurationSha256 $launchedPath) -cne (Get-LabSha256 $validatedPath)) { throw 'Launched loader file rejected.' }
     }
 }
 finally {

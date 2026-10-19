@@ -11,7 +11,10 @@ $manifest = Read-LabManifest
 Assert-LabProfile $manifest
 if ($manifest.Phase -cne 'Validated') { throw 'Baseline not validated.' }
 foreach ($entry in $manifest.InstalledHashes.PSObject.Properties) {
-    if ((Get-LabSha256 (Join-Path $lab $entry.Name)) -cne $entry.Value) { throw "Changed installed asset: $($entry.Name)" }
+    $path = Join-Path $lab $entry.Name
+    # The loader adds its own address cache to InfinityLoader.ini on every launch.
+    $hash = if ($entry.Name -ceq 'InfinityLoader.ini') { Get-LabLoaderConfigurationSha256 $path } else { Get-LabSha256 $path }
+    if ($hash -cne $entry.Value) { throw "Changed installed asset: $($entry.Name)" }
 }
 if ((Get-LabSha256 (Join-Path $lab 'Baldur.exe')) -cne $config.ExeSha256) { throw 'Changed game executable.' }
 $diagnosticPath = Join-Path $lab 'cbr-diagnostics.json'

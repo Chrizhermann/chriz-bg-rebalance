@@ -3,7 +3,9 @@
 This is disposable research infrastructure, not a balance component. It records
 native decisions without correcting clocks, rebuilding buffs, replacing healing,
 or changing attack/movement scheduling. No hooks activate merely by loading the
-diagnostic Lua module. Engine execution and acceptance are still pending.
+diagnostic Lua module. The startup and hook-integration smoke test passed on EEex 1.3.1
+([below](#engine-smoke-test-eeex-131-2026-10-20)); gameplay measurement and acceptance are
+still pending.
 
 The diagnosis, instruction evidence and open design questions are in
 [`../10-timestop-haste-engine-clocks.md`](../10-timestop-haste-engine-clocks.md).
@@ -76,9 +78,14 @@ pwsh -NoProfile -File research/timestop-lab/Prepare-Lab.ps1 -Phase Copy `
   -WeiduPath "C:\Games\Baldur's Gate II Enhanced Edition modded\Setup-Branwen.exe"
 pwsh -NoProfile -File research/timestop-lab/Prepare-Lab.ps1 -Phase Install
 pwsh -NoProfile -File research/timestop-lab/Prepare-Lab.ps1 -Phase Validate
-pwsh -NoProfile -File research/timestop-lab/Stage-Diagnostics.ps1
+git -C C:\src\private\eeex-remote-console worktree add --detach "$eeex\rc-661927e" 661927e56e28435541a3128568cd4ee6d5d80164
+pwsh -NoProfile -File research/timestop-lab/Stage-Diagnostics.ps1 -RemoteConsoleRoot "$eeex\rc-661927e"
 pwsh -NoProfile -File research/timestop-lab/Invoke-Lab.ps1
 ```
+
+Staging copies the Remote Console files only from a clean checkout whose HEAD is the
+reviewed pin. `-RemoteConsoleRoot` names that checkout or worktree. The default, the main
+checkout, is refused as soon as its HEAD moves on, even by a documentation-only commit.
 
 These commands do not launch the game. Copy resumes only matching owned files;
 an uncertain installation stops for inspection. There is no uninstall or reset
@@ -91,18 +98,34 @@ existing hashes still match its previous ownership manifest.
 The manifests, source inventory and installation logs remain in the disposable
 lab. The repository contains no game executable, save or copied proprietary data.
 
-## Runtime coordination — for the later engine session
+## Runtime coordination
 
-`Invoke-Lab.ps1 -Launch` is the explicit launch operation. It holds
-`Local\ChrizInfinityEngineLab` until the owned game/loader exit and refuses to
-start while **any** `Baldur.exe` or `InfinityLoader.exe` is present. Keep its
-PowerShell process alive for the session. It never terminates a process.
+`Invoke-Lab.ps1` without `-Launch` is the read-only preflight. It checks the ownership
+markers, the installed EEex files, the executable and the staged diagnostic assets.
 
-The mutex coordinates only runners that use that same name. Other agents' runners
-may not participate, so agree on an exclusive game slot before launch. The global
-process check reduces collisions but cannot guarantee that an unrelated runner
-will not start concurrently. A failed or uncertain startup is an inspection point,
-not permission to retry repeatedly. A surviving process still blocks the next run.
+On Christopher's PC the game starts only through the verified quiet runner
+`lab_quiet_run.py` from the local lab tools. It uses a hidden desktop, a muted windowed
+profile, a job object, and guards that stop the game on audio, a pointer clip, a gamma
+change or a foreground window. `Invoke-Lab.ps1 -Launch` is not that runner: it starts the
+loader with a plain `Start-Process` on the user's desktop, so do not use it there.
+
+Before the first quiet run:
+
+1. Rename the lab copy's `steam_api64.dll` to `steam_api64.dll.bgse-disabled`, so that
+   Steam Cloud cannot sync this profile. The runner refuses an active Steam DLL.
+2. Run `python -I lab_quiet_run.py prepare <lab> <profile>`. It makes the profile
+   windowed and sets every volume to 0, keeping `Baldur.lua.before-quiet-lab` as a backup.
+
+Install, staging and the preflight refuse while any `Baldur.exe` or `InfinityLoader.exe`
+runs, so this lab runs alone. Take the exclusive `bg-game-install.lock` of the shared lab
+coordination folder, wait until no BG game runs, then run
+`python -I lab_quiet_run.py run <lab> <profile> <out.json> 600`. Parallel lab slots
+(`bg_lab_slots.py`) start nothing while that lock is held. The run ends at its time limit,
+on a message box, or when the game exits; `<out.json>` records the guards' result. Release
+the lock by renaming it only after no process runs from the lab.
+
+A failed or uncertain startup is an inspection point, not permission to retry
+repeatedly. A surviving process still blocks the next run.
 
 Use only this lab's `override` for Remote Console commands, one command at a time.
 First verify the running executable path and perform the client's `ping` and
@@ -175,9 +198,10 @@ Time Stop records are sampled observations, not invented exact start/end edges.
 
 The next engine session has three bounded steps:
 
-1. Startup/IPC and hook-integration smoke test, then a fresh baseline with the
-   one subject, buff and regeneration effect. Verify native HP amount, buff expiry,
-   worker construction and rebuilding, and complete trace decoding.
+1. A fresh baseline with the one subject, buff and regeneration effect. Verify
+   native HP amount, buff expiry, worker construction and rebuilding, and complete
+   trace decoding. (The startup/IPC and hook-integration smoke test before it passed
+   on 2026-10-20.)
 2. Repeat with a separate controller's Time Stop when about twenty game ticks
    remain on the buff, away from a pulse boundary. Measure the native expiry and
    periodic phase through the stop; do not correct either yet.
@@ -189,6 +213,43 @@ Only after these traces resolve the disputed engine paths should a separate,
 actor/effect-scoped clock correction be designed. Caster/immune behavior, Slow,
 area effects, SR/SCS maintenance graphs, consecutive stops, removal/refresh and
 save/load remain explicit later gates. This lab has no current-save safety claim.
+
+## Engine smoke test (EEex 1.3.1, 2026-10-20)
+
+This covered only README step 1: startup, Remote Console and hook integration at the fresh
+main menu. Nothing was armed or measured, and no save was created or loaded.
+
+- **Build.** The `git archive` export of the tag commit reproduced the pinned tree digest.
+  Copy, Install, Validate and staging passed. `WeiDU.log` lists exactly components 0, 1 and
+  8 at v1.3.1. The Remote Console files came from a clean worktree at their pin.
+- **Runs.** There were two quiet runs through `lab_quiet_run.py run`, 600 s each, while
+  holding the exclusive lock. Neither tripped a guard: audio peak 0.0, pointer clip
+  unchanged, no message box, nothing left in the job. Both ended at their time limit.
+- **Remote Console.** Each run rewrote the ready file. `ping` answered. A runaway loop
+  stopped at a 2,000,000-instruction watchdog, and the game answered again afterwards.
+- **Run 1.** `CBRTS.Inspect()` passed: image base `0x140000000`, 8 sites, 2.7.3.0.
+  `CBRTS.Install()` stopped in its fresh-main-menu check, at `CBRTObs.lua:66`: "attempt to
+  call method 'GetActiveEngine' (a nil value)". The EEex binding object
+  `EngineGlobals.g_pBaldurChitin` has no such method. The engine global `e` is the same
+  object and has it, and the bound field `pActiveEngine` equals `m_pEngineStart` at the main
+  menu. Nothing was patched: `installed` and `failed` stayed false, no buffer was allocated,
+  and all eight sites kept their original bytes.
+  - Fix: the check reads `chitin.pActiveEngine`.
+  - `test_observer.py` now runs `Install()`'s precondition with bindings shaped like 1.3.1.
+    With the old accessor, its new tests fail with the lab's error.
+- **Loader cache.** Run 1 also showed that InfinityLoader adds its own cache to
+  `InfinityLoader.ini`: one `CachedExeTime=` and four `CachedAddress=` lines under
+  `[Auto-Generated]`. The preflight compared raw hashes, so it refused every launch after
+  the first.
+  - It now ignores exactly those loader lines; every other byte must still match the
+    validated installation.
+  - `Test-LabGuards.ps1` covers both cases. Mutants that keep the raw hash, strip such
+    lines anywhere in the file, or accept any value all fail.
+- **Run 2.** This was a fresh process with the fix re-staged (`-Refresh`). The preflight
+  passed after the earlier launch, and `Inspect()` passed again. `Install()` returned
+  `installed=true`, 8 sites and `armed=false` in 10 ms. `Status()` showed `failed=false`,
+  `reserved=0`, `overflow=0` and no active recorder. All eight sites now start with `E9`, a
+  jump to their hook. Ping and status still answered a minute later.
 
 ## Host validation
 
@@ -203,7 +264,8 @@ Keystone 0.9.2 and Unicorn 2.1.4 were used. The extra native-analysis libraries
 are in the temporary dependency directory, not installed into the game.
 For the 1.3.1 pin on 2026-10-20, the same versions were installed with
 `pip install --no-deps --require-hashes --target <dir>` beside lupa 2.8 (LuaJIT 2.1):
-all 14 guard groups and all 32 Python tests passed.
+all 14 guard groups and all 32 Python tests passed. With the smoke-test fixes above there
+are 16 guard groups and 34 Python tests, all passing.
 Fixture and decoder tests use synthetic data; assembly tests use synthetic memory
 and the pinned executable on disk. They do not execute the game or prove the
 EEex trampoline integration works at runtime.
