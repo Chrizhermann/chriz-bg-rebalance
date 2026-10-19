@@ -201,6 +201,9 @@ python -B -m unittest discover -s research/timestop-lab -p 'test_*.py' -v
 Python 3.11, `lupa.luajit21`, Capstone 5.0.9, pefile 2024.8.26,
 Keystone 0.9.2 and Unicorn 2.1.4 were used. The extra native-analysis libraries
 are in the temporary dependency directory, not installed into the game.
+For the 1.3.1 pin on 2026-10-20, the same versions were installed with
+`pip install --no-deps --require-hashes --target <dir>` beside lupa 2.8 (LuaJIT 2.1):
+all 14 guard groups and all 32 Python tests passed.
 Fixture and decoder tests use synthetic data; assembly tests use synthetic memory
 and the pinned executable on disk. They do not execute the game or prove the
 EEex trampoline integration works at runtime.
