@@ -24,6 +24,16 @@ EEex_LShift = function(a, b) return a << b end
 EEex_Sprite_GetPortraitIndex = function(s) return s.portrait end
 EEex_Sprite_GetActiveStats = function(s) return s.m_derivedStats end
 EEex_Opcode_AddListsResolvedListener = function(fn) listeners[#listeners + 1] = fn end
+-- Same contract as EEex_Utility.lua: visit node data in order, stop on a truthy return.
+-- Simulated lists are plain arrays; `visited` counts every node handed to the callback.
+local visited = 0
+EEex_Utility_IterateCPtrList = function(list, fn)
+    for _, data in ipairs(list) do
+        visited = visited + 1
+        if fn(data) then break end
+    end
+end
+if scenario == "missing_iterate" then EEex_Utility_IterateCPtrList = nil end
 EEex_GameObject_ApplyEffect = forbidden
 EEex_Sprite_ApplyEffect = forbidden
 EEex_Sprite_SetLocalInt = forbidden
@@ -79,8 +89,45 @@ local function rebuild(s, values)
     apply(s)
 end
 
+-- Effect-list fixtures. 4096 is how the engine stores an applied limited
+-- duration; a rebuild is modelled by replacing the derived stats AND the
+-- timed list the engine just resolved.
+local ABSOLUTE = 4096
+local function effect(opcode, amount, mode, timing, done)
+    return {
+        m_effectId = opcode, m_effectAmount = amount, m_dWFlags = mode,
+        m_durationType = timing == nil and ABSOLUTE or timing,
+        m_done = done == nil and 0 or done,
+    }
+end
+-- Divine Protection as SCS ships it: opcodes 86-89 set to 100 for 18 seconds.
+local function divineProtection(done)
+    local list = {}
+    for opcode = 86, 89 do list[#list + 1] = effect(opcode, 100, 1, ABSOLUTE, done) end
+    return list
+end
+local function all(opcodeAmount, mode, timing, done)
+    local list = {}
+    for opcode = 86, 89 do list[#list + 1] = effect(opcode, opcodeAmount, mode, timing, done) end
+    return list
+end
+local function rebuildWith(s, values, list)
+    s.m_timedEffectList = list
+    rebuild(s, values)
+end
+
 assert(modulePath and markerState and scenario, "missing simulator arguments")
 dofile(modulePath)
+if scenario == "missing_iterate" then
+    -- Load-time capability check: no callback, no partial runtime, one notice.
+    out("failed", CBRPhysRes.failed == true)
+    out("listeners", #listeners)
+    out("failure_logs", #logs)
+    out("apply_defined", type(CBRPhysRes.Apply) == "function")
+    out("forbidden_calls", forbiddenCalls)
+    print = printOriginal
+    return
+end
 assert(type(CBRPhysRes) == "table", "module did not publish CBRPhysRes")
 assert(type(CBRPhysRes.Transform) == "function", "Transform entry point missing")
 assert(type(CBRPhysRes.Apply) == "function", "Apply entry point missing")
@@ -215,6 +262,139 @@ scenarios.setter_failure = function()
     out("later_healthy_unchanged", fields(healthy) == "100,100,100,100")
 end
 
+scenarios.window_set = function()
+    local s = newSprite({100, 100, 100, 100})
+    s.m_timedEffectList = divineProtection()
+    apply(s); out("divine_protection", fields(s))
+    -- During the window the native value passes through unchanged.
+    rebuildWith(s, {100, 95, 87, 81}, divineProtection())
+    out("native_passthrough", fields(s))
+    rebuildWith(s, {100, 100, 100, 100}, all(100, 0))
+    out("increment_100", fields(s))
+    rebuildWith(s, {100, 100, 100, 100}, all(150, 0))
+    out("increment_150", fields(s))
+    rebuildWith(s, {100, 100, 100, 100}, all(120, 1))
+    out("set_120", fields(s))
+end
+scenarios.window_partial = function()
+    local s = newSprite({100, 100, 100, 100})
+    s.m_timedEffectList = {effect(88, 100, 1)}
+    apply(s); out("piercing_only", fields(s))
+    rebuildWith(s, {100, 100, 100, 100}, {effect(86, 100, 1), effect(89, 120, 0)})
+    out("slashing_and_missile", fields(s))
+    -- Mixed list order and unrelated effects around the window.
+    rebuildWith(s, {100, 100, 100, 100}, {
+        effect(166, 100, 1), effect(87, 100, 1), effect(31, 100, 1), effect(0, 5, 0),
+    })
+    out("crushing_among_others", fields(s))
+end
+scenarios.not_windows = function()
+    local candidates = {
+        {"set_99", all(99, 1)},
+        {"increment_99", all(99, 0)},
+        {"percentage_200", all(200, 2)},
+        {"two_increments_of_50", {
+            effect(86, 50, 0), effect(86, 50, 0), effect(87, 50, 0), effect(87, 50, 0),
+            effect(88, 50, 0), effect(88, 50, 0), effect(89, 50, 0), effect(89, 50, 0),
+        }},
+        {"timing_0_unapplied", all(100, 1, 0)},
+        {"timing_1_permanent", all(100, 1, 1)},
+        {"timing_2_equipped", all(100, 1, 2)},
+        {"timing_3_delayed", all(100, 1, 3)},
+        {"timing_4_delayed", all(100, 1, 4)},
+        {"timing_9_permanent", all(100, 1, 9)},
+        {"timing_10_ticks", all(100, 1, 10)},
+        {"done_integer", divineProtection(1)},
+        {"done_boolean", divineProtection(true)},
+        {"opcode_177_wrapper", {effect(177, 0, 2), effect(177, 2, 2)}},
+        {"other_resistances", {effect(27, 100, 1), effect(31, 100, 1), effect(166, 100, 1)}},
+    }
+    for _, candidate in ipairs(candidates) do
+        local s = newSprite({100, 100, 100, 100})
+        s.m_timedEffectList = candidate[2]
+        apply(s)
+        out(candidate[1], fields(s))
+    end
+end
+scenarios.equipped_list_ignored = function()
+    local s = newSprite({100, 100, 100, 100})
+    s.m_equippedEffectList = divineProtection()
+    apply(s); out("physical", fields(s))
+end
+scenarios.window_lifecycle = function()
+    -- Stacking alone: 90 (e.g. Hardiness 40 + Defensive Stance 50) -> 85.
+    local s = newSprite({90, 90, 90, 90})
+    apply(s); out("before_cast", fields(s))
+    for _ = 1, 30 do apply(s) end
+    out("before_fast_passes", fields(s))
+    -- The rebuild that applies Divine Protection already sees it.
+    rebuildWith(s, {100, 100, 100, 100}, divineProtection())
+    out("cast_rebuild", fields(s))
+    for _ = 1, 200 do apply(s) end
+    out("during_fast_passes", fields(s))
+    rebuildWith(s, {100, 100, 100, 100}, divineProtection())
+    out("during_periodic_rebuild", fields(s))
+    -- The first rebuild without it caps again: never longer than the effect.
+    rebuildWith(s, {90, 90, 90, 90}, {})
+    out("expired_rebuild", fields(s))
+    for _ = 1, 30 do apply(s) end
+    out("after_fast_passes", fields(s))
+    -- Still listed but already completed by the engine: no window.
+    rebuildWith(s, {90, 90, 90, 90}, divineProtection(1))
+    out("completed_not_purged", fields(s))
+    rebuildWith(s, {100, 100, 100, 100}, divineProtection())
+    out("recast_rebuild", fields(s))
+    -- Dispelled or removed early: capped at the next rebuild.
+    rebuildWith(s, {90, 90, 90, 90}, {})
+    out("removed_rebuild", fields(s))
+end
+scenarios.window_negative_after = function()
+    -- Divine Protection followed by a -15 penalty: the window is still active.
+    local s = newSprite({85, 85, 85, 85})
+    s.m_timedEffectList = divineProtection()
+    apply(s); out("physical", fields(s))
+end
+scenarios.scan_scope = function()
+    local noise = {}
+    for i = 1, 60 do noise[i] = effect(i % 2 == 0 and 0 or 54, 1, 0) end
+    local function listWithDp()
+        local list = {}
+        for i, value in ipairs(noise) do list[i] = value end
+        for _, value in ipairs(divineProtection()) do list[#list + 1] = value end
+        return list
+    end
+    local s = newSprite({80, 80, 80, 80})
+    s.m_timedEffectList = listWithDp()
+    visited = 0; apply(s)
+    out("visited_nothing_lowered", visited); out("not_lowered", fields(s))
+    visited = 0; rebuildWith(s, {81, 81, 81, 81}, listWithDp())
+    out("visited_one_scan", visited); out("window_81", fields(s))
+    visited = 0
+    for _ = 1, 100 do apply(s) end
+    out("visited_fast_passes", visited)
+    local outsider = newSprite({100, 100, 100, 100}, -1)
+    outsider.m_timedEffectList = listWithDp()
+    visited = 0; apply(outsider)
+    out("visited_nonparty", visited); out("nonparty", fields(outsider))
+    local early = newSprite({100, 100, 100, 100})
+    early.m_timedEffectList = divineProtection()
+    for _, value in ipairs(noise) do early.m_timedEffectList[#early.m_timedEffectList + 1] = value end
+    visited = 0; apply(early)
+    out("visited_early_exit", visited); out("early", fields(early))
+end
+scenarios.window_registered_callback = function()
+    local s = newSprite({100, 100, 100, 100})
+    s.m_timedEffectList = divineProtection()
+    for _, listener in ipairs(listeners) do listener(s) end
+    out("with_window", fields(s))
+    s.m_timedEffectList = {}
+    s.m_derivedStats = newStats({100, 100, 100, 100})
+    for _ = 1, 20 do
+        for _, listener in ipairs(listeners) do listener(s) end
+    end
+    out("after_window", fields(s))
+end
+
 local function failure(kind)
     local s, data, writes = newSprite()
     if kind == "missing_field" or kind == "failure_reload" then data.m_nResistMissile = nil
@@ -226,6 +406,13 @@ local function failure(kind)
     elseif kind == "missing_get" then data.m_spellStates.get = nil
     elseif kind == "missing_set" then data.m_spellStates.set = nil
     elseif kind == "bad_portrait_index" then s.portrait = "0"
+    elseif kind == "missing_timed_list" then s.m_timedEffectList = nil
+    elseif kind == "bad_effect_opcode" then s.m_timedEffectList = {effect("86", 100, 1)}
+    elseif kind == "bad_effect_amount" then s.m_timedEffectList = {effect(86, 0/0, 1)}
+    elseif kind == "bad_effect_mode" then s.m_timedEffectList = {{m_effectId = 86,
+        m_effectAmount = 100, m_durationType = ABSOLUTE, m_done = 0}}
+    elseif kind == "bad_effect_timing" then s.m_timedEffectList = {effect(86, 100, 1, "4096")}
+    elseif kind == "bad_effect_done" then s.m_timedEffectList = {effect(86, 100, 1, ABSOLUTE, "0")}
     elseif kind == "copy_states" then
         local original = data.m_spellStates
         data.m_spellStates = nil

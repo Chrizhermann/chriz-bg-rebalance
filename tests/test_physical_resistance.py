@@ -154,6 +154,92 @@ class PhysicalResistanceCoreTests(unittest.TestCase):
         self.assertEqual(seen["physical"], "90,90,90,90")
         self.assertEqual(seen["marker"], "1")
 
+    def test_short_immunity_window_keeps_native_value(self) -> None:
+        seen = self.run_scenario("window_set")
+        self.assertEqual(seen["divine_protection"], "100,100,100,100")
+        self.assertEqual(seen["native_passthrough"], "100,95,87,81")
+        self.assertEqual(seen["increment_100"], "100,100,100,100")
+        self.assertEqual(seen["increment_150"], "100,100,100,100")
+        self.assertEqual(seen["set_120"], "100,100,100,100")
+
+    def test_window_covers_only_its_own_damage_types(self) -> None:
+        seen = self.run_scenario("window_partial")
+        self.assertEqual(seen["piercing_only"], "90,90,100,90")
+        self.assertEqual(seen["slashing_and_missile"], "100,90,90,100")
+        self.assertEqual(seen["crushing_among_others"], "90,100,90,90")
+
+    def test_stacking_permanent_delayed_and_completed_effects_are_not_windows(self) -> None:
+        seen = self.run_scenario("not_windows")
+        for name in (
+            "set_99", "increment_99", "percentage_200", "two_increments_of_50",
+            "timing_0_unapplied", "timing_1_permanent", "timing_2_equipped",
+            "timing_3_delayed", "timing_4_delayed", "timing_9_permanent", "timing_10_ticks",
+            "done_integer", "done_boolean", "opcode_177_wrapper", "other_resistances",
+        ):
+            with self.subTest(candidate=name):
+                self.assertEqual(seen[name], "90,90,90,90")
+
+    def test_equipped_effects_never_open_a_window(self) -> None:
+        self.assertEqual(self.run_scenario("equipped_list_ignored")["physical"], "90,90,90,90")
+
+    def test_window_starts_and_ends_with_the_effect_itself(self) -> None:
+        seen = self.run_scenario("window_lifecycle")
+        self.assertEqual(seen["before_cast"], "85,85,85,85")
+        self.assertEqual(seen["before_fast_passes"], "85,85,85,85")
+        self.assertEqual(seen["cast_rebuild"], "100,100,100,100")
+        self.assertEqual(seen["during_fast_passes"], "100,100,100,100")
+        self.assertEqual(seen["during_periodic_rebuild"], "100,100,100,100")
+        self.assertEqual(seen["expired_rebuild"], "85,85,85,85")
+        self.assertEqual(seen["after_fast_passes"], "85,85,85,85")
+        self.assertEqual(seen["completed_not_purged"], "85,85,85,85")
+        self.assertEqual(seen["recast_rebuild"], "100,100,100,100")
+        self.assertEqual(seen["removed_rebuild"], "85,85,85,85")
+
+    def test_window_passes_later_penalties_through(self) -> None:
+        self.assertEqual(self.run_scenario("window_negative_after")["physical"], "85,85,85,85")
+
+    def test_effect_list_is_scanned_only_when_the_curve_would_lower_a_value(self) -> None:
+        seen = self.run_scenario("scan_scope")
+        self.assertEqual(seen["visited_nothing_lowered"], "0")
+        self.assertEqual(seen["not_lowered"], "80,80,80,80")
+        self.assertEqual(seen["visited_one_scan"], "64")
+        self.assertEqual(seen["window_81"], "81,81,81,81")
+        self.assertEqual(seen["visited_fast_passes"], "0")
+        self.assertEqual(seen["visited_nonparty"], "0")
+        self.assertEqual(seen["nonparty"], "100,100,100,100")
+        self.assertEqual(seen["visited_early_exit"], "4")
+        self.assertEqual(seen["early"], "100,100,100,100")
+
+    def test_registered_callback_honours_and_releases_window(self) -> None:
+        seen = self.run_scenario("window_registered_callback")
+        self.assertEqual(seen["with_window"], "100,100,100,100")
+        self.assertEqual(seen["after_window"], "90,90,90,90")
+
+    def test_window_rule_is_the_same_for_the_reserved_95_curve(self) -> None:
+        seen = self.run_scenario("window_lifecycle", cap=95)
+        self.assertEqual(seen["before_cast"], "85,85,85,85")
+        self.assertEqual(seen["cast_rebuild"], "100,100,100,100")
+        self.assertEqual(seen["expired_rebuild"], "85,85,85,85")
+
+    def test_invalid_effect_list_fails_before_partial_writes(self) -> None:
+        for scenario in (
+            "missing_timed_list", "bad_effect_opcode", "bad_effect_amount",
+            "bad_effect_mode", "bad_effect_timing", "bad_effect_done",
+        ):
+            with self.subTest(scenario=scenario):
+                seen = self.run_scenario(scenario)
+                self.assertEqual(seen["writes"], "0")
+                self.assertEqual(seen["failed"], "true")
+                self.assertEqual(seen["failure_logs"], "1")
+                self.assertEqual(seen["later_healthy_unchanged"], "true")
+
+    def test_missing_effect_list_iterator_disables_the_module_at_load(self) -> None:
+        seen = self.run_scenario("missing_iterate")
+        self.assertEqual(seen["failed"], "true")
+        self.assertEqual(seen["listeners"], "0")
+        self.assertEqual(seen["failure_logs"], "1")
+        self.assertEqual(seen["apply_defined"], "false")
+
     def test_setter_failure_rolls_back_partial_stat_writes_and_marker(self) -> None:
         seen = self.run_scenario("setter_failure")
         self.assertEqual(seen["physical"], "100,100,100,100")

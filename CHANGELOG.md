@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Party physical resistance (310): short immunity windows keep 100%. While one
+  timed effect grants full immunity to a damage type on its own, such as SCS's
+  Divine Protection and Greater Divine Protection, that type is not capped. The
+  exception lasts exactly as long as the effect. Stacked bonuses, equipment,
+  passives and forms stay capped at 90%. Party and enemies now get the same
+  Divine Protection, and its description is accurate again.
+
 ## v0.8.3 — 2026-10-14
 
 - Add potion uniqueness (330, or 331 where Potions of Genius still stack): each

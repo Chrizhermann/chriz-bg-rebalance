@@ -155,6 +155,14 @@ Physical resistance above **80% counts at half strength**, up to **90%**:
 to slashing, crushing, piercing and missile resistance for party members only.
 Enemies, summons and elemental/magic resistance are unchanged.
 
+**Short immunity windows keep 100%.** While a single timed effect grants full
+immunity to a damage type on its own (SCS's Divine Protection and Greater Divine
+Protection set all four to 100% for three rounds), that type is not capped. The
+exception starts and ends with that effect, including dispels and saved games.
+Stacked bonuses, equipment, kit passives and shapeshift forms stay capped. A
+window delivered through an opcode-177 EFF wrapper is not recognised (none is
+known); it stays at 90%.
+
 Requires EEex and BG2:EE/EET. Launch through InfinityLoader. This operates on
 the resistance the engine has calculated, including its normal stacking rules;
 it does not change individual spells or items. Stoneskin and weapon-immunity
