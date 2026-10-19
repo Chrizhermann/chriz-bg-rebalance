@@ -4,8 +4,9 @@ This is disposable research infrastructure, not a balance component. It records
 native decisions without correcting clocks, rebuilding buffs, replacing healing,
 or changing attack/movement scheduling. No hooks activate merely by loading the
 diagnostic Lua module. The startup and hook-integration smoke test passed on EEex 1.3.1
-([below](#engine-smoke-test-eeex-131-2026-10-20)); gameplay measurement and acceptance are
-still pending.
+([below](#engine-smoke-test-eeex-131-2026-10-20)), and so did the first native baseline
+capture, `baseline_01` ([below](#baseline-capture-baseline_01-2026-10-20)). The Time Stop
+and Haste measurements and any acceptance are still pending.
 
 The diagnosis, instruction evidence and open design questions are in
 [`../10-timestop-haste-engine-clocks.md`](../10-timestop-haste-engine-clocks.md).
@@ -86,6 +87,8 @@ pwsh -NoProfile -File research/timestop-lab/Invoke-Lab.ps1
 Staging copies the Remote Console files only from a clean checkout whose HEAD is the
 reviewed pin. `-RemoteConsoleRoot` names that checkout or worktree. The default, the main
 checkout, is refused as soon as its HEAD moves on, even by a documentation-only commit.
+Staging also builds the lab's QA copy of `UI.MENU` from the lab's own stock file
+([fresh test party](#fresh-test-party-in-the-hidden-game)).
 
 These commands do not launch the game. Copy resumes only matching owned files;
 an uncertain installation stops for inspection. There is no uninstall or reset
@@ -132,6 +135,50 @@ First verify the running executable path and perform the client's `ping` and
 watchdog checks; a leftover ready file is insufficient. An action-queue response
 does not prove the action executed. Check resulting actor/effect state after
 engine ticks. Do not import a playthrough save for convenience.
+
+## Fresh test party in the hidden game
+
+The hidden game gets no mouse or keyboard input, and the Remote Console polls only while
+START or WORLD_ACTIONBAR renders. A new game therefore goes through the game's own buttons,
+clicked with `Infinity_ClickItem`, Christopher's choice on 2026-10-20.
+
+- **QA menu.** `qa_menu.py` reads the stock `UI.MENU` from `chitin.key`/BIF and writes a
+  lab-only copy. It names 15 stock items (`CBRTSQA_*`): the SoA logo, Single Player, New
+  Game, the character-creation buttons, Import's Character File, the Done buttons, the
+  difficulty and the dialogue confirm button. Each name is added only where exactly one item
+  with the stock action exists. It also adds an inert START label (2.7.3 reopens START after
+  the campaign choice only on the next mouse event) and a 1×1 polling widget to the 12 menus
+  that cover START during character creation and dialogue. The builder is idempotent and
+  refuses unknown actions, ambiguous or missing items and name collisions.
+  `qa_menu.py describe <lab>` prints the expected hash. `Stage-Diagnostics.ps1` builds the
+  copy into the lab (`cbr-generated-qa-menu-<sha16>`), stages it as `override/UI.MENU` and
+  records the builder, stock and output hashes. The preflight checks it like every other
+  staged asset.
+- **Client.** `lab_rc.py` (`procs`, `ready`, `lua`, `collect`) talks only to this lab's
+  `override`, requires exactly one `Baldur.exe` from the lab, and refuses while a request is
+  pending. A request that times out is never resent: `collect` waits for the same request,
+  because the console stays deaf during a cutscene. `--arg` values reach Lua as decimal
+  byte escapes in `ARGS`, never as code. `--delay` waits before sending, for a timed case.
+  A game that exits can never answer: `--expect-exit` (for `rc/quit.lua`) and `collect`
+  end with status `exited` once the lab's game is gone, and move a request file the game
+  never claimed out of `override`, so that no later start runs it. Every exchange is logged
+  under `<lab>\cbr-timestop-output\rc-log\`.
+- **Requests.** `rc/*.lua` holds the requests. Read-only: `ping`, `state`, `menus`,
+  `status`, `subject`, `nearby`. Changing: `watchdog`, `install`, `arm`, `stop`, `export`,
+  `start-soa`, `click`, `pick-character`, `set-name`, `dialog`, `pause`, `queue`, `quit`.
+  Each changing request checks its precondition first (menu on the stack, no transition,
+  paused game, armed or disarmed capture, the subject's name).
+
+The 2026-10-20 sequence: `ping`, `watchdog`, `ping`, `state`, `install`, `status`, then
+`start-soa`, `click` Single Player and New Game, `click` Import and Character File,
+`pick-character "Abdel - Fighter - Neutral Good"` (the pregenerated character shipped with
+the game), `click` Appearance, colors Done and sounds Done, `click` Name,
+`set-name "CBRTS Subject"`, `click` Accept and the difficulty. During the SoA opening the
+console was deaf for about two minutes, so `collect` picked up the menu probe. Then
+`dialog confirm-on`, 11 `dialog step` requests through Imoen's dialogue (first reply each
+time), `pause paused`, `dialog confirm-off`. Imoen joins and is the second actor. In
+AR0602 the nearest hostile, a Smoke Mephit, stood about 1,200 pixels away. The caged
+NPCs and the Jailkeep Golem are neutral.
 
 ## Diagnostic controls
 
@@ -196,12 +243,13 @@ Decoder exit 0 means structurally complete evidence, **not** gameplay acceptance
 Exit 1 means incomplete/ambiguous capture; exit 2 means invalid input or I/O failure.
 Time Stop records are sampled observations, not invented exact start/end edges.
 
-The next engine session has three bounded steps:
+The engine sessions have three bounded steps:
 
 1. A fresh baseline with the one subject, buff and regeneration effect. Verify
    native HP amount, buff expiry, worker construction and rebuilding, and complete
-   trace decoding. (The startup/IPC and hook-integration smoke test before it passed
-   on 2026-10-20.)
+   trace decoding. **Done on 2026-10-20** as `baseline_01`
+   ([results](#baseline-capture-baseline_01-2026-10-20)), after the startup/IPC and
+   hook-integration smoke test.
 2. Repeat with a separate controller's Time Stop when about twenty game ticks
    remain on the buff, away from a pulse boundary. Measure the native expiry and
    periodic phase through the stop; do not correct either yet.
@@ -251,6 +299,69 @@ main menu. Nothing was armed or measured, and no save was created or loaded.
   `reserved=0`, `overflow=0` and no active recorder. All eight sites now start with `E9`, a
   jump to their hook. Ping and status still answered a minute later.
 
+## Baseline capture `baseline_01` (2026-10-20)
+
+This was step 1 of the engine sessions: measurement only, no clock correction.
+
+- **Run.** One quiet run through `lab_quiet_run.py run … 1800`, holding the exclusive lock,
+  ended after 864 s by `rc/quit.lua` (the stock `Infinity_ShutdownGame`, no save). No guard
+  tripped: audio peak 0.0, pointer clip unchanged, nothing left in the job. The QA menu was
+  `61dd3832…8b78`, built from the stock `7987e9d3…31fe` in `data/Patch2.bif`.
+- **Party.** A new SoA game on Venture through the [fresh-party
+  sequence](#fresh-test-party-in-the-hidden-game). Portrait 0: "CBRTS Subject", the
+  pregenerated fighter Abdel, 98 HP, in AR0602. Portrait 1: Imoen. AI speed byte 1
+  (normal) and no Time Stop throughout. While the capture was disarmed,
+  `ApplyDamage(Myself,20,0)` lowered the subject from 98 to 83 HP. That 20 requested
+  crushing damage removed only 15 HP was not investigated; the fixtures do not depend on it.
+- **Case.** At world 33172, paused: `Arm(0)` (epoch 1), then the queued `ApplySpellRES` of
+  `CBRTBUF` and `CBRTREG`. Both ran within that paused request: a probe at the same tick
+  already showed deadlines 33262 and 33352, timing `0x1000`. The game ran from 33172 to
+  33434 (262 ticks, about 17.5 s). Then `Stop()`, and `Export("baseline_01")` as a separate
+  request: 451 records, no overflow, no failure, no active recorder. The file is the 8-byte
+  magic, the 128-byte header and 451 records. It stays in the lab, with its decoded JSON/CSV
+  and the request log.
+- **Decoding.** `decode_trace.py` exited 0: status complete, 451 of 451 records committed, no
+  issues, 179 paired dispatches, 436 fixture events and 15 unattributed lifecycle events.
+
+| Check | Native result |
+|---|---|
+| HP amount | 6 healing submissions, each +1 HP within its paired dispatch: 83 → 89. The live probe afterwards agreed (89/98). |
+| Pulse times | Worlds 33192, 33207, 33237, 33267, 33297, 33327: 20 ticks after the application, then 15, then every 30. |
+| Worker dispatch | 179 dispatches, one per world tick from 33173 to 33351. Remaining duration fell by 1 per dispatch. The list counter stayed world − 31498. |
+| Construction and rebuild | Two passes at the application (33172) each constructed a worker; the second one ran. Then one tick after every heal (33193, 33208, 33238, 33268, 33298, 33328) the live worker was destroyed and a new one constructed from the parent. Seeded remaining duration = parent deadline − world (180, 159, 144, 114, 84, 54, 24). Seeded phase = floor((world − origin)/15) mod 2 (0, 1, 0, 0, 0, 0, 0). The engine also copies the worker at each heal and each pass; a copy lives until the next pass or heal and is never dispatched. |
+| Worker end | The last worker reached 0 at 33351, set done and was destroyed. There was no seventh heal. |
+| Buff expiry | A parent is removed only during an effect-list pass. `CBRTBUF` (deadline 33262) went at 33268, 6 ticks late, in the rebuild after the heal at 33267. `CBRTREG` (deadline 33352) went at 33364, 12 ticks late, in a pass without a heal. Pre-expiry checks ran only at 33172, at the six post-heal rebuilds and at 33364. |
+| Other actors | 15 unattributed copy/destroy events at 33221–2, 33311–2 and 33401–2 (every 90 ticks), remaining duration about 2^30: another creature's permanent worker of the same class. They are not fixture evidence. |
+| Time Stop | Counter 0 and caster −1 in all 451 records. |
+
+What this shows:
+
+- **Pulse rule.** At each dispatch the list writes its counter into the worker, which adds 1.
+  The worker's period counter advances when the result is a multiple of 15 (here world ≡ 12
+  mod 15), and it heals at 2. The first heal came at the second such boundary after the application (33177,
+  33192). The rebuild at 33193 seeded phase 1, one whole second after the origin, so the next
+  heal came one boundary later. From the 33208 rebuild on, the elapsed whole seconds were
+  even at every rebuild: phase 0, 30-tick spacing. Two clocks thus set the pulses: the list
+  counter's 15-tick boundary, and the parent origin, read again at every rebuild.
+- **Static path confirmed.** This matches the research note's seeding (`0x1BED5F–0x1BED76`,
+  `0x1BED97–0x1BEDD2`), the 15-tick boundary (`0x1A5D74–0x1A5D7A`) and one dispatch per world
+  tick for an actor at normal speed.
+- **Expiry is not detected at the deadline tick.** A heal-driven rebuild removed the buff 6
+  ticks late. Without a heal, the regeneration parent stayed 12 ticks. This trace does not
+  show what started the pass at 33364.
+
+For steps 2 and 3:
+
+- Fixtures queued while paused apply at once. A case's origin and deadlines are known
+  before the game runs.
+- Pulse boundaries follow the list counter, which started with the game, not the
+  application tick. Read them from the case's own origin and counter.
+- The buff's removal can ride on a regeneration rebuild. Step 2 must note whether its
+  removal pass coincides with one.
+- Each pause toggle read the world time one tick lower afterwards than just before
+  (33104 → 33103, 33173 → 33172, 33434 → 33433); unpausing did not. Use the trace's own
+  world values, not the pause probe.
+
 ## Host validation
 
 ```powershell
@@ -265,7 +376,9 @@ are in the temporary dependency directory, not installed into the game.
 For the 1.3.1 pin on 2026-10-20, the same versions were installed with
 `pip install --no-deps --require-hashes --target <dir>` beside lupa 2.8 (LuaJIT 2.1):
 all 14 guard groups and all 32 Python tests passed. With the smoke-test fixes above there
-are 16 guard groups and 34 Python tests, all passing.
+are 16 guard groups and 34 Python tests, all passing. The fresh-party tooling adds 23
+Python tests (QA menu 12, console client 11); on 2026-10-20 all 16 guard groups and all 57
+Python tests passed.
 Fixture and decoder tests use synthetic data; assembly tests use synthetic memory
 and the pinned executable on disk. They do not execute the game or prove the
 EEex trampoline integration works at runtime.

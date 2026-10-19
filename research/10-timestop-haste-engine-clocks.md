@@ -74,6 +74,23 @@ fresh-menu check, and a preflight that refused the loader's own address cache. N
 armed or measured; the native timing questions below remain open. Details are in the
 [lab README](timestop-lab/README.md#engine-smoke-test-eeex-131-2026-10-20).
 
+Update 2026-10-20, baseline: the first native capture, `baseline_01`, decoded complete
+(no Time Stop, no Haste, a subject at normal speed, `CBRTBUF` plus `CBRTREG`). It confirms
+the regeneration path described below in the running engine:
+
+- One worker dispatch per world tick, and remaining duration falling by 1 per dispatch.
+- Each construction seeds remaining duration from `parent.deadline - worldTime` and phase
+  from `floor((worldTime - origin)/15) % period`.
+- The 15-tick boundary is tested on the list counter, and there were six native +1 HP pulses
+  over the twelve seconds.
+
+The trace adds two facts. First, every heal changes HP, and one tick later the effect-list
+pass destroys the worker and rebuilds it from the parent, re-seeding both values. Here that
+put the first two pulses 20 and 15 ticks apart before they settled at 30. Second, timed
+parents were removed only during such passes, 6 and 12 ticks after their deadlines, not at
+the deadline tick. Time Stop and Haste remain unmeasured. Details are in the
+[lab README](timestop-lab/README.md#baseline-capture-baseline_01-2026-10-20).
+
 ## Evidence identity and method
 
 The current executable inspected was

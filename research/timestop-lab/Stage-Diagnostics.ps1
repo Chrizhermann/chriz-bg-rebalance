@@ -60,6 +60,20 @@ print(json.dumps({"Files":files, "Digest":digest}, separators=(",", ":")))
         BuilderSha256=$builderHash; EncoderSha256=$encoderHash}
 }
 
+function Get-CurrentQAMenu {
+    # The lab-only UI.MENU copy that names stock buttons for queued clicks (qa_menu.py).
+    param([Parameter(Mandatory)][string] $Lab)
+    $builder = Join-Path $PSScriptRoot 'qa_menu.py'
+    $builderHash = Get-LabSha256 $builder
+    $result = @(& python -B $builder describe $Lab)
+    if ($LASTEXITCODE -ne 0 -or $result.Count -ne 1) { throw 'Cannot derive the QA menu from the stock UI.MENU.' }
+    if ((Get-LabSha256 $builder) -cne $builderHash) { throw 'QA menu builder changed while deriving it.' }
+    $description = $result[0] | ConvertFrom-Json
+    if ($description.sha256 -notmatch '^[0-9a-f]{64}$') { throw 'Invalid QA menu description.' }
+    [pscustomobject]@{Sha256=[string]$description.sha256; StockSha256=[string]$description.stock_sha256;
+        BuilderSha256=$builderHash}
+}
+
 $mutex = [Threading.Mutex]::new($false, 'Local\ChrizInfinityEngineLab')
 $owned = $false
 try {
@@ -102,6 +116,18 @@ $sources = [ordered]@{
 foreach ($resref in @('CBRTBUF','CBRTREG','CBRTHST','CBRTIHS','CBRTSTP')) {
     $sources["override\$resref.SPL"] = Join-Path $generated "$resref.SPL"
 }
+# Built from the stock UI.MENU in the lab's own BIF, never from an override copy.
+$qaMenu = Get-CurrentQAMenu $lab
+$qaFolder = Join-Path $lab ('cbr-generated-qa-menu-' + $qaMenu.Sha256.Substring(0, 16))
+Assert-LabNoReparsePath $qaFolder
+if (-not (Test-Path -LiteralPath $qaFolder)) {
+    & python -B (Join-Path $PSScriptRoot 'qa_menu.py') build $lab $qaFolder
+    if ($LASTEXITCODE -ne 0) { throw 'QA menu generation failed.' }
+}
+if ((Get-LabSha256 (Join-Path $qaFolder 'UI.MENU')) -cne $qaMenu.Sha256) {
+    throw 'Generated QA menu differs from the current builder.'
+}
+$sources['override\UI.MENU'] = Join-Path $qaFolder 'UI.MENU'
 $writes = @()
 foreach ($entry in $sources.GetEnumerator()) {
     $target = Join-Path $lab $entry.Key
@@ -169,6 +195,7 @@ $state = [ordered]@{Schema=1; InstanceId=$manifest.InstanceId; Mode='observation
     RemoteSource=$remoteSource.Root; RemoteCommit=$remoteSource.Commit; RemoteGitBlobs=$remoteSource.GitBlobs;
     RemoteSha256=$remoteSource.Sha256; FixtureBuilderSha256=$fixtures.BuilderSha256;
     FixtureEncoderSha256=$fixtures.EncoderSha256; FixtureDigest=$fixtures.Digest;
+    QAMenuBuilderSha256=$qaMenu.BuilderSha256; QAMenuStockSha256=$qaMenu.StockSha256; QAMenuSha256=$qaMenu.Sha256;
     Files=$hashes; StagedUtc=[DateTime]::UtcNow.ToString('o'); GameLaunched=$false}
 [IO.File]::WriteAllText($marker, ($state | ConvertTo-Json -Depth 5), $utf8)
 [pscustomobject]@{LabRoot=$lab; Profile=$config.ProfileRoot; Assets=$hashes.Count;
