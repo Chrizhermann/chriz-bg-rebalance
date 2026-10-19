@@ -142,7 +142,8 @@ function Assert-InstalledEEex {
             throw 'CBR_LAB LUAJIT_CONFIGURATION_MISMATCH'
         }
     }
-    $hashes['InfinityLoader.ini'] = Get-LabSha256 $loaderPath
+    # Equal to the raw hash before the first launch; later launches only add the loader's cache.
+    $hashes['InfinityLoader.ini'] = Get-LabLoaderConfigurationSha256 $loaderPath
     $hashes['WeiDU.log'] = Get-LabSha256 $logPath
     $hashes
 }

@@ -146,6 +146,30 @@ function Get-LabSha256 {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
 }
 
+function ConvertTo-LabLoaderConfiguration {
+    # InfinityLoader writes its own cache into the [Auto-Generated] section on launch: the
+    # executable's file time (CachedExeTime=) and resolved pattern addresses (CachedAddress=).
+    # Without exactly those lines the file must equal the validated pre-launch configuration.
+    # Text is Latin-1 decoded, so the result maps back to the original bytes one to one.
+    param([Parameter(Mandatory)][AllowEmptyString()][string] $Text)
+    $markers = [regex]::Matches($Text, '(?m)^\[Auto-Generated\]\r?$')
+    if ($markers.Count -gt 1) { throw 'CBR_LAB LOADER_CONFIGURATION_AMBIGUOUS' }
+    if ($markers.Count -eq 0) { return $Text }
+    $start = $markers[0].Index
+    $Text.Substring(0, $start) +
+        [regex]::Replace($Text.Substring($start), '(?m)^Cached(?:ExeTime|Address)=[0-9]+(?:\r?\n|\z)', '')
+}
+
+function Get-LabLoaderConfigurationSha256 {
+    param([Parameter(Mandatory)][string] $Path)
+    Assert-LabNoReparsePath $Path
+    $latin1 = [Text.Encoding]::Latin1
+    $text = ConvertTo-LabLoaderConfiguration ($latin1.GetString([IO.File]::ReadAllBytes($Path)))
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { ([BitConverter]::ToString($sha.ComputeHash($latin1.GetBytes($text)))).Replace('-', '').ToLowerInvariant() }
+    finally { $sha.Dispose() }
+}
+
 function Assert-LabNoGameProcess {
     param([object[]] $Processes)
     if (-not $PSBoundParameters.ContainsKey('Processes')) {

@@ -147,6 +147,45 @@ class ObserverTests(unittest.TestCase):
     def machine(self, site, **kwargs):
         return SyntheticHook(site, self.assemblies[site["id"]], **kwargs)
 
+    @staticmethod
+    def install_attempt(loaded=0, in_load_game=0, in_load_area=0, active="start"):
+        """Install() in a fresh runtime with EEex 1.3.1-shaped bindings and no lab files.
+
+        Observed in the 2.7.3.0 lab on 2026-10-20: g_pBaldurChitin has no GetActiveEngine
+        method; pActiveEngine is a bound field. Native BOOL fields are numbers.
+        """
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.execute((HERE / "CBRTObs.lua").read_text(encoding="utf-8"))
+        attempt = lua.eval("""function(loaded, inLoadGame, inLoadArea, active)
+            local function object(pointer, fields) fields = fields or {}; fields._ptr = pointer; return fields end
+            local start, world = object(0x1000), object(0x2000)
+            local game = object(0x3000, {m_bGameLoaded = loaded, m_bInLoadGame = inLoadGame,
+                m_bInLoadArea = inLoadArea})
+            EngineGlobals = {g_pBaldurChitin = object(0x4000, {m_pObjectGame = game,
+                m_pEngineStart = start, m_pEngineWorld = world,
+                pActiveEngine = active == "world" and world or start})}
+            EEex_UDToPtr = function(value) return value._ptr end
+            io.open = function() return nil end
+            local ok, why = pcall(CBRTS.Install)
+            return ok, tostring(why), CBRTS.installed, CBRTS.failed == true, CBRTS.buffer ~= nil
+        end""")
+        return attempt(loaded, in_load_game, in_load_area, active)
+
+    def test_install_precondition_reads_the_bound_active_engine(self):
+        ok, why, installed, failed, buffered = self.install_attempt()
+        self.assertFalse(ok)
+        # Past the fresh-menu check, Install stops at the lab identity before any allocation.
+        self.assertIn("Missing lab guard: CBRTSLab.id", why)
+        self.assertEqual((installed, failed, buffered), (False, False, False))
+
+    def test_install_refuses_outside_the_fresh_main_menu(self):
+        for state in ({"loaded": 1}, {"in_load_game": 1}, {"in_load_area": 1}, {"active": "world"}):
+            with self.subTest(**state):
+                ok, why, installed, failed, buffered = self.install_attempt(**state)
+                self.assertFalse(ok)
+                self.assertIn("Install only at the fresh main menu", why)
+                self.assertEqual((installed, failed, buffered), (False, False, False))
+
     def test_all_eight_bodies_preserve_registers_flags_and_write_boundaries(self):
         self.assertEqual({site["id"] for site in self.sites}, set(range(1, 9)))
         for site in self.sites:

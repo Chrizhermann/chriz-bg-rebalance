@@ -65,6 +65,15 @@ Update 2026-10-18: Christopher chose EEex **1.3.1** for everything, and the
 instruction evidence below still apply. The tagged 2.7 `EEex.dll` and `LuaBindings.dll`
 changed; their hashes below describe the 1.3.0 audit.
 
+Update 2026-10-20: the lab's first engine run, in a disposable 2.7.3.0 copy with EEex 1.3.1,
+passed the startup and hook-integration smoke test. At the fresh main menu, `CBRTS.Inspect()`
+confirmed the image base, the resolver and regeneration vtables and the original bytes at all
+eight sites; `CBRTS.Install()` installed the eight disarmed hooks. Two lab defects that only a
+real run could show were fixed first: a nonexistent `GetActiveEngine` binding in the
+fresh-menu check, and a preflight that refused the loader's own address cache. Nothing was
+armed or measured; the native timing questions below remain open. Details are in the
+[lab README](timestop-lab/README.md#engine-smoke-test-eeex-131-2026-10-20).
+
 ## Evidence identity and method
 
 The current executable inspected was

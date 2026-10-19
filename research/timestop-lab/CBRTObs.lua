@@ -63,7 +63,8 @@ end
 local function assertFreshMainMenu()
     local chitin = EngineGlobals and EngineGlobals.g_pBaldurChitin
     local game = chitin and chitin.m_pObjectGame
-    local active = chitin and chitin:GetActiveEngine()
+    -- EEex 1.3.1 binds the active engine as a field; this object has no GetActiveEngine method.
+    local active = chitin and chitin.pActiveEngine
     local start = chitin and chitin.m_pEngineStart
     assert(game and active and start and game.m_bGameLoaded == 0 and
         game.m_bInLoadGame == 0 and game.m_bInLoadArea == 0 and
