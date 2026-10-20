@@ -169,3 +169,20 @@ the October 6 runtime byte for byte.
   game process even with 310 and the probe switched off, so the in-process save
   and reload ran only in lab 1; lab 2 used a script save and a new process.
 - No window from an opcode-177 EFF wrapper exists to test.
+
+## Approved stream deployment (October 20)
+
+Christopher approved the update with the game closed. Component 1 was appended
+to `%USERPROFILE%\Games\Chriz Easy BG\game` with WeiDU 24900 while holding
+`bg-game-install.lock`. WeiDU exited 0 with no warnings. The log grew from 452
+to 453 rows: the new last row is `CBR_PHYSICAL_CAP:1`, and row 441
+(`CBR_PHYSICAL_CAP:0`) changed only in its comment's version label. Of 40,925
+override files only `M_CBRRES.lua` changed. It is byte-identical to the runtime
+in the lab 2 copy (marker 241), and the adapter's `backup/1` holds the October 6
+runtime. `SPLSTATE.IDS`, `UI.MENU`, both `dialog.tlk`, `chitin.key`,
+`engine.lua` and `weidu.conf` are unchanged. No save was modified and the game
+was not launched. The previous log, runtime, `SPLSTATE.IDS`, adapter folder and
+his latest save are in
+`%USERPROFILE%\Games\Chriz Easy BG\repair-backups\oct20-physical-cap-windows`.
+This is installation verification; the window behaviour was verified in the
+labs above.
