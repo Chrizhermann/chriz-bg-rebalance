@@ -2,14 +2,20 @@
 
 ## Unreleased
 
-- Add Aid: hit points only (340). Aid grants 1d8 hit points +1 per caster level
-  (maximum +10) for one turn per level and no longer gives +1 to attack rolls,
-  damage and saving throws. Casting it again replaces the bonus. Exact copies,
-  such as Bardic Wonders' Troubadour Aid, change with it.
-- Add Luck: 90 seconds (341). Luck and its exact copies last 15 rounds; the
-  bonuses are unchanged. The spell's and the Luck scroll's descriptions say so.
-- Add Chaotic Commands for druids (350): only Spell Revisions' druid exclusion
-  is removed, so druids can cast it again at spell level 5.
+- Add Chris Revisions (340): Christopher's spell balance changes in one
+  component, with or without Spell Revisions.
+  - Aid grants 1d8 hit points +1 per caster level (maximum +10) for one turn
+    per level and no longer gives +1 to attack rolls, damage and saving throws.
+    Casting it again replaces the bonus. Exact copies, such as Bardic Wonders'
+    Troubadour Aid, change with it.
+  - Luck and its exact copies last 15 rounds; the bonuses are unchanged.
+  - Chaotic Commands: only Spell Revisions' druid exclusion is removed, so
+    druids can cast it again at spell level 5.
+  - Prayer and Recitation no longer stack: on each creature, Recitation's
+    bonus or penalty replaces Prayer's of the same kind and blocks it while it
+    lasts. Bless and Chant are unchanged.
+  - A part whose spells are missing is skipped; a part that cannot be changed
+    safely is left unchanged with a warning. Descriptions and scrolls say so.
 
 ## v0.8.3 — 2026-10-14
 

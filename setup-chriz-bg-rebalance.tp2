@@ -29,8 +29,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/sr_antimagic.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/sr_spellstrike.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/potion_uniqueness.tpa~
-  INCLUDE ~chriz-bg-rebalance/lib/buff_spells.tpa~
-  INCLUDE ~chriz-bg-rebalance/lib/druid_access.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/chris_revisions.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -1553,18 +1552,8 @@ REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9330
 REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9331
 LAF cbr_install_potion_uniqueness INT_VAR heroism = 1 END
 
-// Chris Revisions: research/2026-10-23-aid-luck-chaotic-commands.md
-BEGIN @340 DESIGNATED 340 GROUP @1300 LABEL ~cbr_aid_hit_points_only~
+// Chris Revisions: research/2026-10-23-aid-luck-chaotic-commands.md and
+// research/2026-10-23-prayer-recitation.md
+BEGIN @340 DESIGNATED 340 GROUP @1300 LABEL ~cbr_chris_revisions~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9340
-REQUIRE_PREDICATE (IDS_OF_SYMBOL (~spell~ ~CLERIC_AID~) >= 0) @9341
-LAF cbr_install_aid_hp END
-
-BEGIN @341 DESIGNATED 341 GROUP @1300 LABEL ~cbr_luck_90_seconds~
-REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9340
-REQUIRE_PREDICATE (IDS_OF_SYMBOL (~spell~ ~WIZARD_LUCK~) >= 0) @9342
-LAF cbr_install_luck_duration END
-
-BEGIN @350 DESIGNATED 350 GROUP @1300 LABEL ~cbr_druid_chaotic_commands~
-REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9340
-REQUIRE_PREDICATE (IDS_OF_SYMBOL (~spell~ ~CLERIC_CHAOTIC_COMMANDS~) >= 0) @9350
-LAF cbr_install_druid_access STR_VAR symbol = ~CLERIC_CHAOTIC_COMMANDS~ END
+LAF cbr_install_chris_revisions END

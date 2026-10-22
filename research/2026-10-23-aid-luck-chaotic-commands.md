@@ -1,10 +1,13 @@
 # Aid, Luck and Chaotic Commands: first Chris Revisions batch
 
-Status: decided by Christopher on 2026-10-23; components 340, 341 and 350.
-Follows the [October 11 design review](2026-10-11-general-spell-balance-design.md),
-whose duration-only recommendations for Aid and Luck were replaced by these
-decisions. Bless and a stacking rule for Bless/Chant/Prayer/Recitation are
-still under discussion and are not part of this batch.
+Status: decided by Christopher on 2026-10-23; parts of component 340 (Chris
+Revisions). They were first built as components 340, 341 and 350 and merged the
+same day at Christopher's request, so that his revisions do not become one
+component per spell. Follows the
+[October 11 design review](2026-10-11-general-spell-balance-design.md), whose
+duration-only recommendations for Aid and Luck were replaced by these
+decisions. Prayer and Recitation were decided later that day
+([note](2026-10-23-prayer-recitation.md)); Bless is still open.
 
 ## Decisions
 
@@ -91,7 +94,14 @@ identify the inspected inputs. Tests use synthetic fixtures.
 
 ## Component design
 
-### 340 — Aid: hit points only
+Component 340 runs its parts one after another. Each part resolves its spells
+through SPELL.IDS and is skipped without them. A dry run then checks every file
+the part would change. If one cannot be changed safely, nothing of that part is
+written, the installation warns and names the resource, and the other parts
+still apply. Items that show exactly a changed spell's old description text
+show the new one.
+
+### Aid: hit points only
 
 For every ability of the resolved `CLERIC_AID` spell and of each exact copy:
 
@@ -110,8 +120,8 @@ For every ability of the resolved `CLERIC_AID` spell and of each exact copy:
   payload's recipient;
 - each ability gets its own copy of its effects, so shared effect records are
   split; casting effects stay first, and records no ability uses are dropped;
-- an ability with several or mismatched Aid payloads, or none, stops the
-  installation and names the resource.
+- an ability with several or mismatched Aid payloads, or none, leaves Aid
+  unchanged with a warning that names the resource.
 
 Already converted spells (no opcode 129, one 1d8 hit point bonus) are only
 re-synchronized, so a second run is byte-identical.
@@ -120,37 +130,42 @@ Descriptions: the bonus sentence and the `Duration:` line of SR's and the
 native English text are rewritten. A description that is not recognized is
 left unchanged with an installation warning.
 
-### 341 — Luck: 90 seconds
+### Luck: 90 seconds
 
 For every ability of the resolved `WIZARD_LUCK` spell and its exact copies,
 the Luck payload duration is taken from its opcode-133 effect (or an opcode-22
 luck bonus without one). Every timed effect lasting exactly that long becomes
 90 seconds. Other durations, such as SR's one-second glow, stay. Conflicting
-payload durations stop the installation.
+payload durations leave Luck unchanged with a warning.
 
 The spell and every scroll that teaches it get `Duration: 15 rounds` and "for
 the next 15 rounds" in place of the old duration phrases.
 
-### 350 — Chaotic Commands: druid access
+### Chaotic Commands: druid access
 
 Clears only the druid exclusion bit of the resolved priest spell and keeps the
 other flags. A spell already available to druids is left unchanged. A spell no
-priest class can learn (both class bits set) is rejected rather than guessed.
+priest class can learn (both class bits set) is left unchanged with a warning
+rather than guessed.
 
 ## Verification
 
-- `tests/test_aid_luck_druid_access.py` installs the components with WeiDU on
+- `tests/test_chris_revisions.py` installs component 340 with WeiDU on
   synthetic games: SR and native Aid and Luck, Bardic Wonders' copy, a near
   copy and a spell that only removes Aid (both untouched), relocated SPELL.IDS
   slots, shared effect slices with a casting effect, an opcode-22 Luck bonus,
-  the Luck scroll, unrecognized text (warning), ambiguous or missing payloads
-  (rollback), a second run (no change) and uninstall.
+  the Luck scroll, an item showing Aid's description, unrecognized text
+  (warning), ambiguous or missing payloads (that part unchanged with a warning,
+  the others applied), missing symbols (skipped), a second run (no change) and
+  uninstall.
 - On 2026-10-23 all three components were installed on scratch copies of the
   installed resources, once with the effective SR and Bardic Wonders files and
   once with the original BIFF files, each with the installed `dialog.tlk`. Aid
   and `C0TRBS2` changed identically, Luck and `SCRL93` lasted 90 seconds with
   recognized text, and Chaotic Commands lost only the druid bit (the original
-  was left unchanged). Uninstalling restored every file.
+  was left unchanged). Uninstalling restored every file. The same checks passed
+again for the merged component 340, on copies of the CEBG game and of the
+2.6.6.0 reference install.
 
 ## Limitations
 
