@@ -67,6 +67,9 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 320 | Cross-cutting audits | Combat clouds: 75% damage resistance instead of invulnerability | Automated checks passed; combat check pending |
 | 330 / 331 | Cross-cutting audits | Potion uniqueness: one dose of each temporary potion type at a time (331: Potions of Genius still stack) | Automated checks and lab install passed; in-game check pending |
 | 332 | Cross-cutting audits | Heroism family: Heroism, Greater Heroism and the Potion of Heroism do not combine | Automated checks and lab install passed; in-game check pending |
+| 340 | Cross-cutting audits | Aid: hit points only (1d8 +1 per caster level, maximum +10), one turn per level | Automated checks passed; in-game check pending |
+| 341 | Cross-cutting audits | Luck: lasts 90 seconds | Automated checks passed; in-game check pending |
+| 350 | Cross-cutting audits | Chaotic Commands: druids can cast it again | Automated checks passed; in-game check pending |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
@@ -132,6 +135,28 @@ example one that also deals damage) is left as it is and named during
 installation. No EEex is needed. Effects already active in an existing save can
 stack one more time; new doses behave as described.
 [Design and limits](research/2026-10-14-potion-uniqueness-heroism-family.md).
+
+### Components 340, 341 and 350 — Aid, Luck and Chaotic Commands
+
+Christopher's first spell revisions on top of Spell Revisions. Without Spell
+Revisions the same final values apply. Each component is independent.
+
+- **340 Aid** grants only hit points: 1d8 +1 per caster level (maximum +10) for
+  one turn per level. The +1 to attack rolls, damage and saving throws is gone,
+  so Aid no longer adds to the Bless-style bonuses. Casting it again replaces
+  the bonus instead of stacking it. Bardic Wonders' Troubadour copy of Aid
+  changes with it.
+- **341 Luck** lasts **90 seconds** (15 rounds) instead of 5 turns (Spell
+  Revisions) or 3 rounds (unmodded). Its bonuses are unchanged.
+- **350 Chaotic Commands** is available to druids again at spell level 5, as in
+  the unmodded game; Spell Revisions had made it a cleric-only spell.
+
+Spells are found through SPELL.IDS, together with exact copies under other
+names. English descriptions of the spells and of the Luck scroll are updated;
+other wording stays as it is, with a warning. No EEex is needed. Effects already
+active in a save keep their old values until they end. Existing druids should
+receive Chaotic Commands at their next level-up; this is not yet checked in the
+game. [Decisions and evidence](research/2026-10-23-aid-luck-chaotic-commands.md).
 
 ### Component 320 — Damageable combat clouds
 

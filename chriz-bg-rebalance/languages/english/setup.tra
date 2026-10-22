@@ -271,3 +271,14 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @3306 = ~Heroism family: %pu_r% also has instant, chance-based or delayed effects; left as it is.~
 @3307 = ~Heroism family installed for %pu_count_family% potions and spells: while one of them is active on a creature, the others have no effect on it.~
 @3310 = ~This spell, Heroism and the Potion of Heroism are non-cumulative: while one of them is active on a creature, the others have no effect on it until it ends.~
+@340 = ~Aid: hit points only (1d8 +1 per caster level, maximum +10), one turn per level~
+@341 = ~Luck: lasts 90 seconds~
+@350 = ~Chaotic Commands: druids can cast it again~
+@9340 = ~Aid, Luck and Chaotic Commands support BG2:EE / EET only.~
+@9341 = ~SPELL.IDS has no CLERIC_AID entry; Aid is left unchanged.~
+@9342 = ~SPELL.IDS has no WIZARD_LUCK entry; Luck is left unchanged.~
+@9350 = ~SPELL.IDS has no CLERIC_CHAOTIC_COMMANDS entry; Chaotic Commands is left unchanged.~
+@3401 = ~Aid installed: 1d8 hit points +1 per caster level (maximum +10) for one turn per level, with no attack, damage or saving throw bonus. Changed:%bs_members%~
+@3402 = ~Luck installed: it now lasts 90 seconds. Changed:%bs_members%~
+@3500 = ~Chaotic Commands: druids can learn and cast it again.~
+@3501 = ~Chaotic Commands is already available to druids; nothing changed.~

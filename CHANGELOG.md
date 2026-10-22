@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Add Aid: hit points only (340). Aid grants 1d8 hit points +1 per caster level
+  (maximum +10) for one turn per level and no longer gives +1 to attack rolls,
+  damage and saving throws. Casting it again replaces the bonus. Exact copies,
+  such as Bardic Wonders' Troubadour Aid, change with it.
+- Add Luck: 90 seconds (341). Luck and its exact copies last 15 rounds; the
+  bonuses are unchanged. The spell's and the Luck scroll's descriptions say so.
+- Add Chaotic Commands for druids (350): only Spell Revisions' druid exclusion
+  is removed, so druids can cast it again at spell level 5.
+
 ## v0.8.3 — 2026-10-14
 
 - Add potion uniqueness (330, or 331 where Potions of Genius still stack): each
