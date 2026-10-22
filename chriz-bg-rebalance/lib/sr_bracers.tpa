@@ -77,6 +77,12 @@ END
 // Return one real haste delivery per ability, not arbitrary spell immunity lists.
 // A source may have several level headers. Only add a guard to headers that
 // already own haste mechanics AND an exclusion for canonical Haste/IH.
+//
+// The guard goes directly before the header's own protection (opcode 206
+// naming the spell itself), or last when it has none: once that protection
+// applies, the engine ignores the spell's later records, so a guard behind it
+// never reaches the target (BG2:EE 2.7.3.0 lab, 2026-10-20). A guard that an
+// earlier version appended behind the protection moves in front of it.
 DEFINE_PATCH_FUNCTION cbrsb_alias
   INT_VAR apply = 0
   RET is_alias
@@ -96,6 +102,7 @@ BEGIN
     SET ah = ab + h * 0x28
     READ_SHORT (ah + 0x1e) count READ_SHORT (ah + 0x20) first
     SET haste = 0 SET native = 0 SET ih_guard = 0 SET guard = (0 - 1) SET owned = 0
+    SET own = (0 - 1) SET owned_k = (0 - 1)
     FOR (k = 0; k < count; ++k) BEGIN
       SET at = fx + (first + k) * 48
       READ_SHORT at op READ_LONG (at + 4) p1 READ_LONG (at + 8) p2
@@ -109,7 +116,8 @@ BEGIN
       PATCH_IF op = 206 BEGIN
         PATCH_IF ~%res%~ STRING_EQUAL_CASE ~%cbrsb_haste%~ AND guard < 0 BEGIN SET guard = at END
         PATCH_IF ~%res%~ STRING_EQUAL_CASE ~%cbrsb_ih%~ BEGIN SET guard = at SET ih_guard = 1 END
-        PATCH_IF ~%res%~ STRING_EQUAL_CASE ~CBRBIH~ BEGIN ++owned END
+        PATCH_IF ~%res%~ STRING_EQUAL_CASE ~CBRBIH~ BEGIN ++owned SET owned_k = k END
+        PATCH_IF ~%res%~ STRING_EQUAL_CASE ~%SOURCE_RES%~ AND own < 0 BEGIN SET own = k END
       END
     END
     SET qualifies = haste AND guard >= 0 AND (native OR ih_guard)
@@ -124,17 +132,29 @@ BEGIN
     END
     PATCH_IF apply BEGIN
       WRITE_SHORT (ah + 0x20) next
+      SET add = qualifies AND (owned = 0)
+      SET move = (owned = 1) AND (own >= 0) AND (owned_k > own)
       FOR (k = 0; k < count; ++k) BEGIN
-        LPF cbrsb_append_raw INT_VAR source = fx + (first + k) * 48 END
-        ++next
+        PATCH_IF k = own AND add BEGIN
+          LPF cbrsb_append_raw INT_VAR source = guard END
+          WRITE_ASCII (BUFFER_LENGTH - 48 + 0x14) ~CBRBIH~ #8
+          ++next
+        END
+        PATCH_IF k = own AND move BEGIN
+          LPF cbrsb_append_raw INT_VAR source = fx + (first + owned_k) * 48 END
+          ++next
+        END
+        PATCH_IF NOT (move AND k = owned_k) BEGIN
+          LPF cbrsb_append_raw INT_VAR source = fx + (first + k) * 48 END
+          ++next
+        END
       END
-      PATCH_IF qualifies AND owned = 0 BEGIN
+      PATCH_IF add AND own < 0 BEGIN
         LPF cbrsb_append_raw INT_VAR source = guard END
         WRITE_ASCII (BUFFER_LENGTH - 48 + 0x14) ~CBRBIH~ #8
         ++next
-        ++count
       END
-      WRITE_SHORT (ah + 0x1e) count
+      WRITE_SHORT (ah + 0x1e) (count + add)
     END
   END
   PATCH_IF apply BEGIN DELETE_BYTES fx (nf * 48) END
@@ -303,7 +323,9 @@ BEGIN
   // Preserve spell level and secondary type: they belong to the installed
   // SR/SCS protection and dispelling system, even for item delivery.
   // Match all actual Haste aliases in both directions. Do not remove donor
-  // exclusions for Slow or other status effects.
+  // exclusions for Slow or other status effects. CBRBIH joins the list last,
+  // so the helper's own protection follows every exclusion: the engine
+  // ignores the helper's records behind it.
   SET $cbrsb_aliases(~CBRBIH~) = 1
   PATCH_PHP_EACH cbrsb_aliases AS alias => unused BEGIN
     SET present = 0

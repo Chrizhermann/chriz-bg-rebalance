@@ -74,9 +74,12 @@ def synthetic():
                fx(101, p2=40), fx(206, resource="SPWI355"),
                fx(174, resource="EFF_M29", timing=4), fx(206, resource="SPWI677"))
     donor = make_spl((SplAbility(1, 4, 158, payload),)).to_bytes()
+    # Like SR's Haste, each level header ends with its own protection. For
+    # ALTFAST, which shares these bytes, that record is a Haste exclusion.
     haste = make_spl(tuple(SplAbility(level, 4, 1, (
         dataclasses.replace(fx(1, 6), duration=60+6*level),
-        dataclasses.replace(fx(206, resource="SPWI677"), duration=60+6*level)))
+        dataclasses.replace(fx(206, resource="SPWI677"), duration=60+6*level),
+        dataclasses.replace(fx(206, resource="SPWI355"), duration=60+6*level)))
         for level in (1, 10))).to_bytes()
     # A protection spell must not be mistaken for haste merely because of op206.
     unrelated = make_spl((SplAbility(1, 1, 1, (fx(206, resource="SPWI677"),)),)).to_bytes()
@@ -192,6 +195,11 @@ class BracersTests(unittest.TestCase):
             for original_fx, new_fx in zip(effects(before), effects(newer)):
                 self.assertEqual(original_fx, [e for e in new_fx if not (op(e) == 206 and res(e) == "CBRBIH")])
                 self.assertEqual(1, sum(op(e) == 206 and res(e) == "CBRBIH" for e in new_fx))
+                own = [i for i, e in enumerate(new_fx) if op(e) == 206 and res(e) == name[:-4]]
+                if own:
+                    # The engine ignores a spell's records behind its own protection.
+                    guard = next(i for i, e in enumerate(new_fx) if op(e) == 206 and res(e) == "CBRBIH")
+                    self.assertLess(guard, own[0])
         for p, raw in g.stable.items(): self.assertEqual(raw, p.read_bytes())
         self.assertFalse(any(n.endswith(".INSTALLED") for n in after))
 
@@ -615,6 +623,120 @@ class BracersReviewTests(unittest.TestCase):
                 g = self.game(_with_donor(synthetic(), abilities=(
                     self.scaled(base, 1, 60, first), self.scaled(base, 10, 120, second))))
                 self.failed(g, "differ beyond their duration")
+
+
+def _cast(blob: bytes, name: str) -> list[set[str]]:
+    """Engine model of one cast on a fresh target, per level header.
+
+    In-game finding 2026-10-20 (BG2:EE 2.7.3.0 lab): a header's records apply in
+    order, and once the target is protected from the spell itself (opcode 206
+    naming it), the engine ignores the spell's later records. Returns the
+    resources the target is then protected from.
+    """
+    result = []
+    for header in effects(blob):
+        held = set()
+        for record in header:
+            if name in held:
+                break
+            if op(record) == 206:
+                held.add(res(record))
+        result.append(held)
+    return result
+
+
+def _guard_last(blob: bytes) -> bytes:
+    """The layout of earlier versions: each header's CBRBIH guard at its end."""
+    data = bytearray(blob)
+    ab, = struct.unpack_from("<I", data, 0x64)
+    na, = struct.unpack_from("<H", data, 0x68)
+    fx, = struct.unpack_from("<I", data, 0x6a)
+    for h in range(na):
+        count, first = struct.unpack_from("<HH", data, ab + h * 40 + 30)
+        records = [bytes(data[fx + (first + i) * 48:fx + (first + i + 1) * 48]) for i in range(count)]
+        guards = [r for r in records if op(r) == 206 and res(r) == "CBRBIH"]
+        rest = [r for r in records if not (op(r) == 206 and res(r) == "CBRBIH")]
+        data[fx + first * 48:fx + (first + count) * 48] = b"".join(rest + guards)
+    return bytes(data)
+
+
+class BracersGuardOrderTests(unittest.TestCase):
+    """In-game finding 2026-10-20 (BG2:EE 2.7.3.0 lab): with SR Haste or Improved
+    Haste cast first, the bracers still stacked. Their CBRBIH guard sat behind the
+    spells' own protection, where the engine ignores it. Without Spell Revisions
+    the component does not install (test_release_components)."""
+    game = BracersTests.game
+    installed = BracersTests.installed
+    check = BracersTests.check
+
+    def test_guard_precedes_the_spells_own_protection(self):
+        g = self.game()
+        self.installed(g)
+        self.check(g)
+        after = g.snapshot()
+        for name in ("SPWI677", "SPWI355"):
+            for header in effects(after[f"{name}.SPL"]):
+                kinds = [(op(e), res(e)) for e in header]
+                self.assertEqual(kinds.index((206, name)) - 1, kinds.index((206, "CBRBIH")))
+                self.assertEqual((206, name), kinds[-1])
+        # Without its own protection the guard still goes last.
+        for header in effects(after["ALTFAST.SPL"]):
+            self.assertEqual((206, "CBRBIH"), (op(header[-1]), res(header[-1])))
+
+    def test_either_cast_order_excludes_the_other(self):
+        g = self.game()
+        self.installed(g)
+        after = g.snapshot()
+        aliases = {n[:-4] for n, raw in g.original.items() if n.endswith(".SPL") and after[n] != raw}
+        self.assertEqual({"SPWI677", "SPWI355", "ALTFAST"}, aliases)
+        bracers, = _cast(after["CBRBIH.SPL"], "CBRBIH")
+        for name in sorted(aliases):
+            with self.subTest(name=name):
+                # Bracers first: the helper protects its wearer from the spell.
+                self.assertIn(name, bracers)
+                # The spell first: every level header protects from the bracers.
+                for held in _cast(after[f"{name}.SPL"], name):
+                    self.assertIn("CBRBIH", held)
+
+    def test_other_haste_variants_keep_the_earlier_layout(self):
+        r = synthetic()
+        # SPRA301-like innate Haste, and a Wish Haste whose first record is an
+        # instant opcode 324 check naming itself (as SPWISH36): neither is the
+        # spell's own protection, so their guard stays last, as before.
+        r["NATIVE.SPL"] = make_spl((SplAbility(1, 4, 1, (
+            _fx(16, duration=90), _fx(206, resource="SPWI355", duration=90))),)).to_bytes()
+        r["WISHFAST.SPL"] = make_spl((SplAbility(1, 4, 1, (
+            _fx(324, p1=138, p2=110, resource="WISHFAST", duration=0, target=4),
+            _fx(16, p2=1, duration=138, target=4),
+            _fx(206, resource="SPWI355", duration=138, target=4))),)).to_bytes()
+        g = self.game(r)
+        self.installed(g)
+        self.check(g)
+        after = g.snapshot()
+        for name in ("ALTFAST", "NATIVE", "WISHFAST"):
+            with self.subTest(name=name):
+                blob = after[f"{name}.SPL"]
+                self.assertEqual(_guard_last(blob), blob)
+                for header, held in zip(effects(blob), _cast(blob, name)):
+                    guard = header[-1]
+                    self.assertEqual((206, "CBRBIH"), (op(guard), res(guard)))
+                    template = next(e for e in header if op(e) == 206 and res(e) in ("SPWI677", "SPWI355"))
+                    self.assertEqual(template[:20] + guard[20:28] + template[28:], guard)
+                    self.assertIn("CBRBIH", held)
+        bracers, = _cast(after["CBRBIH.SPL"], "CBRBIH")
+        self.assertTrue({"NATIVE", "WISHFAST"} <= bracers)
+
+    def test_tail_application_moves_a_guard_behind_the_own_protection(self):
+        g = self.game()
+        self.installed(g)
+        fixed = g.snapshot()
+        # What an earlier version left: each header's guard last.
+        for name in ("SPWI677.SPL", "SPWI355.SPL"):
+            earlier = _guard_last(fixed[name])
+            self.assertNotEqual(fixed[name], earlier)
+            next(p for p in g.override.iterdir() if p.name.upper() == name).write_bytes(earlier)
+        self.installed(g, repeat=True)
+        self.assertEqual(fixed, g.snapshot())
 
 
 if __name__ == "__main__": unittest.main()

@@ -200,3 +200,61 @@ swaps were wrongly accepted by the first version of this fix.
 Limits: synthetic fixtures only, no in-engine check. The component label no
 longer names a fixed duration. The item description is not edited; a mod that
 changes the duration is expected to update it.
+
+## Guard order, BG2:EE 2.7.3.0 lab, 2026-10-20
+
+The in-game check of the revision above (a disposable copy of the CEBG
+Recommended stack with EEex 1.3.1) found one defect. With the bracers first,
+Haste and Improved Haste were blocked. With Haste or Improved Haste first, the
+bracers still applied and both stacked: a mage got three attacks instead of two.
+
+Cause: SR's Haste (SPWI305, 15 level headers) and Improved Haste (SPWI613) end
+each header with their own protection, an opcode 206 naming the spell itself.
+Once that protection applies, the engine ignores the spell's later records. The
+reciprocal CBRBIH guard had been appended behind it, so it never reached the
+target: the target carried every opcode 206 up to the self-protection, but not
+CBRBIH. The other 13 guarded Haste variants of that stack have no such
+protection and already blocked the bracers. SPWISH36 blocked them too, although
+its first record is an opcode 324 check naming the spell itself: only the
+opcode 206 protection ends a spell's records.
+
+Fix: the guard goes directly before the header's own protection, or last, as
+before, when the header has none. A repeat run over an earlier installation
+moves a guard that sits behind the protection in front of it; nothing else in
+the header moves. The helper needs no change: CBRBIH's own protection already
+follows all its exclusions. Lab run 08 used SPWI305 and SPWI613 rearranged this
+way. Haste or Improved Haste first then blocked the bracers, and bracers first
+still blocked both.
+
+Validation: `python -B -m unittest tests.test_sr_bracers -v` runs 31 tests; 30
+pass and the private-capture test is skipped. The synthetic Haste headers now
+end with their own protection, as SR's do, so the existing tests cover the new
+layout. That includes the public component's parity, uninstall and without-SR
+skip in `tests/test_release_components.py`. `BracersGuardOrderTests` adds four
+tests:
+
+- the guard sits directly before an SR-style own protection, and last when
+  there is none;
+- both cast orders, through a model of the engine rule: the helper protects
+  from every alias, and every alias header protects from the helper before its
+  own protection;
+- an innate Haste and a Wish Haste with an opcode 324 self-check keep the
+  earlier layout byte for byte;
+- a repeat run over the earlier layout moves the guard and then equals a
+  fresh install.
+
+Against the previous library, six checks in five tests fail; the other
+variants' layout already held.
+
+Lab data, local check only: the library was applied in a disposable game to the
+lab's installed 220 resources. Only SPWI305 and SPWI613 changed, each
+byte-identical to what the lab's run-08 tool made from the same files. The
+other 13 variants, CBRBIH and BRAC16 stayed byte-identical, and a repeat run
+was byte-exact. A fresh install from the lab's pre-220 backups
+gave the same files.
+
+Limit: Tweaks Anthology's "Add Save Penalties for Spells Cast by High-Level
+Casters" (2312) comes after 220 in the CEBG recipe and changes CBRBIH's required
+level from 0 to 1. A tail run of 220 over such an installation therefore stops
+at the existing namespace check ("CBRBIH.SPL already exists with different
+contents") and changes nothing. Fresh installs in recipe order are unaffected.
