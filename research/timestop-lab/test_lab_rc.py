@@ -71,7 +71,8 @@ class RequestSyntaxTests(unittest.TestCase):
                              "start-soa.lua": ("UNEXPECTED_MENU", "TRANSITION_IN_PROGRESS"),
                              "queue.lua": ("PAUSE_FIRST", "NOT_THE_SUBJECT", "ARM_FIRST", "DISARMED_ONLY",
                                            "FIXTURES_PRESENT", "NO_CONTROLLER", "NOT_THE_CONTROLLER",
-                                           "FIXTURES_FIRST", "TIME_STOP_ACTIVE", "INVALID_WAIT"),
+                                           "CONTROLLER_BUSY", "FIXTURES_FIRST", "TIME_STOP_ACTIVE",
+                                           "INVALID_WAIT"),
                              "pause.lua": ("NO_GAME", "PAUSE_STATE_UNCHANGED"),
                              "dialog.lua": ("CONFIRM_MODE_REQUIRED", "DIALOG_BUTTON_NOT_CLICKABLE"),
                              "pick-character.lua": ("AMBIGUOUS_CHARACTER", "CHARACTER_NOT_FOUND"),
@@ -88,14 +89,14 @@ class QueueRequestTests(unittest.TestCase):
     GAME = 0x5000  # Stub CInfGame pointer; +0x9690 is the Time Stop counter.
 
     def queue(self, arguments, paused=1, armed=True, fixtures=("CBRTBUF", "CBRTREG"),
-              controller=("Imoen", 2), stop=0):
+              controller=("Imoen", 2), stop=0, action=0):
         runtime = lupa.LuaRuntime(unpack_returned_tuples=True)
         attempt = runtime.eval("""function(code, paused, armed, sources, controllerName, controllerID,
-                stop, game)
+                stop, game, action)
             local queued = {}
             local function actor(id, name, list)
                 return {m_id = id, _name = name, m_timedEffectList = list or {},
-                    m_baseStats = {m_hitPoints = 80}}
+                    m_baseStats = {m_hitPoints = 80}, m_curAction = {m_actionID = action}}
             end
             local list = {}
             for source in python.iter(sources) do
@@ -124,7 +125,7 @@ class QueueRequestTests(unittest.TestCase):
         code = lab_rc.with_arguments((REQUESTS / "queue.lua").read_text(encoding="utf-8"),
                                      {"subject": "CBRTS Subject", **arguments})
         name, identity = controller if controller else (None, None)
-        return attempt(code, paused, armed, list(fixtures), name, identity, stop, self.GAME)
+        return attempt(code, paused, armed, list(fixtures), name, identity, stop, self.GAME, action)
 
     def test_timestop_runs_on_the_controller_after_its_wait(self):
         ok, response, count, target = self.queue({"what": "timestop", "controller": "Imoen", "wait": "66"})
@@ -140,6 +141,7 @@ class QueueRequestTests(unittest.TestCase):
             "ARM_FIRST": ({}, {"armed": False}),
             "NO_CONTROLLER": ({}, {"controller": None}),
             "NOT_THE_CONTROLLER": ({"controller": "Jaheira"}, {}),
+            "CONTROLLER_BUSY": ({}, {"action": 23}),
             "FIXTURES_FIRST": ({}, {"fixtures": ("CBRTREG",)}),
             "TIME_STOP_ACTIVE": ({}, {"stop": 90}),
         }

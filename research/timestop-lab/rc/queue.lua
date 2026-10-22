@@ -6,7 +6,8 @@
 -- ARGS.what = "timestop": the controller in portrait 1 (ARGS.controller: its name) waits ARGS.wait
 --   AI updates (SmallWait), then applies CBRTSTP to itself, so it is the Time Stop caster and the
 --   subject is frozen. Only while a capture is armed, with exactly one of each fixture on the
---   subject, and while no Time Stop runs.
+--   subject, while no Time Stop runs, and with an idle controller (a current action would run
+--   first and delay the stop by an unknown time).
 assert(type(ARGS) == "table" and type(ARGS.subject) == "string" and type(ARGS.what) == "string",
     "ARGS.subject and ARGS.what required")
 local chitin = EngineGlobals.g_pBaldurChitin
@@ -38,6 +39,7 @@ elseif ARGS.what == "timestop" then
     actor = assert(EEex_Sprite_GetInPortrait(1), "NO_CONTROLLER")
     assert(type(ARGS.controller) == "string" and EEex_Sprite_GetName(actor) == ARGS.controller
         and actor.m_id ~= sprite.m_id, "NOT_THE_CONTROLLER")
+    assert(actor.m_curAction.m_actionID == 0, "CONTROLLER_BUSY")
     local count = fixtures()
     assert(count.CBRTBUF == 1 and count.CBRTREG == 1, "FIXTURES_FIRST")
     assert(EEex_Read32(EEex_UDToPtr(chitin.m_pObjectGame) + 0x9690) == 0, "TIME_STOP_ACTIVE")

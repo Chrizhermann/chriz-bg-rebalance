@@ -16,6 +16,7 @@ local function actor(slot)
         area = try(function() return sprite.m_pArea.m_resref:get() end),
         x = try(function() return sprite.m_pos.x end), y = try(function() return sprite.m_pos.y end),
         ai_speed = try(function() return EEex_ReadU8(EEex_UDToPtr(sprite) + 0x58) end),
+        action = try(function() return sprite.m_curAction.m_actionID end),
         -- Raw clocks of the pinned 2.7.3.0 layout. +0x3A0: a full effect check runs only when
         -- its value mod 15 equals the actor ID mod 15 (ProcessEffectList 0x3ABB7C-0x3ABBC5).
         -- +0x1A08 is the regenerated periodic list; the dispatcher copies its counter +0x38 into
