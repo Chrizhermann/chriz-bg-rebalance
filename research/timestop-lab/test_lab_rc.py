@@ -69,7 +69,9 @@ class RequestSyntaxTests(unittest.TestCase):
     def test_requests_that_change_state_check_their_preconditions(self):
         for name, guards in {"click.lua": ("EXPECTED_MENU", "QA_ITEM_REQUIRED"),
                              "start-soa.lua": ("UNEXPECTED_MENU", "TRANSITION_IN_PROGRESS"),
-                             "queue.lua": ("PAUSE_FIRST", "NOT_THE_SUBJECT", "ARM_FIRST", "DISARMED_ONLY"),
+                             "queue.lua": ("PAUSE_FIRST", "NOT_THE_SUBJECT", "ARM_FIRST", "DISARMED_ONLY",
+                                           "FIXTURES_PRESENT", "NO_CONTROLLER", "NOT_THE_CONTROLLER",
+                                           "FIXTURES_FIRST", "TIME_STOP_ACTIVE", "INVALID_WAIT"),
                              "pause.lua": ("NO_GAME", "PAUSE_STATE_UNCHANGED"),
                              "dialog.lua": ("CONFIRM_MODE_REQUIRED", "DIALOG_BUTTON_NOT_CLICKABLE"),
                              "pick-character.lua": ("AMBIGUOUS_CHARACTER", "CHARACTER_NOT_FOUND"),
@@ -77,6 +79,99 @@ class RequestSyntaxTests(unittest.TestCase):
             text = (REQUESTS / name).read_text(encoding="utf-8")
             for guard in guards:
                 self.assertIn(guard, text, f"{name} lacks {guard}")
+
+
+@unittest.skipIf(lupa is None, "lupa with LuaJIT 2.1 is not installed")
+class QueueRequestTests(unittest.TestCase):
+    """queue.lua against stub bindings: what it queues on whom, and what it refuses."""
+
+    GAME = 0x5000  # Stub CInfGame pointer; +0x9690 is the Time Stop counter.
+
+    def queue(self, arguments, paused=1, armed=True, fixtures=("CBRTBUF", "CBRTREG"),
+              controller=("Imoen", 2), stop=0):
+        runtime = lupa.LuaRuntime(unpack_returned_tuples=True)
+        attempt = runtime.eval("""function(code, paused, armed, sources, controllerName, controllerID,
+                stop, game)
+            local queued = {}
+            local function actor(id, name, list)
+                return {m_id = id, _name = name, m_timedEffectList = list or {},
+                    m_baseStats = {m_hitPoints = 80}}
+            end
+            local list = {}
+            for source in python.iter(sources) do
+                list[#list + 1] = {m_sourceRes = {get = function() return source end}}
+            end
+            local actors = {[0] = actor(10, "CBRTS Subject", list)}
+            if controllerName then actors[1] = actor(controllerID, controllerName) end
+            EngineGlobals = {g_pBaldurChitin = {m_pEngineWorld = {m_bPaused = paused, m_bHardPaused = 0},
+                m_pObjectGame = {_ptr = game, m_worldTime = {m_gameTime = 1000}}}}
+            CBRTS = {Status = function() return {armed = armed} end}
+            EEex_Sprite_GetInPortrait = function(slot) return actors[slot] end
+            EEex_Sprite_GetName = function(sprite) return sprite._name end
+            EEex_Utility_IterateCPtrList = function(entries, f) for _, e in ipairs(entries) do f(e) end end
+            EEex_UDToPtr = function(value) return value._ptr end
+            EEex_Read32 = function(address)
+                assert(address == game + 0x9690, "unexpected read")
+                return stop
+            end
+            EEex_Action_QueueResponseStringOnAIBase = function(response, target)
+                queued[#queued + 1] = {response = response, target = target._name}
+            end
+            local ok, result = pcall(assert(loadstring(code, "@queue.lua")))
+            if not ok then return false, tostring(result), #queued end
+            return true, result.queued, #queued, queued[1].target
+        end""")
+        code = lab_rc.with_arguments((REQUESTS / "queue.lua").read_text(encoding="utf-8"),
+                                     {"subject": "CBRTS Subject", **arguments})
+        name, identity = controller if controller else (None, None)
+        return attempt(code, paused, armed, list(fixtures), name, identity, stop, self.GAME)
+
+    def test_timestop_runs_on_the_controller_after_its_wait(self):
+        ok, response, count, target = self.queue({"what": "timestop", "controller": "Imoen", "wait": "66"})
+        self.assertTrue(ok, response)
+        self.assertEqual((response, count, target), ('SmallWait(66)\nApplySpellRES("CBRTSTP",Myself)', 1, "Imoen"))
+        ok, response, _, _ = self.queue({"what": "timestop", "controller": "Imoen", "wait": "0"})
+        self.assertEqual((ok, response), (True, 'ApplySpellRES("CBRTSTP",Myself)'))
+
+    def test_timestop_refuses_without_its_case(self):
+        base = {"what": "timestop", "controller": "Imoen", "wait": "66"}
+        cases = {
+            "PAUSE_FIRST": ({}, {"paused": 0}),
+            "ARM_FIRST": ({}, {"armed": False}),
+            "NO_CONTROLLER": ({}, {"controller": None}),
+            "NOT_THE_CONTROLLER": ({"controller": "Jaheira"}, {}),
+            "FIXTURES_FIRST": ({}, {"fixtures": ("CBRTREG",)}),
+            "TIME_STOP_ACTIVE": ({}, {"stop": 90}),
+        }
+        for guard, (arguments, state) in cases.items():
+            with self.subTest(guard=guard):
+                ok, error, count = self.queue({**base, **arguments}, **state)[:3]
+                self.assertEqual((ok, count), (False, 0))
+                self.assertIn(guard, error)
+        with self.subTest(guard="NOT_THE_CONTROLLER", case="the subject itself"):
+            ok, error, count = self.queue(base, controller=("Imoen", 10))[:3]
+            self.assertEqual((ok, count), (False, 0))
+            self.assertIn("NOT_THE_CONTROLLER", error)
+        with self.subTest(guard="FIXTURES_FIRST", case="a second regeneration"):
+            ok, error, count = self.queue(base, fixtures=("CBRTBUF", "CBRTREG", "CBRTREG"))[:3]
+            self.assertEqual((ok, count), (False, 0))
+            self.assertIn("FIXTURES_FIRST", error)
+        for wait in ("-1", "301", "2.5", "x"):
+            with self.subTest(guard="INVALID_WAIT", wait=wait):
+                ok, error, count = self.queue({**base, "wait": wait})[:3]
+                self.assertEqual((ok, count), (False, 0))
+                self.assertIn("INVALID_WAIT", error)
+
+    def test_fixtures_go_only_onto_a_clean_subject(self):
+        ok, response, count, target = self.queue({"what": "fixtures"}, fixtures=())
+        self.assertTrue(ok, response)
+        self.assertEqual((count, target), (1, "CBRTS Subject"))
+        self.assertIn('ApplySpellRES("CBRTREG",Myself)', response)
+        for leftover in (("CBRTBUF",), ("CBRTREG",)):
+            with self.subTest(leftover=leftover):
+                ok, error, count = self.queue({"what": "fixtures"}, fixtures=leftover)[:3]
+                self.assertEqual((ok, count), (False, 0))
+                self.assertIn("FIXTURES_PRESENT", error)
 
 
 class ExitTests(unittest.TestCase):
