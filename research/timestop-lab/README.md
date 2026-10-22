@@ -4,9 +4,11 @@ This is disposable research infrastructure, not a balance component. It records
 native decisions without correcting clocks, rebuilding buffs, replacing healing,
 or changing attack/movement scheduling. No hooks activate merely by loading the
 diagnostic Lua module. The startup and hook-integration smoke test passed on EEex 1.3.1
-([below](#engine-smoke-test-eeex-131-2026-10-20)), and so did the first native baseline
-capture, `baseline_01` ([below](#baseline-capture-baseline_01-2026-10-20)). The Time Stop
-and Haste measurements and any acceptance are still pending.
+([below](#engine-smoke-test-eeex-131-2026-10-20)). So did the first native baseline
+capture, `baseline_01` ([below](#baseline-capture-baseline_01-2026-10-20)), and the two
+native Time Stop captures, `timestop_01` and `timestop_02`
+([below](#time-stop-captures-timestop_01-and-timestop_02-2026-10-23)). The Haste
+measurement and any acceptance are still pending.
 
 The diagnosis, instruction evidence and open design questions are in
 [`../10-timestop-haste-engine-clocks.md`](../10-timestop-haste-engine-clocks.md).
@@ -168,6 +170,19 @@ clicked with `Infinity_ClickItem`, Christopher's choice on 2026-10-20.
   `start-soa`, `click`, `pick-character`, `set-name`, `dialog`, `pause`, `queue`, `quit`.
   Each changing request checks its precondition first (menu on the stack, no transition,
   paused game, armed or disarmed capture, the subject's name).
+- **Time Stop trigger and clocks.** `queue what=timestop` makes the controller in portrait 1
+  wait `SmallWait(N)` AI updates and then apply `CBRTSTP` to itself, so it is the caster
+  and the subject is frozen. It refuses without an armed capture, without exactly one of
+  each fixture on the subject, while a stop runs, with a busy controller, or with the subject
+  as controller. `queue what=fixtures` refuses while a fixture from an earlier case is still
+  on the subject. `subject` also reports each actor's current action and the raw counters
+  behind native effect timing on 2.7.3.0:
+  - `+0x3A0`: the full effect check runs only when this value mod 15 equals the actor ID
+    mod 15 (`0x3ABB7C–0x3ABBC5`).
+  - `+0x1A08+0x38`: the regenerated periodic list's counter, which the dispatcher copies into
+    each worker (`0x22653D`).
+  - `+0x520C`: the frozen-actor marker (`0x3ABA9D`).
+  - `+0x4BA4`: `m_newEffect`, which is set when a stop ends (`0x3ABACE`).
 
 The 2026-10-20 sequence: `ping`, `watchdog`, `ping`, `state`, `install`, `status`, then
 `start-soa`, `click` Single Player and New Game, `click` Import and Character File,
@@ -252,7 +267,9 @@ The engine sessions have three bounded steps:
    hook-integration smoke test.
 2. Repeat with a separate controller's Time Stop when about twenty game ticks
    remain on the buff, away from a pulse boundary. Measure the native expiry and
-   periodic phase through the stop; do not correct either yet.
+   periodic phase through the stop; do not correct either yet. **Done on 2026-10-23**
+   as `timestop_01` and `timestop_02`
+   ([results](#time-stop-captures-timestop_01-and-timestop_02-2026-10-23)).
 3. Repeat without Time Stop, entering/leaving native Haste midway through a pulse
    interval. Compare native healing cadence in world ticks. Movement and attack
    controls become acceptance requirements when a correction is proposed.
@@ -362,6 +379,86 @@ For steps 2 and 3:
   (33104 → 33103, 33173 → 33172, 33434 → 33433); unpausing did not. Use the trace's own
   world values, not the pause probe.
 
+## Time Stop captures `timestop_01` and `timestop_02` (2026-10-23)
+
+This was step 2: native Time Stop through the fixtures, measurement only, no clock correction.
+
+- **Run.** One quiet run through `lab_quiet_run.py run … 1800`, holding the exclusive lock.
+  Another session's lab game had to end first. The run ended after 590 s through
+  `rc/quit.lua`, without a save. No guard tripped: audio peak 0.0, pointer clip unchanged,
+  nothing left in the job.
+- **Party.** The [fresh-party sequence](#fresh-test-party-in-the-hidden-game) again, sent by a
+  scratch driver that checks the menu after every click. The same actor IDs came back:
+  subject 132974572, Imoen 131401684. `ApplyDamage(Myself,20,0)` again left the subject at
+  83 of 98 HP.
+- **Trigger.** Each case started paused:
+  1. `Arm(0)`, then the fixtures, then a `subject` probe.
+  2. `queue what=timestop`: Imoen runs `SmallWait(N)`, then applies `CBRTSTP` to herself. N
+     came from the probe's list counter, so that the stop would begin at least six ticks
+     from a pulse boundary.
+
+  Both stops began on the planned tick, N + 1 ticks after the application. The game then
+  ran for 20 s without a pause, about 300 ticks. After that came the pause, then `Stop()`,
+  then `Export()` as a separate request.
+- **Decoding.** `decode_trace.py` exited 0 for both traces. Both are complete, with all
+  records committed (443 and 426), no issues, and 179 paired dispatches each, one per
+  world tick. The files stay in the lab with their decoded JSON/CSV and the request log.
+
+| Check | `timestop_01` (buff nearly out) | `timestop_02` (early stop) |
+|---|---|---|
+| Application | 33004. Deadlines 33094 (buff) and 33184 (regeneration). | 33311. Deadlines 33401 and 33491. |
+| Stop | Frozen dispatches 33078 (application + 74) to 33166, caster Imoen. The buff had 16 ticks left. | 33348 (application + 37) to 33436. The buff had 53 ticks left. |
+| Stop counter | 178 at the first frozen dispatch, then −2 per world tick down to 2. The encoded 12 s thus froze the subject for 89 dispatches, about 6 s, as IESDP describes. | Same. |
+| Frozen worker | Dispatched every tick and returned at its Time Stop gate. Remaining duration held (106, then 90), the period counter held, no healing submission. The list counter still rose by 1 per tick. | Held 143, then 83. Otherwise the same. |
+| Buff | Removed **during the stop** at 33094, its deadline. | Removed **during the stop** at 33408, 7 ticks after its deadline. |
+| Rebuild in the stop | The removal pass rebuilt the regeneration worker with remaining 90 = deadline − world. The held 106 was dropped. | Remaining 83 = deadline − world. The held 143 was dropped. |
+| Stop end | At the first free tick, 33167, the list was rebuilt (`m_newEffect`): remaining 17 = deadline − world, phase 0. | 33437: remaining 54, phase 0. |
+| Pulses | Heals at 33027, 33042 and 33072, all before the stop: 83 → 86. None during or after it. | 33341 before the stop and 33461 after it: 86 → 88. |
+| Regeneration end | Worker done at 33183, parent removed at 33184 (the deadline). | Worker done at 33490, parent removed at 33498 (deadline + 7). |
+
+What this shows:
+
+- **The frozen subject keeps losing buff time.** The full effect check still runs for a
+  frozen actor. It finds the expired buff and removes it. In both cases the buff ended inside
+  the stop, at its absolute deadline or at the actor's next check tick after it. Neither
+  removal rode on a regeneration rebuild, because nothing heals during a stop.
+- **The regeneration worker is gated, but every rebuild reseeds it.** While frozen, it
+  neither heals nor counts down. A rebuild reseeds remaining duration from deadline − world
+  and the phase from the origin. Two rebuilds did that here: the pass that removed the buff,
+  and the forced one at the end of the stop. So the frozen time is lost, and the regeneration
+  ends at its absolute deadline. It delivered 3 and 2 HP, against 6 in the baseline. There
+  was no catch-up burst.
+- **After the stop, pulses follow the absolute grid.** The list counter kept counting
+  through the stop, and the phase was reseeded from the origin. In `timestop_02`, the next
+  heal was 23 ticks away when the stop began; it came 24 ticks after the stop ended. A
+  90-tick stop is three heal periods long, so the grid put the pulse almost back in its old
+  phase. A stop of another length would move it.
+- **The full effect check runs once per second, at a phase set by the actor ID.**
+  `ProcessEffectList` runs `CheckEffects` and the rest of its full pass only in three cases
+  (`0x3ABB7C–0x3ABBC5`):
+  - the counter at `+0x3A0`, mod 15, equals the actor ID mod 15;
+  - `m_newEffect` is set;
+  - `+0x4E44` is set.
+
+  From each case's probe, the check ticks were predicted as world ≡ 4 (mod 15) for
+  `timestop_01` and world ≡ 3 for `timestop_02`. All four parent removals fell on those
+  ticks. This also explains why `baseline_01` removed its regeneration parent 12 ticks late
+  (33364 ≡ 4).
+- **A pause can move both phases by one tick.** During `timestop_01`, world − list counter was
+  31498; during `timestop_02` it was 31497. Between them, a pause read 33312 and then 33311,
+  but the subject's counters did not go back. Pulse boundaries and check ticks follow the
+  actor's own counters, not world time.
+
+For step 3 and a later correction:
+
+- Preserving a buff through Time Stop must reconcile the selected parent's deadline before
+  the frozen actor's next full effect check. A repair after the stop comes too late.
+- Each rebuild reseeds the worker from the parent's deadline and origin. A preserved
+  remaining duration must therefore survive in the parent. The pulse phase also depends on
+  the shared list counter, which keeps running through the stop.
+- For the Haste case, `queue` and the `subject` clocks can align the Haste start to the list
+  counter in the same way.
+
 ## Host validation
 
 ```powershell
@@ -378,7 +475,8 @@ For the 1.3.1 pin on 2026-10-20, the same versions were installed with
 all 14 guard groups and all 32 Python tests passed. With the smoke-test fixes above there
 are 16 guard groups and 34 Python tests, all passing. The fresh-party tooling adds 23
 Python tests (QA menu 12, console client 11); on 2026-10-20 all 16 guard groups and all 57
-Python tests passed.
+Python tests passed. The Time Stop trigger adds 3 queue-request tests that run the request
+against stub bindings; on 2026-10-23 all 16 guard groups and all 60 Python tests passed.
 Fixture and decoder tests use synthetic data; assembly tests use synthetic memory
 and the pinned executable on disk. They do not execute the game or prove the
 EEex trampoline integration works at runtime.
