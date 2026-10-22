@@ -91,6 +91,36 @@ parents were removed only during such passes, 6 and 12 ticks after their deadlin
 the deadline tick. Time Stop and Haste remain unmeasured. Details are in the
 [lab README](timestop-lab/README.md#baseline-capture-baseline_01-2026-10-20).
 
+Update 2026-10-23, Time Stop: two native captures, `timestop_01` and `timestop_02`, decoded
+complete. A second actor applied `CBRTSTP` to itself, with 16 and 53 ticks left on the
+subject's buff. They confirm the frozen-actor reading below in the running engine:
+
+- `ProcessEffectList` still runs its expiry checks for a frozen noncaster, so the buff was
+  removed inside the stop both times.
+- The regeneration worker was dispatched every tick but returned at its Time Stop gate: no
+  healing, no countdown. The shared list counter kept rising.
+- The stop's end set `m_newEffect`, and the first free tick rebuilt the list.
+
+Every rebuild in the stop, and the one at its end, reseeded the worker from
+`parent.deadline - worldTime` and the origin. So the frozen time was lost: the regeneration
+ended at its absolute deadline with 3 and 2 HP instead of 6, and no catch-up burst. After
+the stop, pulses followed the absolute grid.
+
+The captures add two facts:
+
+- **The 6- and 12-tick lateness has a cause.** The full pass, including `CheckEffects`,
+  runs only when sprite `+0x3A0` mod 15 equals the actor ID mod 15, or when `m_newEffect` or
+  `+0x4E44` is set (`0x3ABB7C–0x3ABBC5`). Expiry is therefore checked once per second at
+  an actor-specific tick. The predicted ticks matched all four removals.
+- **A pause can shift that tick and the pulse boundaries by one tick against world time.**
+  Pause toggles step world time back by one tick, but actor counters do not go back.
+
+`CBRTSTP`, encoded as 12 s, set a counter that fell by 2 per world tick. It froze the
+subject for 89 ticks. A Time Stop correction must therefore act before the frozen actor's
+next full effect check, and keep the preserved lifetime in the parent, because every
+rebuild reseeds from it. Haste remains unmeasured. Details are in the
+[lab README](timestop-lab/README.md#time-stop-captures-timestop_01-and-timestop_02-2026-10-23).
+
 ## Evidence identity and method
 
 The current executable inspected was
