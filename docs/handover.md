@@ -1,5 +1,30 @@
 # chriz-bg-rebalance — Handover
 
+## October 17 — compatibility follow-ups from the October 8 audit (unreleased)
+
+Branch `claude/compat-followups-20261017` implements follow-ups 1, 2, 3, 5 and 6
+of `docs/audits/2026-10-08-sr-rebalance-compatibility.md` (220, 301, 130,
+400–404, 320); 4 and 7 are on the branch of the same name in
+chriz-spell-revisions-patch. Each component finds what it owns by meaning, keeps
+other mods' changes and fails only for a stated reason. An independent Codex
+review of the first pass found nine more cases, all fixed with tests. Details:
+the audit's implementation status and each component's research note.
+
+Verified: full regression 693 tests, OK, 26 skipped (private
+captures/Lua); SR fork suite 182 passed. WeiDU 249, synthetic fixtures
+and `--nogame` only; no lab install or in-game check.
+
+Decided (Christopher, 2026-10-20): in cloud forms 320, 75% is the target for
+immunity, not a cap. Only resistances of 100% or more become 75%; 76–99% from
+other mods stays. The branch already implements this.
+
+Open:
+- In-game checks of the changed components.
+- Version, tag and release, and the CEBG pin, need Christopher's approval; the
+  collection coordinator updates the pin after a release.
+- Still open in their own repositories: the modpack/SoD audit and the forks
+  audit (`docs/audits/README.md`).
+
 ## October 14 — v0.8.3 candidate: potion uniqueness and Heroism family (local, unpublished)
 
 Components 330/331 (choose one) and 332 follow the behaviour Christopher agreed

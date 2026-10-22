@@ -1,6 +1,8 @@
 # Compatibility audit: Rebalance, SR fork, and BuffBot
 
-Date: 2026-10-08. Status: source-only audit; findings are pending implementation.
+Date: 2026-10-08. Status: source-only audit. All seven follow-ups are implemented
+on review branches (2026-10-17), unreleased; see
+[Implementation status](#implementation-status-2026-10-17).
 
 ## Scope and evidence
 
@@ -187,6 +189,36 @@ reject extra damage, so the tests need to distinguish these cases too.
 
 **Tests:** non-electrical rider; reordered saved/unsaved packets; preserved later
 save penalties and casting hooks; multiple ambiguous pairs; repeat application.
+
+## Implementation status (2026-10-17)
+
+Rebalance items are on branch `claude/compat-followups-20261017` of this
+repository; items 4 and 7 are on the branch of the same name in
+chriz-spell-revisions-patch. An independent Codex source review of the first
+pass found nine further cases (activation conditions and reordered tiers in 220,
+shared slices in 301, foreign abilities and rider descriptions in 130, recipient
+resets in 404, empty level-7 rows and hexadecimal IDS in the RR adapter, and a
+non-repeatable Lightning input); each is fixed with tests on the same branches.
+Codex re-reviews of those fixes found five more (cures and poison reordered
+across 220's level headers, opcode 173 poison resistance given in parts and
+activation-only effects in 320's genie check, and in 130 a fire record shared
+with another ability and a too strict 16-bit guard on its private copy); these
+are fixed with tests as well.
+
+| # | Item | Commits | Result |
+| --- | --- | --- | --- |
+| 1 | SR Bracers 220 | `230d6b5`, review `78a3887`, `925710c` | Activation found and replaced in place; other abilities, equipped effects and donor variations kept; the call keeps the activation's chance, save and power. |
+| 2 | Emotion 301 | `75c37bd`, review `0756af9` | Real dependencies only; every level header rebuilt; descriptions state the spell's own values. |
+| 3 | Elemental arrows 130 | `8650b01`, review `c74c2a5`, `aa9734f`, `c1e88b9`, `56989a2` | Elemental damage found by behavior on the bow-fired hit only; other abilities, riders and their text kept; a damage record shared with another ability is copied first. |
+| 4 | RR/SR adapter | SR fork `5fee801`, review `85cc02d` | Records recognized by the spell they name, any count; empty rows and hexadecimal IDS handled. |
+| 5 | Tempus helpers 400–404 | `c6cbcd1`, `9ae46aa`, review `1f55115` | Grants and CLAB cells located by meaning; Chaos tides built from any donor tiers, recipient resets kept. |
+| 6 | Cloud forms 320 | `27d6ba9`, `6e2b038`, `1ad7ea4` | Immunity (100% or more) becomes 75%; lower values kept. Decided by Christopher (2026-10-20): 75% is the target for immunity, not a cap, so 76–99% from other mods stays. |
+| 7 | SR classic Lightning Bolt | SR fork `19fd5c9`, review `26ad3e1` | SR's damage pair identified by meaning; foreign damage kept; repeat byte-exact. |
+
+Verification: rebalance full regression 693 tests, OK, 26 skipped
+(private captures/Lua); SR fork suite 182 passed; WeiDU 249, synthetic
+fixtures and `--nogame` only. Each fix has variation tests that fail against the
+previous library. No lab install, in-game check, release or CEBG pin change.
 
 ## Checks not condemned by this audit
 

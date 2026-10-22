@@ -293,4 +293,328 @@ class BracersTests(unittest.TestCase):
         self.assertEqual(before, g.snapshot())
 
 
+def _fx(opcode, p1=0, p2=0, resource="", duration=60, timing=0, target=2, **extra):
+    return SplEffect(opcode=opcode, target=target, power=6, parameter1=p1, parameter2=p2,
+                     resource=resource, duration=duration, timing=timing, resist_dispel=3, **extra)
+
+
+def _item_ability(effects, target=5):
+    raw = bytearray(56)
+    raw[0] = 3
+    raw[12] = target
+    struct.pack_into("<H", raw, 34, 1)
+    struct.pack_into("<I", raw, 38, 2048)
+    return ItmAbility(raw=bytes(raw), effects=tuple(effects))
+
+
+def _donor(r):
+    return SplFile.from_bytes(r["SPWI677.SPL"])
+
+
+def _with_donor(r, *, abilities=None, casting=None):
+    donor = _donor(r)
+    if abilities is not None:
+        donor = dataclasses.replace(donor, abilities=tuple(abilities))
+    if casting is not None:
+        donor = dataclasses.replace(donor, casting_effects=tuple(casting))
+    r["SPWI677.SPL"] = donor.to_bytes()
+    return r
+
+
+def _with_item(r, *, abilities=None, global_effects=None):
+    item = ItmFile.from_bytes(r["BRAC16.ITM"])
+    if abilities is not None:
+        item = dataclasses.replace(item, abilities=tuple(abilities))
+    if global_effects is not None:
+        item = dataclasses.replace(item, global_effects=tuple(global_effects))
+    r["BRAC16.ITM"] = item.to_bytes()
+    return r
+
+
+def _expected_payload(effects, spell=60, duration=20, donor="SPWI677"):
+    """The helper's copy of one donor header, record by record."""
+    out = []
+    for e in effects:
+        if e.opcode == 206 and e.resource == "CBRBIH":
+            continue
+        changes = {}
+        if e.target == 2:
+            changes["target"] = 1
+        if e.timing in (0, 4) and e.duration == spell:
+            changes["duration"] = duration
+        if e.opcode == 321 and e.resource == donor:
+            changes["resource"] = "CBRBIH"
+        out.append(dataclasses.replace(e, **changes).canonical())
+    return out
+
+
+class BracersVariationTests(unittest.TestCase):
+    """Valid alternate layouts (compatibility policy, 2026-10-17)."""
+    game = BracersTests.game
+    installed = BracersTests.installed
+
+    def helper(self, g):
+        helper = SplFile.from_bytes(g.snapshot()["CBRBIH.SPL"])
+        self.assertEqual(1, len(helper.abilities))
+        ability = helper.abilities[0]
+        self.assertEqual((5, 1, 0), (ability.target, ability.projectile, ability.required_level))
+        return helper
+
+    def failed(self, g, text):
+        p, out = g.run()
+        self.assertNotEqual(0, p.returncode, out)
+        self.assertIn(text, out)
+        self.assertEqual(g.original, g.snapshot())
+
+    def repeat_is_exact(self, g):
+        before = g.snapshot()
+        self.installed(g, repeat=True)
+        self.assertEqual(before, g.snapshot())
+
+    def test_equipped_bonus_and_unrelated_activation_are_preserved(self):
+        r = synthetic()
+        item = ItmFile.from_bytes(r["BRAC16.ITM"])
+        bonus = SplEffect(opcode=0, target=1, parameter1=1, timing=2)
+        extra = _item_ability((SplEffect(opcode=17, target=1, parameter1=5, timing=1),))
+        g = self.game(_with_item(r, abilities=item.abilities + (extra,), global_effects=(bonus,)))
+        self.installed(g)
+        new = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"])
+        self.assertEqual([bonus.canonical()], [e.canonical() for e in new.global_effects])
+        self.assertEqual(extra.canonical(), new.abilities[1].canonical())
+        self.assertEqual(extra.raw[:0x1e], new.abilities[1].raw[:0x1e])
+        self.assertEqual(extra.raw[0x22:], new.abilities[1].raw[0x22:])
+        self.assertEqual([324, 146, 139, 61], [e.opcode for e in new.abilities[0].effects])
+        self.repeat_is_exact(g)
+
+    def test_reordered_item_and_donor_records(self):
+        r = synthetic()
+        stock = ItmFile.from_bytes(r["BRAC16.ITM"]).abilities[0]
+        reordered = dataclasses.replace(stock, effects=tuple(reversed(stock.effects)))
+        donor = _donor(r).abilities[0]
+        payload = tuple(reversed(donor.effects))
+        r = _with_item(r, abilities=(reordered,))
+        g = self.game(_with_donor(r, abilities=(dataclasses.replace(donor, effects=payload),)))
+        self.installed(g)
+        new = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"]).abilities[0].effects
+        self.assertEqual([61, 139, 146, 324], [e.opcode for e in new])
+        expected = _expected_payload(payload)
+        fx = self.helper(g).abilities[0].effects
+        self.assertEqual(expected, [e.canonical() for e in fx[:len(expected)]])
+        self.repeat_is_exact(g)
+
+    def test_donor_casting_features_are_kept_verbatim(self):
+        cast = (SplEffect(opcode=174, target=1, timing=1, resource="CAS_M05"),
+                SplEffect(opcode=146, target=1, timing=1, parameter2=1, resource="DWHOOK"))
+        g = self.game(_with_donor(synthetic(), casting=cast))
+        self.installed(g)
+        expected = [e.canonical() for e in cast]
+        self.assertEqual(expected, [e.canonical() for e in self.helper(g).casting_effects])
+        donor = SplFile.from_bytes(g.snapshot()["SPWI677.SPL"])
+        self.assertEqual(expected, [e.canonical() for e in donor.casting_effects])
+        self.repeat_is_exact(g)
+
+    def test_casting_features_stored_after_the_payload(self):
+        r = synthetic()
+        cast = SplEffect(opcode=174, target=1, timing=1, resource="CAS_M05")
+        donor = _donor(r)
+        blob = bytearray(donor.to_bytes()) + cast.to_bytes()
+        struct.pack_into("<HH", blob, 0x6e, len(donor.abilities[0].effects), 1)
+        r["SPWI677.SPL"] = bytes(blob)
+        g = self.game(r)
+        self.installed(g)
+        self.assertEqual([cast.canonical()], [e.canonical() for e in self.helper(g).casting_effects])
+        self.repeat_is_exact(g)
+
+    def test_level_scaled_donor_headers(self):
+        r = synthetic()
+        base = _donor(r).abilities[0]
+
+        def scaled(level, seconds):
+            return dataclasses.replace(base, required_level=level, effects=tuple(
+                dataclasses.replace(e, duration=seconds) if e.timing in (0, 4) else e
+                for e in base.effects))
+        g = self.game(_with_donor(r, abilities=(scaled(1, 60), scaled(10, 120))))
+        self.installed(g)
+        expected = _expected_payload(base.effects)
+        fx = self.helper(g).abilities[0].effects
+        self.assertEqual(expected, [e.canonical() for e in fx[:len(expected)]])
+        donor = SplFile.from_bytes(g.snapshot()["SPWI677.SPL"])
+        for ability in donor.abilities:
+            self.assertEqual(1, sum(e.opcode == 206 and e.resource == "CBRBIH" for e in ability.effects))
+        self.repeat_is_exact(g)
+
+    def test_donor_headers_with_different_payloads_fail(self):
+        r = synthetic()
+        base = _donor(r).abilities[0]
+        stronger = dataclasses.replace(base, required_level=10, effects=tuple(
+            dataclasses.replace(e, parameter1=2) if e.opcode == 1 else e for e in base.effects))
+        self.failed(self.game(_with_donor(r, abilities=(base, stronger))), "differ beyond their duration")
+
+    def test_changed_donor_duration_keeps_independent_timers(self):
+        r = synthetic()
+        base = _donor(r).abilities[0]
+        effects = tuple(dataclasses.replace(e, duration=50) for e in base.effects)
+        effects += (_fx(215, resource="SPHASTE", duration=2),)
+        g = self.game(_with_donor(r, abilities=(dataclasses.replace(base, effects=effects),)))
+        self.installed(g)
+        fx = self.helper(g).abilities[0].effects
+        self.assertEqual([20], [e.duration for e in fx if e.opcode == 1])
+        self.assertEqual([2], [e.duration for e in fx if e.opcode == 215])
+        self.assertEqual(_expected_payload(effects, spell=50), [e.canonical() for e in fx[:len(effects)]])
+        self.repeat_is_exact(g)
+
+    def test_bracers_duration_follows_their_activation(self):
+        r = synthetic()
+        stock = ItmFile.from_bytes(r["BRAC16.ITM"]).abilities[0]
+        longer = dataclasses.replace(stock, effects=tuple(
+            dataclasses.replace(e, duration=30) if e.opcode == 16 or (e.opcode == 174 and e.timing == 4) else e
+            for e in stock.effects))
+        g = self.game(_with_item(r, abilities=(longer,)))
+        p, out = g.run()
+        self.assertEqual(0, p.returncode, out)
+        self.assertIn("for 30 seconds", out)
+        fx = self.helper(g).abilities[0].effects
+        self.assertEqual([30], [e.duration for e in fx if e.opcode == 1])
+        self.assertTrue(all(e.duration == 30 for e in fx if e.opcode == 206))
+        new = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"]).abilities[0].effects
+        self.assertEqual([324, 146, 139, 61], [e.opcode for e in new])
+        self.repeat_is_exact(g)
+
+    def test_foreign_donor_records_are_carried(self):
+        r = synthetic()
+        base = _donor(r).abilities[0]
+        effects = base.effects + (
+            _fx(318, resource="FOOSPELL"),
+            _fx(321, resource="SPWI677", duration=0, timing=1),
+            _fx(139, p1=777, duration=0, timing=1, probability1=50),
+            _fx(174, resource="EFF_X", duration=0, timing=1, target=0),
+            _fx(12, p2=0x80000, duration=0, timing=1, dice_number=1, dice_size=4, save_type=1),
+        )
+        g = self.game(_with_donor(r, abilities=(dataclasses.replace(base, effects=effects),)))
+        self.installed(g)
+        fx = self.helper(g).abilities[0].effects
+        self.assertEqual(_expected_payload(effects), [e.canonical() for e in fx[:len(effects)]])
+        self.assertEqual(["CBRBIH"], [e.resource for e in fx if e.opcode == 321])
+        self.assertEqual([0], [e.target for e in fx if e.opcode == 174 and e.resource == "EFF_X"])
+        self.repeat_is_exact(g)
+
+    def test_group_targeted_donor_effect_fails(self):
+        r = synthetic()
+        base = _donor(r).abilities[0]
+        party = _fx(0, p1=1, target=3)
+        g = self.game(_with_donor(r, abilities=(dataclasses.replace(base, effects=base.effects + (party,)),)))
+        self.failed(g, "targets group 3")
+
+    def test_item_without_native_improved_haste_fails(self):
+        r = synthetic()
+        stock = ItmFile.from_bytes(r["BRAC16.ITM"]).abilities[0]
+        normal = dataclasses.replace(stock, effects=tuple(
+            dataclasses.replace(e, parameter2=0) if e.opcode == 16 else e for e in stock.effects))
+        self.failed(self.game(_with_item(r, abilities=(normal,))), "no native Improved Haste activation")
+
+    def test_activation_for_another_target_fails(self):
+        r = synthetic()
+        stock = ItmFile.from_bytes(r["BRAC16.ITM"]).abilities[0]
+        other = _item_ability(stock.effects, target=1)
+        self.failed(self.game(_with_item(r, abilities=(other,))), "does not target its user")
+
+    def test_shared_activation_record_fails(self):
+        r = synthetic()
+        item = ItmFile.from_bytes(r["BRAC16.ITM"])
+        blob = bytearray(_with_item(r, abilities=item.abilities + (_item_ability(()),))["BRAC16.ITM"])
+        ab, = struct.unpack_from("<I", blob, 0x64)
+        count, first = struct.unpack_from("<HH", blob, ab + 0x1e)
+        struct.pack_into("<HH", blob, ab + 56 + 0x1e, count, first)
+        r["BRAC16.ITM"] = bytes(blob)
+        self.failed(self.game(r), "shared with another ability")
+
+    def test_transformed_item_without_helper_fails(self):
+        g = self.game()
+        self.installed(g)
+        next(p for p in g.override.iterdir() if p.name.upper() == "CBRBIH.SPL").unlink()
+        before = g.snapshot()
+        p, out = g.run(repeat=True)
+        self.assertNotEqual(0, p.returncode, out)
+        self.assertIn("CBRBIH.SPL is missing", out)
+        self.assertEqual(before, g.snapshot())
+
+
+class BracersReviewTests(unittest.TestCase):
+    """Independent review findings (2026-10-17)."""
+    game = BracersTests.game
+    installed = BracersTests.installed
+    helper = BracersVariationTests.helper
+    failed = BracersVariationTests.failed
+    repeat_is_exact = BracersVariationTests.repeat_is_exact
+
+    def test_activation_conditions_carry_over_to_the_helper_call(self):
+        r = synthetic()
+        stock = ItmFile.from_bytes(r["BRAC16.ITM"]).abilities[0]
+        conditional = dataclasses.replace(stock, effects=tuple(
+            dataclasses.replace(e, power=4, probability1=50, probability2=10, save_type=1, save_bonus=-2)
+            if e.opcode == 16 else e for e in stock.effects))
+        g = self.game(_with_item(r, abilities=(conditional,)))
+        self.installed(g)
+        new = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"]).abilities[0].effects
+        cast, = [e for e in new if e.opcode == 146 and e.resource == "CBRBIH"]
+        self.assertEqual(
+            (1, 4, 0, 1, 1, 3, 0, 50, 10, 1, -2, 0, 0, 0),
+            (cast.target, cast.power, cast.parameter1, cast.parameter2, cast.timing,
+             cast.resist_dispel, cast.duration, cast.probability1, cast.probability2,
+             cast.save_type, cast.save_bonus, cast.dice_number, cast.dice_size, cast.special))
+        self.repeat_is_exact(g)
+
+    def test_stock_activation_keeps_full_probability_and_no_save(self):
+        g = self.game()
+        self.installed(g)
+        stock = next(e for e in ItmFile.from_bytes(g.original["BRAC16.ITM"]).abilities[0].effects if e.opcode == 16)
+        new = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"]).abilities[0].effects
+        cast, = [e for e in new if e.opcode == 146 and e.resource == "CBRBIH"]
+        self.assertEqual((stock.power, 100, 0, 0, 0), (cast.power, cast.probability1, cast.probability2,
+                                                      cast.save_type, cast.save_bonus))
+
+    @staticmethod
+    def scaled(base, level, seconds, effects):
+        return dataclasses.replace(base, required_level=level, effects=tuple(
+            dataclasses.replace(e, duration=seconds) if e.timing in (0, 4) else e for e in effects))
+
+    def test_level_headers_storing_the_payload_in_another_order(self):
+        r = synthetic()
+        base = _donor(r).abilities[0]
+        # The stock payload starts with five independent records, then opcode
+        # 101, two opcode-206 records and a delayed sound.
+        independent, rest = base.effects[:5], base.effects[5:]
+        self.assertFalse(any(e.opcode in (101, 206, 321) for e in independent))
+        shuffled = tuple(reversed(independent)) + rest
+        g = self.game(_with_donor(r, abilities=(
+            self.scaled(base, 1, 60, base.effects), self.scaled(base, 10, 120, shuffled))))
+        self.installed(g)
+        expected = _expected_payload(base.effects)
+        fx = self.helper(g).abilities[0].effects
+        self.assertEqual(expected, [e.canonical() for e in fx[:len(expected)]])
+        self.repeat_is_exact(g)
+
+    def test_level_headers_reordering_dependent_records_fail(self):
+        r = synthetic()
+        base = _donor(r).abilities[0]
+        protection = next(i for i, e in enumerate(base.effects) if e.opcode == 206)
+        moved = (base.effects[protection],) + base.effects[:protection] + base.effects[protection + 1:]
+        refresh = base.effects + (_fx(321, resource="SPWI677", duration=0, timing=1),)
+        late = (refresh[-1],) + refresh[:-1]
+        # Re-review finding: a cure (opcode 11 removes opcode 25) is not on the
+        # explicit list of removals, and an unlisted opcode must not move.
+        poison, cure = _fx(25, p1=1), _fx(11, duration=0, timing=1)
+        # Same stat, set then bonus versus bonus then set.
+        set_ac, more_ac = _fx(0, p1=5, p2=16), _fx(0, p1=2)
+        cases = {"protection": (base.effects, moved),
+                 "refresh": (refresh, late),
+                 "cure-after-poison": (base.effects + (poison, cure), base.effects + (cure, poison)),
+                 "same-opcode": (base.effects + (set_ac, more_ac), base.effects + (more_ac, set_ac))}
+        for name, (first, second) in cases.items():
+            with self.subTest(name=name):
+                g = self.game(_with_donor(synthetic(), abilities=(
+                    self.scaled(base, 1, 60, first), self.scaled(base, 10, 120, second))))
+                self.failed(g, "differ beyond their duration")
+
+
 if __name__ == "__main__": unittest.main()

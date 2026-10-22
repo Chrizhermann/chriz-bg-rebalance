@@ -1,0 +1,35 @@
+// Isolated --nogame harness for the Holy Power CLAB cap in
+// chriz-bg-rebalance/lib/tempus_holy_power.tpa (components 401-403).
+//   argv[0] = tempus_holy_power.tpa
+//   argv[1] = fixture root (holds OHTEMPUS.2DA), argv[2] = output root
+// Mirrors the production call pattern: read-only classification, cap only
+// when the table is not already capped, then post-validation.
+BACKUP ~backup~
+AUTHOR ~chriz-bg-rebalance test harness~
+
+BEGIN ~Tempus CLAB harness: five-use cap~
+DESIGNATED 0
+
+COPY ~%argv[1]%~ ~%argv[2]%~
+INCLUDE ~%argv[0]%~
+COPY ~%argv[2]%/OHTEMPUS.2DA~ ~%argv[2]%/OHTEMPUS.2DA~
+  LPF cbr_validate_tempus_clab
+    RET
+      cbr_harness_capped = capped_shape
+      cbr_harness_grants = grant_count
+  END
+  PATCH_PRINT ~CBR_CLAB_PREFLIGHT capped_shape=%cbr_harness_capped% grants=%cbr_harness_grants%~
+  PATCH_IF (!cbr_harness_capped) BEGIN
+    LPF cbr_cap_tempus_clab END
+  END
+  LPF cbr_validate_tempus_clab
+    RET
+      cbr_harness_verified = capped_shape
+      cbr_harness_remaining = grant_count
+  END
+  PATCH_IF (!cbr_harness_verified) BEGIN
+    PATCH_FAIL ~harness post-validation found an uncapped CLAB~
+  END
+  PATCH_PRINT ~CBR_CLAB_RESULT grants=%cbr_harness_remaining%~
+BUT_ONLY
+COPY ~%argv[1]%/OHTEMPUS.2DA~ ~%argv[2]%/CBR_TEST.OK~

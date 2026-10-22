@@ -34,3 +34,22 @@ no warnings/errors. The resulting `OHTEMPUS.2DA` retained the early grants and l
 symbol, cleared exactly the five late grants, and contained `AP_C0PR#CL` exactly once at
 every level 1–50 across `ABILITY1`–`ABILITY6` (SHA-256
 `52F53F48191D4AB9B84CCC98C18A9FEC7CD44EE7A809646FC4FB394E28F28229`).
+
+## Superseded by meaning-based ownership (2026-10-17)
+
+The narrow rule above has been replaced, following the compatibility audit of
+2026-10-08 (item 5). The component now owns only `GA_OHTMPS1` cells
+(case-insensitive) in any row and at any level of a table with at least one level
+column; the level is the data-column index. Uses are ordered by (level, row
+order), the first five are kept, and every later one is replaced with `****` by
+the same byte-surgical edit. `AP_CDHLYSYM`, `AP_C0PR#CL`, row names, table
+width, and other mods' cells are no longer validated and stay byte-identical. A
+table that is already at five uses or fewer stays untouched.
+
+Retained refusals, each naming `OHTEMPUS.2DA`: no 2DA signature or missing
+default/column-label lines; a `GA_OHTMPS1` beyond the columns the header
+declares (whether the engine grants it is undefined); and a table with no
+`GA_OHTMPS1` at all, because then the kit does not grant the Holy Power innate
+this component caps, so the five-use result cannot be established. The packed
+Artisan fixture above still produces the exact same bytes. Variation coverage
+is in `tests/test_tempus_clab_variants.py`.

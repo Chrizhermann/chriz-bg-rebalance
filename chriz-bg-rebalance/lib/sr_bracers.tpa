@@ -1,5 +1,6 @@
-// Bracers of Blinding Strike: a 20-second, self-only copy of effective SR
-// Improved Haste. No edits to saves, Wish mechanics, or Tempus helper spells.
+// Bracers of Blinding Strike: a self-only copy of effective SR Improved Haste
+// that lasts as long as the bracers' own activation (20 seconds on the stock
+// item). No edits to saves, Wish mechanics, or Tempus helper spells.
 DEFINE_PATCH_FUNCTION cbrsb_layout
   INT_VAR stride = 0x28 partition = 1
   RET ab na fx nf
@@ -139,71 +140,160 @@ BEGIN
   PATCH_IF apply BEGIN DELETE_BYTES fx (nf * 48) END
 END
 
+// Field-by-field record comparison. A timer equal to its own header's spell
+// duration is normalized, so level-scaled donor headers compare equal.
+DEFINE_PATCH_FUNCTION cbrsb_same_record
+  INT_VAR a = 0 b = 0 pa = 0 pb = 0
+  RET same
+BEGIN
+  SET same = 1
+  FOR (o = 0; o < 48; ++o) BEGIN
+    PATCH_IF (o < 0x0e OR o > 0x11) AND BYTE_AT (a + o) != BYTE_AT (b + o) BEGIN SET same = 0 END
+  END
+  READ_BYTE (a + 0x0c) ta READ_LONG (a + 0x0e) da READ_LONG (b + 0x0e) db
+  PATCH_IF ta = 0 OR ta = 4 BEGIN
+    PATCH_IF da = pa BEGIN SET da = 0 - 1 END
+    PATCH_IF db = pb BEGIN SET db = 0 - 1 END
+  END
+  PATCH_IF da != db BEGIN SET same = 0 END
+END
+
+// Records that each change one stat of their own, or only present the spell,
+// give the same result in any order among themselves. Every other record
+// (removals, cures, protections, casts, summons, any opcode not listed) can
+// act on or add to what is already on the target, so its place can matter.
+DEFINE_PATCH_FUNCTION cbrsb_movable
+  INT_VAR op = 0
+  RET movable
+BEGIN
+  SET movable = 0
+  PATCH_FOR_EACH cbrsb_movable_op IN 0 1 6 10 15 19 21 22 27 28 29 30 31 33 34 35 36 37
+    44 49 54 73 84 85 86 87 88 89 139 141 142 166 173 174 176 215 BEGIN
+    PATCH_IF op = cbrsb_movable_op BEGIN SET movable = 1 END
+  END
+END
+
+// Build CBRBIH from the effective Improved Haste donor (a disposable copy).
+// The result is one self-only, level-0 header: the donor's casting features
+// stay a verbatim prefix, and its payload keeps every field except the target
+// (self), the spell-duration timers (donor duration -> the bracers' activation
+// duration) and the donor's own refresh identity (op321 -> CBRBIH).
 DEFINE_PATCH_FUNCTION cbrsb_build_helper
+  INT_VAR duration = 0
+  STR_VAR donor = ~~
 BEGIN
   READ_ASCII 0 signature (8)
   PATCH_IF NOT (~%signature%~ STRING_EQUAL ~SPL V1  ~) BEGIN PATCH_FAIL ~SR bracers: Improved Haste is not SPL V1.~ END
+  PATCH_IF duration <= 0 BEGIN PATCH_FAIL ~SR bracers: the bracers' activation has no positive duration.~ END
   LPF cbrsb_layout RET ab na fx nf END
-  READ_SHORT 0x70 cf
-  PATCH_IF na != 1 OR cf != 0 BEGIN
-    PATCH_FAIL ~SR bracers: Improved Haste needs a reviewed single direct delivery.~
-  END
-  READ_SHORT (ab + 0x1e) count READ_SHORT (ab + 0x20) first
-  // The donor gains our reciprocal guard on first application. Remove only
-  // that generated guard from this in-memory clone and re-add it in canonical
-  // alias order, so the second application is byte-identical.
-  FOR (k = count - 1; k >= 0; --k) BEGIN
-    SET at = fx + (first + k) * 48
-    READ_SHORT at op READ_ASCII (at + 0x14) res (8) NULL
-    PATCH_IF op = 206 AND ~%res%~ STRING_EQUAL_CASE ~CBRBIH~ BEGIN
-      DELETE_BYTES at 48 --count
-    END
-  END
-  WRITE_SHORT (ab + 0x1e) count
-  SET apr = 0 SET movement = 0
-  FOR (k = 0; k < count; ++k) BEGIN
-    SET at = fx + (first + k) * 48
-    READ_SHORT at op READ_LONG (at + 4) p1 READ_LONG (at + 8) p2
-    READ_BYTE (at + 2) target READ_BYTE (at + 0x0c) timing
-    READ_LONG (at + 0x0e) duration
-    READ_BYTE (at + 0x12) prob READ_BYTE (at + 0x13) lower
-    READ_LONG (at + 0x24) save READ_ASCII (at + 0x14) res (8) NULL
-    PATCH_IF target != 2 OR prob != 100 OR lower != 0 OR save != 0 BEGIN
-      PATCH_FAIL ~SR bracers: unexpected targeting or probability in Improved Haste.~
-    END
-    PATCH_IF NOT (op = 0 OR op = 1 OR op = 36 OR op = 54 OR op = 101 OR
-      op = 139 OR op = 141 OR op = 142 OR op = 174 OR op = 176 OR op = 206 OR
-      op = 221 OR op = 326 OR op = 328) BEGIN
-      PATCH_FAIL ~SR bracers: unreviewed Improved Haste opcode %op%.~
-    END
-    PATCH_IF op = 1 BEGIN
-      PATCH_IF p1 != 1 OR p2 != 0 OR timing != 0 OR duration != 60 BEGIN
-        PATCH_FAIL ~SR bracers: Improved Haste is not SR's timed +1 APR.~
-      END
-      ++apr
-    END
-    PATCH_IF op = 176 BEGIN
-      PATCH_IF p1 != 6 OR p2 != 0 OR timing != 0 OR duration != 60 BEGIN
-        PATCH_FAIL ~SR bracers: unreviewed SR movement effect.~
-      END
-      ++movement
-    END
-    PATCH_IF op = 326 BEGIN
-      PATCH_IF NOT (~%res%~ STRING_EQUAL_CASE ~CBRAPR6~ OR
-        ~%res%~ STRING_EQUAL_CASE ~CBRAPR1~ OR ~%res%~ STRING_EQUAL_CASE ~CBRAPR7~)
-        OR NOT FILE_EXISTS_IN_GAME ~%res%.spl~ BEGIN
-        PATCH_FAIL ~SR bracers: unreviewed or missing Tempus bridge helper.~
+  READ_SHORT 0x6e cf READ_SHORT 0x70 cn
+  // Every level header must be SR's additive APR haste. The donor gains our
+  // reciprocal guard on first application; it is skipped here and re-added
+  // in canonical alias order, so a second application is byte-identical.
+  FOR (h = 0; h < na; ++h) BEGIN
+    SET ah = ab + h * 0x28
+    READ_SHORT (ah + 0x1e) count READ_SHORT (ah + 0x20) first
+    SET apr = 0 SET native = 0 SET spell = 0 - 1 SET kept = 0 SET bounds = 0
+    FOR (k = 0; k < count; ++k) BEGIN
+      SET at = fx + (first + k) * 48
+      READ_SHORT at op READ_LONG (at + 4) p1 READ_LONG (at + 8) p2
+      READ_BYTE (at + 2) target READ_BYTE (at + 0x0c) timing
+      READ_LONG (at + 0x0e) dur READ_ASCII (at + 0x14) res (8) NULL
+      PATCH_IF NOT (op = 206 AND ~%res%~ STRING_EQUAL_CASE ~CBRBIH~) BEGIN
+        SET $cbrsb_keep(~%h%~ ~%kept%~) = at
+        // Records that cannot move split the header into stretches; a
+        // record's stretch is the number of such records before it. Within a
+        // stretch, records of one opcode keep their order (rank).
+        LPF cbrsb_movable INT_VAR op RET movable END
+        SET $cbrsb_bound(~%h%~ ~%kept%~) = 1 - movable
+        SET $cbrsb_stretch(~%h%~ ~%kept%~) = bounds
+        SET rank = 0
+        PATCH_IF VARIABLE_IS_SET $cbrsb_rank_seen(~%h%~ ~%bounds%~ ~%op%~) BEGIN
+          SET rank = $cbrsb_rank_seen(~%h%~ ~%bounds%~ ~%op%~)
+        END
+        SET $cbrsb_rank(~%h%~ ~%kept%~) = rank
+        SET $cbrsb_rank_seen(~%h%~ ~%bounds%~ ~%op%~) = rank + 1
+        SET bounds += 1 - movable
+        ++kept
+        PATCH_IF op = 16 OR op = 317 BEGIN ++native END
+        PATCH_IF op = 1 AND p2 = 0 AND p1 > 0 AND timing = 0 AND dur > 0 BEGIN
+          PATCH_IF spell >= 0 AND dur != spell BEGIN
+            PATCH_FAIL ~SR bracers: %donor%.SPL header %h% grants APR bonuses with different durations, so its spell duration is ambiguous.~
+          END
+          SET spell = dur
+          ++apr
+        END
+        // Self and recipient effects both land on the bracers' wearer.
+        PATCH_IF target > 2 BEGIN
+          PATCH_FAIL ~SR bracers: %donor%.SPL opcode %op% targets group %target%; a self-only copy cannot keep that delivery.~
+        END
+        PATCH_IF NOT (timing = 0 OR timing = 1 OR timing = 4 OR timing = 9) BEGIN
+          PATCH_FAIL ~SR bracers: %donor%.SPL opcode %op% uses timing mode %timing%, which has no equivalent in a fixed-duration copy.~
+        END
       END
     END
-    PATCH_IF timing = 0 OR timing = 4 BEGIN
-      PATCH_IF duration != 60 BEGIN PATCH_FAIL ~SR bracers: unreviewed timed Improved Haste effect.~ END
-      WRITE_LONG (at + 0x0e) 20
-    END ELSE PATCH_IF timing != 1 OR duration != 0 BEGIN
-      PATCH_FAIL ~SR bracers: unsupported Improved Haste timing.~
+    // Keep rejecting a vanilla double-APR donor: copying it would not give
+    // the bracers Spell Revisions' Improved Haste.
+    PATCH_IF native > 0 OR apr = 0 BEGIN
+      PATCH_FAIL ~SR bracers: %donor%.SPL header %h% is not Spell Revisions' additive Improved Haste (native Haste or no APR bonus).~
     END
-    WRITE_BYTE (at + 2) 1
+    SET $cbrsb_kept(~%h%~) = kept
+    SET $cbrsb_spell(~%h%~) = spell
   END
-  PATCH_IF apr != 1 OR movement != 1 BEGIN PATCH_FAIL ~SR bracers: missing SR APR/movement payload.~ END
+  // The bracers have one fixed duration. Level headers may scale the spell's
+  // duration, but must otherwise describe the same payload. They may store it
+  // in another order only where order cannot matter: each record needs an
+  // equal partner with the same stretch and rank, so records that cannot move
+  // keep their place. The helper keeps header 0's order.
+  SET spell = $cbrsb_spell(~0~)
+  SET kept = $cbrsb_kept(~0~)
+  FOR (h = 1; h < na; ++h) BEGIN
+    SET other = $cbrsb_spell(~%h%~)
+    SET same = ($cbrsb_kept(~%h%~) = kept)
+    FOR (k = 0; same AND k < kept; ++k) BEGIN
+      SET a = $cbrsb_keep(~0~ ~%k%~)
+      SET partner = 0 - 1
+      FOR (m = 0; partner < 0 AND m < kept; ++m) BEGIN
+        PATCH_IF (NOT VARIABLE_IS_SET $cbrsb_taken(~%h%~ ~%m%~))
+          AND ($cbrsb_bound(~0~ ~%k%~) = $cbrsb_bound(~%h%~ ~%m%~))
+          AND ($cbrsb_stretch(~0~ ~%k%~) = $cbrsb_stretch(~%h%~ ~%m%~))
+          AND ($cbrsb_rank(~0~ ~%k%~) = $cbrsb_rank(~%h%~ ~%m%~)) BEGIN
+          SET b = $cbrsb_keep(~%h%~ ~%m%~)
+          LPF cbrsb_same_record INT_VAR a b pa = spell pb = other RET equal = same END
+          PATCH_IF equal BEGIN SET partner = m END
+        END
+      END
+      PATCH_IF partner < 0 BEGIN SET same = 0 END ELSE BEGIN SET $cbrsb_taken(~%h%~ ~%partner%~) = 1 END
+    END
+    PATCH_IF NOT same BEGIN
+      PATCH_FAIL ~SR bracers: %donor%.SPL level headers differ beyond their duration and the order of independent records; choosing one for the fixed-duration bracers would be arbitrary.~
+    END
+  END
+  FOR (k = 0; k < cn; ++k) BEGIN
+    LPF cbrsb_append_raw INT_VAR source = fx + (cf + k) * 48 END
+  END
+  FOR (k = 0; k < kept; ++k) BEGIN
+    SET source = $cbrsb_keep(~0~ ~%k%~)
+    LPF cbrsb_append_raw INT_VAR source END
+    SET at = BUFFER_LENGTH - 48
+    READ_SHORT at op READ_BYTE (at + 2) target READ_BYTE (at + 0x0c) timing
+    READ_LONG (at + 0x0e) dur READ_ASCII (at + 0x14) res (8) NULL
+    PATCH_IF target = 2 BEGIN WRITE_BYTE (at + 2) 1 END
+    // Only timers that follow the spell's duration follow the bracers';
+    // independent short visuals or delays keep their own time.
+    PATCH_IF (timing = 0 OR timing = 4) AND dur = spell BEGIN WRITE_LONG (at + 0x0e) duration END
+    PATCH_IF op = 321 AND ~%res%~ STRING_EQUAL_CASE ~%donor%~ BEGIN WRITE_ASCII (at + 0x14) ~CBRBIH~ #8 END
+  END
+  DELETE_BYTES fx (nf * 48)
+  PATCH_IF na > 1 BEGIN
+    DELETE_BYTES (ab + 0x28) ((na - 1) * 0x28)
+    WRITE_SHORT 0x68 1
+    WRITE_LONG 0x6a (fx - (na - 1) * 0x28)
+  END
+  READ_LONG 0x6a fx
+  WRITE_SHORT 0x6e 0 WRITE_SHORT 0x70 cn
+  SET first = cn SET count = kept
+  WRITE_SHORT (ab + 0x20) first
   // Never retain the donor's party-wide area projectile.
   WRITE_BYTE (ab + 0x0c) 5 WRITE_BYTE (ab + 0x0d) 1
   // Mode-1 item casting inherits caster level, including zero for a noncaster.
@@ -225,7 +315,7 @@ BEGIN
     PATCH_IF present = 0 BEGIN
       INSERT_BYTES BUFFER_LENGTH 48 SET at = BUFFER_LENGTH - 48
       WRITE_SHORT at 206 WRITE_BYTE (at + 2) 1 WRITE_BYTE (at + 3) 6
-      WRITE_BYTE (at + 0x0d) 3 WRITE_LONG (at + 0x0e) 20
+      WRITE_BYTE (at + 0x0d) 3 WRITE_LONG (at + 0x0e) duration
       WRITE_BYTE (at + 0x12) 100 WRITE_ASCIIE (at + 0x14) ~%alias%~ #8
       ++count
     END
@@ -233,65 +323,167 @@ BEGIN
   WRITE_SHORT (ab + 0x1e) count
 END
 
-DEFINE_PATCH_FUNCTION cbrsb_patch_item
+// Old BRAC16 haste presentation/cleanup that the helper's own SR package
+// replaces. Another mod's unrelated effect, even with the same opcode, stays.
+DEFINE_PATCH_FUNCTION cbrsb_old_presentation
+  INT_VAR at = 0 duration = 0
+  RET remove
+BEGIN
+  READ_SHORT at op READ_LONG (at + 4) p1 READ_LONG (at + 8) p2
+  READ_ASCII (at + 0x14) res (8) NULL
+  READ_BYTE (at + 2) et READ_BYTE (at + 0x0c) timing READ_LONG (at + 0x0e) dur
+  SET remove = et = 1 AND (
+    (op = 221 AND p1 = 9 AND p2 = 21 AND timing = 0 AND dur = duration)
+    OR (op = 141 AND p1 = 0 AND p2 = 4 AND timing = 1 AND dur = 0)
+    OR (op = 61 AND p1 = 0x783c3c00 AND p2 = 0x190000 AND timing = 1 AND dur = 0)
+    OR (op = 139 AND p1 = 14023 AND p2 = 0 AND timing = 1 AND dur = 0)
+    OR (op = 142 AND p1 = 0 AND p2 = 110 AND timing = 0 AND dur = duration)
+    OR (op = 174 AND p1 = 0 AND p2 = 0 AND (
+      (~%res%~ STRING_EQUAL_CASE ~EFF_M28~ AND timing = 1 AND dur = 0)
+      OR (~%res%~ STRING_EQUAL_CASE ~EFF_M29~ AND timing = 4 AND dur = duration))))
+END
+
+// Read-only: locate BRAC16's self-delivered native Improved Haste activation
+// (opcode 16, mode 1) by meaning. Other abilities, equipped effects, charges
+// and recharge flags are not part of the transformation.
+DEFINE_PATCH_FUNCTION cbrsb_scan_item
+  RET haste_duration carriers transformed
 BEGIN
   READ_ASCII 0 signature (8)
   PATCH_IF NOT (~%signature%~ STRING_EQUAL ~ITM V1  ~) BEGIN PATCH_FAIL ~SR bracers: BRAC16 is not ITM V1.~ END
-  LPF cbrsb_layout INT_VAR stride = 0x38 RET ab na fx nf END
-  READ_SHORT 0x70 eq_count
-  READ_BYTE (ab + 0x0c) target READ_SHORT (ab + 0x22) charges
-  READ_SHORT (ab + 0x1e) count READ_SHORT (ab + 0x20) first
-  PATCH_IF na != 1 OR eq_count != 0 OR target != 5 OR charges != 1 BEGIN
-    PATCH_FAIL ~SR bracers: BRAC16 is not the reviewed self-only daily-charge item.~
-  END
-  SET haste = 0 SET patched = 0
-  FOR (k = 0; k < count; ++k) BEGIN
-    SET at = fx + (first + k) * 48
-    READ_SHORT at op READ_ASCII (at + 0x14) res (8) NULL
-    PATCH_IF op = 16 BEGIN
-      READ_LONG (at + 8) p2 READ_BYTE (at + 0x0c) timing READ_LONG (at + 0x0e) duration
-      PATCH_IF p2 != 1 OR timing != 0 OR duration != 20 BEGIN
-        PATCH_FAIL ~SR bracers: unreviewed original haste payload.~
-      END
-      ++haste
-    END
-    PATCH_IF op = 146 AND ~%res%~ STRING_EQUAL_CASE ~CBRBIH~ BEGIN ++patched END
-  END
-  PATCH_IF haste = 0 AND patched = 1 BEGIN
-    // Already transformed: helper validation below still authenticates the
-    // effective graph; do not duplicate item effects on a second application.
-  END ELSE BEGIN
-    PATCH_IF haste != 1 OR patched != 0 BEGIN PATCH_FAIL ~SR bracers: ambiguous BRAC16 activation.~ END
-    SET kept = 0
+  LPF cbrsb_layout INT_VAR stride = 0x38 partition = 0 RET ab na fx nf END
+  SET haste_duration = 0 - 1 SET carriers = 0 SET transformed = 0
+  FOR (h = 0; h < na; ++h) BEGIN
+    SET ah = ab + h * 0x38
+    READ_BYTE (ah + 0x0c) target
+    READ_SHORT (ah + 0x1e) count READ_SHORT (ah + 0x20) first
+    SET haste = 0 SET cast = 0 SET found = 0
     FOR (k = 0; k < count; ++k) BEGIN
       SET at = fx + (first + k) * 48
-      READ_SHORT at op READ_LONG (at + 4) p1 READ_LONG (at + 8) p2
-      READ_ASCII (at + 0x14) res (8) NULL
-      READ_BYTE (at + 2) et READ_BYTE (at + 0x0c) timing READ_LONG (at + 0x0e) duration
-      // Remove only the reviewed old haste presentation/cleanup package.
-      // Another mod's unrelated effect, even with the same opcode, survives.
-      SET remove = et = 1 AND (
-        (op = 221 AND p1 = 9 AND p2 = 21 AND timing = 0 AND duration = 20)
-        OR (op = 141 AND p1 = 0 AND p2 = 4 AND timing = 1 AND duration = 0)
-        OR (op = 61 AND p1 = 0x783c3c00 AND p2 = 0x190000 AND timing = 1 AND duration = 0)
-        OR (op = 139 AND p1 = 14023 AND p2 = 0 AND timing = 1 AND duration = 0)
-        OR (op = 142 AND p1 = 0 AND p2 = 110 AND timing = 0 AND duration = 20)
-        OR (op = 174 AND p1 = 0 AND p2 = 0 AND (
-          (~%res%~ STRING_EQUAL_CASE ~EFF_M28~ AND timing = 1 AND duration = 0)
-          OR (~%res%~ STRING_EQUAL_CASE ~EFF_M29~ AND timing = 4 AND duration = 20))))
-      PATCH_IF NOT remove BEGIN
-        PATCH_IF op = 16 BEGIN
-          INSERT_BYTES BUFFER_LENGTH 48 SET dest = BUFFER_LENGTH - 48
-          WRITE_SHORT dest 146 WRITE_BYTE (dest + 2) 1 WRITE_BYTE (dest + 3) 3
-          WRITE_LONG (dest + 8) 1 WRITE_BYTE (dest + 0x0c) 1 WRITE_BYTE (dest + 0x0d) 3
-          WRITE_BYTE (dest + 0x12) 100 WRITE_ASCII (dest + 0x14) ~CBRBIH~ #8
-        END ELSE BEGIN LPF cbrsb_append_raw INT_VAR source = at END END
-        ++kept
+      READ_SHORT at op READ_LONG (at + 8) p2 READ_ASCII (at + 0x14) res (8) NULL
+      PATCH_IF op = 16 AND p2 = 1 BEGIN ++haste SET found = at END
+      PATCH_IF op = 146 AND ~%res%~ STRING_EQUAL_CASE ~CBRBIH~ BEGIN ++cast END
+    END
+    PATCH_IF haste > 0 AND cast > 0 BEGIN
+      PATCH_FAIL ~SR bracers: BRAC16 ability %h% has both native haste and the CBRBIH helper call; the earlier edit is incomplete.~
+    END
+    PATCH_IF haste > 1 OR cast > 1 BEGIN
+      PATCH_FAIL ~SR bracers: BRAC16 ability %h% has several Improved Haste activations; which one to replace is ambiguous.~
+    END
+    PATCH_IF haste = 1 BEGIN
+      PATCH_IF NOT (target = 5 OR target = 7) BEGIN
+        PATCH_FAIL ~SR bracers: BRAC16 ability %h% does not target its user; only the self-only activation is supported.~
+      END
+      READ_BYTE (found + 0x0c) timing READ_LONG (found + 0x0e) dur
+      PATCH_IF timing != 0 OR dur <= 0 BEGIN
+        PATCH_FAIL ~SR bracers: BRAC16 ability %h% haste is not a timed activation.~
+      END
+      PATCH_IF haste_duration >= 0 AND dur != haste_duration BEGIN
+        PATCH_FAIL ~SR bracers: BRAC16 abilities use different haste durations; one helper cannot serve both.~
+      END
+      SET haste_duration = dur
+      ++carriers
+    END
+    PATCH_IF cast = 1 BEGIN ++transformed END
+  END
+  PATCH_IF carriers = 0 AND transformed = 0 BEGIN
+    PATCH_FAIL ~SR bracers: BRAC16 has no native Improved Haste activation (opcode 16, mode 1) to replace.~
+  END
+END
+
+// Replace each activation in place with an instant opcode-146 mode-1 call to
+// CBRBIH and remove only the recognized old presentation of that ability.
+// The call keeps the activation's own conditions: its power (level-based
+// protections), probability and saving throw. It stays dispellable and
+// bypasses MR, as before. Equipped effects, other abilities and unrelated
+// records keep their bytes.
+DEFINE_PATCH_FUNCTION cbrsb_patch_item
+  INT_VAR duration = 0
+BEGIN
+  LPF cbrsb_scan_item END
+  LPF cbrsb_layout INT_VAR stride = 0x38 partition = 0 RET ab na fx nf END
+  PATCH_CLEAR_ARRAY cbrsb_change
+  FOR (h = 0; h < na; ++h) BEGIN
+    SET ah = ab + h * 0x38
+    READ_SHORT (ah + 0x1e) count READ_SHORT (ah + 0x20) first
+    SET haste = 0
+    FOR (k = 0; k < count; ++k) BEGIN
+      SET at = fx + (first + k) * 48
+      READ_SHORT at op READ_LONG (at + 8) p2
+      PATCH_IF op = 16 AND p2 = 1 BEGIN SET haste = 1 END
+    END
+    FOR (k = 0; haste AND k < count; ++k) BEGIN
+      SET idx = first + k SET at = fx + idx * 48
+      READ_SHORT at op READ_LONG (at + 8) p2
+      LPF cbrsb_old_presentation INT_VAR at duration RET remove END
+      PATCH_IF op = 16 AND p2 = 1 BEGIN SET $cbrsb_change(~%idx%~) = 1 END
+      ELSE PATCH_IF remove BEGIN SET $cbrsb_change(~%idx%~) = 2 END
+    END
+  END
+  // A changed record shared with another slice would change that slice too.
+  READ_SHORT 0x6e gf READ_SHORT 0x70 gn
+  PATCH_PHP_EACH cbrsb_change AS idx => kind BEGIN
+    SET refs = (idx >= gf AND idx < gf + gn)
+    FOR (h = 0; h < na; ++h) BEGIN
+      READ_SHORT (ab + h * 0x38 + 0x1e) count READ_SHORT (ab + h * 0x38 + 0x20) first
+      SET refs += (idx >= first AND idx < first + count)
+    END
+    PATCH_IF refs != 1 BEGIN
+      PATCH_FAIL ~SR bracers: BRAC16 effect %idx% is shared with another ability or the equipped effects; changing it would change them too.~
+    END
+  END
+  PATCH_PHP_EACH cbrsb_change AS idx => kind BEGIN
+    PATCH_IF kind = 1 BEGIN
+      SET at = fx + idx * 48
+      READ_BYTE (at + 3) power
+      READ_BYTE (at + 0x12) probability1 READ_BYTE (at + 0x13) probability2
+      READ_LONG (at + 0x24) save_type READ_LONG (at + 0x28) save_bonus
+      FOR (o = 0; o < 48; o += 4) BEGIN WRITE_LONG (at + o) 0 END
+      WRITE_SHORT at 146 WRITE_BYTE (at + 2) 1 WRITE_BYTE (at + 3) power
+      WRITE_LONG (at + 8) 1 WRITE_BYTE (at + 0x0c) 1 WRITE_BYTE (at + 0x0d) 3
+      WRITE_BYTE (at + 0x12) probability1 WRITE_BYTE (at + 0x13) probability2
+      WRITE_ASCII (at + 0x14) ~CBRBIH~ #8
+      WRITE_LONG (at + 0x24) save_type WRITE_LONG (at + 0x28) save_bonus
+    END
+  END
+  // Delete from the highest index down so pending indexes stay valid.
+  FOR (idx = nf - 1; idx >= 0; --idx) BEGIN
+    PATCH_IF VARIABLE_IS_SET $cbrsb_change(~%idx%~) BEGIN
+      PATCH_IF $cbrsb_change(~%idx%~) = 2 BEGIN
+        DELETE_BYTES (fx + idx * 48) 48
+        READ_SHORT 0x6e gf READ_SHORT 0x70 gn
+        PATCH_IF gf > idx BEGIN WRITE_SHORT 0x6e (gf - 1) END
+        ELSE PATCH_IF idx < gf + gn BEGIN WRITE_SHORT 0x70 (gn - 1) END
+        FOR (h = 0; h < na; ++h) BEGIN
+          SET ah = ab + h * 0x38
+          READ_SHORT (ah + 0x1e) count READ_SHORT (ah + 0x20) first
+          PATCH_IF first > idx BEGIN WRITE_SHORT (ah + 0x20) (first - 1) END
+          ELSE PATCH_IF idx < first + count BEGIN WRITE_SHORT (ah + 0x1e) (count - 1) END
+        END
       END
     END
-    DELETE_BYTES fx (nf * 48)
-    WRITE_SHORT (ab + 0x1e) kept WRITE_SHORT (ab + 0x20) 0
-    WRITE_SHORT 0x6e 0
+  END
+END
+
+// An already-installed helper records the bracers' activation duration in
+// its APR timer; a repeat application rebuilds it from the same value.
+DEFINE_PATCH_FUNCTION cbrsb_helper_duration
+  RET duration
+BEGIN
+  LPF cbrsb_layout INT_VAR partition = 0 RET ab na fx nf END
+  SET duration = 0 - 1
+  READ_SHORT (ab + 0x1e) count READ_SHORT (ab + 0x20) first
+  FOR (k = 0; k < count; ++k) BEGIN
+    SET at = fx + (first + k) * 48
+    READ_SHORT at op READ_LONG (at + 4) p1 READ_LONG (at + 8) p2
+    READ_BYTE (at + 0x0c) timing READ_LONG (at + 0x0e) dur
+    PATCH_IF op = 1 AND p2 = 0 AND p1 > 0 AND timing = 0 AND dur > 0 BEGIN
+      PATCH_IF duration >= 0 AND dur != duration BEGIN SET duration = 0 - 2 END
+      PATCH_IF duration != 0 - 2 BEGIN SET duration = dur END
+    END
+  END
+  PATCH_IF duration <= 0 BEGIN
+    PATCH_FAIL ~SR bracers: CBRBIH.SPL does not record one bracers duration; preserve it and investigate.~
   END
 END
 
@@ -325,15 +517,31 @@ BEGIN
   ACTION_IF NOT VARIABLE_IS_SET $cbrsb_aliases(~%cbrsb_ih%~) BEGIN
     FAIL ~SR bracers: Improved Haste lacks the expected non-stacking contract.~
   END
+  // The helper lasts as long as the bracers' own activation.
+  COPY_EXISTING ~BRAC16.ITM~ ~override~
+    LPF cbrsb_scan_item RET cbrsb_duration = haste_duration cbrsb_carriers = carriers END
+  BUT_ONLY
+  ACTION_IF cbrsb_carriers = 0 BEGIN
+    ACTION_IF NOT FILE_EXISTS_IN_GAME ~CBRBIH.SPL~ BEGIN
+      FAIL ~SR bracers: BRAC16 already calls CBRBIH, but CBRBIH.SPL is missing; restore the original item first.~
+    END
+    COPY_EXISTING ~CBRBIH.SPL~ ~override~
+      LPF cbrsb_helper_duration RET cbrsb_duration = duration END
+    BUT_ONLY
+  END
   // Build in memory first. These preflights never change the COPY buffer.
   // An unrelated pre-existing helper cannot be replaced.
   COPY_EXISTING ~%cbrsb_ih%.SPL~ ~override~
     READ_ASCII 0 original (BUFFER_LENGTH)
-    INNER_PATCH_SAVE cbrsb_expected ~%original%~ BEGIN LPF cbrsb_build_helper END END
+    INNER_PATCH_SAVE cbrsb_expected ~%original%~ BEGIN
+      LPF cbrsb_build_helper INT_VAR duration = cbrsb_duration STR_VAR donor = EVAL ~%cbrsb_ih%~ END
+    END
   BUT_ONLY
   COPY_EXISTING ~BRAC16.ITM~ ~override~
     READ_ASCII 0 original (BUFFER_LENGTH)
-    INNER_PATCH_SAVE cbrsb_item ~%original%~ BEGIN LPF cbrsb_patch_item END END
+    INNER_PATCH_SAVE cbrsb_item ~%original%~ BEGIN
+      LPF cbrsb_patch_item INT_VAR duration = cbrsb_duration END
+    END
   BUT_ONLY
   ACTION_IF FILE_EXISTS_IN_GAME ~CBRBIH.SPL~ BEGIN
     COPY_EXISTING ~CBRBIH.SPL~ ~override~
@@ -360,5 +568,5 @@ BEGIN
     INNER_PATCH ~%cbrsb_item%~ BEGIN SET expected_length = BUFFER_LENGTH END
     INSERT_BYTES 0 expected_length WRITE_ASCIIE 0 ~%cbrsb_item%~ (expected_length)
   BUT_ONLY
-  PRINT ~Bracers now use self-only SR Improved Haste for 20 seconds, once per day.~
+  PRINT ~Bracers now use a self-only copy of Spell Revisions Improved Haste for %cbrsb_duration% seconds.~
 END

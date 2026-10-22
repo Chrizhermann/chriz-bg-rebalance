@@ -830,6 +830,80 @@ LAF RES_NUM_OF_SPELL_NAME STR_VAR spell_name = ~WIZARD_EMOTION_COURAGE~
 LAF RES_NUM_OF_SPELL_NAME STR_VAR spell_name = ~WIZARD_EMOTION_HOPE~
   RET cbr_em_hope_resref = spell_res cbr_em_hope_id = spell_num END
 
+// Describe each spell from its own final header, read after allocation and
+// before any string is resolved: school, spell level, and the first ability
+// header's range and casting time.  The two descriptions share the
+// placeholder contract documented beside @3012/@3014.  A canonical spell
+// (Enchantment, level 4, range 50, casting time 4) resolves to exactly the
+// earlier fixed text, so existing installs keep reusing their strings.  The
+// area of effect is not derived from the projectile and stays fixed text.
+DEFINE_ACTION_FUNCTION cbr_em_describe_spell
+  INT_VAR
+    is_courage = 0
+  STR_VAR
+    resref = ~~
+  RET
+    description
+BEGIN
+  OUTER_SPRINT cbr_em_dd_resref ~%resref%~
+  COPY_EXISTING - ~%cbr_em_dd_resref%.SPL~ nowhere
+    LPF cbr_em_description_stats
+      RET
+        cbr_em_dd_school = school
+        cbr_em_dd_level = level
+        cbr_em_dd_range = range
+        cbr_em_dd_casting_time = casting_time
+        cbr_em_dd_agree = headers_agree
+    END
+    SPRINT cbr_em_dd_school_name ~~
+    PATCH_IF (cbr_em_dd_school = 1) BEGIN
+      SPRINT cbr_em_dd_school_name @3031
+    END ELSE PATCH_IF (cbr_em_dd_school = 2) BEGIN
+      SPRINT cbr_em_dd_school_name @3032
+    END ELSE PATCH_IF (cbr_em_dd_school = 3) BEGIN
+      SPRINT cbr_em_dd_school_name @3033
+    END ELSE PATCH_IF (cbr_em_dd_school = 4) BEGIN
+      SPRINT cbr_em_dd_school_name @3034
+    END ELSE PATCH_IF (cbr_em_dd_school = 5) BEGIN
+      SPRINT cbr_em_dd_school_name @3035
+    END ELSE PATCH_IF (cbr_em_dd_school = 6) BEGIN
+      SPRINT cbr_em_dd_school_name @3036
+    END ELSE PATCH_IF (cbr_em_dd_school = 7) BEGIN
+      SPRINT cbr_em_dd_school_name @3037
+    END ELSE PATCH_IF (cbr_em_dd_school = 8) BEGIN
+      SPRINT cbr_em_dd_school_name @3038
+    END
+    PATCH_IF (~%cbr_em_dd_school_name%~ STR_EQ ~~) BEGIN
+      SPRINT cbr_em_desc_school_line ~~
+      PATCH_WARN @9307
+    END ELSE BEGIN
+      SPRINT cbr_em_desc_school_line ~(%cbr_em_dd_school_name%)%LNL%~
+    END
+    PATCH_IF (cbr_em_dd_agree = 0) BEGIN
+      PATCH_WARN @9319
+    END
+    SPRINT cbr_em_desc_level ~%cbr_em_dd_level%~
+    SPRINT cbr_em_desc_range ~%cbr_em_dd_range%~
+    SPRINT cbr_em_desc_casting_time ~%cbr_em_dd_casting_time%~
+    PATCH_IF (is_courage = 1) BEGIN
+      SPRINT description @3012
+    END ELSE BEGIN
+      SPRINT description @3014
+    END
+  BUT_ONLY
+END
+
+LAF cbr_em_describe_spell
+  INT_VAR is_courage = 1
+  STR_VAR resref = EVAL ~%cbr_em_courage_resref%~
+  RET cbr_em_courage_desc_text = description
+END
+LAF cbr_em_describe_spell
+  INT_VAR is_courage = 0
+  STR_VAR resref = EVAL ~%cbr_em_hope_resref%~
+  RET cbr_em_hope_desc_text = description
+END
+
 // ADD_SPELL has now selected the final dynamic resrefs, but no new strings
 // have been resolved. Reject a pre-owned D-name before TLK mutation; a forced
 // reinstall restores this component's previous STATDESC rows before reaching
@@ -884,9 +958,9 @@ END
 OUTER_SET cbr_em_courage_state = IDS_OF_SYMBOL (~splstate~ ~EMOTION_COURAGE~)
 OUTER_SET cbr_em_hope_state = IDS_OF_SYMBOL (~splstate~ ~EMOTION_HOPE~)
 OUTER_SET cbr_em_courage_name = RESOLVE_STR_REF (@3011)
-OUTER_SET cbr_em_courage_desc = RESOLVE_STR_REF (@3012)
+OUTER_SET cbr_em_courage_desc = RESOLVE_STR_REF (~%cbr_em_courage_desc_text%~)
 OUTER_SET cbr_em_hope_name = RESOLVE_STR_REF (@3013)
-OUTER_SET cbr_em_hope_desc = RESOLVE_STR_REF (@3014)
+OUTER_SET cbr_em_hope_desc = RESOLVE_STR_REF (~%cbr_em_hope_desc_text%~)
 OUTER_SET cbr_em_courage_status_name = "-1"
 OUTER_SET cbr_em_hope_status_name = "-1"
 ACTION_IF (cbr_em_need_courage = 1) BEGIN

@@ -2302,10 +2302,26 @@ class TempusHolyPowerTests(unittest.TestCase):
                     self.run_case(phase="allocate", splstate_layout=layout)
                 )
 
-    def test_rejects_partial_clab_cap_and_accepts_complete_cap(self) -> None:
+    def test_partially_cleared_clab_is_capped_to_five_and_complete_cap_is_untouched(self) -> None:
+        # The cap owns "at most five GA_OHTMPS1 uses", not an all-or-none
+        # late-grant fingerprint: a table where another edit already cleared
+        # level 26 still holds nine uses and must be capped to the first five.
         partial = self.run_case(phase="classify", clab_layout="partial")
-        self.assertFalse(partial.succeeded, "partially capped OHTEMPUS.2DA was accepted")
-        self.assertRegex(partial.transcript.upper(), r"CLAB|OHTEMPUS|PARTIALLY")
+        self.assert_success(partial)
+        self.assertEqual(
+            (partial.fixture.root / CLAB_NAME).read_bytes(),
+            (partial.output / CLAB_NAME).read_bytes(),
+            "classification must not rewrite OHTEMPUS.2DA",
+        )
+        progressed = self.run_case(phase="progression", clab_layout="partial")
+        self.assert_success(progressed)
+        self.assertEqual(
+            _clear_clab_holy_power_grants(
+                (progressed.fixture.root / CLAB_NAME).read_bytes(), (31, 36, 41, 46)
+            ),
+            (progressed.output / CLAB_NAME).read_bytes(),
+            "cap changed bytes outside the four remaining late grants",
+        )
 
         capped = self.run_case(phase="classify", clab_layout="capped")
         self.assert_success(capped)
