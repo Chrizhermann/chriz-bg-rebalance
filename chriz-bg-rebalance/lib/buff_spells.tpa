@@ -1,0 +1,493 @@
+// Components 340 (Aid: hit points only) and 341 (Luck: 90 seconds).
+// Design and evidence: research/2026-10-23-aid-luck-chaotic-commands.md
+//
+// Each component resolves its spell through SPELL.IDS and also changes its exact
+// copies: spells whose abilities and effects match it byte for byte (Bardic
+// Wonders' Troubadour copies Aid that way). Copies are collected before anything
+// changes. Membership arrays store the call's generation number, as in
+// potion_uniqueness.tpa, because WeiDU keeps array entries between components.
+
+// Bounds-checked SPL layout. Sets bs_ok, bs_ab, bs_nab, bs_fx, bs_nfx,
+// bs_cast_first, bs_cast_n; bs_std = 1 when the effect table follows the
+// abilities and fills the rest of the file, which a table rebuild needs.
+DEFINE_PATCH_MACRO cbr_bs_layout
+BEGIN
+  SET bs_ok = 0
+  SET bs_std = 0
+  SET bs_ab = 0
+  SET bs_nab = 0
+  SET bs_fx = 0
+  SET bs_nfx = 0
+  SET bs_cast_first = 0
+  SET bs_cast_n = 0
+  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+    READ_ASCII 0 bs_hdr (8)
+    PATCH_IF (~%bs_hdr%~ STR_EQ ~SPL V1  ~) BEGIN
+      READ_LONG  0x64 bs_ab
+      READ_SHORT 0x68 bs_nab
+      READ_LONG  0x6a bs_fx
+      READ_SHORT 0x6e bs_cast_first
+      READ_SHORT 0x70 bs_cast_n
+      PATCH_IF ((bs_ab >= 0x72) AND ((bs_ab + bs_nab * 0x28) <= BUFFER_LENGTH)
+        AND (bs_fx >= 0x72) AND (bs_fx <= BUFFER_LENGTH)) BEGIN
+        SET bs_nfx = (BUFFER_LENGTH - bs_fx) / 0x30
+        SET bs_ok = ((bs_cast_first + bs_cast_n) <= bs_nfx)
+        FOR (bs_la = 0; bs_ok AND (bs_la < bs_nab); ++bs_la) BEGIN
+          READ_SHORT (bs_ab + bs_la * 0x28 + 0x1e) bs_ln
+          READ_SHORT (bs_ab + bs_la * 0x28 + 0x20) bs_lf
+          PATCH_IF ((bs_lf + bs_ln) > bs_nfx) BEGIN SET bs_ok = 0 END
+        END
+        SET bs_std = (bs_ok AND ((bs_ab + bs_nab * 0x28) <= bs_fx)
+          AND (((BUFFER_LENGTH - bs_fx) MODULO 0x30) = 0))
+      END
+    END
+  END
+END
+
+// The abilities and their effects as text, without table positions (bs_sig).
+DEFINE_PATCH_MACRO cbr_bs_signature
+BEGIN
+  SPRINT bs_sig ~%bs_nab%~
+  FOR (bs_sa = 0; bs_sa < bs_nab; ++bs_sa) BEGIN
+    SET bs_at = bs_ab + bs_sa * 0x28
+    READ_SHORT (bs_at + 0x1e) bs_sn
+    READ_SHORT (bs_at + 0x20) bs_sf
+    FOR (bs_sj = 0; bs_sj < 10; ++bs_sj) BEGIN
+      // 0x20 is the first-effect index: a position, not content.
+      PATCH_IF (bs_sj = 8) BEGIN
+        READ_SHORT (bs_at + 0x22) bs_sv
+      END ELSE BEGIN
+        READ_LONG (bs_at + bs_sj * 4) bs_sv
+      END
+      SPRINT bs_sig ~%bs_sig%,%bs_sv%~
+    END
+    FOR (bs_sj = 0; bs_sj < bs_sn * 12; ++bs_sj) BEGIN
+      READ_LONG (bs_fx + bs_sf * 0x30 + bs_sj * 4) bs_sv
+      SPRINT bs_sig ~%bs_sig%,%bs_sv%~
+    END
+    SPRINT bs_sig ~%bs_sig%;~
+  END
+END
+
+// bs_res is a member of this call's family: bs_member_hit = 1.
+DEFINE_PATCH_MACRO cbr_bs_is_member
+BEGIN
+  SET bs_member_hit = 0
+  TO_UPPER bs_res
+  PATCH_IF (VARIABLE_IS_SET $cbr_bs_member(~%bs_res%~)) BEGIN
+    PATCH_IF ($cbr_bs_member(~%bs_res%~) = cbr_bs_gen) BEGIN SET bs_member_hit = 1 END
+  END
+END
+
+// Resolves bs_symbol to bs_anchor (bs_prefix + slot; bs_base 1000 for priest,
+// 2000 for wizard spells).
+DEFINE_ACTION_MACRO cbr_bs_resolve
+BEGIN
+  CLEAR_IDS_MAP
+  OUTER_SET bs_id = IDS_OF_SYMBOL (~spell~ ~%bs_symbol%~)
+  ACTION_IF ((bs_id < (bs_base + 100)) OR (bs_id > (bs_base + 999))) BEGIN
+    FAIL ~CBR %bs_what%: SPELL.IDS does not map %bs_symbol% to a %bs_prefix% spell.~
+  END
+  OUTER_SET bs_slot = bs_id - bs_base
+  OUTER_SPRINT bs_anchor ~%bs_prefix%%bs_slot%~
+  ACTION_IF NOT FILE_EXISTS_IN_GAME ~%bs_anchor%.spl~ BEGIN
+    FAIL ~CBR %bs_what%: SPELL.IDS maps %bs_symbol% to the missing %bs_anchor%.spl.~
+  END
+END
+
+// The family: bs_anchor first, then its exact copies in the order WeiDU lists
+// them, as $cbr_bs_fam(0 .. bs_nfam - 1) and $cbr_bs_member(RESREF).
+DEFINE_ACTION_MACRO cbr_bs_collect_family
+BEGIN
+  ACTION_IF (NOT VARIABLE_IS_SET cbr_bs_gen) BEGIN OUTER_SET cbr_bs_gen = 0 END
+  OUTER_SET cbr_bs_gen = cbr_bs_gen + 1
+  COPY_EXISTING ~%bs_anchor%.spl~ ~override~
+    LPM cbr_bs_layout
+    PATCH_IF ((NOT bs_ok) OR (bs_nab = 0)) BEGIN
+      PATCH_FAIL ~CBR %bs_what%: %SOURCE_FILE% has no usable ability table.~
+    END
+    LPM cbr_bs_signature
+    SPRINT bs_anchor_sig ~%bs_sig%~
+    SET bs_anchor_nab = bs_nab
+    READ_SHORT (bs_ab + 0x1e) bs_anchor_n0
+  BUT_ONLY
+  OUTER_SET bs_nfam = 1
+  OUTER_SPRINT $cbr_bs_fam(~0~) ~%bs_anchor%~
+  OUTER_SET $cbr_bs_member(~%bs_anchor%~) = cbr_bs_gen
+  COPY_EXISTING_REGEXP GLOB ~^.+\.spl$~ ~override~
+    SPRINT bs_res ~%SOURCE_RES%~
+    LPM cbr_bs_is_member
+    PATCH_IF NOT bs_member_hit BEGIN
+      LPM cbr_bs_layout
+      // Cheap filters first; only a full match is a copy.
+      PATCH_IF (bs_ok AND (bs_nab = bs_anchor_nab)) BEGIN
+        READ_SHORT (bs_ab + 0x1e) bs_n0
+        PATCH_IF (bs_n0 = bs_anchor_n0) BEGIN
+          LPM cbr_bs_signature
+          PATCH_IF (~%bs_sig%~ STR_EQ ~%bs_anchor_sig%~) BEGIN
+            SPRINT $cbr_bs_fam(~%bs_nfam%~) ~%bs_res%~
+            SET bs_nfam += 1
+            SET $cbr_bs_member(~%bs_res%~) = cbr_bs_gen
+          END
+        END
+      END
+    END
+  BUT_ONLY
+  OUTER_SPRINT bs_members ~~
+  OUTER_FOR (bs_fi = 0; bs_fi < bs_nfam; ++bs_fi) BEGIN
+    OUTER_SPRINT bs_member $cbr_bs_fam(~%bs_fi%~)
+    OUTER_SPRINT bs_members ~%bs_members% %bs_member%~
+  END
+END
+
+// Appends a copy of the effect at bs_src; bs_dst is the copy's offset.
+DEFINE_PATCH_MACRO cbr_bs_append_copy
+BEGIN
+  SET bs_dst = BUFFER_LENGTH
+  INSERT_BYTES bs_dst 0x30
+  FOR (bs_c = 0; bs_c < 12; ++bs_c) BEGIN
+    READ_LONG (bs_src + bs_c * 4) bs_v
+    WRITE_LONG (bs_dst + bs_c * 4) bs_v
+  END
+END
+
+// Aid (340) for one family member. Per ability, L = max(ability level, 3), the
+// cleric's minimum level for a 2nd-level spell, as Spell Revisions uses it:
+// - the timed opcode-129 payload goes. A timed opcode-18 type-0 bonus becomes
+//   min(L, 10) + 1d8 hit points; without one (native Aid) the opcode 129 itself
+//   becomes that bonus, keeping its delivery fields;
+// - every timed effect that lasted exactly as long as the payload lasts 60 * L
+//   seconds (glow, icon, end sound);
+// - the ability starts with one opcode-321 refresh per family member, so a recast
+//   of any member replaces the bonus instead of stacking it. The ability's first
+//   family refresh is the template; otherwise Spell Revisions' form is used.
+// Each ability gets its own copy of its effects; casting effects stay first.
+DEFINE_PATCH_MACRO cbr_bs_aid_patch
+BEGIN
+  LPM cbr_bs_layout
+  PATCH_IF ((NOT bs_std) OR (bs_nab = 0)) BEGIN
+    PATCH_FAIL ~CBR Aid: %SOURCE_FILE% has invalid or unsupported ability/effect tables.~
+  END
+  // Plan every ability before anything changes.
+  FOR (bs_a = 0; bs_a < bs_nab; ++bs_a) BEGIN
+    SET bs_at = bs_ab + bs_a * 0x28
+    READ_SHORT (bs_at + 0x10) bs_level
+    READ_SHORT (bs_at + 0x1e) bs_n
+    READ_SHORT (bs_at + 0x20) bs_first
+    SET bs_n129 = 0
+    SET bs_n18 = 0
+    SET bs_tpl = (0 - 1)
+    FOR (bs_i = 0; bs_i < bs_n; ++bs_i) BEGIN
+      SET bs_e = bs_fx + (bs_first + bs_i) * 0x30
+      READ_SHORT bs_e bs_op
+      PATCH_IF (bs_op = 129) BEGIN
+        SET bs_n129 += 1
+        SET bs_i129 = bs_i
+      END
+      PATCH_IF (bs_op = 18) BEGIN
+        SET bs_n18 += 1
+        SET bs_i18 = bs_i
+      END
+      PATCH_IF ((bs_op = 321) AND (bs_tpl < 0)) BEGIN
+        READ_ASCII (bs_e + 0x14) bs_res (8) NULL
+        LPM cbr_bs_is_member
+        PATCH_IF bs_member_hit BEGIN SET bs_tpl = bs_i END
+      END
+    END
+    PATCH_IF ((bs_n129 > 1) OR (bs_n18 > 1) OR ((bs_n129 = 0) AND (bs_n18 = 0))) BEGIN
+      PATCH_FAIL ~CBR Aid: %SOURCE_FILE% (ability for level %bs_level%) does not have exactly one Aid payload; found %bs_n129% opcode-129 and %bs_n18% opcode-18 effects.~
+    END
+    SET bs_drop = (0 - 1)
+    PATCH_IF (bs_n129 = 1) BEGIN
+      SET bs_pay = bs_i129
+      SET bs_e = bs_fx + (bs_first + bs_i129) * 0x30
+      READ_BYTE (bs_e + 0x02) bs_ptarget
+      READ_BYTE (bs_e + 0x0c) bs_ptiming
+      READ_LONG (bs_e + 0x0e) bs_old
+      PATCH_IF ((bs_ptiming != 0) OR (bs_old <= 0)) BEGIN
+        PATCH_FAIL ~CBR Aid: %SOURCE_FILE% (ability for level %bs_level%) has an opcode-129 effect that is not a timed bonus.~
+      END
+      PATCH_IF (bs_n18 = 1) BEGIN
+        SET bs_e = bs_fx + (bs_first + bs_i18) * 0x30
+        READ_BYTE (bs_e + 0x02) bs_t18
+        READ_LONG (bs_e + 0x08) bs_p2
+        READ_BYTE (bs_e + 0x0c) bs_tm18
+        READ_LONG (bs_e + 0x0e) bs_d18
+        PATCH_IF ((bs_t18 != bs_ptarget) OR (bs_p2 != 0) OR (bs_tm18 != 0) OR (bs_d18 != bs_old)) BEGIN
+          PATCH_FAIL ~CBR Aid: %SOURCE_FILE% (ability for level %bs_level%) has opcode-129 and opcode-18 effects that do not form one timed bonus.~
+        END
+        SET bs_drop = bs_i129
+        SET bs_pay = bs_i18
+      END
+    END ELSE BEGIN
+      // Already converted: one timed type-0 bonus with 1d8.
+      SET bs_pay = bs_i18
+      SET bs_e = bs_fx + (bs_first + bs_i18) * 0x30
+      READ_BYTE (bs_e + 0x02) bs_ptarget
+      READ_LONG (bs_e + 0x08) bs_p2
+      READ_BYTE (bs_e + 0x0c) bs_ptiming
+      READ_LONG (bs_e + 0x0e) bs_old
+      READ_LONG (bs_e + 0x1c) bs_dice
+      READ_LONG (bs_e + 0x20) bs_sides
+      PATCH_IF ((bs_p2 != 0) OR (bs_ptiming != 0) OR (bs_old <= 0) OR (bs_dice != 1) OR (bs_sides != 8)) BEGIN
+        PATCH_FAIL ~CBR Aid: %SOURCE_FILE% (ability for level %bs_level%) has no opcode-129 payload and no timed 1d8 hit point bonus.~
+      END
+    END
+    PATCH_IF (bs_level < 3) BEGIN SET bs_l = 3 END ELSE BEGIN SET bs_l = bs_level END
+    SET $cbr_bsa_new(~%bs_a%~) = 60 * bs_l
+    PATCH_IF (bs_l > 10) BEGIN SET $cbr_bsa_hp(~%bs_a%~) = 10 END ELSE BEGIN SET $cbr_bsa_hp(~%bs_a%~) = bs_l END
+    SET $cbr_bsa_pay(~%bs_a%~) = bs_pay
+    SET $cbr_bsa_drop(~%bs_a%~) = bs_drop
+    SET $cbr_bsa_old(~%bs_a%~) = bs_old
+    SET $cbr_bsa_tpl(~%bs_a%~) = bs_tpl
+    SET $cbr_bsa_target(~%bs_a%~) = bs_ptarget
+  END
+
+  // Build the new table after the old one, then remove the old one.
+  SET bs_total = bs_nfx
+  SET bs_out = 0
+  FOR (bs_i = 0; bs_i < bs_cast_n; ++bs_i) BEGIN
+    SET bs_src = bs_fx + (bs_cast_first + bs_i) * 0x30
+    LPM cbr_bs_append_copy
+    SET bs_out += 1
+  END
+  WRITE_SHORT 0x6e 0
+  FOR (bs_a = 0; bs_a < bs_nab; ++bs_a) BEGIN
+    SET bs_at = bs_ab + bs_a * 0x28
+    READ_SHORT (bs_at + 0x1e) bs_n
+    READ_SHORT (bs_at + 0x20) bs_first
+    SET bs_start = bs_out
+    FOR (bs_m = 0; bs_m < bs_nfam; ++bs_m) BEGIN
+      SPRINT bs_mres $cbr_bs_fam(~%bs_m%~)
+      PATCH_IF ($cbr_bsa_tpl(~%bs_a%~) >= 0) BEGIN
+        SET bs_src = bs_fx + (bs_first + $cbr_bsa_tpl(~%bs_a%~)) * 0x30
+        LPM cbr_bs_append_copy
+      END ELSE BEGIN
+        // Spell Revisions' refresh: non-dispellable, ignores magic resistance,
+        // on the payload's recipient.
+        SET bs_dst = BUFFER_LENGTH
+        INSERT_BYTES bs_dst 0x30
+        WRITE_SHORT bs_dst 321
+        WRITE_BYTE (bs_dst + 0x02) $cbr_bsa_target(~%bs_a%~)
+        WRITE_BYTE (bs_dst + 0x0c) 1
+        WRITE_BYTE (bs_dst + 0x12) 100
+      END
+      WRITE_ASCIIE (bs_dst + 0x14) ~%bs_mres%~ #8
+      SET bs_out += 1
+    END
+    FOR (bs_i = 0; bs_i < bs_n; ++bs_i) BEGIN
+      SET bs_src = bs_fx + (bs_first + bs_i) * 0x30
+      READ_SHORT bs_src bs_op
+      SET bs_skip = (bs_i = $cbr_bsa_drop(~%bs_a%~))
+      PATCH_IF (bs_op = 321) BEGIN
+        READ_ASCII (bs_src + 0x14) bs_res (8) NULL
+        LPM cbr_bs_is_member
+        PATCH_IF bs_member_hit BEGIN SET bs_skip = 1 END
+      END
+      PATCH_IF (NOT bs_skip) BEGIN
+        LPM cbr_bs_append_copy
+        PATCH_IF (bs_i = $cbr_bsa_pay(~%bs_a%~)) BEGIN
+          WRITE_SHORT bs_dst 18
+          WRITE_LONG (bs_dst + 0x04) $cbr_bsa_hp(~%bs_a%~)
+          WRITE_LONG (bs_dst + 0x08) 0
+          WRITE_LONG (bs_dst + 0x0e) $cbr_bsa_new(~%bs_a%~)
+          WRITE_LONG (bs_dst + 0x1c) 1
+          WRITE_LONG (bs_dst + 0x20) 8
+        END ELSE BEGIN
+          READ_BYTE (bs_src + 0x0c) bs_tm
+          READ_LONG (bs_src + 0x0e) bs_du
+          PATCH_IF (((bs_tm = 0) OR (bs_tm = 3) OR (bs_tm = 4)) AND (bs_du = $cbr_bsa_old(~%bs_a%~))) BEGIN
+            WRITE_LONG (bs_dst + 0x0e) $cbr_bsa_new(~%bs_a%~)
+          END
+        END
+        SET bs_out += 1
+      END
+    END
+    WRITE_SHORT (bs_at + 0x20) bs_start
+    WRITE_SHORT (bs_at + 0x1e) (bs_out - bs_start)
+  END
+  DELETE_BYTES bs_fx (bs_total * 0x30)
+END
+
+// Luck (341) for one family member: every timed effect that lasts exactly as
+// long as the Luck bonus (opcode 133, else a timed opcode-22 luck bonus) now
+// lasts 90 seconds. Other durations, such as a short glow, stay.
+DEFINE_PATCH_MACRO cbr_bs_luck_patch
+BEGIN
+  LPM cbr_bs_layout
+  PATCH_IF ((NOT bs_ok) OR (bs_nab = 0)) BEGIN
+    PATCH_FAIL ~CBR Luck: %SOURCE_FILE% has invalid ability/effect tables.~
+  END
+  // Plan first: abilities may share effect records.
+  FOR (bs_i = 0; bs_i < bs_nfx; ++bs_i) BEGIN SET $cbr_bsl_set(~%bs_i%~) = 0 END
+  FOR (bs_a = 0; bs_a < bs_nab; ++bs_a) BEGIN
+    SET bs_at = bs_ab + bs_a * 0x28
+    READ_SHORT (bs_at + 0x10) bs_level
+    READ_SHORT (bs_at + 0x1e) bs_n
+    READ_SHORT (bs_at + 0x20) bs_first
+    SET bs_old = (0 - 1)
+    PATCH_FOR_EACH bs_luck_op IN 133 22 BEGIN
+      PATCH_IF (bs_old < 0) BEGIN
+        FOR (bs_i = 0; bs_i < bs_n; ++bs_i) BEGIN
+          SET bs_e = bs_fx + (bs_first + bs_i) * 0x30
+          READ_SHORT bs_e bs_op
+          READ_BYTE (bs_e + 0x0c) bs_tm
+          READ_LONG (bs_e + 0x0e) bs_du
+          PATCH_IF ((bs_op = bs_luck_op) AND (bs_tm = 0)) BEGIN
+            PATCH_IF ((bs_old >= 0) AND (bs_du != bs_old)) BEGIN
+              PATCH_FAIL ~CBR Luck: %SOURCE_FILE% (ability for level %bs_level%) has Luck bonuses with different durations.~
+            END
+            SET bs_old = bs_du
+          END
+        END
+      END
+    END
+    PATCH_IF (bs_old <= 0) BEGIN
+      PATCH_FAIL ~CBR Luck: %SOURCE_FILE% (ability for level %bs_level%) has no timed Luck bonus.~
+    END
+    FOR (bs_i = 0; bs_i < bs_n; ++bs_i) BEGIN
+      SET bs_e = bs_fx + (bs_first + bs_i) * 0x30
+      READ_BYTE (bs_e + 0x0c) bs_tm
+      READ_LONG (bs_e + 0x0e) bs_du
+      PATCH_IF (((bs_tm = 0) OR (bs_tm = 3) OR (bs_tm = 4)) AND (bs_du = bs_old)) BEGIN
+        SET bs_gi = bs_first + bs_i
+        SET $cbr_bsl_set(~%bs_gi%~) = 1
+      END
+    END
+  END
+  FOR (bs_i = 0; bs_i < bs_nfx; ++bs_i) BEGIN
+    PATCH_IF ($cbr_bsl_set(~%bs_i%~)) BEGIN
+      WRITE_LONG (bs_fx + bs_i * 0x30 + 0x0e) 90
+    END
+  END
+END
+
+// Rewrites the text at bs_off with the phrases of bs_kind (aid or luck). Text
+// that is not recognized stays unchanged; bs_warn = 1 reports it.
+DEFINE_PATCH_MACRO cbr_bs_description
+BEGIN
+  READ_LONG bs_off bs_ref
+  PATCH_IF (bs_ref > 0) BEGIN
+    GET_STRREF bs_ref bs_text
+    INNER_PATCH_SAVE bs_new_text ~%bs_text%~ BEGIN
+      PATCH_IF (~%bs_kind%~ STR_EQ ~aid~) BEGIN
+        REPLACE_TEXTUALLY ~gains a [+]1 bonus to attack rolls, damage rolls,? and saving throws, plus ~ ~gains ~
+        REPLACE_TEXTUALLY ~gains the benefits of a Bless spell ([^)]*) and a special bonus of 1d8 additional Hit Points~ ~gains a special bonus of 1d8 additional Hit Points +1 per level of the caster (up to a maximum of 1d8+10)~
+        REPLACE_TEXTUALLY ~Duration:[^%WNL%%MNL%%LNL%]*~ ~Duration: 1 turn/level~
+      END ELSE BEGIN
+        REPLACE_TEXTUALLY ~Duration:[^%WNL%%MNL%%LNL%]*~ ~Duration: 15 rounds~
+        REPLACE_TEXTUALLY ~for the next \([0-9a-z]+ \)?\(round\|turn\|hour\|minute\|second\)s?~ ~for the next 15 rounds~
+      END
+    END
+    PATCH_IF (~%bs_kind%~ STR_EQ ~aid~) BEGIN
+      SET bs_known = (((INDEX (CASE_SENSITIVE EXACT_MATCH ~Duration: 1 turn/level~ ~%bs_new_text%~)) >= 0)
+        AND ((INDEX (CASE_SENSITIVE EXACT_MATCH ~1d8~ ~%bs_new_text%~)) >= 0)
+        AND ((INDEX (CASE_INSENSITIVE EXACT_MATCH ~bonus to attack rolls~ ~%bs_new_text%~)) < 0)
+        AND ((INDEX (CASE_INSENSITIVE EXACT_MATCH ~benefits of a Bless spell~ ~%bs_new_text%~)) < 0))
+    END ELSE BEGIN
+      SET bs_known = ((INDEX (CASE_SENSITIVE EXACT_MATCH ~Duration: 15 rounds~ ~%bs_new_text%~)) >= 0)
+    END
+    PATCH_IF bs_known BEGIN
+      PATCH_IF NOT (~%bs_new_text%~ STR_EQ ~%bs_text%~) BEGIN
+        WRITE_LONG bs_off (RESOLVE_STR_REF (~%bs_new_text%~))
+      END
+    END ELSE PATCH_IF bs_warn BEGIN
+      PATCH_WARN ~CBR %bs_what%: the description of %SOURCE_FILE% has different or untranslated text; left unchanged.~
+    END
+  END
+END
+
+// Effects bs_s_first .. + bs_s_n of an item that teach a family member.
+DEFINE_PATCH_MACRO cbr_bs_teach_slice
+BEGIN
+  FOR (bs_i = 0; bs_i < bs_s_n; ++bs_i) BEGIN
+    SET bs_e = bs_ifx + (bs_s_first + bs_i) * 0x30
+    PATCH_IF ((bs_e + 0x30) <= BUFFER_LENGTH) BEGIN
+      READ_SHORT bs_e bs_op
+      PATCH_IF (bs_op = 147) BEGIN
+        READ_ASCII (bs_e + 0x14) bs_res (8) NULL
+        LPM cbr_bs_is_member
+        PATCH_IF bs_member_hit BEGIN SET bs_teach = 1 END
+      END
+    END
+  END
+END
+
+// Items that teach a family member (opcode 147, scrolls) get the same text
+// update as the spell; their identified description warns when unrecognized.
+DEFINE_ACTION_MACRO cbr_bs_scroll_descriptions
+BEGIN
+  COPY_EXISTING_REGEXP GLOB ~^.+\.itm$~ ~override~
+    SET bs_teach = 0
+    PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+      READ_ASCII 0 bs_hdr (8)
+      PATCH_IF (~%bs_hdr%~ STR_EQ ~ITM V1  ~) BEGIN
+        READ_LONG  0x64 bs_iab
+        READ_SHORT 0x68 bs_inab
+        READ_LONG  0x6a bs_ifx
+        PATCH_IF ((bs_iab >= 0x72) AND ((bs_iab + bs_inab * 0x38) <= BUFFER_LENGTH) AND (bs_ifx >= 0x72)) BEGIN
+          READ_SHORT 0x6e bs_s_first
+          READ_SHORT 0x70 bs_s_n
+          LPM cbr_bs_teach_slice
+          FOR (bs_ia = 0; bs_ia < bs_inab; ++bs_ia) BEGIN
+            READ_SHORT (bs_iab + bs_ia * 0x38 + 0x1e) bs_s_n
+            READ_SHORT (bs_iab + bs_ia * 0x38 + 0x20) bs_s_first
+            LPM cbr_bs_teach_slice
+          END
+        END
+      END
+    END
+    PATCH_IF bs_teach BEGIN
+      SET bs_off = 0x54
+      SET bs_warn = 1
+      LPM cbr_bs_description
+      SET bs_off = 0x50
+      SET bs_warn = 0
+      LPM cbr_bs_description
+    END
+  BUT_ONLY IF_EXISTS
+END
+
+DEFINE_ACTION_FUNCTION cbr_install_aid_hp
+BEGIN
+  OUTER_SPRINT bs_what ~Aid~
+  OUTER_SPRINT bs_kind ~aid~
+  OUTER_SPRINT bs_symbol ~CLERIC_AID~
+  OUTER_SPRINT bs_prefix ~SPPR~
+  OUTER_SET bs_base = 1000
+  LAM cbr_bs_resolve
+  LAM cbr_bs_collect_family
+  OUTER_FOR (bs_fi = 0; bs_fi < bs_nfam; ++bs_fi) BEGIN
+    OUTER_SPRINT bs_member $cbr_bs_fam(~%bs_fi%~)
+    COPY_EXISTING ~%bs_member%.spl~ ~override~
+      LPM cbr_bs_aid_patch
+      SET bs_off = 0x50
+      SET bs_warn = 1
+      LPM cbr_bs_description
+    BUT_ONLY
+  END
+  LAM cbr_bs_scroll_descriptions
+  PRINT @3401
+END
+
+DEFINE_ACTION_FUNCTION cbr_install_luck_duration
+BEGIN
+  OUTER_SPRINT bs_what ~Luck~
+  OUTER_SPRINT bs_kind ~luck~
+  OUTER_SPRINT bs_symbol ~WIZARD_LUCK~
+  OUTER_SPRINT bs_prefix ~SPWI~
+  OUTER_SET bs_base = 2000
+  LAM cbr_bs_resolve
+  LAM cbr_bs_collect_family
+  OUTER_FOR (bs_fi = 0; bs_fi < bs_nfam; ++bs_fi) BEGIN
+    OUTER_SPRINT bs_member $cbr_bs_fam(~%bs_fi%~)
+    COPY_EXISTING ~%bs_member%.spl~ ~override~
+      LPM cbr_bs_luck_patch
+      SET bs_off = 0x50
+      SET bs_warn = 1
+      LPM cbr_bs_description
+    BUT_ONLY
+  END
+  LAM cbr_bs_scroll_descriptions
+  PRINT @3402
+END

@@ -1,5 +1,25 @@
 # chriz-bg-rebalance — Handover
 
+## October 23 — Chris Revisions, first batch: Aid, Luck, Chaotic Commands (unreleased)
+
+Components 340 (Aid: hit points only), 341 (Luck: 90 seconds) and 350 (Chaotic
+Commands for druids) implement Christopher's October 23 decisions. Libraries
+`chriz-bg-rebalance/lib/buff_spells.tpa` and `druid_access.tpa`; decisions,
+binary evidence and design in `research/2026-10-23-aid-luck-chaotic-commands.md`,
+which builds on the October 11 review (`research/2026-10-11-general-spell-balance-design.md`).
+
+Verified: `tests/test_aid_luck_druid_access.py` (real WeiDU on synthetic games)
+and the release-package test. A scratch install on copies of the installed SR,
+Bardic Wonders and original BIFF resources, with the installed `dialog.tlk`,
+changed only the expected files, recognized every description and uninstalled
+cleanly. Full regression `python -B -m unittest discover -s tests -t .`: 583 tests
+OK, 26 skipped (private captures) with WeiDU 249. Not launched in a game.
+
+Open: in-game check (the 1d8 hit point roll; druids receiving Chaotic Commands at
+level-up); Bless and a stacking rule for Bless/Chant/Prayer/Recitation await
+Christopher's decision; the collection's curation entry; tag/release only with
+Christopher's approval.
+
 ## October 14 — v0.8.3 candidate: potion uniqueness and Heroism family (local, unpublished)
 
 Components 330/331 (choose one) and 332 follow the behaviour Christopher agreed
