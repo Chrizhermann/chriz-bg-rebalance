@@ -72,7 +72,8 @@ class RequestSyntaxTests(unittest.TestCase):
                              "queue.lua": ("PAUSE_FIRST", "NOT_THE_SUBJECT", "ARM_FIRST", "DISARMED_ONLY",
                                            "FIXTURES_PRESENT", "NO_CONTROLLER", "NOT_THE_CONTROLLER",
                                            "CONTROLLER_BUSY", "FIXTURES_FIRST", "TIME_STOP_ACTIVE",
-                                           "INVALID_WAIT"),
+                                           "INVALID_WAIT", "UNKNOWN_SPELL", "SUBJECT_BUSY",
+                                           "HASTE_PRESENT", "FIXTURES_MIXED"),
                              "pause.lua": ("NO_GAME", "PAUSE_STATE_UNCHANGED"),
                              "dialog.lua": ("CONFIRM_MODE_REQUIRED", "DIALOG_BUTTON_NOT_CLICKABLE"),
                              "pick-character.lua": ("AMBIGUOUS_CHARACTER", "CHARACTER_NOT_FOUND"),
@@ -163,6 +164,37 @@ class QueueRequestTests(unittest.TestCase):
                 ok, error, count = self.queue({**base, "wait": wait})[:3]
                 self.assertEqual((ok, count), (False, 0))
                 self.assertIn("INVALID_WAIT", error)
+
+    def test_haste_runs_on_the_subject_after_its_wait(self):
+        for spell in ("CBRTHST", "CBRTIHS"):
+            with self.subTest(spell=spell):
+                ok, response, count, target = self.queue({"what": "haste", "spell": spell, "wait": "74"})
+                self.assertTrue(ok, response)
+                self.assertEqual((response, count, target),
+                                 (f'SmallWait(74)\nApplySpellRES("{spell}",Myself)', 1, "CBRTS Subject"))
+        ok, response, _, _ = self.queue({"what": "haste", "spell": "CBRTHST", "wait": "0"}, fixtures=())
+        self.assertEqual((ok, response), (True, 'ApplySpellRES("CBRTHST",Myself)'))
+
+    def test_haste_refuses_without_a_clean_case(self):
+        base = {"what": "haste", "spell": "CBRTHST", "wait": "74"}
+        cases = {
+            "ARM_FIRST": ({}, {"armed": False}),
+            "UNKNOWN_SPELL": ({"spell": "CBRTSTP"}, {}),
+            "SUBJECT_BUSY": ({}, {"action": 23}),
+            "HASTE_PRESENT": ({}, {"fixtures": ("CBRTBUF", "CBRTREG", "CBRTIHS")}),
+            "FIXTURES_MIXED": ({}, {"fixtures": ("CBRTREG",)}),
+            "TIME_STOP_ACTIVE": ({}, {"stop": 90}),
+            "INVALID_WAIT": ({"wait": "301"}, {}),
+        }
+        for guard, (arguments, state) in cases.items():
+            with self.subTest(guard=guard):
+                ok, error, count = self.queue({**base, **arguments}, **state)[:3]
+                self.assertEqual((ok, count), (False, 0))
+                self.assertIn(guard, error)
+        with self.subTest(guard="FIXTURES_MIXED", case="two of each"):
+            ok, error, count = self.queue(base, fixtures=("CBRTBUF", "CBRTREG") * 2)[:3]
+            self.assertEqual((ok, count), (False, 0))
+            self.assertIn("FIXTURES_MIXED", error)
 
     def test_fixtures_go_only_onto_a_clean_subject(self):
         ok, response, count, target = self.queue({"what": "fixtures"}, fixtures=())
