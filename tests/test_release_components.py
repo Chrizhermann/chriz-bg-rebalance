@@ -37,7 +37,8 @@ def arrow_resources():
         struct.pack_into("<I", header, 0x0c, desc - 1)
         struct.pack_into("<I", header, 0x54, desc)
         ab = bytearray(56)
-        ab[0] = 2
+        ab[0] = 2  # attack type: ranged
+        ab[0x10] = 1  # launcher: bow (as on the reference arrows)
         struct.pack_into("<H", ab, 0x14, bonus)
         struct.pack_into("<H", ab, 0x1a, bonus)
         result[name + ".ITM"] = ItmFile(
@@ -113,7 +114,10 @@ class ReleaseComponentsTests(unittest.TestCase):
         self.assertNotIn("SUCCESSFULLY INSTALLED", output)
         self.assertEqual(g.original, g.snapshot())
 
-    def test_arrows_malformed_last_item_rolls_back(self):
+    def test_arrows_last_item_without_fire_package_warns_and_stays_unchanged(self):
+        # Formerly a rollback test: a non-fire, unknown-mode damage record is not
+        # malformed, only not the fire package. Genuinely malformed tables still
+        # roll back (tests/test_elemental_arrows.py).
         resources = arrow_resources()
         item = ItmFile.from_bytes(resources["AROWKC.ITM"])
         ability = item.abilities[0]
@@ -122,8 +126,15 @@ class ReleaseComponentsTests(unittest.TestCase):
             dataclasses.replace(ability, effects=(wrong, *ability.effects[1:])),)).to_bytes()
         g = self.game(resources, log="~STRATAGEMS/SETUP-STRATAGEMS.TP2~ #0 #2000\n")
         code, output = run_public(g, 130)
-        self.assertNotEqual(0, code, output)
-        self.assertIn("NOT INSTALLED DUE TO ERRORS", output)
+        self.assertNotIn("NOT INSTALLED", output)
+        self.assertIn("INSTALLED WITH WARNINGS", output)
+        self.assertIn("AROWKC.ITM has no fire damage package", output)
+        after = g.snapshot()
+        self.assertEqual(g.original["AROWKC.ITM"], after["AROWKC.ITM"])
+        for name in ("AROW04", "AROW09", "AROW08"):
+            self.assertNotEqual(g.original[name + ".ITM"], after[name + ".ITM"], name)
+        code, output = run_public(g, 130, uninstall=True)
+        self.assertEqual(0, code, output)
         self.assertEqual(g.original, g.snapshot())
 
     def test_bracers_public_matches_tail_and_uninstalls(self):

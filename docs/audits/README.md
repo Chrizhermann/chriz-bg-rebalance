@@ -25,8 +25,10 @@ checkout/ref, affected paths, plausible counterexamples, and tests to add.
    the jailbreak's silent wrong-spell fallback, then fixed dialogue IDs/counts,
    encounter-coordinate fingerprints, creature/effect-layout restrictions.
 2. [Rebalance, SR and BuffBot](2026-10-08-sr-rebalance-compatibility.md): Bracers,
-   Emotion, elemental arrows, RR spell migration, Tempus, and SR Lightning Bolt.
-   Cloud resistance ownership needs a balance decision before refactoring.
+   Emotion, elemental arrows, RR spell migration, Tempus, cloud forms and SR
+   Lightning Bolt are implemented on review branches (2026-10-17, unreleased);
+   see its implementation status. Cloud forms: Christopher decided on
+   2026-10-20 that 75% is the target for immunity, not a cap.
 3. [Artisan, Bardic, Aura and Randomiser](2026-10-08-forks-compatibility.md):
    Bardic's Abettor payload and Artisan's standalone Fighter Modals retrofit.
    No comparable defect established in inspected Aura/BuffBot paths. Randomiser's

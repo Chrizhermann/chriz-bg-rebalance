@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.ie_formats import ItmFile, SplAbility, SplEffect, SplFile, make_spl
+from tests.ie_formats import ItmAbility, ItmFile, SplAbility, SplEffect, SplFile, make_spl
 from tests.test_flail_of_ages import strings, tlk
 from tests.test_tempus_holy_power_installer import _write_key_and_bif
 
@@ -157,18 +157,24 @@ def expected_form(blob):
     for offset in referenced_effect_offsets(blob):
         opcode, = struct.unpack_from("<H", blob, offset)
         p1, p2 = struct.unpack_from("<ii", blob, offset + 4)
-        if p1 == 100 and p2 == 1:
-            if opcode in RESISTANCE_OPCODES:
-                struct.pack_into("<i", raw, offset + 4, 75)
-            elif opcode == 166:
-                struct.pack_into("<ii", raw, offset + 4, 0, 0)
+        # Immunity (a set value of 100 or more) is owned; lower values are
+        # another mod's or an earlier decision and stay as they are.
+        if opcode in RESISTANCE_OPCODES and p2 == 1 and p1 >= 100:
+            struct.pack_into("<i", raw, offset + 4, 75)
+        elif opcode == 166 and (p1, p2) == (100, 1):
+            struct.pack_into("<ii", raw, offset + 4, 0, 0)
     return bytes(raw)
 
 
 def expected_clone(blob):
     raw = bytearray(blob)
-    # CRE V1: 0x5D is MR; 0x63 is MISSILE, not poison resistance.
-    raw[0x59:0x64] = bytes([75, 75, 75, 75, 0, 75, 75, 75, 75, 75, 75])
+    # CRE V1: 0x5D is MR; 0x63 is MISSILE, not poison resistance. Signed bytes.
+    for offset in range(0x59, 0x64):
+        value, = struct.unpack_from("<b", blob, offset)
+        if offset == 0x5D:
+            raw[offset] = 0
+        elif value >= 100:
+            raw[offset] = 75
     return bytes(raw)
 
 
@@ -257,7 +263,7 @@ class CloudFormsTests(unittest.TestCase):
         for path, before in game.stable.items():
             self.assertEqual(before, path.read_bytes(), str(path))
 
-    def assert_exact_install(self, game):
+    def assert_exact_install(self, game, *, described=True):
         after = game.snapshot()
         expected = dict(game.original)
         for name in FORMS:
@@ -272,7 +278,9 @@ class CloudFormsTests(unittest.TestCase):
                 continue
             old_ref, = struct.unpack_from("<I", expected[name], 0x50)
             new_ref, = struct.unpack_from("<I", after[name], 0x50)
-            wanted = game.original_texts[old_ref].replace(OLD_PHRASE, NEW_PHRASE)
+            wanted = game.original_texts[old_ref]
+            if described:
+                wanted = wanted.replace(OLD_PHRASE, NEW_PHRASE)
             self.assertEqual(wanted, strings(game.tlk)[new_ref])
             if wanted != game.original_texts[old_ref]:
                 self.assertGreaterEqual(new_ref, len(game.original_texts))
@@ -379,9 +387,10 @@ class CloudFormsTests(unittest.TestCase):
         del resources["GASFORM4.CRE"]
         self.failed_unchanged(self.game(resources), "combat mist donor is missing")
 
-    def test_unsupported_donor_header_resistance_or_inventory_fails(self):
+    def test_unsupported_donor_header_or_inventory_fails(self):
+        # Resistance bytes are not fingerprints any more (2026-10-17); see
+        # test_donor_resistance_bytes_follow_the_immunity_rule.
         mutations = ((0, b"CRE V9.9"), (0x28, struct.pack("<I", 0x6400)),
-                     (0x59, bytes([125])), (0x5D, bytes([0])), (0x63, bytes([75])),
                      (0x2C0, struct.pack("<I", 1)), (0x33, bytes([2])))
         for offset, replacement in mutations:
             with self.subTest(offset=hex(offset)):
@@ -426,9 +435,11 @@ class CloudFormsTests(unittest.TestCase):
         self.failed_unchanged(self.game(resources), "invalid summon description resource")
 
     def test_unreviewed_resistance_delivery_or_missing_form_signature_fails(self):
-        changes = ((86, {"parameter2": 0}), (86, {"parameter1": 50}),
+        # A partial value and a missing regeneration are valid variations now
+        # (2026-10-17); see the tests after test_partial_existing_75_values_do_not_compound.
+        changes = ((86, {"parameter2": 0}),
                    (86, {"target": 2}), (86, {"timing": 2}), (86, {"duration": 0}),
-                   (98, {"opcode": 142}), (53, {"parameter1": 0x6400}))
+                   (53, {"parameter1": 0x6400}))
         for opcode, fields in changes:
             with self.subTest(opcode=opcode, fields=fields):
                 resources = synthetic()
@@ -484,6 +495,127 @@ class CloudFormsTests(unittest.TestCase):
         game = self.game(resources)
         self.installed(game)
         self.assert_exact_install(game)
+
+    def test_lower_resistances_are_kept_and_only_immunity_becomes_75(self):
+        resources = synthetic()
+        for name in ("OHBEGASF.SPL", "BDGASFOR.SPL", "FINBODGF.ITM"):
+            blob = mutate_effect(resources[name], 86, parameter1=80)
+            blob = mutate_effect(blob, 87, parameter1=110)
+            blob = mutate_effect(blob, 27, parameter1=-50)  # a vulnerability
+            resources[name] = mutate_effect(blob, 28, parameter1=99)
+        game = self.game(resources)
+        self.installed(game)
+        self.assert_exact_install(game)
+        changed = SplFile.from_bytes(game.snapshot()["OHBEGASF.SPL"]).all_effects()
+        values = {fx.opcode: fx.parameter1 for fx in changed if fx.opcode in RESISTANCE_OPCODES}
+        self.assertEqual({27: -50, 28: 99, 29: 75, 30: 75, 31: 75, 84: 75, 85: 75,
+                          86: 80, 87: 75, 88: 75, 89: 75}, values)
+        first, first_tlk = game.snapshot(), game.tlk.read_bytes()
+        self.installed(game, repeat=True)
+        self.assertEqual(first, game.snapshot())
+        self.assertEqual(first_tlk, game.tlk.read_bytes())
+
+    def test_forms_without_regeneration_or_with_fewer_resistances_install(self):
+        resources = synthetic()
+        resources["OHBEGASF.SPL"] = mutate_effect(resources["OHBEGASF.SPL"], 98, opcode=142)
+        blob = mutate_effect(resources["BDGASFOR.SPL"], 89, opcode=142)
+        resources["BDGASFOR.SPL"] = mutate_effect(blob, 84, opcode=142)
+        game = self.game(resources)
+        self.installed(game)
+        self.assert_exact_install(game)
+
+    def test_already_reduced_form_is_left_as_it_is(self):
+        resources = {"OHGASFRM.SPL": form("OHGASFRM.SPL")}
+        for opcode in RESISTANCE_OPCODES:
+            resources["OHGASFRM.SPL"] = mutate_effect(resources["OHGASFRM.SPL"], opcode, parameter1=60)
+        resources["OHGASFRM.SPL"] = mutate_effect(resources["OHGASFRM.SPL"], 166, parameter1=0)
+        game = self.game(resources)
+        code, output = game.run()
+        self.assertEqual(0, code, output)
+        self.assertIn("has no resistance at immunity level", output)
+        self.assertEqual(game.original, game.snapshot())
+
+    def test_donor_resistance_bytes_follow_the_immunity_rule(self):
+        resources = synthetic()
+        raw = bytearray(resources["GASFORM4.CRE"])
+        raw[0x59] = 125   # above immunity: 75
+        raw[0x5A] = 80    # another mod's partial value: kept
+        raw[0x5B] = 0xCE  # -50, a vulnerability: kept
+        raw[0x5D] = 40    # MR: always 0 on the combat form
+        raw[0x63] = 75
+        resources["GASFORM4.CRE"] = bytes(raw)
+        game = self.game(resources)
+        self.installed(game)
+        self.assert_exact_install(game)
+        clone = game.snapshot()["CBRGAS75.CRE"]
+        self.assertEqual(bytes([75, 80, 0xCE, 75, 0, 75, 75, 75, 75, 75, 75]), clone[0x59:0x64])
+        self.assertEqual(67, clone[0x64])
+        first = game.snapshot()
+        self.installed(game, repeat=True)
+        self.assertEqual(first, game.snapshot())
+
+    def test_genie_text_needs_75_on_every_channel_and_poison_immunity(self):
+        def partial_slashing(blob):
+            return mutate_effect(blob, 86, parameter1=80)
+
+        def immune_crushing_above_100(blob):  # becomes 75 like 100: text still true
+            return mutate_effect(blob, 87, parameter1=120)
+
+        def no_magical_fire_or_cold(blob):  # the real DVGASFRM.ITM sets neither
+            return mutate_effect(mutate_effect(blob, 84, opcode=142), 85, opcode=142)
+
+        def no_slashing(blob):
+            return mutate_effect(blob, 86, opcode=142)
+
+        def no_poison_defense(blob):
+            return mutate_effect(mutate_effect(blob, 101, opcode=142), 173, opcode=142)
+
+        def poison_resistance_only(blob):  # op 173 at 100 is poison immunity too
+            return mutate_effect(blob, 101, opcode=142)
+
+        def poison_resistance_reduced(blob):  # op 173 adds up: 100 - 50 is not immunity
+            parsed = ItmFile.from_bytes(mutate_effect(blob, 101, opcode=142))
+            weaker = effect(173, -50, item=True)
+            return dataclasses.replace(parsed, global_effects=(*parsed.global_effects, weaker)).to_bytes()
+
+        def with_activation(blob, *effects):
+            raw = bytearray(56)
+            raw[0] = 3  # magical activation, applies only when used
+            parsed = ItmFile.from_bytes(blob)
+            used = ItmAbility(raw=bytes(raw), effects=tuple(effects))
+            return dataclasses.replace(parsed, abilities=(*parsed.abilities, used)).to_bytes()
+
+        def poison_part_only_on_activation(blob):  # equipped 60, +40 only when used
+            equipped = mutate_effect(mutate_effect(blob, 101, opcode=142), 173, parameter1=60)
+            return with_activation(equipped, effect(173, 40, item=True))
+
+        def missile_only_on_activation(blob):
+            return with_activation(mutate_effect(blob, 89, opcode=142), effect(89, 100, 1, item=True))
+
+        def poison_resistance_in_parts(blob):  # 60 + 40 is immunity
+            parsed = ItmFile.from_bytes(mutate_effect(mutate_effect(blob, 101, opcode=142), 173, parameter1=60))
+            rest = effect(173, 40, item=True)
+            return dataclasses.replace(parsed, global_effects=(*parsed.global_effects, rest)).to_bytes()
+
+        cases = ((partial_slashing, False), (immune_crushing_above_100, True),
+                 (no_magical_fire_or_cold, True), (no_slashing, False),
+                 (no_poison_defense, False), (poison_resistance_only, True),
+                 (poison_resistance_reduced, False), (poison_resistance_in_parts, True),
+                 (poison_part_only_on_activation, False), (missile_only_on_activation, False))
+        for change, described in cases:
+            with self.subTest(change=change.__name__):
+                resources = synthetic()
+                resources["DVGASFRM.ITM"] = change(resources["DVGASFRM.ITM"])
+                game = self.game(resources)
+                code, output = game.run()
+                if described:
+                    self.assertEqual(0, code, output)
+                else:
+                    self.assertEqual(3, code, output)
+                    self.assertIn("INSTALLED WITH WARNINGS", output)
+                    self.assertIn("description unchanged: the changed DVGASFRM.ITM", output)
+                    self.assertEqual(game.original_tlk, game.tlk.read_bytes())
+                self.assert_exact_install(game, described=described)
 
     def test_alternate_description_warns_without_rewriting_or_touching_shared_tlk(self):
         texts = [TEXTS[0], "Different or translated description.", TEXTS[2].replace(OLD_PHRASE, NEW_PHRASE)]

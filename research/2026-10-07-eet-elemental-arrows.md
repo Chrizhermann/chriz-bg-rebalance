@@ -23,3 +23,76 @@ malformed-last-item rollback. No new game or save was modified for publication.
 
 This is an EET implementation of the user's chosen SCS balance rule, not a new
 global item overhaul or a claim that upstream SCS 3017 now supports EET.
+
+## 2026-10-17: behavior-based matching (audit 2026-10-08, item 3)
+
+The balance values are unchanged; the input matching no longer fingerprints
+the captured shape. Per extended header, the elemental package is the opcode-12
+record with the component's damage type (param2 high word), normal damage mode
+(low word 0) and projectile target (2). Only its dice are owned (1d3 acid,
+1d2 cold/fire); fire also owns the to-hit/damage bonus of the headers that
+carry the package. Other damage types (an acid rider on a fire arrow),
+same-element records with other delivery, helpers and headers without the
+package stay byte-identical, whatever their type or order. Two package records
+in one header are ambiguous (writing both multiplies damage) and fail the
+component; malformed tables still fail. Validation of all four items runs
+before any item or TLK string is written. An item without any package is left
+unchanged with a warning. Description edits are derived from the old and new
+values; text that states other values or uses other wording is left unchanged
+with a warning. The reference install's AROWKC text ("+1d2 fire damage", no
+THAC0 line) is accepted as already correct apart from the breath save.
+Evidence: synthetic real-WeiDU tests in `tests/test_elemental_arrows.py`; no
+game or save was used.
+
+## 2026-10-17: owned ability and owned text clauses (review findings A and B)
+
+An independent source review found two defects in the behavior-based matcher.
+
+A. The classifier never checked the ability type, so a separate type-3
+activation dealing fire damage was also reduced to 1d2 and lost its bonuses.
+The owned ability is now the arrow's own hit only: every ITM extended header
+with attack type 2 (ranged, byte 0x00) and launcher 1 (bow, byte 0x10), which
+is what the reference AROW04/08/09/KC carry. Activations, melee headers and
+ranged headers without the bow launcher keep every byte, in any order and
+number. Several bow-fired headers with the package are all patched, as
+before. An item whose only package sits on another header warns, names how
+many such records were left alone and stays unchanged.
+
+B. The description rewrite stripped every `NdM+K` bonus and changed every
+"Save vs. Spell" for the kobold arrow, so a preserved `+1d4+2 acid damage`
+rider lost its `+2` and unrelated save claims became Breath. Only the owned
+clauses change now: the one "+NdM <element> damage" clause, the save
+statement attached to it, the one weapon-damage bonus (riders written as
+"+NdM+K" or followed by a non-physical "<type> damage" are never touched) and
+the one THAC0 claim. An owned claim stated more than once leaves the text
+unchanged with a warning. A "Save vs. Spell" claim elsewhere in a breath-save
+arrow's text is kept with a warning. The female string (dialogF.tlk, present
+for several EE languages) is rewritten from its own text instead of
+receiving the male result; if either string cannot be rewritten, neither
+changes. Unrecognized bonus wording can still stay stale (known limitation).
+Evidence: `tests/test_elemental_arrows.py`, synthetic real-WeiDU games only.
+
+### Re-review: shared effect records (copy-on-write)
+
+A Codex re-review found finding A still open: an ITM slice is only (first
+index, count) into one effect table, so a type-3 activation can reference
+the very fire record of the bow-fired header, and the in-place write still
+changed it. Now, before any write, every owned package record read by a
+foreign slice (a non-owned header or the equipped effects) is detected.
+That owned header gets a private copy of its whole slice appended to the
+effect table, its first index is repointed, and only the copy is patched.
+Every other slice keeps its records byte-identical. A record shared only by
+owned headers is patched in place, since every reader is meant to change.
+Each owned header sharing with a foreign slice gets its own copy, because
+owned slices may differ in extent. A rerun finds the owned header on its
+private, already-patched copy and is byte-exact. Appending needs the effect
+table to end the file (the normal ITM layout) and each copy's first index to
+fit its 16-bit field; otherwise that item is left unchanged with a warning
+naming the obstacle. Evidence: `test_shared_package_records_are_copied_on_write`
+and `test_shared_records_without_a_trailing_effect_table_warn_and_keep_the_item`.
+
+The copy leaves the owned slice out of header order. WeiDU's own
+`ADD_ITEM_EFFECT` and `ADD_ITEM_EQEFFECT` shift every slice by its index, so a
+later mod still patches both headers correctly; on the shared layout without a
+copy, the same later call corrupts the bow header. Evidence:
+`test_copied_records_stay_patchable_by_later_mods`.

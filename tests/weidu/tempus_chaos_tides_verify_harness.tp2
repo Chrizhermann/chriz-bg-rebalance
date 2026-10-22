@@ -1,0 +1,35 @@
+// Isolated --nogame harness that runs only component 404's post-build
+// acceptance (cbr_tide_verify_spell) over one prepared tide SPL, so tests
+// can prove which leftovers the verifier rejects and which carried donor
+// records it accepts.
+//   argv[0] = tempus_holy_power.tpa (shared primitives)
+//   argv[1] = tempus_chaos_tides.tpa
+//   argv[2] = input tide SPL, argv[3] = existing output directory
+//   argv[4] = tide (1..3), argv[5] = side sign (1 / -1)
+//   argv[6] = donor resref, argv[7..9] = the three same-side tide resrefs
+BACKUP ~backup~
+AUTHOR ~chriz-bg-rebalance test harness~
+
+BEGIN ~Chaos tides verify harness~
+DESIGNATED 0
+
+INCLUDE ~%argv[0]%~
+INCLUDE ~%argv[1]%~
+OUTER_SET cbr_vh_tide = %argv[4]%
+OUTER_SET cbr_vh_sign = %argv[5]%
+OUTER_SPRINT cbr_vh_donor ~%argv[6]%~
+OUTER_SPRINT cbr_vh_reset_a ~%argv[7]%~
+OUTER_SPRINT cbr_vh_reset_b ~%argv[8]%~
+OUTER_SPRINT cbr_vh_reset_c ~%argv[9]%~
+COPY ~%argv[2]%~ ~%argv[3]%~
+  LPF cbr_tide_verify_spell
+    INT_VAR tide = cbr_vh_tide side_sign = cbr_vh_sign
+    STR_VAR
+      resource_name = ~verify input~
+      donor_resref = EVAL ~%cbr_vh_donor%~
+      reset_a = EVAL ~%cbr_vh_reset_a%~
+      reset_b = EVAL ~%cbr_vh_reset_b%~
+      reset_c = EVAL ~%cbr_vh_reset_c%~
+  END
+BUT_ONLY
+COPY ~%argv[2]%~ ~%argv[3]%/CBR_TEST.OK~
