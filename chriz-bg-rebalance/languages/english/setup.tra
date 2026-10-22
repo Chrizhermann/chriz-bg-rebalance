@@ -272,7 +272,7 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9315 = ~Party physical resistance supports BG2:EE / EET only.~
 @9316 = ~Party physical resistance requires EEex. Install EEex before this component.~
 @9317 = ~Party physical resistance requires SPLSTATE.IDS to reserve its rebuild marker.~
-@9318 = ~Party physical resistance installed: 90% becomes 85%; 100% becomes 90%. Enemies, summons and non-physical resistances are unchanged. Launch through InfinityLoader.~
+@9318 = ~Party physical resistance installed: 90% becomes 85%; 100% becomes 90%. Short immunity spells such as Divine Protection still grant 100% while they last. Enemies, summons and non-physical resistances are unchanged. Launch through InfinityLoader.~
 @330 = ~All temporary potion types~
 @331 = ~All temporary potion types except Potions of Genius~
 @1330 = ~Potion uniqueness: one dose of each temporary potion type at a time~
