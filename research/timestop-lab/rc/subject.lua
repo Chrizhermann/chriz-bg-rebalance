@@ -1,4 +1,4 @@
--- Read-only: the party slots, the subject's HP and fixture effects, Time Stop state.
+-- Read-only: the party slots, HP, fixture effects and raw effect clocks, Time Stop state.
 local function try(f)
     local ok, value = pcall(f)
     if ok then return value end
@@ -16,6 +16,16 @@ local function actor(slot)
         area = try(function() return sprite.m_pArea.m_resref:get() end),
         x = try(function() return sprite.m_pos.x end), y = try(function() return sprite.m_pos.y end),
         ai_speed = try(function() return EEex_ReadU8(EEex_UDToPtr(sprite) + 0x58) end),
+        -- Raw clocks of the pinned 2.7.3.0 layout. +0x3A0: a full effect check runs only when
+        -- its value mod 15 equals the actor ID mod 15 (ProcessEffectList 0x3ABB7C-0x3ABBC5).
+        -- +0x1A08 is the regenerated periodic list; the dispatcher copies its counter +0x38 into
+        -- each worker (0x22653D). +0x520C: frozen-actor marker (0x3ABA9D). +0x4BA4: m_newEffect,
+        -- set when a stop ends (0x3ABACE).
+        clocks = try(function()
+            local pointer = EEex_UDToPtr(sprite)
+            return {check = EEex_Read32(pointer + 0x3A0), list = EEex_Read32(pointer + 0x1A40),
+                frozen = EEex_Read32(pointer + 0x520C), new_effect = EEex_Read32(pointer + 0x4BA4)}
+        end),
         fixtures = {}}
     try(function()
         EEex_Utility_IterateCPtrList(sprite.m_timedEffectList, function(effect)
