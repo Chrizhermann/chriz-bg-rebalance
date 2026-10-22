@@ -31,7 +31,7 @@ local function actor(slot)
     try(function()
         EEex_Utility_IterateCPtrList(sprite.m_timedEffectList, function(effect)
             local source = effect.m_sourceRes:get()
-            if source == "CBRTBUF" or source == "CBRTREG" then
+            if source == "CBRTBUF" or source == "CBRTREG" or source == "CBRTHST" or source == "CBRTIHS" then
                 out.fixtures[#out.fixtures + 1] = {source = source, opcode = effect.m_effectId,
                     timing = effect.m_durationType, deadline = effect.m_duration}
             end
