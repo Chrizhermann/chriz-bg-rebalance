@@ -22,7 +22,7 @@ T.sites = {
     {id=4, name="copy", rva=0x1DCAE3, bytes="8B 4B 14 89 4A 14", kind="restore",
         worker="rbx", related="rdx"},
     {id=5, name="dispatch", rva=0x226549, bytes="48 8B 03 48 8B CB", kind="restore",
-        actor="r15", worker="rbx", elapsed="r14", list="rsi"},
+        actor="r15", worker="rbx", elapsed="r8", list="rsi"},
     {id=6, name="returned", rva=0x226556, bytes="75 06 83 7B 08 00", kind="branch",
         actor="r15", worker="rbx", elapsed="r14", list="rsi"},
     {id=7, name="heal_submission", rva=0x1A5ECE, bytes="C7 44 24 20 01 00 00 00", kind="restore",

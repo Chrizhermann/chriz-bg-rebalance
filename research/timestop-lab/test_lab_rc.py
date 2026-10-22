@@ -77,6 +77,8 @@ class RequestSyntaxTests(unittest.TestCase):
                              "pause.lua": ("NO_GAME", "PAUSE_STATE_UNCHANGED"),
                              "dialog.lua": ("CONFIRM_MODE_REQUIRED", "DIALOG_BUTTON_NOT_CLICKABLE"),
                              "pick-character.lua": ("AMBIGUOUS_CHARACTER", "CHARACTER_NOT_FOUND"),
+                             "fix.lua": ("FIX_NOT_LOADED", "UNKNOWN_OP", "PAUSE_FIRST", "NO_SUBJECT",
+                                         "NOT_THE_SUBJECT"),
                              "quit.lua": ("STOP_FIRST",)}.items():
             text = (REQUESTS / name).read_text(encoding="utf-8")
             for guard in guards:
@@ -206,6 +208,52 @@ class QueueRequestTests(unittest.TestCase):
                 ok, error, count = self.queue({"what": "fixtures"}, fixtures=leftover)[:3]
                 self.assertEqual((ok, count), (False, 0))
                 self.assertIn("FIXTURES_PRESENT", error)
+
+
+@unittest.skipIf(lupa is None, "lupa with LuaJIT 2.1 is not installed")
+class FixRequestTests(unittest.TestCase):
+    """fix.lua against a stub CBRTF: which operation it forwards, and what it refuses."""
+
+    def fix(self, arguments, paused=1, loaded=True, subject="CBRTS Subject"):
+        runtime = lupa.LuaRuntime(unpack_returned_tuples=True)
+        attempt = runtime.eval("""function(code, paused, loaded, subject)
+            local calls = {}
+            EngineGlobals = {g_pBaldurChitin = {m_pEngineWorld = {m_bPaused = paused, m_bHardPaused = 0}}}
+            if loaded then
+                CBRTF = {}
+                for _, op in ipairs({"Install", "Status", "Disable", "Select"}) do
+                    CBRTF[op] = function(...) calls[#calls + 1] = op; return {op = op, args = {...}} end
+                end
+            end
+            EEex_Sprite_GetInPortrait = function(slot)
+                if slot == 0 and subject then return {_name = subject} end
+            end
+            EEex_Sprite_GetName = function(sprite) return sprite._name end
+            local ok, result = pcall(assert(loadstring(code, "@fix.lua")))
+            if not ok then return false, tostring(result), #calls end
+            return true, result.op, #calls, result.args[1]
+        end""")
+        code = lab_rc.with_arguments((REQUESTS / "fix.lua").read_text(encoding="utf-8"), arguments)
+        return attempt(code, paused, loaded, subject)
+
+    def test_operations_forward_to_the_module(self):
+        for op, called in (("install", "Install"), ("status", "Status"), ("disable", "Disable")):
+            with self.subTest(op=op):
+                self.assertEqual(self.fix({"op": op}, paused=0)[:3], (True, called, 1))
+        self.assertEqual(self.fix({"op": "select", "subject": "CBRTS Subject"}), (True, "Select", 1, 0))
+
+    def test_refusals_call_nothing(self):
+        cases = {"FIX_NOT_LOADED": ({"op": "status"}, {"loaded": False}),
+                 "UNKNOWN_OP": ({"op": "enable"}, {}),
+                 "ARGS.subject required": ({"op": "select"}, {}),
+                 "PAUSE_FIRST": ({"op": "select", "subject": "CBRTS Subject"}, {"paused": 0}),
+                 "NO_SUBJECT": ({"op": "select", "subject": "CBRTS Subject"}, {"subject": None}),
+                 "NOT_THE_SUBJECT": ({"op": "select", "subject": "CBRTS Subject"}, {"subject": "Imoen"})}
+        for guard, (arguments, state) in cases.items():
+            with self.subTest(guard=guard):
+                ok, error, count = self.fix(arguments, **state)[:3]
+                self.assertEqual((ok, count), (False, 0))
+                self.assertIn(guard, error)
 
 
 class ExitTests(unittest.TestCase):

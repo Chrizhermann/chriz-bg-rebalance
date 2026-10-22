@@ -109,6 +109,7 @@ foreach ($entry in $fixtures.Files.PSObject.Properties) {
 }
 $sources = [ordered]@{
     'override\CBRTObs.lua' = Join-Path $PSScriptRoot 'CBRTObs.lua'
+    'override\CBRTFix.lua' = Join-Path $PSScriptRoot 'CBRTFix.lua'
     'override\M_CBRTS.lua' = Join-Path $PSScriptRoot 'M_CBRTS.lua'
     'override\M_EEexRC.lua' = Join-Path $remote 'eeexremote\M_EEexRC.lua'
     'override\EEexRC.menu' = Join-Path $remote 'eeexremote\EEexRC.menu'
@@ -191,7 +192,7 @@ SetPrivateProfileString('Program Options','Window Height','720')
 SetPrivateProfileString('Language','Text','en_US')
 "@, $utf8)
 }
-$state = [ordered]@{Schema=1; InstanceId=$manifest.InstanceId; Mode='observation_only';
+$state = [ordered]@{Schema=1; InstanceId=$manifest.InstanceId; Mode='observation_and_inert_correction';
     RemoteSource=$remoteSource.Root; RemoteCommit=$remoteSource.Commit; RemoteGitBlobs=$remoteSource.GitBlobs;
     RemoteSha256=$remoteSource.Sha256; FixtureBuilderSha256=$fixtures.BuilderSha256;
     FixtureEncoderSha256=$fixtures.EncoderSha256; FixtureDigest=$fixtures.Digest;
