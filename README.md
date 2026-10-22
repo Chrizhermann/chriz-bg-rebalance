@@ -60,7 +60,7 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 202 | SR adjustments | Hardiness: optional extra 20% damage resistances | Requires 200 or 201; live acceptance pending |
 | 210 | SR adjustments | EEex Pierce Magic: halve MR, bounded to 10-40 points, for five rounds | Automated checks passed; live acceptance pending |
 | 211 | SR adjustments | Spellstrike: 15% spell failure for two rounds | Automated checks passed; live acceptance pending |
-| 220 | SR adjustments | Bracers of Blinding Strike: self-only SR Improved Haste | Automated checks passed; in-engine check pending |
+| 220 | SR adjustments | Bracers of Blinding Strike: self-only SR Improved Haste | Automated checks passed; both cast orders checked in the 2.7.3.0 lab |
 | 301 | Cross-cutting audits | Emotion, Courage / Emotion, Hope: mutually exclusive beneficial emotions | ✅ implemented and automated-verified; delivery/mutual exclusion live-verified, status-entry retest pending |
 | 302 | Cross-cutting audits | Flail of the Ages: saves against Slow; +5 allows Haste | Isolated WeiDU checks passed; in-game check pending |
 | 310 | Cross-cutting audits | Party physical resistance: half effectiveness above 80%, maximum 90% | Automated checks passed; in-engine check pending |

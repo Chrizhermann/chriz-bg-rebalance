@@ -9,6 +9,11 @@
   on the stock item) and keeps the activation's chance, saving throw and power.
   Changes a self-only copy cannot represent stop the installation with a
   message instead of producing a different spell.
+- Bracers of Blinding Strike (220) and SR's Haste or Improved Haste no longer
+  stack when the spell is cast first. The bracers' guard now sits before the
+  spell's own protection, behind which the engine ignores it; a repeat run
+  moves a guard that an earlier version left there. Found in the BG2:EE
+  2.7.3.0 lab.
 - Elemental arrows (130) change only each arrow's bow-fired hit and find its
   elemental damage by what it does. Other damage types, helper effects, other
   abilities such as activations, reordered abilities and effects from other
