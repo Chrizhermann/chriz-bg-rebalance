@@ -1,6 +1,6 @@
 -- Disposable BG2:EE 2.7.3.0 / EEex 1.3 clock-correction prototype for one lab subject and the
--- CBRTBUF/CBRTREG fixtures. Nothing is patched on load. Install(), Select() and Disable() are
--- explicit steps; the installed hooks stay inert until Select().
+-- CBRTBUF/CBRTREG fixtures. Nothing is patched on load. Install(), Select(), Verify() and
+-- Disable() are explicit steps; the installed hooks stay inert until Select().
 --   Time Stop: in each world tick in which the engine marks the subject frozen, every selected
 --     timed parent's deadline (and the regeneration origin) moves one tick later, before that
 --     pass checks for expiry. Effects applied mid-stop earn only the later ticks.
@@ -20,7 +20,7 @@ for i, name in ipairs(regs) do saved[name] = (#regs - i) * 8 end
 
 -- Block offsets. Lua writes the block only while the game is paused; the hooks while it runs.
 local B = {enabled=0, subject=8, subjectID=16, frozen=20, lastFrozen=24, listOffset=28,
-    chitin=32, regenVtable=40, shifts=52, admitted=56, suppressed=60, unmatched=64,
+    chitin=32, regenVtable=40, listVerified=48, shifts=52, admitted=56, suppressed=60, unmatched=64,
     restored=68, newParents=72, healReseeds=76, phaseRecords=80,
     parent=128, worker=136, origin0=144, frozen0=148, kappa=152, kappaSet=156,
     lastAdmitted=160, phase=164, phaseBefore=168, period=172, valid=176, activeOrigin=180}
@@ -138,6 +138,9 @@ function F.BuildAssembly(site, block)
     loadRole("r15", site.worker)
     if site.id == 1 then
         subjectOnly()
+        -- Nothing is counted or walked until Lua has proven the list layout on this subject.
+        emit("cmp dword ptr "..at(B.listVerified)..", 1")
+        emit("jne "..label("exit"))
         worldTime("exit")
         -- One shift per distinct frozen tick: a hasted actor passes twice per tick, and a pause
         -- steps world time back one tick without undoing the ticks already counted.
@@ -361,6 +364,7 @@ function F.Install()
     return {installed=true, sites=#F.sites, enabled=false}
 end
 
+-- Select before the fixtures, so the first construct of the regeneration is tracked.
 function F.Select(portrait)
     assert(F.installed and not F.failed, "Install the correction first")
     assertPaused()
@@ -370,8 +374,8 @@ function F.Select(portrait)
     local pointer = EEex_UDToPtr(sprite)
     local offset = EEex_UDToPtr(sprite.m_timedEffectList) - pointer
     assert(offset > 0 and offset < 0x10000, "Unexpected timed effect list offset")
-    -- The frozen hook walks this list natively, so prove its layout on the subject's own effects.
-    assert(verifyList(sprite) > 0, "Apply the fixtures before selecting; an empty list proves no layout")
+    -- An empty list proves no layout; the frozen body then stays idle until Verify().
+    local verified = verifyList(sprite) > 0
     ffi.fill(ffi.cast("void*", F.block+B.shifts), 128-B.shifts, 0)
     ffi.fill(ffi.cast("void*", F.block+B.parent), SIZE-B.parent, 0)
     EEex_WritePtr(F.block+B.subject, pointer)
@@ -379,8 +383,27 @@ function F.Select(portrait)
     EEex_Write32(F.block+B.frozen, 0)
     EEex_Write32(F.block+B.lastFrozen, 0)
     EEex_Write32(F.block+B.listOffset, offset)
+    EEex_Write32(F.block+B.listVerified, verified and 1 or 0)
     F.sessionEnded = false
     EEex_Write32(F.block+B.enabled, 1)
+    return F.Status()
+end
+
+-- The frozen body walks the subject's timed list natively; prove the walk on its own effects.
+function F.Verify(portrait)
+    assert(F.installed and not F.failed, "Install the correction first")
+    assertPaused()
+    assert(EEex_Read32(F.block+B.enabled) == 1, "Select a subject first")
+    local sprite = assert(EEex_Sprite_GetInPortrait(portrait or 0), "No subject in that portrait")
+    assert(EEex_UDToPtr(sprite) == EEex_ReadPtr(F.block+B.subject) and
+        sprite.m_id == EEex_Read32(F.block+B.subjectID), "Not the selected subject")
+    local ok, count = pcall(verifyList, sprite)
+    if not ok then
+        EEex_Write32(F.block+B.enabled, 0)
+        error(count, 0)
+    end
+    assert(count > 0, "No timed effect on the subject yet; apply the fixtures first")
+    EEex_Write32(F.block+B.listVerified, 1)
     return F.Status()
 end
 
@@ -395,6 +418,7 @@ function F.Status()
     local function u32(name) return EEex_Read32(F.block+B[name]) end
     return {installed=F.installed, failed=F.failed or false, enabled=u32("enabled") == 1,
         session_ended=F.sessionEnded or false, subject=u32("subjectID"),
+        layout_verified=u32("listVerified") == 1,
         frozen_ticks=u32("frozen"), last_frozen_world=u32("lastFrozen"), shifts=u32("shifts"),
         admitted=u32("admitted"), suppressed=u32("suppressed"), unmatched=u32("unmatched"),
         restored=u32("restored"), new_parents=u32("newParents"), heal_reseeds=u32("healReseeds"),
