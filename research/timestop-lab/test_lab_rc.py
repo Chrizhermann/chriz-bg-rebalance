@@ -221,7 +221,7 @@ class FixRequestTests(unittest.TestCase):
             EngineGlobals = {g_pBaldurChitin = {m_pEngineWorld = {m_bPaused = paused, m_bHardPaused = 0}}}
             if loaded then
                 CBRTF = {}
-                for _, op in ipairs({"Install", "Status", "Disable", "Select"}) do
+                for _, op in ipairs({"Install", "Status", "Disable", "Select", "Verify"}) do
                     CBRTF[op] = function(...) calls[#calls + 1] = op; return {op = op, args = {...}} end
                 end
             end
@@ -240,20 +240,23 @@ class FixRequestTests(unittest.TestCase):
         for op, called in (("install", "Install"), ("status", "Status"), ("disable", "Disable")):
             with self.subTest(op=op):
                 self.assertEqual(self.fix({"op": op}, paused=0)[:3], (True, called, 1))
-        self.assertEqual(self.fix({"op": "select", "subject": "CBRTS Subject"}), (True, "Select", 1, 0))
+        for op, called in (("select", "Select"), ("verify", "Verify")):
+            with self.subTest(op=op):
+                self.assertEqual(self.fix({"op": op, "subject": "CBRTS Subject"}), (True, called, 1, 0))
 
     def test_refusals_call_nothing(self):
-        cases = {"FIX_NOT_LOADED": ({"op": "status"}, {"loaded": False}),
-                 "UNKNOWN_OP": ({"op": "enable"}, {}),
-                 "ARGS.subject required": ({"op": "select"}, {}),
-                 "PAUSE_FIRST": ({"op": "select", "subject": "CBRTS Subject"}, {"paused": 0}),
-                 "NO_SUBJECT": ({"op": "select", "subject": "CBRTS Subject"}, {"subject": None}),
-                 "NOT_THE_SUBJECT": ({"op": "select", "subject": "CBRTS Subject"}, {"subject": "Imoen"})}
-        for guard, (arguments, state) in cases.items():
-            with self.subTest(guard=guard):
-                ok, error, count = self.fix(arguments, **state)[:3]
-                self.assertEqual((ok, count), (False, 0))
-                self.assertIn(guard, error)
+        for op in ("select", "verify"):
+            cases = {"FIX_NOT_LOADED": ({"op": "status"}, {"loaded": False}),
+                     "UNKNOWN_OP": ({"op": "enable"}, {}),
+                     "ARGS.subject required": ({"op": op}, {}),
+                     "PAUSE_FIRST": ({"op": op, "subject": "CBRTS Subject"}, {"paused": 0}),
+                     "NO_SUBJECT": ({"op": op, "subject": "CBRTS Subject"}, {"subject": None}),
+                     "NOT_THE_SUBJECT": ({"op": op, "subject": "CBRTS Subject"}, {"subject": "Imoen"})}
+            for guard, (arguments, state) in cases.items():
+                with self.subTest(op=op, guard=guard):
+                    ok, error, count = self.fix(arguments, **state)[:3]
+                    self.assertEqual((ok, count), (False, 0))
+                    self.assertIn(guard, error)
 
 
 class ExitTests(unittest.TestCase):

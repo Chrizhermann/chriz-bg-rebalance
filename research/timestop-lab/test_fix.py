@@ -93,9 +93,10 @@ class Machine:
                          lambda _uc, _access, address, size, _value, _user: self.writes.append((address, size)))
         self.uc.hook_add(unicorn.UC_HOOK_MEM_READ,
                          lambda _uc, _access, address, size, _value, _user: self.reads.append((address, size)))
-        # What Install() and Select() leave in the block.
+        # What Install(), Select() and Verify() leave in the block.
         for name, value in (("enabled", 1), ("subject", ACTOR), ("subjectID", ACTOR_ID),
-                            ("listOffset", LIST_OFFSET), ("chitin", GLOBAL), ("regenVtable", VTABLE)):
+                            ("listOffset", LIST_OFFSET), ("chitin", GLOBAL), ("regenVtable", VTABLE),
+                            ("listVerified", 1)):
             self.set(name, value)
         self.put(GLOBAL, "Q", CHITIN)
         self.put(CHITIN + 0x1090, "Q", GAME)
@@ -319,6 +320,19 @@ class FixBodyTests(unittest.TestCase):
                 machine.run(self, 1, actor=actor)
                 self.assertEqual((machine.field("frozen"), machine.field("shifts"), machine.deadline(BUFF)),
                                  (0, 0, 5000))
+
+    def test_frozen_body_stays_idle_until_the_layout_is_verified(self):
+        machine = self.machine()
+        machine.effect(BUFF, b"CBRTBUF", deadline=5000)
+        machine.link([BUFF])
+        machine.set("listVerified", 0)
+        reads = machine.run(self, 1)
+        self.assertEqual((machine.field("frozen"), machine.field("shifts"), machine.deadline(BUFF)), (0, 0, 5000))
+        for address, size in reads:
+            self.assertTrue(BLOCK <= address and address + size <= BLOCK + SIZE
+                            or address == ACTOR + 0x48 and size == 4
+                            or INITIAL_RSP - 128 <= address and address + size <= INITIAL_RSP,
+                            f"read before verification: {address:#x}+{size}")
 
     def test_frozen_walk_is_bounded_on_a_corrupt_cyclic_list(self):
         machine = self.machine()
@@ -616,9 +630,10 @@ class FixLuaTests(unittest.TestCase):
         read_ptr = lua.eval("function(offset) return EEex_ReadPtr(BASE + offset) end")
         base = lua.eval("BASE")
         self.assertTrue(status["enabled"])
+        self.assertTrue(status["layout_verified"])
         self.assertEqual(read_ptr(layout["subject"]), base + 0x400)
         self.assertEqual((read(layout["subjectID"]), read(layout["listOffset"]), read(layout["frozen"]),
-                          read(layout["lastFrozen"])), (0x1234, 0x300, 0, 0))
+                          read(layout["lastFrozen"]), read(layout["listVerified"])), (0x1234, 0x300, 0, 0, 1))
         for offset in range(layout["shifts"], 128, 4):
             self.assertEqual(read(offset), 0, f"counter at {offset}")
         for offset in range(layout["parent"], SIZE, 4):
@@ -631,7 +646,6 @@ class FixLuaTests(unittest.TestCase):
                               "Timed effect list layout mismatch"),
                  "order": ("LINK({BASE + 0x1000, BASE + 0x1200}); ITERATED = {BASE + 0x1200, BASE + 0x1000}",
                            "Timed effect list layout mismatch"),
-                 "empty": ("LINK({})", "Apply the fixtures before selecting"),
                  "portrait": ("LINK({BASE + 0x1000}); SPRITE = nil", "No subject in that portrait")}
         for case, (setup, message) in cases.items():
             with self.subTest(case=case):
@@ -641,6 +655,41 @@ class FixLuaTests(unittest.TestCase):
                 self.assertFalse(ok)
                 self.assertIn(message, why)
                 self.assertEqual(lua.eval("EEex_Read32(BASE)"), 0)
+
+    def test_select_before_the_fixtures_leaves_the_frozen_body_idle_until_verify(self):
+        lua = self.runtime()
+        layout = dict(lua.globals().CBRTF.layout.items())
+        lua.execute("LINK({})")
+        status = lua.eval("CBRTF.Select(0)")
+        self.assertEqual((status["enabled"], status["layout_verified"]), (True, False))
+        self.assertEqual(lua.eval(f"EEex_Read32(BASE + {layout['listVerified']})"), 0)
+        lua.execute("LINK({BASE + 0x1000, BASE + 0x1200})")
+        status = lua.eval("CBRTF.Verify(0)")
+        self.assertEqual((status["enabled"], status["layout_verified"]), (True, True))
+
+    def test_verify_refuses_and_a_layout_mismatch_disables(self):
+        cases = {"unselected": ("EEex_Write32(BASE, 0)", "Select a subject first", 0),
+                 "other subject": ("SPRITE = {_ptr = BASE + 0x500, m_id = 0x1234, m_timedEffectList = {_ptr = BASE + 0x700}}",
+                                   "Not the selected subject", 1),
+                 "other id": ("SPRITE.m_id = 0x4321", "Not the selected subject", 1),
+                 "empty": ("LINK({})", "No timed effect on the subject yet", 1),
+                 "mismatch": ("ITERATED = {BASE + 0x1200}", "Timed effect list layout mismatch", 0)}
+        for case, (setup, message, enabled) in cases.items():
+            with self.subTest(case=case):
+                lua = self.runtime()
+                lua.execute("LINK({}); CBRTF.Select(0); LINK({BASE + 0x1000, BASE + 0x1200})")
+                lua.execute(setup)
+                ok, why = lua.eval("function() return pcall(CBRTF.Verify, 0) end")()
+                self.assertFalse(ok)
+                self.assertIn(message, why)
+                self.assertEqual(lua.eval("EEex_Read32(BASE)"), enabled)
+                self.assertFalse(lua.eval("CBRTF.Status()")["layout_verified"])
+        lua = self.runtime()
+        lua.execute("LINK({}); CBRTF.Select(0); LINK({BASE + 0x1000})")
+        lua.execute("EngineGlobals.g_pBaldurChitin.m_pEngineWorld.m_bPaused = 0")
+        ok, why = lua.eval("function() return pcall(CBRTF.Verify, 0) end")()
+        self.assertFalse(ok)
+        self.assertIn("Pause the lab", why)
 
     def test_select_requires_install_and_a_pause(self):
         lua = self.runtime(paused=0)
