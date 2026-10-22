@@ -20,7 +20,7 @@ if ((Get-LabSha256 (Join-Path $lab 'Baldur.exe')) -cne $config.ExeSha256) { thro
 $diagnosticPath = Join-Path $lab 'cbr-diagnostics.json'
 Assert-LabNoReparsePath $diagnosticPath
 $diagnostics = Get-Content -LiteralPath $diagnosticPath -Raw | ConvertFrom-Json
-if ($diagnostics.InstanceId -cne $manifest.InstanceId -or $diagnostics.Mode -cne 'observation_only') {
+if ($diagnostics.InstanceId -cne $manifest.InstanceId -or $diagnostics.Mode -cne 'observation_and_inert_correction') {
     throw 'Diagnostic identity mismatch.'
 }
 foreach ($entry in $diagnostics.Files.PSObject.Properties) {
