@@ -121,6 +121,35 @@ next full effect check, and keep the preserved lifetime in the parent, because e
 rebuild reseeds from it. Haste remains unmeasured. Details are in the
 [lab README](timestop-lab/README.md#time-stop-captures-timestop_01-and-timestop_02-2026-10-23).
 
+Update 2026-10-23, Haste: four native captures, `haste_01` to `haste_04`, decoded complete.
+Native Haste or Improved Haste began or ended during the regeneration fixture, without
+Time Stop. They confirm the `m_AISpeed` coupling below in the running engine:
+
+- The hasted subject got two AI updates per world tick. The regenerated list's counter rose
+  by 2 per tick, the worker's remaining duration fell by 2 per tick, and pulses came every
+  7.5 ticks. Haste and Improved Haste behaved the same.
+- The full pass also ran twice per second, so hasted expiry came at most about 7 ticks late.
+
+The captures add three facts:
+
+- **Hasted regeneration heals more than twice as often.** Every heal was followed by a
+  rebuild, and the rebuild reseeds the phase from world time in 15-tick steps. Hasted, two
+  pulses fall into each step, so most rebuilds started at phase 1. Per 30 hasted ticks the
+  captures gave 2.4 to 2.75 heals, against 1 at normal speed.
+- **Durations stay in world time, but the worker can run dry first.** Each rebuild reseeds
+  remaining duration from `parent.deadline - worldTime`, and the hasted worker then counts
+  it down twice as fast. After the last rebuild it ran out 15 ticks before the deadline in
+  `haste_02`.
+- **Entering and leaving Haste each force a rebuild with a world-time phase.** The pass that
+  adds or removes Haste rebuilds the list. Haste's own expiry waits for the next full pass,
+  like any other parent's.
+
+So a Haste correction must slow the selected worker's countdown and pulses to world time
+and keep its phase across rebuilds. Actor scheduling, `m_AISpeed` and the shared counter
+stay untouched, as the recommendation says. SR-shaped Haste, movement and attacks remain
+unmeasured. Details are in the
+[lab README](timestop-lab/README.md#haste-captures-haste_01-to-haste_04-2026-10-23).
+
 ## Evidence identity and method
 
 The current executable inspected was

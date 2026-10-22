@@ -5,10 +5,12 @@ native decisions without correcting clocks, rebuilding buffs, replacing healing,
 or changing attack/movement scheduling. No hooks activate merely by loading the
 diagnostic Lua module. The startup and hook-integration smoke test passed on EEex 1.3.1
 ([below](#engine-smoke-test-eeex-131-2026-10-20)). So did the first native baseline
-capture, `baseline_01` ([below](#baseline-capture-baseline_01-2026-10-20)), and the two
+capture, `baseline_01` ([below](#baseline-capture-baseline_01-2026-10-20)), the two
 native Time Stop captures, `timestop_01` and `timestop_02`
-([below](#time-stop-captures-timestop_01-and-timestop_02-2026-10-23)). The Haste
-measurement and any acceptance are still pending.
+([below](#time-stop-captures-timestop_01-and-timestop_02-2026-10-23)), and the four
+native Haste captures, `haste_01` to `haste_04`
+([below](#haste-captures-haste_01-to-haste_04-2026-10-23)). No clock correction exists
+yet, and no acceptance has run.
 
 The diagnosis, instruction evidence and open design questions are in
 [`../10-timestop-haste-engine-clocks.md`](../10-timestop-haste-engine-clocks.md).
@@ -183,6 +185,11 @@ clicked with `Infinity_ClickItem`, Christopher's choice on 2026-10-20.
     each worker (`0x22653D`).
   - `+0x520C`: the frozen-actor marker (`0x3ABA9D`).
   - `+0x4BA4`: `m_newEffect`, which is set when a stop ends (`0x3ABACE`).
+- **Haste trigger.** `queue what=haste` makes the subject wait `SmallWait(N)` AI updates and
+  then apply `CBRTHST` (Haste) or `CBRTIHS` (Improved Haste) to itself. It refuses without
+  an armed capture, with a busy subject, with a Haste fixture already on it, with a partial
+  or doubled fixture set, or while a stop runs. `subject` lists the Haste fixtures with their
+  deadlines. Its `ai_speed` is `m_AISpeed` (`+0x58`): 1 at normal speed, 0 while hasted.
 
 The 2026-10-20 sequence: `ping`, `watchdog`, `ping`, `state`, `install`, `status`, then
 `start-soa`, `click` Single Player and New Game, `click` Import and Character File,
@@ -272,7 +279,9 @@ The engine sessions have three bounded steps:
    ([results](#time-stop-captures-timestop_01-and-timestop_02-2026-10-23)).
 3. Repeat without Time Stop, entering/leaving native Haste midway through a pulse
    interval. Compare native healing cadence in world ticks. Movement and attack
-   controls become acceptance requirements when a correction is proposed.
+   controls become acceptance requirements when a correction is proposed. **Done on
+   2026-10-23** as `haste_01` to `haste_04`
+   ([results](#haste-captures-haste_01-to-haste_04-2026-10-23)).
 
 Only after these traces resolve the disputed engine paths should a separate,
 actor/effect-scoped clock correction be designed. Caster/immune behavior, Slow,
@@ -459,6 +468,107 @@ For step 3 and a later correction:
 - For the Haste case, `queue` and the `subject` clocks can align the Haste start to the list
   counter in the same way.
 
+## Haste captures `haste_01` to `haste_04` (2026-10-23)
+
+This was step 3: native Haste and Improved Haste through the regeneration fixture, without
+Time Stop. Measurement only, no correction.
+
+- **Run.** One quiet run through `lab_quiet_run.py run … 1800`, holding the exclusive lock.
+  It ended after 953 s through `rc/quit.lua`, without a save. No guard tripped: audio peak
+  0.0, pointer clip unchanged, nothing left in the job.
+- **Party.** The same [fresh-party sequence](#fresh-test-party-in-the-hidden-game) and the
+  same actor IDs. `ApplyDamage(Myself,20,0)` again left the subject at 83 of 98 HP. Between
+  cases, a disarmed run let every lab fixture run out, Haste included, and `ApplyDamage`
+  topped the missing HP back up to at least 13.
+- **Trigger.** Each case started paused with `Arm(0)`.
+  - *Entering* (`haste_01` Haste, `haste_02` Improved Haste): the fixtures, a `subject`
+    probe, then `queue what=haste`. The subject runs `SmallWait(N)` and then applies the
+    Haste fixture to itself. N came from the probe's list counter and the baseline heal
+    rule, so that Haste would begin 7 ticks after the third native heal, midway through a
+    15-tick pulse interval. Both began on the planned tick.
+  - *Leaving* (`haste_03`, `haste_04`, both Haste): Haste first, applied while paused, then
+    about 14 s of hasted running, a pause and the fixtures. Haste's deadline fell 76 and 87
+    ticks after the fixtures. `haste_03` was not aligned further. For `haste_04` the driver
+    predicted from the probe's counters which full pass would first reach the Haste
+    deadline (rules below). It was ready to shift the subject's pulse grid by one tick per
+    short pause cycle until a scheduled pass between two pulses would end Haste; the first
+    probe already qualified.
+
+  Then 20 s of running without a pause, the pause, `Stop()` and `Export()`.
+- **Decoding.** `decode_trace.py` exited 0 for all four traces. All are complete, with all
+  records committed (732, 656, 668 and 710) and no issues. A hasted tick has two paired
+  dispatches, a normal tick one. The files stay in the lab with their decoded JSON/CSV and
+  the request log.
+
+Times are world ticks; +n counts from the fixtures' application.
+
+| Check | `haste_01` (Haste in) | `haste_02` (Improved Haste in) | `haste_03` (Haste out) | `haste_04` (Haste out, mid-interval) |
+|---|---|---|---|---|
+| Fixtures | 32993. Deadlines 33083 (buff) and 33173 (regeneration). | 33432. Deadlines 33522 and 33612. | 34107. Deadlines 34197 and 34287. | 34667. Deadlines 34757 and 34847. |
+| Haste | Began at +71, 7 ticks after a heal. Still on at the end. | Began at +79, 7 ticks after a heal. Still on at the end. | Deadline +76. Removed at +79 by the pass that the heal at +78 forced. | Deadline +87. Removed at +89 by a scheduled pass, 4 ticks after the pulse at +85. |
+| Heals | +19, +34, +64; hasted +82, +90, +105, +112, +120, +135, +142, +150, +165, +172. | +27, +42, +72; hasted +83, +90, +105, +113, +120, +135, +143, +150. | Hasted +11, +26, +33, +48, +56, +63, +78; then +93, +123, +153. | Hasted +10, +25, +33, +48, +55, +63, +78, +85; then +97, +127, +157. |
+| HP | 83 → 96 | 81 → 92 | 80 → 90 | 80 → 91 |
+| Buff removed | At its deadline, in a heal rebuild. | Deadline + 1, heal rebuild. | Deadline + 4, heal rebuild. | Deadline + 8, heal rebuild. |
+| Regeneration removed | Deadline + 3, scheduled pass. The worker was done 4 ticks before the deadline. | Deadline + 4, scheduled pass. The worker ran dry 15 ticks before the deadline. | Deadline + 10, scheduled pass. | Deadline + 14, scheduled pass. |
+
+For comparison, `baseline_01` healed at +20, +35, +65, +95, +125 and +155: 6 HP.
+
+What this shows:
+
+- **Haste and Improved Haste double the subject's effect clocks.** Both behaved the same. The
+  subject got two AI updates per world tick (`ai_speed` 0), as the static `m_AISpeed` gate
+  predicts. Each update dispatched the regenerated list once and advanced its counter. So
+  the counter rose by 2 per tick, the worker's remaining duration fell by 2 per tick, and
+  pulses came every 7.5 ticks instead of 15. The check counter `+0x3A0` kept pace, so the
+  full pass also ran twice per second: hasted removals came 3 and 4 ticks late, against up
+  to 14 at normal speed.
+- **Hasted regeneration healed up to 2.75 times as often, not twice.** Hasted heals came
+  mostly 15, 7–8 and 8–7 ticks apart. Per 30 hasted ticks the four captures gave 2.75, 2.38
+  (with the dry stretch below), 2.66 and 2.70 heals, against 1 at normal speed and 2 for
+  plain doubling. Every heal here was followed by a rebuild, which reseeds the phase from
+  world time in 15-tick steps: floor((world − origin)/15) mod 2. At normal speed that agrees
+  with the pulse grid. Hasted, two pulses fall into each step, so 20 of the 32 hasted
+  rebuilds started at phase 1, and the next pulse healed at once. Between Haste's start and
+  the regeneration's end, `haste_01` healed 10 times in 109 ticks. Normal speed would give
+  about 3.6, plain doubling about 7.3. An actor at full HP, whose heals change nothing, was
+  not tested.
+- **The duration stays in world time, but the worker can run dry first.** No parent deadline
+  moved. Each rebuild reseeded remaining = deadline − world, but in between the worker
+  counted down twice as fast. In `haste_02` the last rebuild set a remaining duration of 29.
+  It ran out 14 ticks later, 15 ticks before the deadline, and that stretch had no pulse.
+- **Entering Haste forces a rebuild with a world-time phase.** Applying Haste rebuilt the
+  list on the same tick. Both cases began 7 ticks after a heal. `haste_01`, 71 ticks after
+  the fixtures, got phase 0 and healed 11 ticks later. `haste_02`, at 79 ticks, got phase 1
+  and healed 4 ticks later.
+- **Leaving Haste waits for the next full pass, which rebuilds too.** Haste's own deadline is
+  checked like any other parent's. In `haste_03` the pass that a heal forced removed it.
+  In `haste_04` a scheduled pass removed it, 2 ticks after the deadline and midway between
+  two pulses. Both passes reseeded the worker by world time, to phase 1 both times. So the
+  first normal-speed pulse, 14 and 8 ticks later, healed, and the 30-tick cadence was back.
+- **Three rules replay all five captures without Time Stop.** They were checked against
+  `baseline_01` and the four Haste traces, 51 heals and 10 parent removals:
+  - every construction seeds remaining = deadline − world and phase =
+    floor((world − origin)/15) mod 2;
+  - a pulse falls on the update whose list counter + 1 is a multiple of 15, and the phase
+    heals when it reaches 2;
+  - a full pass runs at the update whose list counter + 1 matches the actor ID mod 15 (the
+    step-2 rule; the counter equalled `+0x3A0` in every probe), and at the update after a
+    heal or another change to the list.
+
+  One detail is still loose: which tick takes the first hasted update after a pause. It was
+  the paused tick in `haste_03` and the next one in `haste_04`. So the `haste_04`
+  prediction (34755) came one tick early, still inside the window it aimed for.
+
+For a later correction:
+
+- Under Haste the per-actor counters run twice as fast, and so does every clock that hangs
+  on them, the expiry check included, while durations stay in world time.
+- The rebuild's world-time phase reseed causes the extra hasted heals. It also causes the
+  short second interval at normal speed (+20, then +35 in `baseline_01`). A correction that
+  owns a worker's phase must keep it across rebuilds.
+- Movement and attack were not measured. They become acceptance requirements once a
+  correction is proposed.
+
 ## Host validation
 
 ```powershell
@@ -477,6 +587,8 @@ are 16 guard groups and 34 Python tests, all passing. The fresh-party tooling ad
 Python tests (QA menu 12, console client 11); on 2026-10-20 all 16 guard groups and all 57
 Python tests passed. The Time Stop trigger adds 3 queue-request tests that run the request
 against stub bindings; on 2026-10-23 all 16 guard groups and all 60 Python tests passed.
+The Haste trigger adds 2 more; after step 3 on 2026-10-23, all 16 guard groups and all 62
+Python tests passed.
 Fixture and decoder tests use synthetic data; assembly tests use synthetic memory
 and the pinned executable on disk. They do not execute the game or prove the
 EEex trampoline integration works at runtime.
