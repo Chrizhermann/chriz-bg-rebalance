@@ -16,7 +16,10 @@ The lab must measure actual native timing; these are not live-test results.
 
 The Time Clocks lab (CBR_LAB_VARIANT=timeclocks) stages three more, CLOCK_FIXTURES: native Slow
 (op40), Spell Revisions' Haste (SR 4.19 SPWI305: movement rate, half an attack and the Haste icon,
-no op16) and a disease (op78), a periodic effect besides regeneration and poison.
+no op16) and a disease (op78 type 0 takes parameter 1 HP each second; here 2 HP for 8 seconds),
+a periodic effect besides regeneration and poison. Until session n3 (2026-10-23) the disease had
+parameter 1 = 0 and 20 seconds, which deals no damage, so sessions n1 and n2 could not see its
+pulses (the type switch of CGameEffectDisease::ApplyEffect at 0x1401B1818, jump table 0x1401B1B28).
 
 For its area cases it also stages AREA_FIXTURES: 5 crushing damage once (op12, timing 1), cast
 on the instant projectile; a contingency that casts Magic Missile at whoever hits its bearer
@@ -56,7 +59,7 @@ FIXTURES = (
 CLOCK_FIXTURES = (
     ("CBRTSLW", 20, ((40, 0, 0),)),
     ("CBRTSRH", 20, ((176, 6, 0), (1, 6, 0), (142, 0, 38))),
-    ("CBRTDIS", 20, ((78, 0, 0),)),
+    ("CBRTDIS", 8, ((78, 2, 0),)),
 )
 
 # resref, encoded duration in seconds, effects as (opcode, parameter1, parameter2, timing, resource).

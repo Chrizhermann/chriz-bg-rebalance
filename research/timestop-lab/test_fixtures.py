@@ -26,7 +26,8 @@ class FixtureTests(unittest.TestCase):
             "CBRTSLW.SPL": (20, ((40, 0, 0),)),
             # Spell Revisions 4.19 SPWI305: movement rate, half an attack, the Haste icon; no op16.
             "CBRTSRH.SPL": (20, ((176, 6, 0), (1, 6, 0), (142, 0, 38))),
-            "CBRTDIS.SPL": (20, ((78, 0, 0),)),
+            # op78 type 0: parameter 1 HP each second (sessions n1 and n2 staged 0 HP for 20 s).
+            "CBRTDIS.SPL": (8, ((78, 2, 0),)),
         }
         area = {f"{resref}.SPL" for resref, _, _ in builder.AREA_FIXTURES}
         with tempfile.TemporaryDirectory(prefix="cbr-fixture-test-") as directory:
@@ -102,7 +103,8 @@ class FixtureTests(unittest.TestCase):
             # The Time Clocks lab's clock fixtures, staged from 2026-10-23.
             "CBRTSLW.SPL": "68646c1b7b996dcfb25f2365c6bd0ebbe416de11f630c706803c9481453ec559",
             "CBRTSRH.SPL": "080383b6a0c14d28262218b71086d012e185d6c236a0aa037603b0591410b95c",
-            "CBRTDIS.SPL": "3ac034e0a68bd0a25d5f4acb51b0f3b56999b3b1928be314ad8b2c4ac5be5fcf",
+            # From session n3; n1 and n2 had 3ac034e0a68bd0a25d5f4acb51b0f3b56999b3b1928be314ad8b2c4ac5be5fcf.
+            "CBRTDIS.SPL": "36bfaec988b3e2d99adc93c48702dba47a84c580746521cc78023fd5c88e9972",
         }
         resources = builder.fixture_bytes()
         for name, digest in pinned.items():
