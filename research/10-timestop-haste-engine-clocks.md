@@ -150,6 +150,41 @@ stay untouched, as the recommendation says. SR-shaped Haste, movement and attack
 unmeasured. Details are in the
 [lab README](timestop-lab/README.md#haste-captures-haste_01-to-haste_04-2026-10-23).
 
+Update 2026-10-23, area effects (static, 2.7.3.0): how projectiles and area objects behave
+during a stop, read from the executable. Christopher's rule of the same day: targeting
+frozen creatures stays; anything with a duration waits until time resumes (buffs, debuffs,
+clouds and walls; area effects that already exist pause too); instant results land
+immediately (hits, the direct damage of Fireball or Magic Missile).
+
+- **Every projectile waits out every stop, the caster's own too.** The AI update of each
+  projectile class compares the projectile's **own object ID** at `+0x48` with the stop's
+  caster at game `+0x9694` and returns while a stop runs and they differ:
+  `CProjectileArea::AIUpdate` at `0x140228576–0x140228582`, `CProjectileBAM::AIUpdate` at
+  `0x14022867E–0x14022868A`, and the same test in `CVisualEffect`, `CGameFireball3d`,
+  `CGameStatic`, `CGameChunk` and `CGameTemporal`. The projectile gets that ID when
+  `CProjectileBAM::Fire` adds it to the object array (`CGameObjectArray::Add`). The ID of the
+  creature that fired it, at `+0x68`, is never compared. So no projectile ever matches the
+  caster, and a spell the caster casts during the stop flies only when time resumes.
+- **Area objects pause.** A cloud or wall is a `CProjectileArea`; its AI update holds its
+  arrival (`+0x3C8`), its remaining explosions (`+0x3C6`), its pulse countdown (`+0x3CE`,
+  reloaded from `+0x3CC`) and its trap trigger (`+0x3D0`). An existing cloud therefore
+  neither pulses nor ages during a stop; a new one waits where it was cast.
+- **Instant deliveries land at once.** `CProjectileInstant` (projectile 1, "None") delivers
+  its effects inside `Fire`, and a melee hit (`CGameSprite::Hit`) applies at once, so both
+  reach frozen creatures during the stop.
+- **Triggered releases go through `CGameAIBase::FireSpell`.** A frozen creature's
+  contingency can still fire through `SetTrigger` and `CContingencyList::ProcessTrigger`;
+  a spell it releases on a projectile other than "None" then waits like any other.
+  Sequencer and trigger releases use the same `FireSpell` path.
+- **Saving.** Traps are saved with the area; a flying projectile that carries effects blocks
+  saving (`CProjectile::CanSaveGame`).
+
+So the engine's own projectile hold already matches the rule for clouds, walls and every
+spell cast during the stop, and the clock fix covers the effects on frozen creatures.
+Projectile hooks are on hold (coordinator, 2026-10-23); the engine's behaviour stays. The
+Time Clocks lab's area cases A–G check this together with the clock fix in the running
+engine.
+
 ## Evidence identity and method
 
 The current executable inspected was
