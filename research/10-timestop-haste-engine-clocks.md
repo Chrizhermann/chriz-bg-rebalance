@@ -161,10 +161,13 @@ immediately (hits, the direct damage of Fireball or Magic Missile).
   caster at game `+0x9694` and returns while a stop runs and they differ:
   `CProjectileArea::AIUpdate` at `0x140228576–0x140228582`, `CProjectileBAM::AIUpdate` at
   `0x14022867E–0x14022868A`, and the same test in `CVisualEffect`, `CGameFireball3d`,
-  `CGameStatic`, `CGameChunk` and `CGameTemporal`. The projectile gets that ID when
-  `CProjectileBAM::Fire` adds it to the object array (`CGameObjectArray::Add`). The ID of the
-  creature that fired it, at `+0x68`, is never compared. So no projectile ever matches the
-  caster, and a spell the caster casts during the stop flies only when time resumes.
+  `CGameStatic`, `CGameChunk` and `CGameTemporal`. The other projectile classes (chain, color
+  spray, cone of cold, fall, burning hands, mushroom, both scorchers, sky strike, spell hit,
+  travel door) read the stop counter at the start of their AI update too. The projectile
+  gets that ID when `CProjectileBAM::Fire` adds it to the object array
+  (`CGameObjectArray::Add`). The ID of the creature that fired it, at `+0x68`, is never
+  compared. So no projectile ever matches the caster, and a spell the caster casts during the
+  stop flies only when time resumes.
 - **Area objects pause.** A cloud or wall is a `CProjectileArea`; its AI update holds its
   arrival (`+0x3C8`), its remaining explosions (`+0x3C6`), its pulse countdown (`+0x3CE`,
   reloaded from `+0x3CC`) and its trap trigger (`+0x3D0`). An existing cloud therefore
@@ -177,7 +180,15 @@ immediately (hits, the direct damage of Fireball or Magic Missile).
   a spell it releases on a projectile other than "None" then waits like any other.
   Sequencer and trigger releases use the same `FireSpell` path.
 - **Saving.** Traps are saved with the area; a flying projectile that carries effects blocks
-  saving (`CProjectile::CanSaveGame`).
+  saving (`CProjectile::CanSaveGame`). A stop blocks it as well. While the stop counter is
+  set, `CGameArea::AIUpdate` (`0x140178368`) gives the area its battle music (`+0xFA2` = 3)
+  and puts its battle counter `+0xFA4` back to 150 whenever it is 30 or less. The quick
+  save (`CScreenWorld::OnQuickSaveButtonClick`) asks `CInfGame::CanSaveGame` with the combat
+  check on, and `CGameArea::CanSaveGame` (`0x14017BA83`) then refuses while that counter is
+  above 0: "cannot save during combat" (engine string `0xF00379`). No `CanSaveGame` reads the
+  stop counter itself. In the Time Clocks lab the quick save during a stop was refused in
+  sessions n5 (without the mod) and d2 (with it); saves 63 and 95 ticks after a stop's end
+  went through.
 
 So the engine's own projectile hold already matches the rule for clouds and walls, new and
 existing, and the clock fix covers the effects on frozen creatures. It differs in one
@@ -185,8 +196,30 @@ point: the direct damage of a projectile spell cast during the stop (Magic Missi
 Fireball) lands only when time resumes, not at once; only spells on projectile "None" and
 melee hits land at once. Changing that would take projectile hooks. They are on hold
 (coordinator, 2026-10-23) until Christopher decides; the engine's behaviour stays. The
-Time Clocks lab's area cases A–G check this together with the clock fix in the running
-engine, case C the impact of Magic Missile and Fireball against the end of the stop.
+Time Clocks lab's area cases A–G checked this in the running engine, without the clock fix
+and with it ([results](timestop-lab/README.md#time-clocks-captures-2026-10-23-and-24)):
+projectiles and clouds behaved the same both times, Magic Missile and Fireball cast about
+10 ticks into a 15 s stop hit 10 to 21 ticks after its end (case C), and only the durations
+on frozen creatures differed (with the fix, an existing Stinking Cloud's sleep waited out
+the stop).
+
+Update 2026-10-24, the clock fix: it is a separate EEex mod, Chriz BG Time Clocks (local
+repository `chriz-bg-time-clocks`, unpublished), with Christopher's decisions of 2026-10-23
+as its defaults and a switch for each. Its Time Stop part moves the deadline of every timed
+effect of a frozen creature one tick per frozen tick, in each frozen pass at the frozen
+marker and before the expiry check, and holds the creature's periodic list. Its Haste and
+Slow part runs a hasted creature's periodic list only on the updates normal speed has, and a
+slowed creature's twice per update. Rebuilds stay native (Christopher's "Native
+beibehalten"), so it keeps no phase of its own, unlike the correction prototype. Measured in
+the Time Clocks lab against the native game
+([results](timestop-lab/README.md#time-clocks-captures-2026-10-23-and-24)): through a 6 s
+stop the buff and the regeneration kept their time (deadlines moved 90 ticks) and the
+regeneration gave all 6 heals, against 3; an effect put on during the stop waited; the
+caster's own buff ran on; regeneration healed 6 or 7 times hasted (putting Haste on rebuilds
+the list, which at some ticks gains a pulse, as at normal speed), 6 slowed and 6 with Haste
+ending, against 11, 3 and 10; Spell Revisions' Haste stayed native; disease kept its 15-tick
+pulse under Haste; a game saved after a stop loaded with the moved deadline. The game itself
+refused every save during a stop (above).
 
 ## Evidence identity and method
 

@@ -9,8 +9,10 @@ capture, `baseline_01` ([below](#baseline-capture-baseline_01-2026-10-20)), the 
 native Time Stop captures, `timestop_01` and `timestop_02`
 ([below](#time-stop-captures-timestop_01-and-timestop_02-2026-10-23)), and the four
 native Haste captures, `haste_01` to `haste_04`
-([below](#haste-captures-haste_01-to-haste_04-2026-10-23)). No clock correction exists
-yet, and no acceptance has run.
+([below](#haste-captures-haste_01-to-haste_04-2026-10-23)). The clock fix itself is a
+separate EEex mod, Chriz BG Time Clocks. A second lab built from the same scripts, the
+[Time Clocks lab](#time-clocks-lab-2026-10-23), measured it against the native game
+([results](#time-clocks-captures-2026-10-23-and-24)).
 
 The diagnosis, instruction evidence and open design questions are in
 [`../10-timestop-haste-engine-clocks.md`](../10-timestop-haste-engine-clocks.md).
@@ -579,6 +581,185 @@ For a later correction:
 - Movement and attack were not measured. They become acceptance requirements once a
   correction is proposed.
 
+## Time Clocks lab (2026-10-23)
+
+A second lab, for the clock fix itself: the EEex mod Chriz BG Time Clocks (local repository
+`chriz-bg-time-clocks`, not published). The Time Stop lab above belongs to another session, so
+the same scripts build a lab of their own with `$env:CBR_LAB_VARIANT = 'timeclocks'`:
+
+- Game `%USERPROFILE%\Games\CBR-TimeClocks-2.7.3.0`, engine and profile name `CBR TimeClocks Lab
+  2730` (`%USERPROFILE%\OneDrive\Documents\CBR TimeClocks Lab 2730`), the same pins as above
+  (executable, EEex 1.3.1 with components 0, 1 and 8, WeiDU, Remote Console). Copy, Install,
+  Validate and staging as in [Offline preparation](#offline-preparation); `steam_api64.dll`
+  renamed and `lab_quiet_run.py prepare` as in [Runtime coordination](#runtime-coordination).
+  Every script refuses the other lab's identity.
+- **The mod.** `Install-TimeClocks.ps1 -ModRoot <clean checkout> -Components 100,200` installs
+  it with the lab's WeiDU, after uninstalling the components installed before (newest first)
+  and checking that `override` and `EEex_scripts` are back to the inventory recorded before the
+  first install. The checkout's files must equal its HEAD. `cbr-timeclocks.json` records the
+  commit, components, switches and installed files; the preflight checks them like the staged
+  assets.
+- **Fixtures.** Besides the five above, `build_fixtures.py` stages:
+
+  | Fixture | Effect | For |
+  |---|---|---|
+  | `CBRTSLW` | op40 Slow, 20 s | Slow |
+  | `CBRTSRH` | op176 +6, op1 +½ attack, op142 icon 38, 20 s: Spell Revisions 4.19's Haste, no op16 | SR-shaped Haste |
+  | `CBRTDIS` | op78 type 0, 2 HP each second for 8 s (1 HP on the lab's difficulty) | a periodic effect besides regeneration and poison |
+  | `CBRTSTL` | op231, 15 s Time Stop | area cases: time to act in the stop |
+  | `CBRTDMG` | op12 5 crushing, instant | area case F |
+  | `CBRTCON` | op232 contingency: Magic Missile at whoever hits the bearer | area case E |
+  | `CBRTHIT` | op54 +20 to hit | area cases E and F |
+  | `CBRTSAV` | op33 −20 to saves vs. death | area cases A and B: no save against Stinking Cloud |
+
+  Sessions n1 and n2 had a `CBRTDIS` with 0 HP, which shows no pulse.
+- **Spell Revisions' Cloudkill** (case G) without installing SR:
+  `Stage-Diagnostics.ps1 -SpellRevisionsRoot <folder with spell_rev>` runs `sr_cloudkill.py`,
+  which builds SR 4.19.rc5's own projectile `DVCKILL.PRO`, the stock `PROJECTL.IDS` with
+  `DVCKILL` added (346), and SR's Cloudkill as `CBRTSRCK.SPL`, from SR files pinned by hash.
+  Every later refresh needs the switch again.
+- **Requests.** `rc/tc-queue.lua` queues script steps on one creature (wait, mark, apply, cast,
+  castpoint, hostile, attack, damage, spawn, move, destroy) while paused. `rc/tc-probe.lua`
+  reports the party's and named creatures' tracked effects with their deadlines, the clock
+  counters, the stop and the mod's status and switches. `rc/sampler.lua` records, once per
+  frame and only on change, each tracked creature's HP, AI speed and tracked effects, the stop
+  counter and caster, and every projectile from its decode to its end with its area counters
+  (arrival, remaining explosions, pulse countdown); `rc/sampler-export.lua` writes them as
+  `<capture>.samples.jsonl`. `rc/save.lua` clicks the quick save, `rc/load-save.lua` loads a
+  named save, `rc/party-ai.lua` turns the party's AI off.
+- **Driver.** `tc_session.py TAG --mod STATE (--fresh NAME | --save FOLDER) --cases …` runs a
+  session case by case, every step one console request, and stops at the first unexpected
+  answer (it then creates `--stop-file`, which ends the slot's run). It first checks that the
+  mod is absent or active with exactly the switches of STATE. Between cases it waits until no
+  lab effect, stop or tracked projectile is left, walks Imoen back to her place and lowers the
+  subject's HP to at least 13 below its maximum. Each case records its probes, the sampler
+  file and, for the clock cases, the observer trace (`TAG_case.bin`). Every area case spawns
+  its own Bounty Hunters and removes them afterwards. Saves are copied to named lab folders
+  (`000000800-…`) with the probe at saving beside the captures (`saves/<folder>.json`).
+  `test_tc_session.py` runs every case against a scripted game first, with `tc-queue.lua`'s
+  own checks.
+- **Reading.** `tc_report.py <capture>.samples.jsonl` lists the stop, the marks, every HP and
+  speed change, every tracked effect with its deadline, moves and removal, and every projectile.
+- **Runs** go through a parallel lab slot (`bg_lab_slots.py run … --stop <file>`), with the
+  checks for OBS and Christopher's game before each.
+
+## Time Clocks captures (2026-10-23 and 24)
+
+Without the mod (`n`), with its decided components 100 and 200 (`d`) and with one option each
+(`o`), all with the same driver, sampler, observer and fixtures, and all but n1 from n1's save
+`CBTC n1 base`. Each session ran through a parallel lab slot while other sessions' labs ran in
+others; no guard tripped except once in d1.
+
+| Session | Components | Cases | Notes |
+|---|---|---|---|
+| n1 | none | base, stop74, haste, slow, srhaste | Made the party and its save; stopped at its sixth case on a console label with `+` (fixed). |
+| n2 | none | hastedis, areaa–areag | Void for disease (`CBRTDIS` with 0 HP) and for E and F (Imoen's attacks on neutral targets never hit); its marks were unlabelled. |
+| n3 | none | dis, hastedis, areaa–areag | |
+| n4 | none | areae, areaf | E and F again, with two attack rounds. |
+| n5 | none | stop37, stopnew, caster, ihaste, hasteout, save, savestop | |
+| d1 | 100, 200 | base to slow (9 cases) | Ended after 420 s: the quiet runner's guard saw the display gamma change (PC-wide, cause unknown), restored it and closed the game. |
+| d2 | 100, 200 | the other 13 | |
+| d3 | 100, 200 | load | Loaded d2's save made after a stop, in a new process. |
+| o110 | 100, 110, 200 | stopnew, stop74 | |
+| o120 | 100, 120, 200 | caster, stop74 | |
+| o210 | 100, 200, 210 | haste, hastedis, slow | |
+| o220 | 100, 200, 220 | slow, haste | |
+| o230 | 100, 200, 230 | haste, ihaste | |
+
+The mod's status line read `active` with the expected switches in every `d` and `o` session.
+Captures are in `<lab>\cbr-timestop-output`: `tc-driver-<session>.jsonl`, and per case
+`<session>_<case>.samples.jsonl` (with `.report.json` from the current `tc_report.py`; those
+of its earlier versions are in `superseded-reports\`), for clock cases also the observer trace
+`.bin`; the console log in `rc-log\`, the kept saves' probes in `saves\`.
+
+**Clock cases.** +n counts world ticks from the fixtures' application: the buff `CBRTBUF`
+ends at +90, the regeneration `CBRTREG` (1 HP every 2 s) at +180. Each stop lasted 6 s, 89
+ticks with the counter set.
+
+| Case | Without the mod | With 100 and 200 |
+|---|---|---|
+| `base` | n1: 6 heals, +25 to +160; buff removed +92, regeneration +182. | d1: 6 heals, +22 to +157, the same pattern; +91 and +181. |
+| `stop74`: stop 74 ticks in | n1 (stop from +67): 3 heals; buff removed +96, in the stop; regeneration +180. | d1: both deadlines moved 90 ticks, one per frozen pass, to +180 and +270; removed +182 and +272; 6 heals, the last three 91 ticks later than in `base`. |
+| `stop37` | n5: 3 heals; buff removed +102, in the stop; regeneration +192. | d1: moved 90; removed +186 and +276; 6 heals. |
+| `stopnew`: buff put on 20 ticks into the stop | n5: buff from +60 removed +153, after 68 of its 90 ticks frozen; 3 heals. | d1: buff from +62 moved 68 to +220, removed +224; the regeneration moved 90; 6 heals. |
+| `caster`: Imoen's own buff too | n5: hers removed +97, the subject's +95 in the stop. | d1: hers not moved, removed +98; the subject's moved 90. |
+| `haste`: Haste midway between two pulses, after the third heal | n1: 11 heals. | d1 (Haste at +67): 6 heals, +16 to +151, 30 ticks apart after the second. |
+| `ihaste`: the same with Improved Haste | n5: 11 heals. | d1 (at +78): 7 heals (below). |
+| `hasteout`: fixtures 14 s into Haste, which ends 70 ticks later | n5: 10 heals. | d1: 6 heals. |
+| `slow` | n1: 3 heals, 60 ticks apart; removals 11 and 23 ticks late. | d1: 6 heals; removals 10 and 22 late. |
+| `srhaste`: SR 4.19's Haste | n1: AI speed stays 1; 6 heals; removals 5 late. | d2: the same; 6 heals in the native pattern. |
+| `dis` | n3: 8 losses, 15 ticks apart; removed at its deadline. | d2: 8 losses, 15 ticks apart. |
+| `hastedis`: disease and Haste together | n3: 15 losses, 7–8 ticks apart. | d2: 9 losses, 15 ticks apart; the ninth fell on the deadline tick after a one-tick step of the subject's counters. |
+| `save`: saved after a stop | n5: saved at +182, regeneration deadline unmoved (+180). | d2: saved at +211 with the regeneration deadline at +270. d3 loaded it: the same deadline, one more heal, removed 4 ticks after it. |
+| `savestop`: saved in a stop | n5: the game refused the save. | d2: refused. |
+
+With one option each:
+
+| Option | Case | Result |
+|---|---|---|
+| 110: effects put on during a stop run on | `stopnew` | The buff put on in the stop kept its deadline (+147), removed +149; the regeneration from before moved 90. `stop74` as with the defaults. |
+| 120: the caster's effects wait too | `caster` | Imoen's buff moved 89, removed +191; the subject's moved 90. |
+| 210: only regeneration and poison at the normal rate | `haste`, `hastedis`, `slow` | 6 heals hasted and 6 slowed; the disease kept Haste's rate: 15 losses, 7–8 ticks apart. |
+| 220: Slow keeps the game's halved rate | `slow`, `haste` | Slowed: 4 heals, 30 and 60 ticks apart (n1: 3, 60 apart; the phase reseeds after each heal decide which). Haste at +78: 7 heals, like `ihaste` in d1 (below). |
+| 230: hasted creatures check expiry once per second | `ihaste`, `haste` | Improved Haste at +78: the buff and the regeneration were removed 12 ticks after their deadlines (+102, +192), against 4 in d1 with the same 7 heals; checks twice per second come at most 8 ticks late. Haste at +75: removed 2 late; 7 heals (below). |
+
+What this shows:
+
+- **Time Stop (100).** Each effect of a frozen creature kept its remaining time: the mod moved
+  its deadline one tick per frozen tick, in each frozen pass before the pass checked expiry
+  (the subject had a pass every tick, the sleeping T1 of area case A one every third), so
+  nothing ran out in a stop, and the regeneration gave all 6 heals. Its count is one tick
+  more than the 89 frozen dispatches the observer saw in the Time Stop lab (a known limit of
+  the mod). An effect put on during the stop waited the rest of it (choice 2), the caster's
+  own buff ran on (choice 3), and the options turned each of these around.
+- **Haste and Slow (200).** Regeneration healed 6 or 7 times hasted (below), 6 slowed and 6
+  with Haste ending, against 11, 3 and 10 without the mod; disease pulsed 15 ticks apart
+  under Haste. Spell Revisions' Haste, which leaves the AI speed at 1, stayed native.
+  Improved Haste (d1, o230) and Haste in o220 and o230 gave 7 heals, Haste in d1 6. Each was
+  put on 6 ticks after a heal, and putting it on rebuilt the subject's effect list; a rebuild
+  re-derives the regeneration's phase from world time (the step 3 rule). At +78 and +75,
+  floor(t/15) is odd (5), so the phase gained a pulse and the next pulse healed; at +67 (d1's
+  Haste, 4) it did not. Any effect put on at such a tick does the same at normal speed, where
+  the phase pattern stays native (Christopher's "Native beibehalten").
+- **Hasted expiry (230).** With it, the hasted subject's buff and regeneration were removed 12
+  ticks after their deadlines, as at normal speed (one check per second, up to 14 ticks late);
+  without it, hasted removals in these captures came at most 6 ticks late (two checks per
+  second).
+- **Saving.** The game refuses every save during a stop, with or without the mod: while the
+  counter is set, `CGameArea::AIUpdate` keeps the area's battle music up, and
+  `CGameArea::CanSaveGame` then answers "cannot save during combat"
+  ([research note](../10-timestop-haste-engine-clocks.md)). What the mod moved is in the
+  effects, so a game saved after a stop loads with it.
+
+**Area cases.** Times in ticks after the stop's end; T1 and T2 are the Bounty Hunters.
+
+| Case | Without the mod (n3, E and F n4) | With 100 and 200 (d2) |
+|---|---|---|
+| A: clouds exist when the stop begins | Both clouds' pulse countdowns held through the 15 s stop (44 → 43, 40 → 39). T1's sleep from the Stinking Cloud ended in the stop, 25 ticks after its deadline. | The same countdowns. T1's sleep moved 223 ticks and ended 21 after its moved deadline; both targets' `CBRTSAV` moved 223 and 224. |
+| B: Stinking Cloud cast in the stop | Stayed at Imoen until the end, arrived 13 ticks after it. | The same, 15. |
+| C: Magic Missile and Fireball cast in the stop | Held at Imoen. Fireball exploded +10, the missiles hit +12, +13, +20, +21. | Fireball +11, missiles +12, +13, +20, +21. |
+| C2: Fireball flying when the stop begins | Stopped in the air, exploded +9. | The same, +8. |
+| D: Delayed Blast Fireball and Skull Trap cast in the stop | Waited, exploded +10 and +11. | +11 and +12. |
+| E: Imoen hits T1, whose contingency casts Magic Missile at her | The second round hit in the stop. The contingency fired at once; its missile waited and hit her 1–2 ticks after the end. | The same; T1's contingency effect moved 225 ticks. |
+| F: instant damage, then melee | `CBRTDMG` landed at once in the stop; the second round hit in the stop. | The same. |
+| G: Spell Revisions' Cloudkill exists | Its countdown held through the stop (52 → 51). | The same. |
+
+So the engine holds every projectile and cloud the same with and without the mod, and the
+mod adds what the area rule asks of durations: an existing cloud's debuff on a frozen creature
+waits too (A). Hits and instant damage land at once; Magic Missile and Fireball cast in a
+stop land 10 to 21 ticks after it ends, the one difference to the rule, whose hooks wait for
+Christopher's decision. In sessions n3, n4 and d2, Imoen's first `AttackOneRound` hit once in
+six, although with `CBRTHIT` only a natural 1 misses; every second round hit.
+
+**Against the prototype** of the Time Stop lab (`fixstop_01`, `fixhaste_01`, `fixhaste_02`
+there): both shift each deadline once per frozen tick before the expiry check, by 89 there
+and 90 here. Through the stop the prototype healed +18, +33, +63, +182, +212, +242, keeping
+each heal's phase across rebuilds; the mod healed +23, +38, +68, +203, +218, +248, with the
+native rebuilds (the buff's removal at its moved deadline gave the 45-tick gap of `base`).
+Under Haste both healed 6 times at +16, +31, +61, +91, +121, +151. The prototype corrected
+one subject's two fixtures; the mod covers every creature and timed effect, Slow and the
+periodic list as a whole.
+
 ## Host validation
 
 ```powershell
@@ -599,6 +780,13 @@ Python tests passed. The Time Stop trigger adds 3 queue-request tests that run t
 against stub bindings; on 2026-10-23 all 16 guard groups and all 60 Python tests passed.
 The Haste trigger adds 2 more; after step 3 on 2026-10-23, all 16 guard groups and all 62
 Python tests passed.
+The [Time Clocks lab](#time-clocks-lab-2026-10-23) adds its variant, installer, requests,
+driver, report and Spell Revisions staging. On 2026-10-24 all 21 guard groups passed with
+`CBR_LAB_VARIANT` unset and set to `timeclocks`, and so did the 96 tests of the modules that
+need no native-analysis library, under both:
+`python -B -m unittest test_tc_session test_tc_requests test_lab_rc test_fixtures test_lab_variant test_decode_trace test_qa_menu test_sr_cloudkill test_tc_report`
+in `research/timestop-lab`, with `PYTHONPATH` at the repository's `tests`. The dependency
+directory above is no longer on this PC, so `test_observer.py` did not run.
 Fixture and decoder tests use synthetic data; assembly tests use synthetic memory
 and the pinned executable on disk. They do not execute the game or prove the
 EEex trampoline integration works at runtime.
