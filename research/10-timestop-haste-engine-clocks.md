@@ -179,11 +179,14 @@ immediately (hits, the direct damage of Fireball or Magic Missile).
 - **Saving.** Traps are saved with the area; a flying projectile that carries effects blocks
   saving (`CProjectile::CanSaveGame`).
 
-So the engine's own projectile hold already matches the rule for clouds, walls and every
-spell cast during the stop, and the clock fix covers the effects on frozen creatures.
-Projectile hooks are on hold (coordinator, 2026-10-23); the engine's behaviour stays. The
+So the engine's own projectile hold already matches the rule for clouds and walls, new and
+existing, and the clock fix covers the effects on frozen creatures. It differs in one
+point: the direct damage of a projectile spell cast during the stop (Magic Missile,
+Fireball) lands only when time resumes, not at once; only spells on projectile "None" and
+melee hits land at once. Changing that would take projectile hooks. They are on hold
+(coordinator, 2026-10-23) until Christopher decides; the engine's behaviour stays. The
 Time Clocks lab's area cases A–G check this together with the clock fix in the running
-engine.
+engine, case C the impact of Magic Missile and Fireball against the end of the stop.
 
 ## Evidence identity and method
 
