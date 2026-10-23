@@ -75,20 +75,50 @@ class TcQueueTests(unittest.TestCase):
         ok, response, count, who = self.queue({
             "actor": "p1", "name": "Imoen", "t1": "4242",
             "steps": "wait:40;apply:CBRTSTP:self;mark:stop_cast;cast:SPWI112:t1;castpoint:SPWI304:900:1200;"
-                     "attack:t1;apply:CBRTBUF:p0;damage:5;spawn:BOUNHA02:950:1210;move:800:1100"})
+                     "hostile:t1;attack:t1;apply:CBRTBUF:p0;damage:5;spawn:BOUNHA02:950:1210;move:800:1100;"
+                     "mark:end"})
         self.assertTrue(ok, response)
         self.assertEqual(count, 1)
+        # A mark passes its label's number: the script parser drops quotes inside the string.
         self.assertEqual(response.split("\n"), [
-            "SmallWait(40)", 'ApplySpellRES("CBRTSTP",Myself)', "EEex_LuaAction(\"CBTCLab_Mark('stop_cast')\")",
+            "SmallWait(40)", 'ApplySpellRES("CBRTSTP",Myself)', 'EEex_LuaAction("CBTCLab_Mark(1)")',
             'ReallyForceSpellRES("SPWI112",EEex_Target("t1"))', 'ReallyForceSpellPointRES("SPWI304",[900.1200])',
-            'AttackOneRound(EEex_Target("t1"))', 'ApplySpellRES("CBRTBUF",Player1)', "ApplyDamage(Myself,5,0)",
-            'CreateCreature("BOUNHA02",[950.1210],0)', "MoveToPoint([800.1100])"])
+            'ChangeEnemyAlly(EEex_Target("t1"),ENEMY)', 'AttackOneRound(EEex_Target("t1"))',
+            'ApplySpellRES("CBRTBUF",Player1)', "ApplyDamage(Myself,5,0)",
+            'CreateCreature("BOUNHA02",[950.1210],0)', "MoveToPoint([800.1100])", 'EEex_LuaAction("CBTCLab_Mark(2)")'])
         # The target is bound once, on the acting creature.
         self.assertEqual(who, "Imoen|Imoen:t1=4242")
 
     def test_an_object_id_names_the_actor(self):
         ok, response, _, who = self.queue({"actor": "4242", "name": "Bounty Hunter", "steps": "apply:CBRTCON:self"})
         self.assertEqual((ok, response, who), (True, 'ApplySpellRES("CBRTCON",Myself)', "Bounty Hunter|"))
+        ok, response, _, who = self.queue({"actor": "4242", "name": "Bounty Hunter", "steps": "destroy"})
+        self.assertEqual((ok, response, who), (True, "DestroySelf()", "Bounty Hunter|"))
+
+    def test_mark_numbers_follow_the_labels_already_registered(self):
+        runtime = lupa.LuaRuntime(unpack_returned_tuples=True)
+        runtime.execute("CBTCLab_MarkNames = {'a', 'b'}")
+        attempt = runtime.eval("""function(code)
+            CGameObjectType = {SPRITE = 1}
+            local imoen = {m_id = 11, _name = "Imoen", m_objectType = 1, m_curAction = {m_actionID = 0}}
+            EngineGlobals = {g_pBaldurChitin = {m_pEngineWorld = {m_bPaused = 1, m_bHardPaused = 0},
+                m_pObjectGame = {_ptr = 1, m_worldTime = {m_gameTime = 1000}}}}
+            EEex_Sprite_GetInPortrait = function(slot) return slot == 1 and imoen or nil end
+            EEex_Sprite_GetName = function(sprite) return sprite._name end
+            EEex_Action_QueueResponseStringOnAIBase = function() end
+            local ok, result = pcall(assert(loadstring(code, "@tc-queue.lua")))
+            return ok, ok and result.queued or tostring(result)
+        end""")
+        ok, response = attempt(code("tc-queue.lua", {"actor": "p1", "name": "Imoen", "steps": "mark:c;wait:2;mark:d"}))
+        self.assertTrue(ok, response)
+        self.assertEqual(response.split("\n")[0::2], ['EEex_LuaAction("CBTCLab_Mark(3)")',
+                                                      'EEex_LuaAction("CBTCLab_Mark(4)")'])
+        self.assertEqual(list(runtime.eval("CBTCLab_MarkNames").values()), ["a", "b", "c", "d"])
+        # A refused request registers nothing.
+        ok, error = attempt(code("tc-queue.lua", {"actor": "p1", "name": "Imoen", "steps": "mark:e;wait:0"}))
+        self.assertFalse(ok)
+        self.assertIn("INVALID_WAIT", error)
+        self.assertEqual(len(runtime.eval("CBTCLab_MarkNames")), 4)
 
     def test_refusals_queue_nothing(self):
         base = {"actor": "p1", "name": "Imoen", "steps": "wait:10"}
@@ -277,7 +307,8 @@ class SamplerTests(unittest.TestCase):
 
     def test_marks_and_failures_never_break_the_console(self):
         self.assertTrue(self.run_request("sampler.lua", {})[0])
-        self.runtime.execute("EEex_LuaAction_Object = sprites[1]; CBTCLab_Mark('stop_cast')")
+        self.runtime.execute("EEex_LuaAction_Object = sprites[1]; CBTCLab_MarkNames = {'x', 'stop_cast'}; "
+                             "CBTCLab_Mark(2); CBTCLab_Mark('direct')")
         self.runtime.execute("EEex_GameObject_Get = function() error('engine trouble') end")
         for _ in range(4):
             self.frame()
@@ -285,8 +316,8 @@ class SamplerTests(unittest.TestCase):
         self.assertFalse(self.lua.CBTCLab.active)
         self.assertIn("engine trouble", self.lua.CBTCLab.lastError)
         _, records = self.export("marks")
-        mark = next(r for r in records if r["k"] == "mark")
-        self.assertEqual((mark["label"], mark["actor"], mark["w"]), ("stop_cast", 11, 5000))
+        marks = [r for r in records if r["k"] == "mark"]
+        self.assertEqual([(m["label"], m["actor"], m["w"]) for m in marks], [("stop_cast", 11, 5000), ("direct", 11, 5000)])
         self.assertEqual(records[0]["errors"], 3)
 
     def test_a_different_object_array_is_refused(self):

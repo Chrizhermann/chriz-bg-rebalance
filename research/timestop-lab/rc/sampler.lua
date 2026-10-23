@@ -71,8 +71,10 @@ function S.push(record)
     S.count = S.count + 1
     S.records[S.count] = json(record)
 end
-function CBTCLab_Mark(label)
+-- `mark`: a label's number in CBTCLab_MarkNames (tc-queue.lua registers them), or a label.
+function CBTCLab_Mark(mark)
     local actor = EEex_LuaAction_Object
+    local label = type(mark) == "number" and CBTCLab_MarkNames and CBTCLab_MarkNames[mark] or mark
     S.push({k = "mark", label = tostring(label), f = Infinity_GetFrameCounter(), w = world(),
         actor = actor and actor.m_id or -1})
 end

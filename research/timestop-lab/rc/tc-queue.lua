@@ -2,14 +2,19 @@
 -- ARGS.actor: a portrait slot "p0".."p5" or an object ID. ARGS.name: that creature's name, checked.
 -- ARGS.steps: steps separated by ";", each one of
 --   wait:N               SmallWait(N), 1-300 AI updates
---   mark:LABEL           the sampler records LABEL with the tick the step runs on (EEex_LuaAction)
+--   mark:LABEL           the sampler records LABEL with the tick the step runs on: the action
+--                        passes LABEL's number in CBTCLab_MarkNames to EEex_LuaAction, since the
+--                        script parser drops quotes inside an action's string (session n2)
 --   apply:RES:TARGET     ApplySpellRES("RES",TARGET)
 --   cast:RES:TARGET      ReallyForceSpellRES("RES",TARGET)
 --   castpoint:RES:X:Y    ReallyForceSpellPointRES("RES",[X.Y])
 --   attack:TARGET        AttackOneRound(TARGET)
+--   hostile:TARGET       ChangeEnemyAlly(TARGET,ENEMY), before an attack: in session n2,
+--                        AttackOneRound against a neutral creature never hit it
 --   damage:N             ApplyDamage(Myself,N,0), 1-50 crushing
 --   spawn:CRE:X:Y        CreateCreature("CRE",[X.Y],0)
 --   move:X:Y             MoveToPoint([X.Y])
+--   destroy              DestroySelf(): the acting creature leaves the game
 --   TARGET: self, p0..p5 (Player1..Player6), or t1..t4: the creature with the object ID in ARGS.t1..t4,
 --   stored on the acting creature for EEex_Target("t1"), so the action finds it when it runs.
 -- ARGS.idle = "1": refuse a creature with a current action (it would run first).
@@ -57,7 +62,8 @@ local function target(text)
     end
     return 'EEex_Target("' .. key .. '")'
 end
-local actions = {}
+local actions, marks = {}, {}
+local markBase = #(CBTCLab_MarkNames or {})
 for step in (ARGS.steps .. ";"):gmatch("([^;]*);") do
     local parts = {}
     for part in (step .. ":"):gmatch("([^:]*):") do parts[#parts + 1] = part end
@@ -67,7 +73,8 @@ for step in (ARGS.steps .. ";"):gmatch("([^;]*);") do
         action = "SmallWait(" .. number(parts[2], 1, 300, "WAIT") .. ")"
     elseif verb == "mark" and #parts == 2 then
         assert(parts[2]:match("^[%w_]+$") and #parts[2] <= 32, "INVALID_LABEL")
-        action = "EEex_LuaAction(\"CBTCLab_Mark('" .. parts[2] .. "')\")"
+        marks[#marks + 1] = parts[2]
+        action = "EEex_LuaAction(\"CBTCLab_Mark(" .. (markBase + #marks) .. ")\")"
     elseif verb == "apply" and #parts == 3 then
         action = 'ApplySpellRES("' .. resref(parts[2]) .. '",' .. target(parts[3]) .. ")"
     elseif verb == "cast" and #parts == 3 then
@@ -77,6 +84,10 @@ for step in (ARGS.steps .. ";"):gmatch("([^;]*);") do
             .. "." .. number(parts[4], 0, 32767, "POINT") .. "])"
     elseif verb == "attack" and #parts == 2 then
         action = "AttackOneRound(" .. target(parts[2]) .. ")"
+    elseif verb == "hostile" and #parts == 2 then
+        action = "ChangeEnemyAlly(" .. target(parts[2]) .. ",ENEMY)"
+    elseif verb == "destroy" and #parts == 1 then
+        action = "DestroySelf()"
     elseif verb == "damage" and #parts == 2 then
         action = "ApplyDamage(Myself," .. number(parts[2], 1, 50, "AMOUNT") .. ",0)"
     elseif verb == "spawn" and #parts == 4 then
@@ -91,6 +102,9 @@ for step in (ARGS.steps .. ";"):gmatch("([^;]*);") do
 end
 assert(#actions >= 1 and #actions <= 24, "INVALID_STEP_COUNT")
 local response = table.concat(actions, "\n")
+-- Registered only now, so a refused request leaves no labels behind.
+CBTCLab_MarkNames = CBTCLab_MarkNames or {}
+for _, label in ipairs(marks) do CBTCLab_MarkNames[#CBTCLab_MarkNames + 1] = label end
 EEex_Action_QueueResponseStringOnAIBase(response, actor)
 return {queued = response, actor = actor.m_id, name = EEex_Sprite_GetName(actor), targets = bound,
     game_time = game.m_worldTime.m_gameTime}
