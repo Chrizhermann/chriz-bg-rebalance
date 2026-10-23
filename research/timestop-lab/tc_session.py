@@ -628,9 +628,10 @@ def case_load(s: Session, name: str) -> dict:
 # Imoen, the stop's caster, casts with ReallyForceSpell(Point)RES; CBRTSTL stops time for 15 s.
 # Before she attacks, her target turns hostile (without scripts it still never acts): in session
 # n2 her AttackOneRound against neutral targets never hit. She attacks for two rounds, both within
-# the stop: she has one attack per round, and in session n3 the single round of case E missed
-# (with CBRTHIT only a natural 1 does). The sampler records each projectile from its decode to its
-# end, and the targets' HP and tracked effects.
+# the stop: in sessions n3 and n4 her first AttackOneRound hit only once in four (n3's case F),
+# although with CBRTHIT only a natural 1 misses; both of n4's second rounds hit within 17 ticks.
+# The sampler records each projectile from its decode to its end, and the targets' HP and
+# tracked effects.
 def _west(s: Session) -> list[tuple[int, int]]:
     x, y = s.position
     return [(x - 400, y - 30), (x - 400, y + 70)]
