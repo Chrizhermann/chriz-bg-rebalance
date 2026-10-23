@@ -1,8 +1,11 @@
 #Requires -Version 7.0
 [CmdletBinding()]
 # The Remote Console source may be any clean checkout or worktree at the pin, so a
-# moved main checkout never has to be switched back for staging.
-param([switch] $Refresh, [string] $RemoteConsoleRoot = 'C:\src\private\eeex-remote-console')
+# moved main checkout never has to be switched back for staging. -SpellRevisionsRoot (Time
+# Clocks lab only) also stages Spell Revisions' Cloudkill for area case G (sr_cloudkill.py);
+# once staged, every later refresh needs it again.
+param([switch] $Refresh, [string] $RemoteConsoleRoot = 'C:\src\private\eeex-remote-console',
+    [string] $SpellRevisionsRoot)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Lab.Common.ps1')
 
@@ -58,6 +61,22 @@ print(json.dumps({"Files":files, "Digest":digest}, separators=(",", ":")))
     $specification = $result[0] | ConvertFrom-Json
     [pscustomobject]@{Files=$specification.Files; Digest=$specification.Digest;
         BuilderSha256=$builderHash; EncoderSha256=$encoderHash}
+}
+
+function Get-CurrentSRCloudkill {
+    # Spell Revisions' Cloudkill under lab names, from the reviewed SR files and the lab's stock
+    # PROJECTL.IDS (sr_cloudkill.py). The SR folder is a downloaded archive: isolated Python only.
+    param([Parameter(Mandatory)][string] $Lab, [Parameter(Mandatory)][string] $Root)
+    $builder = Join-Path $PSScriptRoot 'sr_cloudkill.py'
+    $builderHash = Get-LabSha256 $builder
+    $result = @(& python -I -B $builder describe $Lab $Root)
+    if ($LASTEXITCODE -ne 0 -or $result.Count -ne 1) { throw "Cannot derive Spell Revisions' Cloudkill." }
+    if ((Get-LabSha256 $builder) -cne $builderHash) { throw 'Cloudkill builder changed while deriving it.' }
+    $description = $result[0] | ConvertFrom-Json
+    if ($description.digest -notmatch '^[0-9a-f]{64}$') { throw 'Invalid Cloudkill description.' }
+    [pscustomobject]@{Root=$Root; Digest=[string]$description.digest; Files=$description.files;
+        Sources=$description.sources; ProjectlValue=[int]$description.projectl_value;
+        StockProjectlSha256=[string]$description.stock_projectl_sha256; BuilderSha256=$builderHash}
 }
 
 function Get-CurrentQAMenu {
@@ -135,6 +154,27 @@ if ((Get-LabSha256 (Join-Path $qaFolder 'UI.MENU')) -cne $qaMenu.Sha256) {
     throw 'Generated QA menu differs from the current builder.'
 }
 $sources['override\UI.MENU'] = Join-Path $qaFolder 'UI.MENU'
+$cloudkill = $null
+if ($SpellRevisionsRoot) {
+    if ($config.Variant -cne 'timeclocks') { throw "Spell Revisions' Cloudkill is staged only in the Time Clocks lab." }
+    $srRoot = ConvertTo-LabFullPath $SpellRevisionsRoot
+    if (Test-LabPathWithin -Path $srRoot -Root $lab) { throw 'The Spell Revisions folder must not be inside the lab.' }
+    $cloudkill = Get-CurrentSRCloudkill $lab $srRoot
+    $srFolder = Join-Path $lab ('cbr-generated-sr-cloudkill-' + $cloudkill.Digest.Substring(0, 16))
+    Assert-LabNoReparsePath $srFolder
+    if (-not (Test-Path -LiteralPath $srFolder)) {
+        & python -I -B (Join-Path $PSScriptRoot 'sr_cloudkill.py') build $lab $srRoot $srFolder
+        if ($LASTEXITCODE -ne 0) { throw "Spell Revisions' Cloudkill generation failed." }
+    }
+    foreach ($entry in $cloudkill.Files.PSObject.Properties) {
+        $path = Join-Path $srFolder $entry.Name
+        if ((Get-LabSha256 $path) -cne $entry.Value) { throw "Generated Cloudkill file differs: $($entry.Name)" }
+        $sources["override\$($entry.Name)"] = $path
+    }
+}
+elseif ($old -and $old.PSObject.Properties['SpellRevisions']) {
+    throw "This lab has Spell Revisions' Cloudkill staged; pass -SpellRevisionsRoot again."
+}
 $writes = @()
 foreach ($entry in $sources.GetEnumerator()) {
     $target = Join-Path $lab $entry.Key
@@ -204,6 +244,11 @@ $state = [ordered]@{Schema=1; InstanceId=$manifest.InstanceId; Mode='observation
     FixtureEncoderSha256=$fixtures.EncoderSha256; FixtureDigest=$fixtures.Digest;
     QAMenuBuilderSha256=$qaMenu.BuilderSha256; QAMenuStockSha256=$qaMenu.StockSha256; QAMenuSha256=$qaMenu.Sha256;
     Files=$hashes; StagedUtc=[DateTime]::UtcNow.ToString('o'); GameLaunched=$false}
+if ($cloudkill) {
+    $state['SpellRevisions'] = [ordered]@{Root=$cloudkill.Root; Sources=$cloudkill.Sources; Digest=$cloudkill.Digest;
+        ProjectlValue=$cloudkill.ProjectlValue; StockProjectlSha256=$cloudkill.StockProjectlSha256;
+        BuilderSha256=$cloudkill.BuilderSha256}
+}
 [IO.File]::WriteAllText($marker, ($state | ConvertTo-Json -Depth 5), $utf8)
 [pscustomobject]@{LabRoot=$lab; Profile=$config.ProfileRoot; Assets=$hashes.Count;
     AutoPatch=$false; GameLaunched=$false} | ConvertTo-Json -Compress
