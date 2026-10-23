@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.8.4 — 2026-10-23
 
 - Bracers of Blinding Strike (220) now keep other mods' changes to the bracers
   and to SR's Improved Haste: equipped bonuses, extra abilities, reordered or
