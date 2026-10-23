@@ -114,8 +114,12 @@ $sources = [ordered]@{
     'override\EEexRC.menu' = Join-Path $remote 'eeexremote\EEexRC.menu'
 }
 $resrefs = @('CBRTBUF','CBRTREG','CBRTHST','CBRTIHS','CBRTSTP')
-# The Time Clocks lab also gets Slow, Spell Revisions' Haste and a disease (build_fixtures.py).
-if ($config.Variant -ceq 'timeclocks') { $resrefs += @('CBRTSLW','CBRTSRH','CBRTDIS') }
+# The Time Clocks lab also gets Slow, Spell Revisions' Haste and a disease, and for its area
+# cases instant damage, a contingency, a to-hit bonus, a longer Time Stop and a save penalty
+# (build_fixtures.py).
+if ($config.Variant -ceq 'timeclocks') {
+    $resrefs += @('CBRTSLW','CBRTSRH','CBRTDIS','CBRTDMG','CBRTCON','CBRTHIT','CBRTSTL','CBRTSAV')
+}
 foreach ($resref in $resrefs) {
     $sources["override\$resref.SPL"] = Join-Path $generated "$resref.SPL"
 }

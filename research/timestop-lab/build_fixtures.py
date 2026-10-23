@@ -17,6 +17,15 @@ The lab must measure actual native timing; these are not live-test results.
 The Time Clocks lab (CBR_LAB_VARIANT=timeclocks) stages three more, CLOCK_FIXTURES: native Slow
 (op40), Spell Revisions' Haste (SR 4.19 SPWI305: movement rate, half an attack and the Haste icon,
 no op16) and a disease (op78), a periodic effect besides regeneration and poison.
+
+For its area cases it also stages AREA_FIXTURES: 5 crushing damage once (op12, timing 1), cast
+on the instant projectile; a contingency that casts Magic Missile at whoever hits its bearer
+(op232: parameter 1 = 1 LastHitter, parameter 2 = 0 HitBy, as the stock Fire Shield (Red)
+BALSHLD.SPL and Studded Leather of Thorns LEAT23.ITM use it); +20 to-hit (op54), so the
+caster's single round of attacks lands; a Time Stop of 15 seconds (op231, 30 encoded), long
+enough for the caster to act during it; and -20 to saves vs. death (op33, a penalty as the
+stock Doom SPPR113 gives -2), so a target cannot save against the stock Stinking Cloud (save
+vs. death at +2).
 """
 
 from __future__ import annotations
@@ -50,22 +59,34 @@ CLOCK_FIXTURES = (
     ("CBRTDIS", 20, ((78, 0, 0),)),
 )
 
+# resref, encoded duration in seconds, effects as (opcode, parameter1, parameter2, timing, resource).
+AREA_FIXTURES = (
+    ("CBRTDMG", 0, ((12, 5, 0, 1, ""),)),
+    ("CBRTCON", 120, ((232, 1, 0, 0, "SPWI112"),)),
+    ("CBRTHIT", 120, ((54, 20, 0, 0, ""),)),
+    ("CBRTSTL", 30, ((231, 0, 0, 0, ""),)),
+    ("CBRTSAV", 120, ((33, -20, 0, 0, ""),)),
+)
+
 
 def fixture_bytes() -> dict[str, bytes]:
     """Return complete resources; no files or native effects are touched."""
     result = {}
-    specifications = [(resref, duration, ((opcode, parameter1, parameter2),))
+    specifications = [(resref, duration, ((opcode, parameter1, parameter2, 0, ""),))
                       for resref, opcode, parameter1, parameter2, duration in FIXTURES]
-    for resref, duration, effects in (*specifications, *CLOCK_FIXTURES):
+    clocks = [(resref, duration, tuple((*effect, 0, "") for effect in effects))
+              for resref, duration, effects in CLOCK_FIXTURES]
+    for resref, duration, effects in (*specifications, *clocks, *AREA_FIXTURES):
         effects = tuple(SplEffect(
             opcode=opcode,
             target=2,  # The single projectile target, not an area or caster list.
             parameter1=parameter1,
             parameter2=parameter2,
-            timing=0,
+            timing=timing,
             duration=duration,
             resist_dispel=2,  # Explicitly ignore MR; no dispel confound in baseline.
-        ) for opcode, parameter1, parameter2 in effects)
+            resource=resource,
+        ) for opcode, parameter1, parameter2, timing, resource in effects)
         ability_raw = bytearray(0x28)
         ability_raw[0] = 1  # Standard spell form.
         struct.pack_into("<H", ability_raw, 0x02, 2)  # Spell ability location.

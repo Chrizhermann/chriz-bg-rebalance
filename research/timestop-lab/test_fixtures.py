@@ -28,12 +28,15 @@ class FixtureTests(unittest.TestCase):
             "CBRTSRH.SPL": (20, ((176, 6, 0), (1, 6, 0), (142, 0, 38))),
             "CBRTDIS.SPL": (20, ((78, 0, 0),)),
         }
+        area = {f"{resref}.SPL" for resref, _, _ in builder.AREA_FIXTURES}
         with tempfile.TemporaryDirectory(prefix="cbr-fixture-test-") as directory:
             output = Path(directory) / "assets"
             paths = builder.build_fixtures(output)
-            self.assertEqual({p.name for p in paths}, set(expected))
-            self.assertEqual({p.name for p in output.iterdir()}, set(expected))
+            self.assertEqual({p.name for p in paths}, set(expected) | area)
+            self.assertEqual({p.name for p in output.iterdir()}, set(expected) | area)
             for path in paths:
+                if path.name in area:
+                    continue
                 with self.subTest(resource=path.name):
                     duration, effects = expected[path.name]
                     data = path.read_bytes()
@@ -64,6 +67,30 @@ class FixtureTests(unittest.TestCase):
                     for offset in (0x08, 0x0C, 0x50, 0x54):
                         self.assertEqual(struct.unpack_from("<i", data, offset)[0], -1)
 
+    def test_area_fixtures_carry_their_timing_and_resource(self):
+        # resource -> (encoded duration, (opcode, parameter1, parameter2, timing, resource))
+        expected = {
+            "CBRTDMG.SPL": (0, (12, 5, 0, 1, "")),
+            "CBRTCON.SPL": (120, (232, 1, 0, 0, "SPWI112")),
+            "CBRTHIT.SPL": (120, (54, 20, 0, 0, "")),
+            "CBRTSTL.SPL": (30, (231, 0, 0, 0, "")),
+            "CBRTSAV.SPL": (120, (33, -20, 0, 0, "")),
+        }
+        self.assertEqual({f"{resref}.SPL" for resref, _, _ in builder.AREA_FIXTURES}, set(expected))
+        resources = builder.fixture_bytes()
+        for name, (duration, wanted) in expected.items():
+            with self.subTest(resource=name):
+                data = resources[name]
+                self.assertEqual(len(data), 0x72 + 0x28 + 0x30)
+                ability = SplFile.from_bytes(data).abilities[0]
+                self.assertEqual((ability.target, ability.projectile), (1, 1))
+                (effect,) = ability.effects
+                self.assertEqual((effect.opcode, effect.parameter1, effect.parameter2, effect.timing,
+                                  effect.resource), wanted)
+                self.assertEqual((effect.duration, effect.target, effect.resist_dispel), (duration, 2, 2))
+                self.assertEqual((effect.dice_number, effect.dice_size, effect.save_type, effect.special),
+                                 (0, 0, 0, 0))
+
     def test_time_stop_lab_fixtures_keep_their_bytes(self):
         # The five fixtures of the Time Stop lab's captures (staged 2026-10-20 to 2026-10-23).
         pinned = {
@@ -72,6 +99,10 @@ class FixtureTests(unittest.TestCase):
             "CBRTHST.SPL": "fa037db573ed9ff3703b380b375d5f00ad8fd8d629bb46b786a841aa3ff643c8",
             "CBRTIHS.SPL": "f47d0b3794eb6f099b5999b3828be672331eb19e324de29490ccdb7a4045a9b0",
             "CBRTSTP.SPL": "15f75bbda945424cb2e75896c5bdb53003e43cc611988f56eb2023b0940946a4",
+            # The Time Clocks lab's clock fixtures, staged from 2026-10-23.
+            "CBRTSLW.SPL": "68646c1b7b996dcfb25f2365c6bd0ebbe416de11f630c706803c9481453ec559",
+            "CBRTSRH.SPL": "080383b6a0c14d28262218b71086d012e185d6c236a0aa037603b0591410b95c",
+            "CBRTDIS.SPL": "3ac034e0a68bd0a25d5f4acb51b0f3b56999b3b1928be314ad8b2c4ac5be5fcf",
         }
         resources = builder.fixture_bytes()
         for name, digest in pinned.items():
