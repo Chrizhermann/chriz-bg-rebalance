@@ -24,8 +24,9 @@ pulses (the type switch of CGameEffectDisease::ApplyEffect at 0x1401B1818, jump 
 For its area cases it also stages AREA_FIXTURES: 5 crushing damage once (op12, timing 1), cast
 on the instant projectile; a contingency that casts Magic Missile at whoever hits its bearer
 (op232: parameter 1 = 1 LastHitter, parameter 2 = 0 HitBy, as the stock Fire Shield (Red)
-BALSHLD.SPL and Studded Leather of Thorns LEAT23.ITM use it); +20 to-hit (op54), so the
-caster's single round of attacks lands; a Time Stop of 15 seconds (op231, 30 encoded), long
+BALSHLD.SPL and Studded Leather of Thorns LEAT23.ITM use it); +20 to-hit (op54), so only a
+natural 1 misses (the lab's Imoen has THAC0 17, the Bounty Hunter BOUNHA02 plate mail and
+Dexterity 17, AC 0); a Time Stop of 15 seconds (op231, 30 encoded), long
 enough for the caster to act during it; and -20 to saves vs. death (op33, a penalty as the
 stock Doom SPPR113 gives -2), so a target cannot save against the stock Stinking Cloud (save
 vs. death at +2).

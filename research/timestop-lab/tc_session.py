@@ -627,8 +627,10 @@ def case_load(s: Session, name: str) -> dict:
 # subject (cloud and fireball targets) or beside Imoen (melee), and removes them afterwards.
 # Imoen, the stop's caster, casts with ReallyForceSpell(Point)RES; CBRTSTL stops time for 15 s.
 # Before she attacks, her target turns hostile (without scripts it still never acts): in session
-# n2 her AttackOneRound against neutral targets never hit. The sampler records each projectile
-# from its decode to its end, and the targets' HP and tracked effects.
+# n2 her AttackOneRound against neutral targets never hit. She attacks for two rounds, both within
+# the stop: she has one attack per round, and in session n3 the single round of case E missed
+# (with CBRTHIT only a natural 1 does). The sampler records each projectile from its decode to its
+# end, and the targets' HP and tracked effects.
 def _west(s: Session) -> list[tuple[int, int]]:
     x, y = s.position
     return [(x - 400, y - 30), (x - 400, y + 70)]
@@ -717,18 +719,19 @@ def area_contingency(s: Session, name: str) -> dict:
     def setup():
         (t1,) = _targets(s, _near(s), name)
         s.tcq("p1", CONTROLLER, "apply:CBRTHIT:self;apply:CBRTCON:t1", f"{name}-prepare", t1=t1["id"])
-        s.tcq("p1", CONTROLLER, "wait:5;mark:e_stop;apply:CBRTSTL:self;wait:10;mark:e_attack;hostile:t1;attack:t1",
-              f"{name}-stop-attack", t1=t1["id"])
+        s.tcq("p1", CONTROLLER, "wait:5;mark:e_stop;apply:CBRTSTL:self;wait:10;mark:e_attack;hostile:t1;attack:t1;"
+              "mark:e_attack2;attack:t1", f"{name}-stop-attack", t1=t1["id"])
         return _ids(s, [t1])
     return _area(s, name, setup, 420)
 
 
 def area_instant(s: Session, name: str) -> dict:
-    """F: CBRTDMG (the instant projectile) and a melee round against a frozen target."""
+    """F: CBRTDMG (the instant projectile) and two melee rounds against a frozen target."""
     def setup():
         (t1,) = _targets(s, _near(s), name)
         s.tcq("p1", CONTROLLER, "apply:CBRTHIT:self;wait:5;mark:f_stop;apply:CBRTSTL:self;wait:10;mark:f_damage;"
-              "cast:CBRTDMG:t1;mark:f_attack;hostile:t1;attack:t1", f"{name}-stop-hit", t1=t1["id"])
+              "cast:CBRTDMG:t1;mark:f_attack;hostile:t1;attack:t1;mark:f_attack2;attack:t1", f"{name}-stop-hit",
+              t1=t1["id"])
         return _ids(s, [t1])
     return _area(s, name, setup, 330)
 
