@@ -59,6 +59,14 @@ class ReportTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 tc_report.load(path)
 
+    def test_an_effect_applied_again_keeps_its_removal(self):
+        records = [{"k": "header", "lab": "x", "records": 3}, sample(10, fx="SPWI213/39/4096/50"),
+                   sample(52), sample(80, fx="SPWI213/39/4096/215")]
+        summary = tc_report.summarize(*[records[0], records[1:]])
+        effect = summary["actors"]["10"]["effects"]["SPWI213/39"]
+        self.assertEqual((effect["seen"], effect["deadline"], effect["removed"], effect["again"]),
+                         (10, 50, None, [[52, 80, 215]]))
+
     def test_repeated_effects_keep_their_own_rows(self):
         self.assertEqual(tc_report.effects("A/1/4096/5,A/1/4096/9,B/2/1/0"),
                          {"A/1": (4096, 5), "A/1#2": (4096, 9), "B/2": (1, 0)})

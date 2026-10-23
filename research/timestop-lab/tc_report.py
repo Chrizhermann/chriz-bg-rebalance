@@ -80,7 +80,8 @@ def summarize(header: dict, records: list[dict]) -> dict:
                 if key in before and before[key][1] != deadline:
                     item["moves"].append([record["w"], before[key][1], deadline])
                 if key not in before and item["removed"] is not None:
-                    item.setdefault("again", []).append([record["w"], deadline])
+                    # Removed, then applied again (a cloud's next pulse): [removed, again, deadline].
+                    item.setdefault("again", []).append([item["removed"], record["w"], deadline])
                     item["removed"] = None
             for key in before:
                 if key not in now and key in entry["effects"]:
