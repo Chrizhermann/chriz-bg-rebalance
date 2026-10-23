@@ -150,6 +150,39 @@ stay untouched, as the recommendation says. SR-shaped Haste, movement and attack
 unmeasured. Details are in the
 [lab README](timestop-lab/README.md#haste-captures-haste_01-to-haste_04-2026-10-23).
 
+Update 2026-10-23, correction prototype: the lab's `CBRTFix.lua` corrects both clocks for one
+selected subject and the two fixtures. It is opt-in and stays inert until a subject is
+selected. Four hooks do the work:
+
+- in each frozen world tick, before the expiry check, the selected deadlines and the
+  regeneration origin move one tick later;
+- the regeneration worker runs once per world tick on the subject's active time, and a
+  second hasted dispatch is a no-op;
+- every rebuild gets the kept phase back;
+- after a heal, the kept phase is the one a native un-hasted rebuild would seed, so the
+  native heal pattern at normal speed stays (Christopher's choice).
+
+Four corrected captures decoded complete:
+
+- **Control.** The corrected control matched the native rules tick for tick.
+- **Time Stop.** In an 89-tick stop the buff kept its 20 remaining ticks, and the
+  regeneration gave all 6 HP: none inside the stop, the next heal 23 active ticks later as
+  before, no catch-up burst. Natively the buff ended inside the stop, and the regeneration
+  gave 3 and 2 HP.
+- **Haste.** Both Haste cases, entering midway and ending midway, healed 6 times with native
+  spacing, against 13 and 10 natively.
+
+Two one-tick residuals remain under Haste. A regeneration applied while paused to a subject
+that is already hasted can start its grid one tick early. A rebuild in the second hasted
+update of a tick leaves the worker one tick longer. Neither changed a heal count here; the
+lab README describes fixes for both.
+
+Expiry still waits for the subject's next full pass, so its timing stays native. The go-beyond
+gate below is not passed yet: explicit removal is untested. Attacks and movement, corrected
+Improved Haste and SR-shaped Haste, consecutive stops, removal during a stop, save/load and
+caster/immune subjects are open too. Details are in the
+[lab README](timestop-lab/README.md#corrected-captures-fixctl_01-fixstop_01-fixhaste_01-and-fixhaste_02-2026-10-23).
+
 ## Evidence identity and method
 
 The current executable inspected was
@@ -399,6 +432,13 @@ Binary anchors for the compatibility reading (all under the read-only game direc
   record `0xFA` op328 duration18, `0x12A` op231 duration36; last modifying owner unaudited.
 
 ## Smallest isolated prototype and acceptance plan — proposed only
+
+Status 2026-10-23: the prototype exists as
+[`timestop-lab/CBRTFix.lua`](timestop-lab/README.md#correction-prototype-cbrtfixlua). For the
+fixture it met the Time Stop requirements of step 2 and the healing requirements of step 3,
+with a one-tick phase offset in one Haste case. In every case the rebuilds kept the phase
+without a duplicate HP event, the first item of step 4. Attacks and movement, the other Haste
+cases and the rest of steps 4 and 5 are open (see the update above).
 
 Use a disposable BG2:EE **2.7.3.0 / EEex 1.3.1** copy and establish unmodified controls.
 Match its executable to the current fingerprint above, then validate candidate patch
