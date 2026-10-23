@@ -1,13 +1,14 @@
-"""Component 340, Chris Revisions: Aid, Luck, Chaotic Commands, Prayer and Recitation.
+"""Component 340, Chris Revisions: Aid, Luck, Bless, Chaotic Commands, Prayer and Recitation.
 
 Real WeiDU on disposable synthetic games only. The fixtures mirror the shapes
-seen in an installed EET game (native and Spell Revisions Aid/Luck, Bardic
-Wonders' byte copy of Aid, the Luck scroll, SR's druid exclusion,
-IWDification's Prayer and Recitation with their sub-spells and priest scrolls)
-plus layouts the component must also handle: relocated SPELL.IDS slots, shared
-effect slices, casting effects, an opcode-22 Luck bonus, reordered refreshes,
-saving throws and unrecognized text. Descriptions are short stand-ins that
-contain only the phrases the installer rewrites.
+seen in an installed EET game (native and Spell Revisions Aid/Luck/Bless, Bardic
+Wonders' byte copy of Aid, SCS's instant prebuff copy of Bless, the Luck scroll,
+SR's druid exclusion, IWDification's Prayer and Recitation with their sub-spells
+and priest scrolls) plus layouts the component must also handle: relocated
+SPELL.IDS slots, shared effect slices, casting effects, an opcode-22 Luck bonus,
+a Bless with its own level table, reordered refreshes, saving throws and
+unrecognized text. Descriptions are short stand-ins that contain only the
+phrases the installer rewrites.
 """
 from __future__ import annotations
 
@@ -61,14 +62,21 @@ RECITATION_NOTE = ("Recitation does not stack with Prayer. On each creature, Rec
                    "Recitation lasts, Prayer adds no bonus or penalty of the same kind.")
 PRAYER_NEW = PRAYER + "\n\n" + PRAYER_NOTE
 RECITATION_NEW = RECITATION.split(" Recitation does not")[0] + " " + RECITATION_NOTE
+SR_BLESS = ("Bless\nRange: Long\nDuration: 5 turns\nCasting Time: 5\n\nUpon uttering the Bless spell, "
+            "the caster raises the morale of friendly creatures by +1.")
+NATIVE_BLESS = ("Bless\nRange: 40 ft.\nDuration: 6 rounds\nCasting Time: 9\n\nUpon uttering the Bless "
+                "spell, the caster raises the morale of friendly creatures by +1.")
+BLESS_DURATION = "Duration: 5 rounds + 1 round/level (maximum 25 rounds)"
+SR_BLESS_NEW = SR_BLESS.replace("Duration: 5 turns", BLESS_DURATION)
+NATIVE_BLESS_NEW = NATIVE_BLESS.replace("Duration: 6 rounds", BLESS_DURATION)
 TEXTS = ["Unrelated shared text.", SR_AID, NATIVE_AID, SR_LUCK, NATIVE_LUCK, GERMAN,
-         PRAYER, RECITATION, RECITATION, OTHER_RECITATION, GERMAN_RECITATION]
+         PRAYER, RECITATION, RECITATION, OTHER_RECITATION, GERMAN_RECITATION, SR_BLESS, NATIVE_BLESS]
 (SR_AID_REF, NATIVE_AID_REF, SR_LUCK_REF, NATIVE_LUCK_REF, GERMAN_REF, PRAYER_REF, RECITATION_REF,
- RECITATION_COPY_REF, OTHER_RECITATION_REF, GERMAN_RECITATION_REF) = range(1, 11)
+ RECITATION_COPY_REF, OTHER_RECITATION_REF, GERMAN_RECITATION_REF, SR_BLESS_REF, NATIVE_BLESS_REF) = range(1, 13)
 # Each part's spell gets its SPELL.IDS entry when the game has it.
 DEFAULT_IDS = {"SPPR201.SPL": "1201 CLERIC_AID", "SPWI209.SPL": "2209 WIZARD_LUCK",
-               "SPPR508.SPL": "1508 CLERIC_CHAOTIC_COMMANDS", "SPPR327.SPL": "1327 CLERIC_PRAYER",
-               "SPPR422.SPL": "1422 CLERIC_RECITATION"}
+               "SPPR101.SPL": "1101 CLERIC_BLESS", "SPPR508.SPL": "1508 CLERIC_CHAOTIC_COMMANDS",
+               "SPPR327.SPL": "1327 CLERIC_PRAYER", "SPPR422.SPL": "1422 CLERIC_RECITATION"}
 
 
 def fx(op, p1=0, p2=0, *, tg=2, pw=2, tm=0, rd=3, du=0, res="", **kwargs):
@@ -168,6 +176,58 @@ def luck(d=300, *, resref="SPWI209", desc=SR_LUCK_REF, spell_type=1, **kwargs):
 def chaotic_commands(excl, *, spell_type=2):
     return spell([SplAbility(9, 1, 1, (fx(101, 0, 5, du=540), fx(142, 0, 33, du=540)))],
                  spell_type=spell_type, level=5, excl=excl)
+
+
+def bless_raw(range_, speed):
+    """Ability fields besides level and effects, which every new ability keeps."""
+    raw = bytearray(0x28)
+    raw[0] = 1
+    struct.pack_into("<HH", raw, 0x0E, range_, 1)
+    struct.pack_into("<HH", raw, 0x12, speed, 1)
+    struct.pack_into("<H", raw, 0x24, 3)
+    return bytes(raw)
+
+
+SR_BLESS_RAW, NATIVE_BLESS_RAW = bless_raw(30, 5), bless_raw(40, 9)
+
+
+def bless_effects(d, *, amount=1, visual=1):
+    """Spell Revisions' Bless: bonus, visual, feedback, spell state, icon, end sound."""
+    e = functools.partial(fx, pw=1)
+    return (e(130, amount, du=d), e(215, 0, 1, du=visual, res="ICBLESAI"), e(139, 14123, tm=1),
+            e(328, 1, 68, du=d, special=1), e(142, 0, 17, du=d), e(174, tm=4, du=d, res="EFF_E01"))
+
+
+def native_bless_effects(d):
+    e = functools.partial(fx, pw=1)
+    return (e(130, 1, du=d), e(139, 14123, tm=1), e(142, 0, 17, du=d), e(174, tm=4, du=d, res="EFF_E01"),
+            e(215, 0, 1, rd=2, du=2, res="ICBLESAI"), e(50, 1264876800, 983040, tm=1))
+
+
+def prebuff_bless_effects(d):
+    """SCS's instant prebuff copy: Bless without its cosmetic effects."""
+    return tuple(e for e in bless_effects(d) if e.opcode in (130, 328, 142))
+
+
+def bless_ability(level, effects, raw=SR_BLESS_RAW):
+    return SplAbility(level, 4, 162, effects, icon="SPPR101B", raw=raw)
+
+
+def sr_bless(*, spell_type=2, desc=SR_BLESS_REF, effects=None):
+    return spell([bless_ability(1, effects or bless_effects(300))], spell_type=spell_type, level=1,
+                 desc=desc, excl=0x80000000)
+
+
+def bless_duration(level):
+    return 30 + 6 * min(level, 20)
+
+
+def scs_prebuff_map(game, *rows):
+    """SCS's own map of instant prebuff copies, as its installer writes it."""
+    path = game.root / "weidu_external/data/stratagems/instant_prebuff_spells.2da"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\r\n" + b"".join(f"{key} {resref}\r\n".encode() for key, resref in rows))
+    return path
 
 
 # IWDification's Prayer and Recitation: the spell casts a bonus sub-spell for
@@ -329,6 +389,7 @@ class CombinedTests(Fixture):
             "C0TRBS2.SPL": sr_aid(spell_type=1),
             "SPWI209.SPL": luck(),
             "SCRL93.ITM": item(fx(147, tg=1, tm=1, res="SPWI209"), description=SR_LUCK_REF),
+            "SPPR101.SPL": sr_bless(),
             "SPPR508.SPL": chaotic_commands(0x80000020),
             **prayer_recitation(),
         })
@@ -336,10 +397,10 @@ class CombinedTests(Fixture):
     def test_every_part_applies_in_one_component_and_a_second_run_changes_nothing(self):
         game = self.all_parts()
         output = self.install(game)
-        self.assertEqual({"SPPR201.SPL", "C0TRBS2.SPL", "SPWI209.SPL", "SCRL93.ITM", "SPPR508.SPL",
-                          "SPPR327.SPL", "SPPR422.SPL", "#RECITEG.SPL", "#RECITEB.SPL",
+        self.assertEqual({"SPPR201.SPL", "C0TRBS2.SPL", "SPWI209.SPL", "SCRL93.ITM", "SPPR101.SPL",
+                          "SPPR508.SPL", "SPPR327.SPL", "SPPR422.SPL", "#RECITEG.SPL", "#RECITEB.SPL",
                           "CDID327.ITM", "CDID422.ITM", "CBRCOPY.ITM"}, self.changed(game))
-        for text in ("Aid installed", "Luck installed", "druids can learn and cast it again",
+        for text in ("Aid installed", "Luck installed", "Bless installed", "druids can learn and cast it again",
                      "Prayer and Recitation installed"):
             self.assertIn(text, output)
         self.assertNotIn("skipped", output)
@@ -361,9 +422,11 @@ class CombinedTests(Fixture):
 
     def test_parts_without_their_spell_are_skipped(self):
         game = self.game({"SPELL.IDS": b"IDS V1.0\n2209 WIZARD_LUCK\n1327 CLERIC_PRAYER\n",
-                          "SPPR201.SPL": sr_aid(), "SPWI209.SPL": luck(), **prayer_recitation()})
+                          "SPPR201.SPL": sr_aid(), "SPWI209.SPL": luck(), "SPPR101.SPL": sr_bless(),
+                          **prayer_recitation()})
         output = self.install(game)
         self.assertIn("Aid skipped; SPELL.IDS has no CLERIC_AID entry", output)
+        self.assertIn("Bless skipped; SPELL.IDS has no CLERIC_BLESS entry", output)
         self.assertIn("Chaotic Commands skipped; SPELL.IDS has no CLERIC_CHAOTIC_COMMANDS entry", output)
         self.assertIn("Prayer and Recitation skipped; SPELL.IDS has no CLERIC_RECITATION entry", output)
         self.assertEqual({"SPWI209.SPL"}, self.changed(game))
@@ -516,6 +579,117 @@ class LuckTests(Fixture):
         missing = self.game({"SPWI209.SPL": spell([SplAbility(1, 1, 48, (fx(33, 1, du=300),))],
                                                   spell_type=1)})
         self.left_unchanged(missing, "has no timed Luck bonus", "SPWI209.SPL")
+
+    def test_scs_prebuff_copy_changes_with_the_spell(self):
+        cosmetic = {139, 141, 174, 50}
+        prebuff = spell([SplAbility(1, 1, 48, tuple(e for e in luck_effects("SPWI209", 300)
+                                                    if e.opcode not in cosmetic))], spell_type=1)
+        game = self.game({"SPWI209.SPL": luck(), "DWSW209.SPL": prebuff})
+        scs_prebuff_map(game, ("WIZARD_LUCK_PREBUFF", "dwsw209"))
+        output = self.install(game)
+        self.assertIn("Changed: SPWI209 DWSW209", output)
+        self.assertEqual(tuple(e for e in luck_effects("SPWI209", 90) if e.opcode not in cosmetic),
+                         SplFile.from_bytes(game.snapshot()["DWSW209.SPL"]).abilities[0].effects)
+
+
+class BlessTests(Fixture):
+    def sr_game(self):
+        game = self.game({
+            "SPPR101.SPL": sr_bless(),
+            "C0BLESS.SPL": sr_bless(spell_type=4),                         # exact copy
+            "C0NEAR.SPL": sr_bless(effects=bless_effects(300, visual=2)),  # not an exact copy
+            "DWSP101.SPL": sr_bless(effects=prebuff_bless_effects(300)),
+            # An item that shows the spell's description shows the new one.
+            "CBRBLESS.ITM": item(fx(146, 0, 1, tg=1, tm=1, res="SPPR101"), description=SR_BLESS_REF),
+        })
+        self.prebuff_map = scs_prebuff_map(game, ("WIZARD_SHIELD_PREBUFF", "dwsw114"),
+                                           ("CLERIC_BLESS_PREBUFF", "dwsp101"))
+        return game
+
+    def assert_bless(self, game, name, build):
+        """Abilities for levels 1-20, each lasting 30 s + 6 s per level, with the old fields."""
+        before, after = game.original[name], game.snapshot()[name]
+        old, new = SplFile.from_bytes(before), SplFile.from_bytes(after)
+        self.assertEqual(tuple(range(1, 21)), tuple(a.required_level for a in new.abilities), name)
+        kept = lambda raw: raw[:0x10] + raw[0x12:0x1E] + raw[0x22:]  # noqa: E731
+        for ability in new.abilities:
+            self.assertEqual(build(bless_duration(ability.required_level)), ability.effects,
+                             (name, ability.required_level))
+            self.assertEqual(kept(old.abilities[0].raw), kept(ability.raw), name)
+        # In the header only the description, the ability count and the effect offset change.
+        self.assertEqual(before[:0x50] + before[0x54:0x68] + before[0x6E:0x72],
+                         after[:0x50] + after[0x54:0x68] + after[0x6E:0x72])
+        self.assertEqual((20, 0x72 + 20 * 0x28), struct.unpack_from("<HI", after, 0x68))
+
+    def test_spell_revisions_bless_lasts_30_seconds_plus_a_round_per_level(self):
+        game = self.sr_game()
+        prebuff_map = self.prebuff_map.read_bytes()
+        output = self.install(game)
+        after = game.snapshot()
+        self.assertEqual({"SPPR101.SPL", "C0BLESS.SPL", "DWSP101.SPL", "CBRBLESS.ITM"}, self.changed(game))
+        self.assertIn("Bless installed", output)
+        self.assertIn("Changed: SPPR101 C0BLESS DWSP101", output)
+        for name, build in (("SPPR101", bless_effects), ("C0BLESS", bless_effects),
+                            ("DWSP101", prebuff_bless_effects)):
+            self.assert_bless(game, name + ".SPL", build)
+            self.assertEqual(SR_BLESS_NEW, description(game, after[name + ".SPL"]))
+        self.assertEqual(after["SPPR101.SPL"][0x50:0x54], after["CBRBLESS.ITM"][0x54:0x58])
+        self.assertEqual(prebuff_map, self.prebuff_map.read_bytes())
+        self.uninstall(game)
+        self.assertEqual(prebuff_map, self.prebuff_map.read_bytes())
+
+    def test_native_bless_and_a_bless_with_its_own_level_table(self):
+        game = self.game({"SPPR101.SPL": spell([bless_ability(1, native_bless_effects(36), NATIVE_BLESS_RAW)],
+                                               level=1, desc=NATIVE_BLESS_REF)})
+        # A map entry for a file that does not exist is ignored.
+        scs_prebuff_map(game, ("CLERIC_BLESS_PREBUFF", "dwsp101"))
+        self.install(game)
+        self.assertEqual({"SPPR101.SPL"}, self.changed(game))
+        self.assert_bless(game, "SPPR101.SPL", native_bless_effects)
+        self.assertEqual(NATIVE_BLESS_NEW, description(game, game.snapshot()["SPPR101.SPL"]))
+
+        # Relocated, with its own bonuses at levels 3, 10 and 25 and a casting effect.
+        cast = (fx(50, tg=1, du=1),)
+        own = [bless_ability(3, bless_effects(60)), bless_ability(10, bless_effects(120, amount=2)),
+               bless_ability(25, bless_effects(300, amount=3))]
+        variant = self.game({"SPELL.IDS": b"IDS V1.0\n1150 CLERIC_BLESS\n",
+                             "SPPR150.SPL": spell(own, level=1, casting=cast)})
+        self.install(variant)
+        result = SplFile.from_bytes(variant.snapshot()["SPPR150.SPL"])
+        self.assertEqual(cast, result.casting_effects)
+        self.assertEqual((*range(1, 21), 25), tuple(a.required_level for a in result.abilities))
+        for ability in result.abilities:
+            level = ability.required_level
+            # Below level 3 the game used the lowest ability, so the new ones copy it.
+            amount = 1 if level < 10 else 2 if level < 25 else 3
+            self.assertEqual(bless_effects(bless_duration(level), amount=amount), ability.effects, level)
+        self.repeat(variant)
+
+    def test_second_application_changes_nothing(self):
+        game = self.sr_game()
+        self.install(game)
+        self.repeat(game)
+
+    def test_conflicting_or_missing_bless_bonus_is_left_unchanged(self):
+        conflict = self.game({"SPPR101.SPL": sr_bless(effects=(*bless_effects(300), fx(130, 1, pw=1, du=60))),
+                              "SPWI209.SPL": luck()})
+        self.left_unchanged(conflict, "Chris Revisions: Bless left unchanged: SPPR101.spl (ability for level 1) "
+                            "has Bless bonuses with different durations", "SPPR101.SPL")
+        self.assertEqual({"SPWI209.SPL"}, self.changed(conflict))
+        # SCS's prebuff copy changes with the spell, so one that cannot stops both.
+        missing = self.game({"SPPR101.SPL": sr_bless(),
+                             "DWSP101.SPL": sr_bless(effects=(fx(142, 0, 17, pw=1, du=300),))})
+        scs_prebuff_map(missing, ("CLERIC_BLESS_PREBUFF", "DWSP101"))
+        self.left_unchanged(missing, "DWSP101.spl (ability for level 1) has no timed Bless bonus",
+                            "SPPR101.SPL", "DWSP101.SPL")
+
+    def test_unrecognized_description_warns_and_keeps_the_text(self):
+        game = self.game({"SPPR101.SPL": sr_bless(desc=GERMAN_REF)})
+        output = self.install(game, warnings=True)
+        self.assertIn("Bless: the description of SPPR101.spl has different or untranslated text", output)
+        after = game.snapshot()["SPPR101.SPL"]
+        self.assertEqual(GERMAN_REF, struct.unpack_from("<i", after, 0x50)[0])
+        self.assertEqual(bless_effects(150), SplFile.from_bytes(after).abilities[-1].effects)
 
 
 class DruidAccessTests(Fixture):

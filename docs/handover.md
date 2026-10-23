@@ -1,30 +1,35 @@
 # chriz-bg-rebalance — Handover
 
-## October 23 — Chris Revisions (340): Aid, Luck, Chaotic Commands, Prayer and Recitation (unreleased)
+## October 23 — Chris Revisions (340): Aid, Luck, Bless, Chaotic Commands, Prayer and Recitation (unreleased)
 
 Component 340 holds Christopher's spell revisions as parts of one component, at
-his request: Aid hit points only, Luck 90 seconds, Chaotic Commands for druids,
-and Prayer/Recitation not cumulative (Bless and Chant keep stacking). The parts
-were first built as components 340, 341 and 350; future revisions join 340 as
-further parts instead of new components. A part without its spells is skipped;
-one that cannot be changed safely is left unchanged with a warning while the
-others apply. Library `chriz-bg-rebalance/lib/chris_revisions.tpa`. Decisions,
-binary evidence and design are in `research/2026-10-23-aid-luck-chaotic-commands.md`
-and `research/2026-10-23-prayer-recitation.md`, which build on the October 11
-review (`research/2026-10-11-general-spell-balance-design.md`).
+his request: Aid hit points only, Luck 90 seconds, Bless 30 seconds + 1 round
+per level (36–150 seconds), Chaotic Commands for druids, and Prayer/Recitation
+not cumulative (Bless and Chant keep stacking). The parts were first built as
+components 340, 341 and 350; future revisions join 340 as further parts instead
+of new components. A part without its spells is skipped; one that cannot be
+changed safely is left unchanged with a warning while the others apply. Family
+parts (Aid, Luck, Bless) also change exact copies and the instant prebuff copy
+SCS's own map lists for the spell (only Bless has one: `DWSP101`). Library
+`chriz-bg-rebalance/lib/chris_revisions.tpa`. Decisions, binary evidence and
+design are in `research/2026-10-23-aid-luck-chaotic-commands.md`,
+`research/2026-10-23-prayer-recitation.md` and `research/2026-10-23-bless.md`,
+which build on the October 11 review
+(`research/2026-10-11-general-spell-balance-design.md`).
 
 Verified: `tests/test_chris_revisions.py` (real WeiDU on synthetic games) and the
 release-package test. Scratch installs on copies of the CEBG game's resources
-and of the 2.6.6.0 reference install, each with its `dialog.tlk`, changed only
-the expected files, recognized every description and uninstalled cleanly. With
-the original BIFF files the Prayer/Recitation part was skipped. Full regression
-`python -B -m unittest discover -s tests -t .`: 590 tests OK, 26 skipped (private
-captures) with WeiDU 249. Not launched in a game.
+(with SCS's prebuff map) and of the 2.6.6.0 reference install, each with its
+`dialog.tlk`, changed only the expected files, recognized every description and
+uninstalled cleanly. With the original BIFF files the Prayer/Recitation part was
+skipped. Full regression `python -B -m unittest discover -s tests -t .`: see the
+latest PR verification. Not launched in a game.
 
 Open: in-game check (the 1d8 hit point roll; druids receiving Chaotic Commands at
-level-up; Prayer and Recitation in both orders and from opposing casters); Bless
-(Christopher's idea: 30 seconds + 1 round per level) awaits his decision; the
-collection's curation entry; tag/release only with Christopher's approval.
+level-up; Prayer and Recitation in both orders and from opposing casters; Bless
+durations at levels 1, 10 and 20); whether druids get Bless back (SR excludes
+them; Christopher has not decided); the collection's curation entry; tag/release
+only with Christopher's approval.
 
 ## October 14 — v0.8.3 candidate: potion uniqueness and Heroism family (local, unpublished)
 

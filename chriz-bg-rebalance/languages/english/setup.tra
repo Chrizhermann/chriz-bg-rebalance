@@ -271,13 +271,14 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @3306 = ~Heroism family: %pu_r% also has instant, chance-based or delayed effects; left as it is.~
 @3307 = ~Heroism family installed for %pu_count_family% potions and spells: while one of them is active on a creature, the others have no effect on it.~
 @3310 = ~This spell, Heroism and the Potion of Heroism are non-cumulative: while one of them is active on a creature, the others have no effect on it until it ends.~
-@340 = ~Chris Revisions: Christopher's spell balance changes (Aid, Luck, Chaotic Commands, Prayer and Recitation)~
+@340 = ~Chris Revisions: Christopher's spell balance changes (Aid, Luck, Bless, Chaotic Commands, Prayer and Recitation)~
 @9340 = ~Chris Revisions supports BG2:EE / EET only.~
 @3401 = ~Aid installed: 1d8 hit points +1 per caster level (maximum +10) for one turn per level, with no attack, damage or saving throw bonus. Changed:%cr_members%~
 @3402 = ~Luck installed: it now lasts 90 seconds. Changed:%cr_members%~
 @3403 = ~Prayer and Recitation installed: on each creature, Recitation's bonus or penalty replaces Prayer's of the same kind and blocks it while it lasts (%cr_pairs%).~
 @3404 = ~Chris Revisions: %cr_what% skipped; SPELL.IDS has no %cr_symbol% entry.~
 @3405 = ~Chris Revisions: %cr_what% left unchanged: %cr_problem%~
+@3406 = ~Bless installed: it now lasts 30 seconds + 1 round per caster level (36 to 150 seconds). Changed:%cr_members%~
 @3411 = ~Recitation does not stack with Prayer. On each creature, Recitation's bonus replaces a Prayer bonus and its penalty replaces a Prayer penalty; while Recitation lasts, Prayer adds no bonus or penalty of the same kind.~
 @3412 = ~Prayer does not stack with Recitation. A creature with Recitation's bonus gains no bonus from Prayer, a creature with Recitation's penalty suffers no penalty from Prayer, and a later Recitation replaces Prayer's bonus or penalty.~
 @3500 = ~Chaotic Commands: druids can learn and cast it again.~

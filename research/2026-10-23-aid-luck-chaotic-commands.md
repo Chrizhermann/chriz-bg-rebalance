@@ -6,8 +6,8 @@ same day at Christopher's request, so that his revisions do not become one
 component per spell. Follows the
 [October 11 design review](2026-10-11-general-spell-balance-design.md), whose
 duration-only recommendations for Aid and Luck were replaced by these
-decisions. Prayer and Recitation were decided later that day
-([note](2026-10-23-prayer-recitation.md)); Bless is still open.
+decisions. Prayer and Recitation ([note](2026-10-23-prayer-recitation.md)) and
+Bless ([note](2026-10-23-bless.md)) were decided later that day.
 
 ## Decisions
 
@@ -114,8 +114,11 @@ For every ability of the resolved `CLERIC_AID` spell and of each exact copy:
 - each ability starts with one opcode-321 refresh per family member: Aid first,
   then its copies in the order WeiDU lists them. The family is the Aid spell
   plus spells whose abilities and effects are byte-identical to it, collected
-  before anything changes. Recasting either spell replaces the other instead of
-  stacking hit points. The ability's first family refresh is the template;
+  before anything changes, and the instant prebuff copies SCS's own map lists
+  for it (added with Bless; SCS has none for Aid or Luck today, see the
+  [Bless note](2026-10-23-bless.md#component-design)). Recasting either spell
+  replaces the other instead of stacking hit points. The ability's first
+  family refresh is the template;
   otherwise SR's form is used (non-dispellable, ignores magic resistance) on the
   payload's recipient;
 - each ability gets its own copy of its effects, so shared effect records are
