@@ -1,0 +1,95 @@
+{
+  "planPath": "docs/plans/2026-08-27-scs-ambient-readiness-implementation.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Land installed evidence and a reproducible read-only audit",
+      "status": "completed"
+    },
+    {
+      "id": 2,
+      "subject": "Lock component 120 behavior with failing binary and script tests",
+      "status": "completed",
+      "blockedBy": [1]
+    },
+    {
+      "id": 3,
+      "subject": "Implement the component 120 semantic and BCS patch library",
+      "status": "completed",
+      "blockedBy": [2]
+    },
+    {
+      "id": 4,
+      "subject": "Wire and document component 120",
+      "status": "completed",
+      "blockedBy": [3]
+    },
+    {
+      "id": 5,
+      "subject": "Build the red fake-EEex suite and session-scoped probe",
+      "status": "completed",
+      "blockedBy": [1]
+    },
+    {
+      "id": 6,
+      "subject": "Obtain authorization and run the installed EEex timing/API spike",
+      "status": "completed",
+      "blockedBy": [5]
+    },
+    {
+      "id": 7,
+      "subject": "Implement the component 121 install-time manifest compiler",
+      "status": "completed",
+      "blockedBy": [6]
+    },
+    {
+      "id": 8,
+      "subject": "Implement the ambient one-slot-per-reset runtime",
+      "status": "completed",
+      "blockedBy": [7]
+    },
+    {
+      "id": 9,
+      "subject": "Implement the urgent first-contact reaction",
+      "status": "completed",
+      "blockedBy": [8]
+    },
+    {
+      "id": 10,
+      "subject": "Wire and document component 121",
+      "status": "completed",
+      "blockedBy": [4, 9]
+    },
+    {
+      "id": 11,
+      "subject": "Run final offline verification and two-pass local review",
+      "status": "completed",
+      "blockedBy": [10]
+    },
+    {
+      "id": 12,
+      "subject": "Prepare but do not perform the live deployment checkpoint",
+      "status": "completed",
+      "blockedBy": [11]
+    },
+    {
+      "id": 13,
+      "subject": "Lock the legacy capability contract with failing tests",
+      "status": "completed",
+      "blockedBy": [12]
+    },
+    {
+      "id": 14,
+      "subject": "Implement the capability-selected runtime and probe adapter",
+      "status": "completed",
+      "blockedBy": [13]
+    },
+    {
+      "id": 15,
+      "subject": "Record evidence, review, and verify without installing",
+      "status": "completed",
+      "blockedBy": [14]
+    }
+  ],
+  "lastUpdated": "2026-08-31T17:55:44+09:00"
+}

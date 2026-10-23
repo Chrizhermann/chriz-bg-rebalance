@@ -1,0 +1,183 @@
+// CBR 110 deterministic, file-first physical-vorpal resources.
+// Evidence and native-engine limits: research/19-dragon-vorpal-delivery.md.
+
+DEFINE_ACTION_FUNCTION cbr_build_dragon_vorpal_eff
+  INT_VAR chance = 0 save_penalty = 0
+  RET buffer
+BEGIN
+  ACTION_IF ((chance != 5) && (chance != 10) && (chance != 15))
+         || ((save_penalty != 2) && (save_penalty != 4)) BEGIN
+    FAIL ~CBR 110: unsupported vorpal probability/save profile.~
+  END
+  OUTER_PATCH_SAVE buffer ~~ BEGIN
+    INSERT_BYTES 0 0x110
+    WRITE_ASCII 0 ~EFF V2.0EFF V2.0~
+    WRITE_LONG 0x10 402
+    WRITE_LONG 0x14 2
+    WRITE_SHORT 0x24 1
+    // The engine rolls 0..99 and checks an inclusive probability interval.
+    WRITE_SHORT 0x2c (chance - 1)
+    WRITE_ASCII 0x30 ~CBRDVGO~ (8)
+    WRITE_LONG 0x40 4 // one save vs. death, on this delivered effect only
+    WRITE_LONG 0x44 (0 - save_penalty)
+    WRITE_LONG 0x5c 2 // non-dispellable and ignores magic resistance
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_build_dragon_vorpal_spl
+  STR_VAR rider = ~~ own_package = ~~
+  RET buffer
+BEGIN
+  OUTER_SET cbr_dve_fx_count = 3
+  ACTION_IF !(~%rider%~ STR_EQ ~~) BEGIN
+    ACTION_IF !(~%own_package%~ STR_EQ ~CBRDV15~)
+           && !(~%own_package%~ STR_EQ ~CBRDV10~)
+           && !(~%own_package%~ STR_EQ ~CBRDV05~) BEGIN
+      FAIL ~CBR 110: unknown package for vorpal stacking prevention.~
+    END
+    OUTER_SET cbr_dve_fx_count = 4
+  END
+  OUTER_PATCH_SAVE buffer ~~ BEGIN
+    INSERT_BYTES 0 (0x9a + cbr_dve_fx_count * 0x30)
+    WRITE_ASCII 0 ~SPL V1  ~
+    WRITE_LONG 0x08 0xffffffff
+    WRITE_LONG 0x0c 0xffffffff
+    WRITE_LONG 0x50 0xffffffff
+    WRITE_LONG 0x54 0xffffffff
+    WRITE_SHORT 0x1c 4
+    WRITE_LONG 0x64 0x72
+    WRITE_SHORT 0x68 1
+    WRITE_LONG 0x6a 0x9a
+    WRITE_SHORT 0x72 1
+    WRITE_SHORT 0x74 4
+    WRITE_BYTE 0x7e 5
+    WRITE_BYTE 0x7f 1
+    WRITE_SHORT 0x82 1
+    WRITE_SHORT 0x90 cbr_dve_fx_count // empirical nFx offset +0x1e
+    WRITE_SHORT 0x94 1
+    WRITE_SHORT 0x96 1
+    // Reapplication and difficulty removal affect only our three packages.
+    SET cbr_dve_fx = 0x9a
+    SET cbr_dve_first = 1
+    PATCH_FOR_EACH cbr_dve_owned IN ~%own_package%~ ~CBRDV15~ ~CBRDV10~ ~CBRDV05~ BEGIN
+      // The self-referencing removal must be the first effect to prevent
+      // stacking. The removal-only spell has no self-referencing entry.
+      PATCH_IF !(~%cbr_dve_owned%~ STR_EQ ~~)
+            && (cbr_dve_first || !(~%cbr_dve_owned%~ STR_EQ ~%own_package%~)) BEGIN
+        WRITE_SHORT cbr_dve_fx 321
+        WRITE_BYTE (cbr_dve_fx + 2) 1
+        WRITE_BYTE (cbr_dve_fx + 0x0c) 1
+        WRITE_BYTE (cbr_dve_fx + 0x0d) 2
+        WRITE_BYTE (cbr_dve_fx + 0x12) 100
+        WRITE_ASCIIE (cbr_dve_fx + 0x14) ~%cbr_dve_owned%~ (8)
+        SET cbr_dve_fx += 0x30
+      END
+      SET cbr_dve_first = 0
+    END
+    PATCH_IF !(~%rider%~ STR_EQ ~~) BEGIN
+      WRITE_SHORT cbr_dve_fx 248
+      WRITE_BYTE (cbr_dve_fx + 2) 1
+      WRITE_BYTE (cbr_dve_fx + 0x0c) 9
+      WRITE_BYTE (cbr_dve_fx + 0x0d) 2
+      WRITE_BYTE (cbr_dve_fx + 0x12) 100
+      WRITE_ASCIIE (cbr_dve_fx + 0x14) ~%rider%~ (8)
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_apply_dragon_vorpal_effects
+  INT_VAR game_mode = 1
+  STR_VAR phase = ~full~ resource_dir = ~override~ template_file = ~~
+BEGIN
+  OUTER_SPRINT phase EVALUATE_BUFFER ~%phase%~
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  OUTER_SPRINT template_file EVALUATE_BUFFER ~%template_file%~
+  ACTION_IF !(~%phase%~ STR_EQ ~preflight~) && !(~%phase%~ STR_EQ ~full~) BEGIN
+    FAIL ~CBR 110: unknown resource phase %phase%.~
+  END
+  ACTION_IF (~%resource_dir%~ STR_EQ ~~) || !DIRECTORY_EXISTS ~%resource_dir%~ BEGIN
+    FAIL ~CBR 110: resource directory is missing: %resource_dir%.~
+  END
+  ACTION_IF !FILE_EXISTS ~%template_file%~ BEGIN
+    FAIL ~CBR 110: dragon vorpal runtime template is missing: %template_file%.~
+  END
+  ACTION_CLEAR_ARRAY cbr_dve_files
+  COPY ~%template_file%~ ~%template_file%~
+    PATCH_IF (INDEX_BUFFER (~CBR_DRAGON_VORPAL_RUNTIME_V1~) < 0)
+          || (INDEX_BUFFER (~function CBRDVGO~) < 0) BEGIN
+      PATCH_FAIL ~CBR 110: unrecognized dragon vorpal runtime template.~
+    END
+    READ_ASCII 0 cbr_dve_lua (BUFFER_LENGTH)
+  BUT_ONLY
+  OUTER_SPRINT $cbr_dve_files(~M_CBRDVG.lua~) ~%cbr_dve_lua%~
+  ACTION_FOR_EACH cbr_dve_profile IN ~15~ ~10~ ~05~ BEGIN
+    OUTER_SET cbr_dve_chance = 5
+    OUTER_SET cbr_dve_penalty = 2
+    ACTION_IF (~%cbr_dve_profile%~ STR_EQ ~15~) BEGIN
+      OUTER_SET cbr_dve_chance = 15
+      OUTER_SET cbr_dve_penalty = 4
+    END ELSE ACTION_IF (~%cbr_dve_profile%~ STR_EQ ~10~) BEGIN
+      OUTER_SET cbr_dve_chance = 10
+    END
+    LAF cbr_build_dragon_vorpal_eff
+      INT_VAR chance = cbr_dve_chance save_penalty = cbr_dve_penalty
+      RET cbr_dve_data = buffer
+    END
+    OUTER_SPRINT $cbr_dve_files(~CBRDVE%cbr_dve_profile%.EFF~) ~%cbr_dve_data%~
+    LAF cbr_build_dragon_vorpal_spl
+      STR_VAR rider = EVAL ~CBRDVE%cbr_dve_profile%~
+              own_package = EVAL ~CBRDV%cbr_dve_profile%~
+      RET cbr_dve_data = buffer
+    END
+    OUTER_SPRINT $cbr_dve_files(~CBRDV%cbr_dve_profile%.SPL~) ~%cbr_dve_data%~
+  END
+  LAF cbr_build_dragon_vorpal_spl RET cbr_dve_data = buffer END
+  OUTER_SPRINT $cbr_dve_files(~CBRDVREM.SPL~) ~%cbr_dve_data%~
+
+  // Validate every reserved path before the first output is published. In
+  // game mode also check archived resources; a BIFF collision is still foreign.
+  // Opcode 321 matches ITM and SPL parent resrefs without checking extension.
+  ACTION_FOR_EACH cbr_dve_owned IN ~CBRDV15~ ~CBRDV10~ ~CBRDV05~ BEGIN
+    ACTION_IF FILE_EXISTS ~%resource_dir%/%cbr_dve_owned%.ITM~
+           || DIRECTORY_EXISTS ~%resource_dir%/%cbr_dve_owned%.ITM~ BEGIN
+      FAIL ~CBR 110: reserved cross-type resource collision: %cbr_dve_owned%.ITM.~
+    END
+    ACTION_IF game_mode BEGIN
+      ACTION_IF FILE_EXISTS_IN_GAME ~%cbr_dve_owned%.ITM~ BEGIN
+        FAIL ~CBR 110: reserved cross-type resource collision: %cbr_dve_owned%.ITM.~
+      END
+    END
+  END
+  ACTION_PHP_EACH cbr_dve_files AS cbr_dve_filename => cbr_dve_expected BEGIN
+    ACTION_IF DIRECTORY_EXISTS ~%resource_dir%/%cbr_dve_filename%~ BEGIN
+      FAIL ~CBR 110: reserved resource path is a directory: %cbr_dve_filename%.~
+    END
+    ACTION_IF FILE_EXISTS ~%resource_dir%/%cbr_dve_filename%~ BEGIN
+      COPY ~%resource_dir%/%cbr_dve_filename%~ ~%resource_dir%/%cbr_dve_filename%~
+        READ_ASCII 0 cbr_dve_existing (BUFFER_LENGTH)
+        PATCH_IF !(~%cbr_dve_existing%~ STR_EQ ~%cbr_dve_expected%~) BEGIN
+          PATCH_FAIL ~CBR 110: reserved resource collision: %cbr_dve_filename%.~
+        END
+      BUT_ONLY
+    END ELSE ACTION_IF game_mode BEGIN
+      ACTION_IF FILE_EXISTS_IN_GAME ~%cbr_dve_filename%~ BEGIN
+        COPY_EXISTING ~%cbr_dve_filename%~ ~override~
+          READ_ASCII 0 cbr_dve_existing (BUFFER_LENGTH)
+          PATCH_IF !(~%cbr_dve_existing%~ STR_EQ ~%cbr_dve_expected%~) BEGIN
+            PATCH_FAIL ~CBR 110: reserved archived resource collision: %cbr_dve_filename%.~
+          END
+        BUT_ONLY
+      END
+    END
+  END
+  ACTION_IF (~%phase%~ STR_EQ ~full~) BEGIN
+    ACTION_PHP_EACH cbr_dve_files AS cbr_dve_filename => cbr_dve_expected BEGIN
+      // The source is only a read handle; replace its buffer with the fully
+      // preflighted canonical bytes. CREATE would write before preflight.
+      COPY ~%template_file%~ ~%resource_dir%/%cbr_dve_filename%~
+        DELETE_BYTES 0 BUFFER_LENGTH
+        INSERT_BYTES 0 (STRING_LENGTH ~%cbr_dve_expected%~)
+        WRITE_ASCIIE 0 ~%cbr_dve_expected%~
+    END
+  END
+END

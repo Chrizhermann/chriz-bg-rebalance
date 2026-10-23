@@ -1,0 +1,482 @@
+// EET adaptation of installed SCS 35.21 component 3017.
+// Upstream elemental_arrows.tpa changes AROW04 to 1d3 acid, AROW09 to
+// 1d2 cold, and removes AROW08/AROWKC's physical/attack bonuses.
+// Also reduce those two fire effects to 1d2, verified in BG2's AROW08
+// in data/ITEMS.BIF and the SCS @16011 description. SCS omits that
+// write, and its component gate excludes EET. No item replacement.
+// ARROPHE2 and special arrows are intentionally outside the SCS list.
+//
+// Behavior, not fixture shape. The owned ability is the arrow's own hit:
+// every ITM extended header with attack type 2 (ranged, byte 0x00) and
+// launcher 1 (bow, byte 0x10). That is the header the engine resolves when
+// the arrow is shot from a bow; a type-3 activation, a melee header or a
+// ranged header that needs no or another launcher is a different ability
+// (often added by another mod) and keeps every byte. On an owned header the
+// "elemental package" is the opcode-12 record whose damage type (param2 high
+// word) is the component's element, damage mode (param2 low word) is 0
+// (normal dice damage) and target is 2 (projectile target = the victim).
+// Only its dice (+0x1c/+0x20) are owned; for fire, also the to-hit/damage
+// bonuses (+0x14/+0x1a) of the owned headers that carry the package. Every
+// other record, header and byte is preserved: other damage types (e.g. an
+// acid rider on a fire arrow), same-element records with other delivery,
+// SCS troll helpers and headers without the package. Two package records in
+// one owned header are genuinely ambiguous (writing each would multiply the
+// damage, picking one would discard another mod's data) and fail the
+// component. An item without any package on an owned header is left
+// untouched with a warning: its promised change cannot be established and no
+// damage is invented.
+//
+// Effect records can be shared: a slice is only (first index, count) into one
+// table, so a foreign header or the equipped effects may reference the very
+// record an owned header carries as its package. Writing it in place would
+// change that foreign ability. Copy-on-write: such an owned header gets a
+// private copy of its whole slice appended to the effect table and its first
+// index repointed, and only the copy is patched; every other slice keeps its
+// records byte-identical. A record shared only by owned headers is patched in
+// place once, since every slice that reads it is meant to change. Each owned
+// header that shares with a foreign slice gets its own copy (owned slices may
+// differ in extent, so a per-header copy is always exact). A rerun sees the
+// owned header on its private, already-patched copy and copies nothing.
+// Appending is only possible when the effect table ends the file (the normal
+// ITM layout, nothing after it); otherwise, or past the 16-bit first-index
+// limit, the item is left unchanged with a warning.
+//
+// Text: only the owned clauses change - the one "+NdM <element> damage"
+// clause, the save statement attached to it, the one weapon-damage bonus
+// ("1d6+2", not an added "+1d4+2"/"1d4+2 acid damage" rider) and the one
+// THAC0 claim. Each change is derived from the actual old/new values. Text
+// that states other values, uses other wording or states an owned claim more
+// than once is left unchanged with a warning rather than published false.
+// Male (dialog.tlk) and female (dialogF.tlk) strings are rewritten
+// independently; if either cannot be rewritten, neither is changed.
+
+// 1 if the extended header at ability_at is the bow-fired hit (see above).
+DEFINE_PATCH_FUNCTION cbr_elemental_arrow_owned
+    INT_VAR ability_at=0
+    RET owned
+BEGIN
+    READ_BYTE ability_at cea_kind
+    READ_BYTE (ability_at+0x10) cea_launcher
+    SET owned = (cea_kind = 2 AND cea_launcher = 1) ? 1 : 0
+END
+
+// 1 if effect record index `record` is read by the equipped-effect slice or
+// by the slice of any extended header other than `self` that is not owned.
+DEFINE_PATCH_FUNCTION cbr_elemental_arrow_foreign_ref
+    INT_VAR ability_offset=0 ability_count=0 self=0 record=0
+    RET shared
+BEGIN
+    SET shared = 0
+    READ_SHORT 0x6e cea_ref_first
+    READ_SHORT 0x70 cea_ref_count
+    PATCH_IF record >= cea_ref_first AND record < cea_ref_first + cea_ref_count BEGIN
+        SET shared = 1
+    END
+    FOR (cea_k=0; cea_k<ability_count; cea_k+=1) BEGIN
+        PATCH_IF cea_k != self BEGIN
+            SET cea_b = ability_offset + cea_k * 0x38
+            LPF cbr_elemental_arrow_owned INT_VAR ability_at=cea_b RET cea_b_owned=owned END
+            READ_SHORT (cea_b+0x1e) cea_ref_count
+            READ_SHORT (cea_b+0x20) cea_ref_first
+            PATCH_IF NOT cea_b_owned AND
+                record >= cea_ref_first AND record < cea_ref_first + cea_ref_count BEGIN
+                SET shared = 1
+            END
+        END
+    END
+END
+
+// Count the package records of one extended header (bounds checked by caller).
+DEFINE_PATCH_FUNCTION cbr_elemental_arrow_scan
+    INT_VAR ability_at=0 effect_offset=0 damage_type=0
+    RET package_count package_at
+BEGIN
+    READ_SHORT (ability_at+0x1e) cea_scan_count
+    READ_SHORT (ability_at+0x20) cea_scan_first
+    SET package_count = 0
+    SET package_at = 0
+    FOR (cea_j=0; cea_j<cea_scan_count; cea_j+=1) BEGIN
+        SET cea_e = effect_offset + (cea_scan_first + cea_j) * 0x30
+        READ_SHORT cea_e cea_opcode
+        PATCH_IF cea_opcode = 12 BEGIN
+            READ_SHORT (cea_e+0x08) cea_mode
+            READ_SHORT (cea_e+0x0a) cea_type
+            READ_BYTE (cea_e+0x02) cea_target
+            PATCH_IF cea_type = damage_type AND cea_mode = 0 AND cea_target = 2 BEGIN
+                SET package_count += 1
+                SET package_at = cea_e
+            END
+        END
+    END
+END
+
+// Rewrite the owned clauses of one description string. reason is empty when
+// new_text may be published; save_note is set when a "Save vs. Spell" claim
+// outside the element clause was kept although the package saves vs. breath.
+DEFINE_PATCH_FUNCTION cbr_elemental_arrow_text
+    INT_VAR old_n=0 old_s=0 old_save=0 old_hit=0 old_dmg=0 elemental_size=0 remove_bonus=0
+    STR_VAR text=~~ element=~~
+    RET reason save_note new_text
+BEGIN
+    SET cea_hits = 0
+    SET cea_bad_dice = 0
+    SET cea_thac0 = 0
+    SET cea_bad_hit = 0
+    SET cea_bonus_claims = 0
+    SET cea_bad_dmg = 0
+    SET cea_save_attached = 0
+    SET cea_save_elsewhere = 0
+    INNER_PATCH_SAVE new_text ~%text%~ BEGIN
+        REPLACE_EVALUATE CASE_INSENSITIVE ~\+\([0-9]+\)d\([0-9]+\)\( %element% damage\)~ BEGIN
+            SET cea_hits += 1
+            PATCH_IF MATCH1 = old_n AND MATCH2 = old_s BEGIN
+                SPRINT cea_r ~+1d%elemental_size%%MATCH3%~
+            END ELSE BEGIN
+                PATCH_IF MATCH1 != 1 OR MATCH2 != elemental_size BEGIN SET cea_bad_dice = 1 END
+                SPRINT cea_r ~%MATCH0%~
+            END
+        END ~%cea_r%~
+        PATCH_IF remove_bonus BEGIN
+            REPLACE_EVALUATE CASE_INSENSITIVE ~\(THAC0: *\)\([+-]?\)\([0-9]+\)~ BEGIN
+                SET cea_thac0 += 1
+                SET cea_v = MATCH3
+                PATCH_IF ~%MATCH2%~ STRING_EQUAL ~-~ BEGIN SET cea_v = 0 - cea_v END
+                PATCH_IF cea_v != 0 AND cea_v = old_hit BEGIN
+                    SPRINT cea_r ~%MATCH1%+0~
+                END ELSE BEGIN
+                    PATCH_IF cea_v != 0 BEGIN SET cea_bad_hit = 1 END
+                    SPRINT cea_r ~%MATCH0%~
+                END
+            END ~%cea_r%~
+            // NdM+K is the weapon damage unless it is a rider: written as an
+            // added "+NdM+K" clause, or followed by a non-physical
+            // "<type> damage" ("1d4+2 acid damage"). Riders are never owned.
+            REPLACE_EVALUATE CASE_INSENSITIVE
+                ~\(\+?\)\([0-9]+d[0-9]+\)\([+-]\)\([0-9]+\)\( +[a-z]+ damage\|\)~ BEGIN
+                SPRINT cea_r ~%MATCH0%~
+                SPRINT cea_kind ~%MATCH5%~
+                TO_LOWER cea_kind
+                PATCH_IF ~%MATCH1%~ STRING_EQUAL ~~ AND
+                    (~%cea_kind%~ STRING_EQUAL ~~ OR
+                     (~%cea_kind%~ STRING_MATCHES_REGEXP ~ +\(piercing\|missile\|crushing\|slashing\|physical\) damage~) = 0) BEGIN
+                    SET cea_v = MATCH4
+                    PATCH_IF ~%MATCH3%~ STRING_EQUAL ~-~ BEGIN SET cea_v = 0 - cea_v END
+                    PATCH_IF cea_v != 0 BEGIN SET cea_bonus_claims += 1 END
+                    PATCH_IF cea_v != 0 AND cea_v = old_dmg BEGIN
+                        SPRINT cea_r ~%MATCH2%%MATCH5%~
+                    END ELSE PATCH_IF cea_v != 0 BEGIN
+                        SET cea_bad_dmg = 1
+                    END
+                END
+            END ~%cea_r%~
+            // The special kobold arrow keeps its original save vs. breath; only
+            // the save statement attached to the element clause describes it.
+            PATCH_IF (old_save BAND 0x1f) = 2 BEGIN
+                REPLACE_EVALUATE CASE_INSENSITIVE
+                    ~\(\+[0-9]+d[0-9]+ %element% damage *(\)\(Save vs\. \)\([a-z]+\)~ BEGIN
+                    SET cea_save_attached += 1
+                    SPRINT cea_r ~%MATCH0%~
+                    PATCH_IF ~%MATCH3%~ STRING_EQUAL_CASE ~Spell~ BEGIN
+                        SPRINT cea_r ~%MATCH1%%MATCH2%Breath~
+                    END
+                END ~%cea_r%~
+                PATCH_IF cea_save_attached = 0 AND
+                    INDEX_BUFFER (CASE_INSENSITIVE ~Save vs\. Spell~) >= 0 BEGIN
+                    SET cea_save_elsewhere = 1
+                END
+            END
+        END
+    END
+    SPRINT reason ~~
+    SPRINT save_note ~~
+    PATCH_IF cea_hits = 0 BEGIN
+        SPRINT reason ~no "+NdM %element% damage" text was found; different wording or language~
+    END ELSE PATCH_IF cea_hits > 1 BEGIN
+        SPRINT reason ~it has %cea_hits% "+NdM %element% damage" clauses, so the one describing the owned package cannot be identified~
+    END ELSE PATCH_IF cea_bad_dice BEGIN
+        SPRINT reason ~it states %element% damage dice that match neither the old nor the new package~
+    END ELSE PATCH_IF cea_thac0 > 1 OR cea_bonus_claims > 1 BEGIN
+        SPRINT reason ~it has several THAC0 or weapon-damage bonus claims, so the owned one cannot be identified~
+    END ELSE PATCH_IF cea_bad_hit OR cea_bad_dmg BEGIN
+        SPRINT reason ~its THAC0 or damage-bonus text matches neither the old nor the new bonus~
+    END
+    PATCH_IF cea_save_elsewhere BEGIN
+        SPRINT save_note ~yes~
+    END
+END
+
+// Strip a " +N" name suffix that states a removed bonus; bad = 1 otherwise.
+DEFINE_PATCH_FUNCTION cbr_elemental_arrow_name
+    INT_VAR old_hit=0 old_dmg=0 text_conflict=0
+    STR_VAR text=~~
+    RET bad new_name
+BEGIN
+    SET bad = 0
+    INNER_PATCH_SAVE new_name ~%text%~ BEGIN
+        REPLACE_EVALUATE ~ *\+\([0-9]+\)$~ BEGIN
+            PATCH_IF text_conflict = 0 AND
+                ((old_hit != 0 AND MATCH1 = old_hit) OR (old_dmg != 0 AND MATCH1 = old_dmg)) BEGIN
+                SPRINT cea_r ~~
+            END ELSE BEGIN
+                SET bad = 1
+                SPRINT cea_r ~%MATCH0%~
+            END
+        END ~%cea_r%~
+    END
+END
+
+// damage_type is the opcode-12 damage-type word (acid 1, cold 2, fire 8).
+// apply=0 validates without writing or warning, so all items are checked
+// before any item or TLK string is published.
+DEFINE_PATCH_FUNCTION cbr_elemental_arrow
+    INT_VAR damage_type=0 elemental_size=0 remove_bonus=0 apply=1
+    STR_VAR element=~~
+BEGIN
+    SPRINT cea_item ~%SOURCE_FILE%~
+    TO_UPPER cea_item
+    PATCH_IF BUFFER_LENGTH < 0x72 BEGIN
+        PATCH_FAIL ~Elemental arrows: %cea_item% is truncated (shorter than an ITM V1 header); nothing was installed.~
+    END
+    READ_ASCII 0 cea_signature (8)
+    PATCH_IF NOT (~%cea_signature%~ STRING_EQUAL ~ITM V1  ~) BEGIN
+        PATCH_FAIL ~Elemental arrows: %cea_item% is not an ITM V1 resource; nothing was installed.~
+    END
+    READ_SHORT 0x1c cea_category
+    PATCH_IF cea_category != 5 BEGIN
+        PATCH_FAIL ~Elemental arrows: %cea_item% is not an arrow (item category %cea_category%); nothing was installed.~
+    END
+    READ_LONG 0x64 cea_ability_offset
+    READ_SHORT 0x68 cea_ability_count
+    READ_LONG 0x6a cea_effect_offset
+    PATCH_IF cea_ability_offset < 0x72 OR
+        cea_ability_offset + cea_ability_count * 0x38 > BUFFER_LENGTH OR
+        cea_effect_offset < cea_ability_offset + cea_ability_count * 0x38 BEGIN
+        PATCH_FAIL ~Elemental arrows: %cea_item% has a malformed extended-header table; nothing was installed.~
+    END
+
+    // Classify every header. Old package values drive the text updates.
+    SET cea_packages = 0
+    SET cea_foreign = 0
+    SET cea_text_conflict = 0
+    SET cea_old_n = 0
+    SET cea_old_s = 0
+    SET cea_old_save = 0
+    SET cea_old_hit = 0
+    SET cea_old_dmg = 0
+    FOR (cea_i=0; cea_i<cea_ability_count; cea_i+=1) BEGIN
+        SET cea_a = cea_ability_offset + cea_i * 0x38
+        READ_SHORT (cea_a+0x1e) cea_count
+        READ_SHORT (cea_a+0x20) cea_first
+        PATCH_IF cea_effect_offset + (cea_first + cea_count) * 0x30 > BUFFER_LENGTH BEGIN
+            PATCH_FAIL ~Elemental arrows: %cea_item% extended header %cea_i% (0-based) has an effect slice outside the file; nothing was installed.~
+        END
+        LPF cbr_elemental_arrow_owned INT_VAR ability_at=cea_a RET cea_owned=owned END
+        LPF cbr_elemental_arrow_scan
+            INT_VAR ability_at=cea_a effect_offset=cea_effect_offset damage_type=damage_type
+            RET cea_found=package_count cea_at=package_at
+        END
+        PATCH_IF NOT cea_owned BEGIN
+            SET cea_foreign += cea_found
+        END ELSE PATCH_IF cea_found > 1 BEGIN
+            PATCH_FAIL ~Elemental arrows: %cea_item% extended header %cea_i% (0-based) has %cea_found% %element% damage records of the same kind (opcode 12, %element% damage, normal damage mode, projectile target). Setting each to 1d%elemental_size% would multiply the damage and choosing one would discard another mod's data; nothing was installed.~
+        END ELSE PATCH_IF cea_found = 1 BEGIN
+            READ_LONG (cea_at+0x1c) cea_n
+            READ_LONG (cea_at+0x20) cea_s
+            READ_LONG (cea_at+0x24) cea_save
+            READ_SSHORT (cea_a+0x14) cea_hit
+            READ_SSHORT (cea_a+0x1a) cea_dmg
+            PATCH_IF cea_packages = 0 BEGIN
+                SET cea_old_n = cea_n
+                SET cea_old_s = cea_s
+                SET cea_old_save = cea_save
+                SET cea_old_hit = cea_hit
+                SET cea_old_dmg = cea_dmg
+            END ELSE PATCH_IF cea_n != cea_old_n OR cea_s != cea_old_s OR
+                (remove_bonus AND (cea_save != cea_old_save OR cea_hit != cea_old_hit OR cea_dmg != cea_old_dmg)) BEGIN
+                SET cea_text_conflict = 1
+            END
+            SET cea_packages += 1
+        END
+    END
+
+    PATCH_IF cea_packages = 0 AND apply BEGIN
+        SPRINT cea_foreign_note ~~
+        PATCH_IF cea_foreign > 0 BEGIN
+            SPRINT cea_foreign_note ~; %cea_foreign% such record(s) on other extended headers were not changed, because those abilities are not the arrow's bow-fired hit~
+        END
+        PATCH_WARN ~Elemental arrows: %cea_item% has no %element% damage package (opcode 12, %element% damage, normal damage mode, projectile target) on its bow-fired extended header (attack type ranged, launcher bow), so its 1d%elemental_size% change cannot be established%cea_foreign_note%; this item was left unchanged.~
+    END
+
+    // Copy-on-write pre-pass: decide before any write whether every owned
+    // package read by a foreign slice can get a private copy.
+    SET cea_separable = 1
+    PATCH_IF cea_packages > 0 AND apply BEGIN
+        // Copies are appended in header order. Only each copy's first index
+        // is a 16-bit field (records inside a slice may lie beyond it, as in
+        // any ITM), so the last copy's first index decides.
+        SET cea_copy_records = 0
+        SET cea_last_copy_at = 0
+        SET cea_first_shared = 0 - 1
+        FOR (cea_i=0; cea_i<cea_ability_count; cea_i+=1) BEGIN
+            SET cea_a = cea_ability_offset + cea_i * 0x38
+            LPF cbr_elemental_arrow_owned INT_VAR ability_at=cea_a RET cea_owned=owned END
+            LPF cbr_elemental_arrow_scan
+                INT_VAR ability_at=cea_a effect_offset=cea_effect_offset damage_type=damage_type
+                RET cea_found=package_count cea_at=package_at
+            END
+            PATCH_IF cea_owned AND cea_found = 1 BEGIN
+                LPF cbr_elemental_arrow_foreign_ref
+                    INT_VAR ability_offset=cea_ability_offset ability_count=cea_ability_count
+                        self=cea_i record=((cea_at - cea_effect_offset) / 0x30)
+                    RET cea_shared=shared
+                END
+                PATCH_IF cea_shared BEGIN
+                    READ_SHORT (cea_a+0x1e) cea_count
+                    SET cea_last_copy_at = cea_copy_records
+                    SET cea_copy_records += cea_count
+                    PATCH_IF cea_first_shared < 0 BEGIN SET cea_first_shared = cea_i END
+                END
+            END
+        END
+        PATCH_IF cea_copy_records > 0 BEGIN
+            SPRINT cea_obstacle ~~
+            PATCH_IF ((BUFFER_LENGTH - cea_effect_offset) MODULO 0x30) != 0 BEGIN
+                SPRINT cea_obstacle ~the effect table is not at the end of the file~
+            END ELSE PATCH_IF (BUFFER_LENGTH - cea_effect_offset) / 0x30 + cea_last_copy_at > 0xffff BEGIN
+                SPRINT cea_obstacle ~a copy would start beyond the 16-bit first-effect index~
+            END
+            PATCH_IF NOT (~%cea_obstacle%~ STRING_EQUAL ~~) BEGIN
+                SET cea_separable = 0
+                PATCH_WARN ~Elemental arrows: %cea_item% extended header %cea_first_shared% (0-based) shares its %element% damage record with another ability or the equipped effects, so it needs a private copy; the shared records cannot be separated because %cea_obstacle%; this item was left unchanged.~
+            END
+        END
+    END
+
+    PATCH_IF cea_packages > 0 AND apply AND cea_separable BEGIN
+        // A header without the package that shares a removed bonus value makes
+        // the bonus text impossible to attribute to the package header.
+        SET cea_bonus_shared = 0
+        FOR (cea_i=0; cea_i<cea_ability_count; cea_i+=1) BEGIN
+            SET cea_a = cea_ability_offset + cea_i * 0x38
+            LPF cbr_elemental_arrow_owned INT_VAR ability_at=cea_a RET cea_owned=owned END
+            LPF cbr_elemental_arrow_scan
+                INT_VAR ability_at=cea_a effect_offset=cea_effect_offset damage_type=damage_type
+                RET cea_found=package_count cea_at=package_at
+            END
+            PATCH_IF cea_owned AND cea_found = 1 BEGIN
+                LPF cbr_elemental_arrow_foreign_ref
+                    INT_VAR ability_offset=cea_ability_offset ability_count=cea_ability_count
+                        self=cea_i record=((cea_at - cea_effect_offset) / 0x30)
+                    RET cea_shared=shared
+                END
+                PATCH_IF cea_shared BEGIN
+                    // Append a private copy of this header's whole slice.
+                    READ_SHORT (cea_a+0x1e) cea_count
+                    READ_SHORT (cea_a+0x20) cea_first
+                    SET cea_src = cea_effect_offset + cea_first * 0x30
+                    SET cea_dst = BUFFER_LENGTH
+                    INSERT_BYTES cea_dst (cea_count * 0x30)
+                    FOR (cea_q=0; cea_q<cea_count * 0x30; cea_q+=4) BEGIN
+                        READ_LONG (cea_src+cea_q) cea_w
+                        WRITE_LONG (cea_dst+cea_q) cea_w
+                    END
+                    WRITE_SHORT (cea_a+0x20) ((cea_dst - cea_effect_offset) / 0x30)
+                    SET cea_at = cea_dst + (cea_at - cea_src)
+                END
+                WRITE_LONG (cea_at+0x1c) 1
+                WRITE_LONG (cea_at+0x20) elemental_size
+                PATCH_IF remove_bonus BEGIN
+                    WRITE_SHORT (cea_a+0x14) 0
+                    WRITE_SHORT (cea_a+0x1a) 0
+                END
+            END ELSE PATCH_IF remove_bonus BEGIN
+                READ_SSHORT (cea_a+0x14) cea_hit
+                READ_SSHORT (cea_a+0x1a) cea_dmg
+                PATCH_IF (cea_old_hit != 0 AND cea_hit = cea_old_hit) OR
+                    (cea_old_dmg != 0 AND cea_dmg = cea_old_dmg) BEGIN
+                    SET cea_bonus_shared = 1
+                END
+            END
+        END
+
+        // Description: male and female strings are rewritten independently and
+        // published together, or not at all.
+        READ_STRREF 0x54 cea_old_description
+        READ_STRREF_F 0x54 cea_old_description_f
+        LPF cbr_elemental_arrow_text
+            INT_VAR old_n=cea_old_n old_s=cea_old_s old_save=cea_old_save old_hit=cea_old_hit
+                old_dmg=cea_old_dmg elemental_size=elemental_size remove_bonus=remove_bonus
+            STR_VAR text=EVAL ~%cea_old_description%~ element=EVAL ~%element%~
+            RET cea_reason=reason cea_save_note=save_note cea_description=new_text
+        END
+        LPF cbr_elemental_arrow_text
+            INT_VAR old_n=cea_old_n old_s=cea_old_s old_save=cea_old_save old_hit=cea_old_hit
+                old_dmg=cea_old_dmg elemental_size=elemental_size remove_bonus=remove_bonus
+            STR_VAR text=EVAL ~%cea_old_description_f%~ element=EVAL ~%element%~
+            RET cea_reason_f=reason cea_save_note_f=save_note cea_description_f=new_text
+        END
+        PATCH_IF cea_text_conflict BEGIN
+            SPRINT cea_reason ~its %element% packages or bonuses differ between extended headers~
+        END ELSE PATCH_IF NOT (~%cea_reason%~ STRING_EQUAL ~~) BEGIN
+            // The male reason is reported as is.
+        END ELSE PATCH_IF NOT (~%cea_reason_f%~ STRING_EQUAL ~~) BEGIN
+            SPRINT cea_reason ~female (dialogF.tlk) text: %cea_reason_f%~
+        END ELSE PATCH_IF cea_bonus_shared BEGIN
+            SPRINT cea_reason ~another extended header has the same to-hit or damage bonus, so the bonus text cannot be attributed~
+        END
+        PATCH_IF NOT (~%cea_reason%~ STRING_EQUAL ~~) BEGIN
+            PATCH_WARN ~Elemental arrows: %cea_item% description was not updated (%cea_reason%); its text was left unchanged.~
+        END ELSE BEGIN
+            PATCH_IF NOT (~%cea_save_note%%cea_save_note_f%~ STRING_EQUAL ~~) BEGIN
+                PATCH_WARN ~Elemental arrows: %cea_item% description states "Save vs. Spell" outside its %element% damage clause; that claim cannot be attributed to the %element% package (which saves vs. breath) and was left unchanged.~
+            END
+            PATCH_IF NOT (~%cea_description%~ STRING_EQUAL ~%cea_old_description%~) OR
+                NOT (~%cea_description_f%~ STRING_EQUAL ~%cea_old_description_f%~) BEGIN
+                SAY DESC ~%cea_description%~ ~%cea_description_f%~
+            END
+        END
+
+        // Name: drop a "+N" suffix that states a removed bonus.
+        PATCH_IF remove_bonus BEGIN
+            READ_STRREF 0x0c cea_old_name
+            READ_STRREF_F 0x0c cea_old_name_f
+            LPF cbr_elemental_arrow_name
+                INT_VAR old_hit=cea_old_hit old_dmg=cea_old_dmg text_conflict=cea_text_conflict
+                STR_VAR text=EVAL ~%cea_old_name%~
+                RET cea_bad_name=bad cea_name=new_name
+            END
+            LPF cbr_elemental_arrow_name
+                INT_VAR old_hit=cea_old_hit old_dmg=cea_old_dmg text_conflict=cea_text_conflict
+                STR_VAR text=EVAL ~%cea_old_name_f%~
+                RET cea_bad_name_f=bad cea_name_f=new_name
+            END
+            PATCH_IF cea_bad_name OR cea_bad_name_f BEGIN
+                PATCH_WARN ~Elemental arrows: %cea_item% name was not updated (its "+N" suffix does not state the removed bonus); its name was left unchanged.~
+            END ELSE PATCH_IF NOT (~%cea_name%~ STRING_EQUAL ~%cea_old_name%~) OR
+                NOT (~%cea_name_f%~ STRING_EQUAL ~%cea_old_name_f%~) BEGIN
+                SAY NAME2 ~%cea_name%~ ~%cea_name_f%~
+            END
+        END
+    END
+END
+
+DEFINE_ACTION_FUNCTION cbr_elemental_arrows
+    INT_VAR apply=0
+BEGIN
+    COPY_EXISTING ~arow04.itm~ ~override~
+        LPF cbr_elemental_arrow INT_VAR damage_type=1 elemental_size=3 apply=apply STR_VAR element=acid END
+    BUT_ONLY
+
+    COPY_EXISTING ~arow09.itm~ ~override~
+        LPF cbr_elemental_arrow INT_VAR damage_type=2 elemental_size=2 apply=apply STR_VAR element=cold END
+    BUT_ONLY
+
+    COPY_EXISTING ~arow08.itm~ ~override~
+                  ~arowkc.itm~ ~override~
+        LPF cbr_elemental_arrow INT_VAR damage_type=8 elemental_size=2 remove_bonus=1 apply=apply STR_VAR element=fire END
+    BUT_ONLY
+END
+
+// Validate all four items first; publish items and TLK strings only afterwards.
+LAF cbr_elemental_arrows INT_VAR apply=0 END
+LAF cbr_elemental_arrows INT_VAR apply=1 END

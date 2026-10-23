@@ -1,0 +1,12 @@
+BACKUP ~backup~
+AUTHOR ~chriz-bg-rebalance test harness~
+
+ALWAYS
+  INCLUDE ~%argv[0]%~
+END
+
+BEGIN ~Dragon vorpal deterministic resource fixture~ DESIGNATED 1
+LAF cbr_apply_dragon_vorpal_effects
+  INT_VAR game_mode = 0
+  STR_VAR phase = ~%argv[3]%~ resource_dir = ~%argv[1]%~ template_file = ~%argv[2]%~
+END

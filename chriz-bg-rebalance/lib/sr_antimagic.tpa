@@ -1,0 +1,221 @@
+// SR anti-magic adjustments. Shared by the public and independent tail installer.
+DEFINE_PATCH_MACRO cbr_am_layout
+BEGIN
+  PATCH_IF BUFFER_LENGTH < 0x72 BEGIN PATCH_FAIL ~CBR anti-magic: truncated SPL.~ END
+  READ_ASCII 0 am_sig (8)
+  READ_LONG 0x64 am_ab
+  READ_SHORT 0x68 am_nab
+  READ_LONG 0x6a am_fx
+  READ_SHORT 0x6e am_cf
+  READ_SHORT 0x70 am_nc
+  PATCH_IF NOT (~%am_sig%~ STRING_EQUAL ~SPL V1  ~)
+    OR am_nab = 0 OR am_ab < 0x72 OR am_ab + 40 * am_nab > BUFFER_LENGTH
+    OR am_fx < am_ab + 40 * am_nab OR am_fx > BUFFER_LENGTH
+    OR (BUFFER_LENGTH - am_fx) MODULO 48 != 0 BEGIN
+    PATCH_FAIL ~CBR anti-magic: invalid SPL ability/effect layout.~
+  END
+  SET am_total = (BUFFER_LENGTH - am_fx) / 48
+  PATCH_IF am_total > 65535 OR am_cf + am_nc > am_total BEGIN
+    PATCH_FAIL ~CBR anti-magic: invalid casting slice.~
+  END
+  FOR (am_i = 0; am_i < am_total; ++am_i) BEGIN SET $am_owner(~%am_i%~) = (0 - 2) END
+  FOR (am_i = am_cf; am_i < am_cf + am_nc; ++am_i) BEGIN SET $am_owner(~%am_i%~) = (0 - 1) END
+  FOR (am_a = 0; am_a < am_nab; ++am_a) BEGIN
+    READ_SHORT (am_ab + 40 * am_a + 0x1e) am_n
+    READ_SHORT (am_ab + 40 * am_a + 0x20) am_first
+    PATCH_IF am_n = 0 OR am_first + am_n > am_total BEGIN PATCH_FAIL ~CBR anti-magic: invalid effect slice.~ END
+    SET $am_first(~%am_a%~) = am_first
+    SET $am_count(~%am_a%~) = am_n
+    FOR (am_i = am_first; am_i < am_first + am_n; ++am_i) BEGIN
+      PATCH_IF $am_owner(~%am_i%~) != (0 - 2) BEGIN PATCH_FAIL ~CBR anti-magic: overlapping effect slices.~ END
+      SET $am_owner(~%am_i%~) = am_a
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_sr_pierce_magic_patch
+BEGIN
+  LPM cbr_am_layout
+  // Exactly one reviewed MR modifier/callback and one protection remover in
+  // each ability. Reject unknown parallel MR writers instead of layering over them.
+  FOR (am_i = 0; am_i < am_total; ++am_i) BEGIN SET $am_drop(~%am_i%~) = 0 END
+  FOR (am_a = 0; am_a < am_nab; ++am_a) BEGIN
+    SET pm_mr = 0
+    SET pm_strip = 0
+    FOR (am_i = $am_first(~%am_a%~); am_i < $am_first(~%am_a%~) + $am_count(~%am_a%~); ++am_i) BEGIN
+      SET am_at = am_fx + 48 * am_i
+      READ_SHORT am_at pm_op
+      READ_LONG (am_at + 4) pm_p1
+      READ_LONG (am_at + 8) pm_p2
+      READ_BYTE (am_at + 2) pm_tgt
+      READ_BYTE (am_at + 12) pm_time
+      READ_LONG (am_at + 36) pm_save
+      READ_ASCII (am_at + 20) pm_res (8) NULL
+      PATCH_IF pm_op = 230 AND pm_p1 = 8 AND pm_p2 = 1 BEGIN ++pm_strip END
+      PATCH_IF pm_op = 166 OR (pm_op = 402 AND ~%pm_res%~ STRING_EQUAL_CASE ~CBRPM~) BEGIN
+        PATCH_IF pm_tgt != 2 OR (pm_save BAND 31) != 0
+          OR (pm_op = 166 AND (pm_p1 != 0 OR pm_p2 != 1 OR pm_time != 0)) BEGIN
+          PATCH_FAIL ~CBR Pierce Magic: unsupported MR payload.~
+        END
+        ++pm_mr
+        SET $pm_donor(~%am_a%~) = am_at
+        SET $am_drop(~%am_i%~) = 1
+      END
+      // The runtime owns a refreshing MR icon. The old expiry sound would
+      // otherwise play at the original deadline after a successful refresh.
+      PATCH_IF pm_tgt = 2 AND ((pm_op = 142 AND pm_p2 = 106 AND pm_time = 0)
+        OR (pm_op = 174 AND pm_time = 4 AND ~%pm_res%~ STRING_EQUAL_CASE ~EFF_E06~)) BEGIN
+        SET $am_drop(~%am_i%~) = 1
+      END
+    END
+    PATCH_IF pm_mr != 1 OR pm_strip != 1 BEGIN
+      PATCH_FAIL ~CBR Pierce Magic: expected one MR payload and one level-8 protection remover per ability.~
+    END
+  END
+  SET am_out = 0
+  FOR (am_i = 0; am_i < am_total; ++am_i) BEGIN
+    SET am_a = $am_owner(~%am_i%~)
+    PATCH_IF am_i = am_cf BEGIN WRITE_SHORT 0x6e am_out END
+    PATCH_IF am_a >= 0 BEGIN
+      PATCH_IF am_i = $am_first(~%am_a%~) BEGIN
+        WRITE_SHORT (am_ab + 40 * am_a + 0x20) am_out
+        SET $am_new_start(~%am_a%~) = am_out
+        // Measure MR at impact, before protection removal can change a stat.
+        SET am_dest = BUFFER_LENGTH
+        INSERT_BYTES am_dest 48
+        SET am_at = $pm_donor(~%am_a%~)
+        FOR (am_b = 0; am_b < 48; ++am_b) BEGIN
+          READ_BYTE (am_at + am_b) am_byte
+          WRITE_BYTE (am_dest + am_b) am_byte
+        END
+        WRITE_SHORT am_dest 402
+        WRITE_LONG (am_dest + 4) 0
+        WRITE_LONG (am_dest + 8) 0
+        WRITE_BYTE (am_dest + 12) 1
+        WRITE_BYTE (am_dest + 13) 2
+        WRITE_LONG (am_dest + 14) 0
+        WRITE_ASCII (am_dest + 20) ~CBRPM~ #8
+        ++am_out
+      END
+    END
+    PATCH_IF NOT $am_drop(~%am_i%~) BEGIN
+      SET am_at = am_fx + 48 * am_i
+      SET am_dest = BUFFER_LENGTH
+      INSERT_BYTES am_dest 48
+      FOR (am_b = 0; am_b < 48; ++am_b) BEGIN
+        READ_BYTE (am_at + am_b) am_byte
+        WRITE_BYTE (am_dest + am_b) am_byte
+      END
+      ++am_out
+    END
+    PATCH_IF am_a >= 0 BEGIN
+      PATCH_IF am_i = $am_first(~%am_a%~) + $am_count(~%am_a%~) - 1 BEGIN
+        WRITE_SHORT (am_ab + 40 * am_a + 0x1e) (am_out - $am_new_start(~%am_a%~))
+      END
+    END
+  END
+  PATCH_IF am_out > 65535 BEGIN PATCH_FAIL ~CBR anti-magic: too many effects.~ END
+  PATCH_IF am_cf = am_total BEGIN WRITE_SHORT 0x6e am_out END
+  DELETE_BYTES am_fx (48 * am_total)
+END
+
+// Count mechanics in a validated spell; action discovery follows actual cast
+// links rather than assuming SR/SCS's usual B suffix. C/Spell Shield stays intact.
+DEFINE_PATCH_MACRO cbr_am_classify
+BEGIN
+  LPM cbr_am_layout
+  SET am_matches = 0
+  FOR (am_i = 0; am_i < am_total; ++am_i) BEGIN
+    PATCH_IF $am_owner(~%am_i%~) >= 0 BEGIN
+      SET am_at = am_fx + 48 * am_i
+      READ_SHORT am_at am_op
+      READ_ASCII (am_at + 20) am_res (8) NULL
+      PATCH_IF (component = 210 AND (am_op = 166 OR (am_op = 402 AND ~%am_res%~ STRING_EQUAL_CASE ~CBRPM~)))
+        OR (component = 211 AND am_op = 60) BEGIN ++am_matches END
+    END
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_install_sr_antimagic
+  INT_VAR component = 210
+  STR_VAR runtime_file = ~chriz-bg-rebalance/lua/M_CBRPM.lua~
+BEGIN
+  ACTION_IF component = 210 BEGIN
+    OUTER_SPRINT am_symbol ~WIZARD_PIERCE_MAGIC~
+    OUTER_SPRINT am_description @2100
+  END ELSE ACTION_IF component = 211 BEGIN
+    OUTER_SPRINT am_symbol ~WIZARD_SPELL_STRIKE~
+    OUTER_SPRINT am_description @2110
+  END ELSE BEGIN FAIL ~CBR anti-magic: unknown component.~ END
+  OUTER_SET am_id = IDS_OF_SYMBOL (~spell~ ~%am_symbol%~)
+  ACTION_IF am_id < 2100 OR am_id > 2999 BEGIN FAIL ~CBR anti-magic: missing or invalid spell.ids mapping.~ END
+  OUTER_SET am_slot = am_id - 2000
+  OUTER_SPRINT am_parent ~SPWI%am_slot%~
+  ACTION_IF NOT FILE_EXISTS_IN_GAME ~%am_parent%.spl~ BEGIN FAIL ~CBR anti-magic: missing parent spell.~ END
+  OUTER_SET am_parent_matches = 0
+  ACTION_CLEAR_ARRAY am_children
+  COPY_EXISTING - ~%am_parent%.spl~ ~override~
+    LPM cbr_am_classify
+    SET am_parent_matches = am_matches
+    FOR (am_i = 0; am_i < am_total; ++am_i) BEGIN
+      PATCH_IF $am_owner(~%am_i%~) >= 0 BEGIN
+        SET am_at = am_fx + 48 * am_i
+        READ_SHORT am_at am_op
+        READ_BYTE (am_at + 2) am_tgt
+        PATCH_IF am_op = 146 AND am_tgt = 2 BEGIN
+          READ_ASCII (am_at + 20) am_child (8) NULL
+          TO_UPPER am_child
+          SET $am_children(~%am_child%~) = 1
+        END
+      END
+    END
+  OUTER_SET am_payload_count = 0
+  ACTION_IF am_parent_matches > 0 BEGIN
+    OUTER_SPRINT am_payload ~%am_parent%~
+    OUTER_SET am_payload_count = 1
+  END
+  ACTION_PHP_EACH am_children AS am_child => _ BEGIN
+    ACTION_IF FILE_EXISTS_IN_GAME ~%am_child%.spl~ BEGIN
+      COPY_EXISTING - ~%am_child%.spl~ ~override~
+        LPM cbr_am_classify
+        PATCH_IF am_matches > 0 BEGIN
+          SET am_payload_count += 1
+          SPRINT am_payload ~%am_child%~
+        END
+    END ELSE BEGIN FAIL ~CBR anti-magic: missing linked payload %am_child%.spl.~ END
+  END
+  ACTION_IF am_payload_count != 1 BEGIN FAIL ~CBR anti-magic: ambiguous or unsupported effective payload.~ END
+
+  ACTION_IF component = 210 BEGIN
+    OUTER_SET CBR_PM_MR_STAT = IDS_OF_SYMBOL (~stats~ ~RESISTMAGIC~)
+    ACTION_IF CBR_PM_MR_STAT < 0 BEGIN FAIL ~CBR Pierce Magic: cannot resolve RESISTMAGIC.~ END
+    ACTION_FOR_EACH am_ext IN spl eff itm BEGIN
+      ACTION_IF FILE_EXISTS_IN_GAME ~CBRPM.%am_ext%~ BEGIN FAIL ~CBR Pierce Magic: private CBRPM namespace already occupied.~ END
+    END
+    ACTION_IF FILE_EXISTS_IN_GAME ~M_CBRPM.lua~ BEGIN
+      COPY_EXISTING - ~M_CBRPM.lua~ ~override~
+        READ_ASCII 0 am_marker (25)
+        PATCH_IF NOT (~%am_marker%~ STRING_EQUAL ~-- CBR_SR_PIERCE_MAGIC_V1~) BEGIN
+          PATCH_FAIL ~CBR Pierce Magic: foreign M_CBRPM.lua collision.~
+        END
+    END
+    COPY_EXISTING ~%am_payload%.spl~ ~override~
+      LPF cbr_sr_pierce_magic_patch END
+    BUT_ONLY_IF_IT_CHANGES
+    COPY ~%runtime_file%~ ~override/M_CBRPM.lua~ EVALUATE_BUFFER
+  END ELSE BEGIN
+    COPY_EXISTING ~%am_payload%.spl~ ~override~
+      LPF cbr_sr_spellstrike_patch STR_VAR payload_resref = EVAL ~%am_payload%~ END
+    BUT_ONLY_IF_IT_CHANGES
+  END
+  // Allocate a private description only after binary preflight/transformation.
+  // Preserve the installed SCS note allowing invisible-target anti-magic.
+  COPY_EXISTING ~%am_parent%.spl~ ~override~
+    READ_LONG 0x18 am_flags
+    PATCH_IF (am_flags BAND 0x1000000) != 0 BEGIN
+      SAY UNIDENTIFIED_DESC ~%am_description%
+
+This spell can be cast at invisible creatures.~
+    END ELSE BEGIN SAY UNIDENTIFIED_DESC ~%am_description%~ END
+  BUT_ONLY_IF_IT_CHANGES
+END

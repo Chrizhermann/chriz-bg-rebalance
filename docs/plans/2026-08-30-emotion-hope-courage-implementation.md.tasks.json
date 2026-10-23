@@ -1,0 +1,41 @@
+{
+  "planPath": "docs/plans/2026-08-30-emotion-hope-courage-implementation.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: Record provenance, mechanics, and distribution evidence",
+      "status": "completed"
+    },
+    {
+      "id": 1,
+      "subject": "Task 2: Add binary fixtures and failing transformation tests",
+      "status": "completed",
+      "blockedBy": [0]
+    },
+    {
+      "id": 2,
+      "subject": "Task 3: Implement the deterministic SPL transformations",
+      "status": "completed",
+      "blockedBy": [1]
+    },
+    {
+      "id": 3,
+      "subject": "Task 4: Add the public component, strings, and scroll behavior",
+      "status": "completed",
+      "blockedBy": [2]
+    },
+    {
+      "id": 4,
+      "subject": "Task 5: Document compatibility and component scope",
+      "status": "completed",
+      "blockedBy": [3]
+    },
+    {
+      "id": 5,
+      "subject": "Task 6: Parse, regress, review, and report the boundary",
+      "status": "completed",
+      "blockedBy": [4]
+    }
+  ],
+  "lastUpdated": "2026-08-30T12:44:31+09:00"
+}

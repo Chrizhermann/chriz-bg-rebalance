@@ -1,35 +1,492 @@
 # chriz-bg-rebalance — Handover
 
+## October 23 — v0.8.4: October audit follow-ups, 220 guard order, 310 immunity windows
+
+Christopher approved the release on 2026-10-23. It contains PR #10 (follow-ups
+1, 2, 3, 5 and 6 of the October 8 audit: 220, 301, 130, 400–404, 320), PR #11
+(310: short immunity windows keep 100%, his option A of October 20) and PR #14
+(220: the bracers' guard before SR Haste's own protection, found in the 2.7.3.0
+lab of October 20). The audit's items 4 and 7 are in chriz-spell-revisions-patch
+v4.21-chriz.6; the RR decision is recorded under item 4 of the audit. Tag
+`v0.8.4` and the GitHub release are made from this release PR's merge commit.
+
+Verified: full regression 711 tests, OK, 26 skipped (private captures) with
+WeiDU 249.
+`tools/package_sr_antimagic.py` rebuilds v0.8.3's six published files byte for
+byte from its tag; v0.8.4's are built the same way from a clean checkout of the
+new tag.
+
+Open:
+- In-game checks of 220 as released (the lab confirmed its guard order on
+  patched spell copies) and of 400–403.
+- The CEBG pin: the collection coordinator updates it.
+
+## October 17 — compatibility follow-ups from the October 8 audit (unreleased)
+
+Branch `claude/compat-followups-20261017` implements follow-ups 1, 2, 3, 5 and 6
+of `docs/audits/2026-10-08-sr-rebalance-compatibility.md` (220, 301, 130,
+400–404, 320); 4 and 7 are on the branch of the same name in
+chriz-spell-revisions-patch. Each component finds what it owns by meaning, keeps
+other mods' changes and fails only for a stated reason. An independent Codex
+review of the first pass found nine more cases, all fixed with tests. Details:
+the audit's implementation status and each component's research note.
+
+Verified: full regression 693 tests, OK, 26 skipped (private
+captures/Lua); SR fork suite 182 passed. WeiDU 249, synthetic fixtures
+and `--nogame` only; no lab install or in-game check.
+
+Decided (Christopher, 2026-10-20): in cloud forms 320, 75% is the target for
+immunity, not a cap. Only resistances of 100% or more become 75%; 76–99% from
+other mods stays. The branch already implements this.
+
+Open:
+- In-game checks of the changed components.
+- Version, tag and release, and the CEBG pin, need Christopher's approval; the
+  collection coordinator updates the pin after a release.
+- Still open in their own repositories: the modpack/SoD audit and the forks
+  audit (`docs/audits/README.md`).
+
+## October 14 — v0.8.3 candidate: potion uniqueness and Heroism family (local, unpublished)
+
+Components 330/331 (choose one) and 332 follow the behaviour Christopher agreed
+on October 9–14. Library `chriz-bg-rebalance/lib/potion_uniqueness.tpa`; design,
+mechanism, limits and the lab result are in
+`research/2026-10-14-potion-uniqueness-heroism-family.md`. The October 9
+prototype's EEex admission hook was not reused: plain WeiDU guards keep every
+effect in its original item or spell.
+
+Verified: `tests/test_potion_uniqueness.py` (real WeiDU on synthetic games:
+patched set, preserved originals, spell states, descriptions, uninstall, a
+repeat run over the installed result, and a game without Bardic Wonders or the
+SPLPROT row). Full regression: 543 passed, 26 skipped (private captures) with WeiDU 249. Lab install on a disposable copy of
+the EET/SR/SCS/Bardic game changed the expected potions and spells only; not
+launched in-engine.
+
+Open: in-game check; a Bardic Wonders adapter for Gallant copies created after
+332 (recipe in the research note); the collection's curation entry for 330–332;
+tag/release only with Christopher's approval.
+
+## October 13 — v0.8.2 candidate (local, unpublished)
+
+Review of PR7 found one regression, fixed in `ec0a6e3`: the stricter
+noncanonical Haste check kept the +5's immunity to real innate Haste spells
+(`SPRA301`/`SPIN572`/`SPIN828` in vanilla, `SPIN572` with SR), which v0.8.1
+removes. Their fatigue, glow/sound, Slow-cancel and self-guard records now count
+as Haste; other effects keep the immunity with an installer message. Verified
+with the real spells against the captured CEBG and vanilla items, and new
+synthetic regression tests that fail on the unfixed code. Remaining review
+nits not changed: cosmetic casting features still mark a Slow helper unsafe;
+single-line localized description matching; no work cap on deep helper fan-out.
+
+Version markers, changelog and `docs/release-notes/v0.8.2.md` are prepared.
+Full regression: 565 tests, OK, 24 skipped (private captures). The local
+commits are not pushed to PR7; merge, tag and publication need approval.
+
+## October 8 — FoA compatibility repair and cross-repo audit (unreleased)
+
+Active worktree: `.worktrees/foa-compatibility-20261008`, branch
+`codex/foa-compatibility-20261008`, based on `83e51d2` / released v0.8.1.
+Component 302 no longer assumes one ability or one direct Slow effect. It
+preserves foreign effects, follows supported single-target Slow-only helpers,
+and separates shared effect slices where needed. Description variation does not
+abort mechanics. See [research](../research/15-flail-of-ages.md) and
+[cross-repository follow-up](audits/README.md).
+
+Prepared for review on the branch above; not released or pinned in CEBG.
+No live-game changes or new engine acceptance. Other audit findings remain open
+in their owning repositories.
+
+Verified evidence: full regression completed with exit 0 on October 8:
+`python -B -m unittest discover -s tests -t . -v` ran 560 tests in 451.995 seconds:
+536 passed, 24 skipped for unavailable private dragon/bracers captures. All 33
+real-WeiDU tests across the four `test_flail_of_ages*` modules ran and passed,
+including captured vanilla/CEBG inputs. The two Bard guard messages in stdout
+are expected negative-test diagnostics, not failures. Saved status and logs:
+`work/foa-full-regression-20261008`, job
+`48856b67-bc53-4382-98d3-a4a4ca55946b`. The completed job was inspected, not rerun.
+
+October 12 shipping check: fetched `origin/main` is still `83e51d2`, with no
+intervening merge conflicts. Fresh focused and packaging run:
+`python -B -m unittest tests.test_flail_of_ages tests.test_flail_of_ages_variants tests.test_flail_of_ages_safety tests.test_flail_of_ages_haste tests.test_release_components -v`
+passed all 39 tests in 26.946 seconds, no skips. Independent bounded review
+found no new correctness or packaging-inclusion blocker; `git diff --check`
+passed. Version remains v0.8.1 until release preparation synchronizes all
+installer markers. No release tag or asset has been published for this fix.
+
+## October 7 release integration — v0.8.1 published and verified
+
+The approved combined owner release **v0.8.1** is public GitHub Latest, not a draft
+or prerelease. [PR #6](https://github.com/Chrizhermann/chriz-bg-rebalance/pull/6)
+merged at `09db97dc5cbd14f1b8bf7fe3af64f69bee313585`; the annotated v0.8.1 tag
+points to that source. All three freshly downloaded published ZIPs match the
+tested candidate sizes and SHA-256 hashes recorded below. No Actions workflows
+or remote checks are configured in this repository; the completed local checks
+and independent review are the release evidence, not a claimed CI run.
+Worktree: `.worktrees/sr-antimagic-research`, branch `codex/sr-antimagic-research`.
+HEAD `c14a9a2` cleanly cherry-picks the approved bracers/private-cap commit
+`9078d11` onto the combined Hardiness/anti-magic/physical-cap base `48938d1`.
+The original physical-cap worktree and its dirty cloud work remain untouched.
+
+Integration adds public 130 (EET elemental arrows), 220 (SR bracers)
+and 320 (75% combat cloud forms), their source/tests, and matching v0.8.1
+version markers in the main/Hardiness/anti-magic TP2s. 130 is the previously
+verified October 3 adapter, renamed into the owner namespace, scoped to
+AROW04/09/08/AROWKC only. 220 uses the unchanged tested bracers library. 320
+copies the owner's approved October 6 cloud source without modifying that copy.
+Current public declaration order ends `...302,420,421,310,130,220,320`;
+collection must follow actual declaration order. The earlier sequence contains
+`...407,409,408...`, not numerical order. See the [component/default/dependency
+matrix](handovers/2026-10-07-release-collection.md) before pinning.
+
+Verified, all exit 0:
+
+- Full regression `python -B -m unittest discover -s tests -t . -v`: **539 tests,
+  26 expected skips** for unavailable private resource captures, 428 seconds.
+  Session 37698 is complete and its final result was collected; do not rerun it
+  to recover the old result. Negative Bard guard diagnostics were expected.
+- Subsequently added extracted-package test and ran
+  `python -B -m unittest tests.test_release_components -v`: **6 tests passed**.
+  Covers exact arrow changes/preservation/uninstall/rollback, public bracers
+  parity/requirements, and full ZIP allowlist/source fidelity plus installation
+  of 130, 220 and 320 using its packaged WeiDU in a disposable synthetic game.
+- Earlier bracers/cloud suite: 36 cases, one absent private-capture skip.
+- Main TP2 parse and `git diff --check` pass.
+
+Published archives were built with
+`python tools/package_sr_antimagic.py --output dist\v0.8.1-candidate`:
+
+- `chriz-bg-rebalance-v0.8.1-windows.zip`: 1,753,775 bytes, SHA-256
+  `5d6cc9dfec8779e1e4534da686dc2f3849bcb795b24981c0930d95918efccf0c`.
+- `CBR_SR_HARDINESS-v0.8.1-windows.zip`: 1,285,575 bytes, SHA-256
+  `1816039b574a0b7b4a71b6622e2658aedecdab5e36c56b5c59393c0817587d87`.
+- `CBR_SR_ANTIMAGIC-v0.8.1-windows.zip`: 1,289,937 bytes, SHA-256
+  `5102469389ad087674794d76cc60cd67527137dc5a0b46fb35df7b550eff7b63`.
+
+Independent review found no blocker; implementation commit `784fb83` and release
+publication were approved by the collection lead on Christopher's authority.
+README, changelog, release notes and collection handover are complete. The full
+collection asset is
+`https://github.com/Chrizhermann/chriz-bg-rebalance/releases/download/v0.8.1/chriz-bg-rebalance-v0.8.1-windows.zip`.
+CEBG pinning and installer publication remain separate work in that repository.
+Keep the pre-existing deployment-note edit to
+`docs/handovers/2026-10-06-sr-antimagic-collection.md` out of this integration commit;
+the matching existing note in the tail README is preserved alongside its necessary
+version update. No 95% physical-cap variant or deferred redesign was added.
+No live game, save, security setting, collection or website was changed.
+
+## Unpublished Hardiness work — 2026-10-06
+
+`v0.8.0-dev`, branch `codex/sr-hardiness-adjustment`, adds 200 (40% physical only,
+recommended), 201 (30% physical only, mutually exclusive with 200), and 202
+(optional extra 20% elemental/magic-damage resistances, requires 200 or 201).
+Both normal and Wish Hardiness are covered; duration, stacking and existing
+Breach behavior are retained. Requires SR Revised Warrior HLAs #65.
+
+A separate tail installer avoids reinstalling SR or prior BG Rebalance entries.
+Build local packages with `python tools/package_sr_hardiness.py`. These are
+unpublished development artifacts; no live game or saves were changed.
+
+The collection's v0.7.1 pin does not include this work. Integration remains a
+separate required step: [exact handover](handovers/2026-10-06-sr-hardiness-collection.md).
+
+The previously published status below is historical and remains unchanged.
+
+
 Live entry point for anyone (user, future agent) picking up work on this repo.
 Mirrors the convention of `chriz-bg-modpack/docs/handover.md`.
+
+## Status (2026-09-30) — v0.7.1 Apex Dragons compatibility fix
+
+- Component 110 now supports both legitimate SCS difficulty backends: INI and
+  GLOBAL. SCS converts its authored GLOBAL checks to INI only when its integrated
+  difficulty menu is present. The GLOBAL scripts in CEBG Test19 were valid; our
+  INI-only guard was the defect. The component still owns only its lethal-melee
+  prefix and preserves the rest of SCS's AI byte for byte.
+- No gameplay tuning changed: same five dragons, difficulty thresholds, proc
+  chances and removal rules. Missing/mixed difficulty controls and foreign or
+  duplicate prefixes still reject. Component 111 and Flail 302 are unchanged.
+- All **52 focused dragon checks pass**, including real WeiDU installation of
+  110/111 over private copies of Test19's actual resources and exact uninstall
+  restoration in a disposable synthetic game. This is not a live combat test.
+  Full regression: **395 tests passed, no skips**, exit 0 (444 seconds), with
+  private legacy and Test19 captures available. Expected negative-path Bard
+  diagnostics appeared in stdout; there were no test failures. No game was run.
+- Published release ZIP: 50 reviewed entries, **1,734,037 bytes**, SHA-256
+  `ba53f02e1b5542534412331dc2f33d78c4b3a19e2dd3dee60ef6a9755ef170ab`.
+  Captured game resources, tests and private research inputs are excluded.
+  PR #5 merged at `1578fac00cd93ba88341ffdfcb0346c08480cd21`; annotated tag
+  `v0.7.1` points there. GitHub reports normal Latest (not draft/prerelease).
+  Fresh release acquisition matches the candidate and published asset digest.
+- Christopher authorized publishing this small mod fix. No CEBG public release
+  or installed-game change is authorized by that approval. The stopped Test19
+  remains untouched: CEBG must also correct its expected order (302 is declared
+  last) and separately validate any supervised recovery. A new archive alone
+  cannot make the old frozen attempt resumable.
+
+## Status (2026-09-29) — v0.7.0 published with Flail of the Ages
+
+- PR #4 merged at `5db2f64cf623f818991ca077b9a2edb2156f16ee`; annotated tag
+  `v0.7.0` points there. GitHub reports normal Latest (not draft/prerelease).
+  Downloaded `chriz-bg-rebalance-v0.7.0.zip` is **1,733,901 bytes**, SHA-256
+  `3aae59bc634671ad6a6565d5862c4db984584bd90094ecbf640dda338d665b87`.
+  Its 50 entries are the reviewed runtime/docs/licenses/setup allowlist; captured
+  test resources are excluded. Extracted component catalogue includes 302.
+- Full automated suite: **382 cases, exit 0, 26 existing capture-dependent skips**;
+  all 13 Flail cases pass. TP2/TPA parsing passes. Publication does not claim live
+  gameplay acceptance or an installed-game update. Exact pin handed to CEBG.
+
+- Component **302**, label `cbr_flail_of_ages_rebalance`, implements Christopher's
+  approved item rebalance: Slow saves vs. breath at −2/+3, −4/either +4, −6/+5;
+  +5 retains harmful-impairment Free Action protection while permitting Haste and
+  Improved Haste. Chance, duration, damage, unrelated effects and lower tiers stay
+  unchanged. SR's associated Haste removal and Slow feedback share the save.
+- Work is isolated on `codex/flail-of-ages-rebalance`, based on current
+  `origin/main` `8349304`, in the reused clean worktree
+  `.worktrees/bard-progression-release-20260920`. Owner main's unrelated dirty Bard
+  and Time Stop work is untouched. Version markers and release notes now target
+  v0.7.0; publication and archive verification are complete as recorded above.
+- **13 focused tests pass** using actual WeiDU 249 in disposable games, including
+  vanilla and default CEBG item captures, both effect layouts, negative signed save
+  values, preservation, exact item uninstall, idempotence and unchanged pre-existing
+  TLK strings. Full current installed English descriptions also passed an isolated
+  check. TP2 and TPA parse checks pass. No live installation or save was modified,
+  and these are not in-game acceptance claims.
+- CEBG intends to select 302 by default after the next owner release. It belongs in
+  the existing late/post-EET_end Rebalance run, after SR/SCS/item-description changes;
+  no EEex or external provider component is required. Later selected CDTweaks
+  2310/2311 alter SPLs, not these ITMs. Do not pin an unreleased branch as if it were
+  a published release artifact. No extra isolated gameplay gate is added here;
+  the user plans the combined release install/playtest.
+- Unknown item structures or non-English/unrecognized descriptions reject safely.
+  This is not a global Free Action policy, arbitrary overhaul support, or an
+  existing-save hotpatch. See `research/15-flail-of-ages.md` and
+  `tests/test_flail_of_ages.py`. Captured game binaries remain local research inputs,
+  not distributable mod payloads.
+
+## Status (2026-09-26) — v0.6.0 ships component 301
+
+- The 2026-08-30 Emotion, Courage / Emotion, Hope work (component 301) was never
+  committed: its Codex worktree was cleaned up on 2026-09-05 and only the automatic
+  snapshot `9c662ad` kept it (local backup branch
+  `backup/emotion-hope-courage-301-snapshot-20260905`). It was ported unchanged in
+  behavior onto the v0.5.0 baseline on branch `claude/emotion-hope-courage-301` and
+  released as v0.6.0 with Christopher's approval. All v0.5.0 components are unchanged.
+- Published 2026-09-26 (PR #3, tag on merge `4aa6110`): `chriz-bg-rebalance-v0.6.0.zip`,
+  1,724,047 bytes, SHA-256 `e5f39cb60ecf90a715715d95848df4582168e55cdcff4fc5455bc768f3063224`.
+- Christopher wants 301 as a collection default. The collection still pins v0.4.0; the
+  pin change and default selection are handed to the collection release line.
+- Not separately recorded: the standalone status-list retest in the retained
+  `CBR301 STATUS UI TEST R3 20260830` host (see the 2026-08-30 section), and a live
+  check of provider mode (IWDification/SCS-supplied spells), which the collection uses
+  and which has installer/transformer fixture coverage. Christopher accepted release
+  based on earlier in-game testing; fix any reported issue in a follow-up release.
+
+## Status (2026-09-16) — v0.4.0 optional dragon intake
+
+- Components 110/111 are ported from the existing a947 implementation onto the
+  current public main baseline (9fe9ec6, including v0.3.2 and its no-SR recovery
+  documentation). The six runtime changes match the collection's pinned dragon
+  payload; this release does not absorb other dirty development work.
+- 110 is the optional EEex lethal-melee rider; 111 is independent 18-second wing
+  buffet. Both require SCS Smarter Dragons 6540; see the README for all five actors,
+  difficulty activation and the permanent-death warning.
+- User decision: include implemented candidates now, then test combat on one
+  combined CEBG installation. Older docs requiring another standalone combat test
+  before publication are superseded. Native combat and existing-save support are
+  still unverified, not silently accepted.
+- Captured game/SCS test resources remain local and are excluded from publication.
+  The test code reports their absence explicitly on a fresh clone. The release
+  package contains only runtime files, player documentation, licenses and WeiDU.
+- No live installation, saved game, legacy worktree or earlier release was modified.
 
 ## What this is
 
 SCS- and SR-adjacent balance adjustments + spell-behavior fixes as a tail-install WeiDU mod.
-Component numbering: 100s SCS / 200s SR / 300s cross-cutting / 400s class-kit revisions of
-base-game+SoD kits (rework, not new kits); labels `cbr_*`. Approved design:
-`docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `CLAUDE.md`.
+Component numbering: 100s SCS / 200s SR / 300s cross-cutting; labels `cbr_*`. Approved design:
+`docs/plans/2026-07-02-chriz-bg-rebalance-design.md`. Conventions + landmines: `AGENTS.md`.
 
-## Status (2026-08-23)
+## Status (2026-09-07) — v0.3.2 Tempus Holy Power compatibility
 
-- **Hardiness live hotfix applied 2026-08-19 (user-approved in-session)** — SR #65's
-  20%-everything Hardiness restored to **40% physical** (SR's 20% elemental rider kept) by
-  direct override edit of `SPCL907.spl` + `SPWISH12.spl`; byte-exact verified, pristine copies
-  in `research/originals/`. In-game description still says 20% until comp 200 ships.
-  `research/06`: diagnosis, comp 200 spec (40/30 subcomponents; open: keep the elemental
-  rider?), comp 301 phys-res cap sketch (90/80, party-only EEex clamp, planned 301c soft
-  knee). Verified: Hardiness / Defensive Stance / Wish-Hardiness op321-remove each other in
-  both directions (vanilla EE, kept by AK's DwD overhaul); DwD unkillability = passives 20 +
-  stance 50 + DoE 20, not Hardiness stacking.
-- **Ambient readiness research (`research/08`)** — SCS pre-buff internals + EEex hook inventory
-  for "no one-click assassination of casters": user already at SCS top prep tier (engine
-  slider 5, prep globals unset); gap = See()-gated tiers vs stealth, no Detect path for
-  priests, nothing for non-casters. User clarified 2026-08-23: the pain is reaction latency; primary candidate is now
-  121 ambient-at-load (EEex), 120 optional. Open: ambient for neutral casters with SCS scripts?
-- **Process:** the 2026-08-22 session's doc rewrite dropped this session's uncommitted
-  scope/handover edits — re-merged 2026-08-23; commit doc edits promptly when sessions
-  overlap. User directive 2026-08-23: no multi-agent research/verify fan-outs unless asked;
-  spend tokens only on work that lands as durable docs/components.
+- Component 401 now recognizes validated single-hop Improved Haste doubling and
+  the original non-SR Divine Power exclusion prefix. SCS and Spell Revisions are
+  optional for this component family. Unsafe or ambiguous layouts still fail.
+- All 281 automated tests pass, including actual base-game and SCS/no-SR inputs,
+  source preservation, idempotence and exact rollback in isolated synthetic games.
+  See `research/14-tempus-delegated-haste.md` and `CHANGELOG.md`.
+- The collection task reports v0.3.2 pinned in CEBG app 0.1.0-alpha.15 / collection
+  0.1.0-alpha.13 and successful in-place recovery of the exact no-SR installation:
+  all eight BG Rebalance selections and the remaining stack completed with exit 0,
+  and all 429 frozen components were validated. Failure history was preserved with
+  a separate supervised completion receipt. See research/14 for the attributed
+  recovery evidence. Runtime gameplay remains untested; no further mod release is
+  needed for this installer incident.
+
+## Previous status (2026-09-04) — v1.2 ambient/urgent PASS; v0.3.1 CLAB fix
+
+- **Component 401's first clean curated-stack install exposed one narrow validator gap.**
+  Artisan's Kitpack legitimately packs `AP_C0PR#CL` into otherwise empty `ABILITY1` cells
+  of `OHTEMPUS.2DA`. The test-first fix accepts only that exact permission token
+  at ordinary levels and still clears only the five late Holy Power grants. See
+  `research/13-tempus-artisan-clab-packing.md`. All 68 Holy Power tests pass, and the
+  isolated release candidate installed `401` with no warning/error and verified every
+  resulting CLAB invariant. It first shipped in v0.3.1 and remains in v0.3.2.
+
+- **The approved v1.2 laboratory now exists:**
+  `C:\Games\Baldur's Gate II Enhanced Edition modded - CBR Ambient Readiness v1.2 Test`
+  combines the audited SCS/SR EET snapshot with the exact EEex v1.2 runtime. Components 120
+  and 121 are at the WeiDU tail. Its installed `M_CBRRDY.lua` now contains the verified
+  accounting and urgent binding corrections (SHA-256 `9957348E...B3D08`) as audited one-file
+  lab hotfixes.
+  Do not force-reinstall or uninstall 121. The active playthrough
+  remains untouched. Recheck `Baldur.exe` and `InfinityLoader.exe` immediately before any
+  further lab write rather than relying on an earlier process observation.
+- **The first v1.2 pass found a real component-121 blocker.** In the loaded process,
+  `type(m_worldTime.GetCurrentTime)` was `nil`, direct `m_worldTime.m_gameTime` returned a
+  numeric raw tick value, and the userdata metatable exposed the field but no method. Both
+  readiness layers consequently faulted closed before any effect, slot debit, or queued cast.
+- **The clock-corrected rerun passed delivery but failed accounting.** The user visually
+  confirmed the expected Vigil buffs. A paused read-only diagnostic then found the exact
+  `DWSW408` / `DWSP735` effects, but all four memorized counts were unchanged, all component
+  ledgers were empty, and every relevant spell had failed. This is a visual delivery PASS and
+  one-slot accounting FAIL. The neutral actors did not exercise urgent first-contact casting.
+- **The final corrected runtime passed fresh-process ambient acceptance.** In paused `AR3000`,
+  exact runtime SHA-256 `EF38A1A0BF942A2B3AB294FAE48DA2548E9413DBD5FE7CB255406C413E06DD3D`
+  reported `ambient_faulted=0` and `urgent_faulted=0`. All four subjects were neutral with
+  `instantprep=0` and `inafight=0`; every exact marker and schema-2 charged ledger was present,
+  with no ambient failure. `SHUGMG01` had one of two `SPWI408` copies available (`[0,1]`),
+  while `SHUPOL01` had zero of one `SPWI408` and `SHUGAR01` / `SHUGOD01` each had zero of one
+  `SPPR735` (`[0]`). This is the agreed one-slot accounting PASS, not urgent evidence.
+- **The corrected neutral-to-hostile urgent path passed.** The first attempt faulted because
+  EEex v1.2 requires the Boolean argument to `virtual_ClearActions`; exact binding and engine
+  disassembly established `false` as the full-clear branch after the existing passive-only
+  action gate. Runtime `9957348E...B3D08` then kept `urgent_faulted=0`. An attack order alone
+  correctly did nothing while Brother Pol was neutral; after the first hit made him hostile,
+  his exact normal `SPWI708` start spent one contact attempt and the sole Mantle slot, and the
+  exact opcode-120 effects were active. The generic mage's non-passive action 22 was not
+  displaced. This accepts the primary current-version path, not every broader matrix row.
+- **The corrected current-version contract uses one scheduler and one confirmation observer.**
+  EEex v1.2 registers one deferred callback as the sole scheduler and one synchronous
+  lists-resolved callback as an ambient-only pending-confirmation observer (`1/1`, total 2).
+  Legacy registers only one synchronous full scheduler (`0/1`, total 1). If the synchronous
+  observer API is missing on v1.2, ambient fails closed while urgent may remain on the
+  deferred scheduler. Both modes read direct `m_worldTime.m_gameTime` raw ticks.
+- **Opcode-146 delivery does not explain away an SCS action 181.** Exact BG2EE 2.6.6
+  disassembly proves `dwFlags=1` publishes the child through `CMessageFireSpell` /
+  `CGameAIBase::FireSpell` and does not create action 181. Therefore an exact SCS `181 -> 147`
+  sequence during first-delivery pending can supply the one charge after a later callback
+  observes its exact slot loss and marker. After an ordinary component debit, schema 2 keeps
+  the exact locator/original/debited flags so one later exact SCS pair can restore only that
+  component-debited record, again only after post-action delta proof.
+- **Persisted accounting survives gameplay retirement.** Existing ledger export/import and a
+  real quick-list reset run independently of enable, external-owner, and fault gates. Generic
+  callbacks require an existing session, but exact action 181 plus known delivery may rebuild
+  ephemeral state from an existing valid charged/reimbursable schema-2 UDAux ledger, without
+  allocating UDAux, so save/load or hot reload before the first deferred tick cannot defeat
+  reimbursement.
+- **The staged lich route was wrong.** The save's `AR3019` one-time spawn locals are already
+  exhausted and neither lich exists in any saved area. The staged lab save is in `AR3000`, where
+  the Vigil group provides better subjects: the generic mage and Brother Pol have ambient
+  Stoneskin plus urgent PfMW/Mantle respectively. While neutral (`EA=128`) their urgent layer
+  is correctly inactive; deliberately making the group hostile gives a visible urgent test.
+- **Automated and live evidence are deliberately split:** the earlier `68 focused / 228 repository`
+  result proves only the clock-field correction. The accounting redesign now has 76 focused
+  tests and all 253 repository tests passing. The fresh-process ambient delivery/accounting
+  rerun and the later corrected neutral-to-hostile urgent path now pass. Full legacy live
+  acceptance and the unexercised rows of the broader current-version matrix remain explicit.
+- **Existing-lab deployment used audited direct override hotfixes.** With both game processes
+  absent, the disposable lab's clock-only runtime (`42191F62...`) was preserved, the reviewed
+  accounting candidate (`870B4C6F...`) was preserved, and the verified ambient runtime was
+  deployed as `EF38A1A0...`; the later one-line urgent binding correction produced final
+  stamped runtime `9957348E...B3D08`. `WeiDU.log` remained byte-identical at `6C988DE3...`;
+  the final runtime parses with the bundled Lua interpreter and matches the production suffix
+  exactly.
+  Evidence is under `%USERPROFILE%\Documents\Codex\2026-09-02\cbr-ambient-v12-accounting-hotfix-20260902-215413`.
+  This avoided uninstalling an entry or relying on `--force-install-list 121`, which is a
+  silent no-op for an already installed component. Ambient accounting and the primary urgent
+  path have cleared their live gates; do not deploy into the active playthrough without
+  separate explicit approval.
+- **Transient lifecycle ambiguity is bounded and fail-closed.** Reset/import or sprite
+  replacement discards pending delivery. A narrow boundary can leave one already-queued
+  finite child effect without debit or ledger; the generic marker cannot prove ownership, so
+  it is not retroactively charged and never receives free maintenance. If a queued component
+  child instead arrives after an SCS-paid ledger commit, it is likewise a bounded redundant
+  finite effect and causes no debit or new entitlement.
+- **Older EEex remains second priority.** Its one synchronous callback is the full scheduler,
+  it shares the direct clock field, and v0.11 inactive/faulted/external-owner no-ledger
+  marshal exports normalize to `{}` while valid existing ledgers remain tables. Corrected
+  legacy live acceptance remains separately pending.
+
+See `research/11-eeex-v1.2-readiness-compatibility.md` and
+`research/12-eeex-legacy-readiness-fallback.md` for provenance, official references, and
+RED/GREEN evidence.
+
+## Status (2026-08-30) — superseded original offline implementation checkpoint
+
+- **Dragon work is being handled elsewhere and is out of scope for this branch.** Do not
+  resume component 110 from this handover.
+- **Historical claim, superseded by the v1.2 accounting failure above:** components 120 + 121
+  were considered approved, implemented, and fully reviewed offline on branch
+  `codex/ambient-readiness-121`. The authoritative design is
+  `docs/plans/2026-08-27-scs-ambient-readiness-design.md` (commit `ae71422`); the executable
+  plan is `docs/plans/2026-08-27-scs-ambient-readiness-implementation.md` (commit `b68b22c`).
+- **120 fixes a verified SCS / Spell Revisions semantic mismatch.** This install maps both
+  `WIZARD_IMPROVED_MANTLE` and `WIZARD_MOMENT_OF_PRESCIENCE` to spell 2808, but effective
+  `SPWI808` is Moment of Prescience and has no weapon-immunity effect. The read-only audit
+  found 585 SCS common-mage scripts, 98 numeric-2808 candidates, 77 first-round blocks,
+  80 renewal blocks, 82 chain-contingency blocks, and zero unknown target-containing
+  shapes. Exact resources and hashes are in `research/09-scs-sr-moment-of-prescience.md`
+  and `research/originals/`.
+- **121 is a deliberately retireable interim hybrid**, not the final AI architecture. The
+  user is separately developing an EEex AI overhaul that may eventually claim either
+  runtime layer. Ambient readiness starts with actually memorized 8-hour-plus self-buffs,
+  curated for hostile/neutral/allied SCS casters, consumes one real slot once per proven
+  spellbook reset, and maintains natural expiry for free only when safe. Urgent readiness
+  allows one fast but normal, interruptible weapon-protection cast per contact episode.
+- **The separately authorized Task 6 capability spike is complete and cleaned up.** It used
+  a disposable save, installed nothing, wrote no save, and ended with Baldur/InfinityLoader
+  closed and every hashed game input unchanged. The two-pass Task 11 review tightened
+  component 120 to every installed canonical BCS family, protected EEex session caches from
+  recycled object IDs, required complete effect-list visibility, and replaced the stock
+  Project Image resref assumption with final-`SPELL.IDS` resolution. WeiDU parse-check and
+  all 216 repository tests passed in a clean process. Task 12's approval-gated procedure is
+  `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`. At this checkpoint no live
+  component install had yet been authorized; the later disposable-lab result and correction
+  are superseded by the 2026-09-02 status above.
+
+## Status (2026-08-30) — component 301 Emotion, Courage / Emotion, Hope
+
+- **Component 301 (Emotion, Courage / Emotion, Hope): IMPLEMENTED and automated-verified;
+  real delivery and mutual exclusion live-verified; status-list correction awaiting one manual
+  retest.** It owns the final dynamically resolved spell resources and English
+  descriptions, makes the beneficial Emotions mutually exclusive per creature, preserves the
+  save/MR-coupled Fear/Symbol removers, the unconditional Emotion, Hopelessness remover, and SCS
+  state markers. It supplies dynamically allocated fallback spells with original blue IWDEE
+  spell icons, independently extracted 13x13 IWDEE heart status icons, dynamic `STATDESC.2DA`
+  rows/opcode 142, a private IWDEE allies-only projectile/animation/sound graph, and clean
+  point-target CBR scrolls when the symbols are absent. Standalone store distribution mirrors the live donor
+  entries dynamically; fixed area, CRE, spellbook, and save edits are excluded. Install after
+  IWDification, SCS, SR, and other spell/scroll/store overhauls. Evidence:
+  `research/11-emotion-hope-courage.md`; design:
+  `docs/plans/2026-08-30-emotion-hope-courage-design.md`.
+- **The earlier controlled result did not validate delivery.** Direct EEex effect-block tests in
+  `CBR301 DISPOSABLE TEST 20260830 R2` bypassed the spell projectile. The later UI pass correctly
+  found that the former HOLD projectile filtered out allies and that the donor-cloned Courage
+  scroll could not target the ground. The corrected IWDEE projectile and clean scroll build pass
+  automated binary/install tests and were installed once into the fresh disposable
+  `CBR301 CORRECTED TEST 20260830` copy. Its first save load crashed because that clean host was
+  missing the EEex/BuffBot runtime required by the `bfbt-test` save, not because of a decoded
+  component resource defect. A compatible fresh `CBR301 CORRECTED UI TEST R2 20260830` host now
+  has the exact old EEex/BuffBot/Remote Console order, English TLK, isolated profile, referenced
+  test resources, and corrected component 301 last; launch it only through `InfinityLoader.exe`.
+  The later real UI casts delivered both complete buff sequences and confirmed Hope/Courage
+  replacement, but showed no character-sheet status entry because the fallback SPLs had no
+  opcode 142 and the clone had no matching `STATDESC.2DA` rows. The repository correction now
+  generates both. A fresh `CBR301 STATUS UI TEST R3 20260830` host and matching isolated profile
+  are installed and binary-audited: Courage/Hope resolve to `SPWI422`/`SPWI426`, their status
+  rows are 207/208, and both one-frame 13x13 D BAMs match the native IWDEE hashes. Launch only
+  that host's `InfinityLoader.exe`; only the visible status-list result still needs manual
+  confirmation. The production game and active playthrough stayed read-only. Full evidence:
+  `research/11-emotion-hope-courage.md`.
 
 ## Status (2026-08-22)
 
@@ -51,22 +508,6 @@ base-game+SoD kits (rework, not new kits); labels `cbr_*`. Approved design:
 - **Live check still owed by the user after 409 is installed + game restarted:** Branwen
   wielding a 2-pip weapon reads a *steady* 1.5 (stat 8 = 7; 2.5 under Holy Power tier-1),
   no cycling; swapping to a 0-pip weapon drops it within a second.
-## Status (2026-08-19)
-
-- **Hardiness live hotfix applied (user-approved in-session)** — SR #65's 20%-everything
-  Hardiness restored to **40% physical** (SR's 20% elemental rider kept) by direct override
-  edit of `SPCL907.spl` + `SPWISH12.spl`; byte-exact verified (60+60 dwords), pristine
-  copies in `research/originals/`. In-game description still reads 20% until comp 200
-  ships. Diagnosis + specs: `research/06`.
-- **New backlog components:** 200 — SR Hardiness restore (subcomponents 40%/30%);
-  301 — physical-resistance cap (90%/80%, EEex party-only stat clamp; research needed;
-  301c soft-knee variant user-endorsed).
-- **Verified (user challenged it):** Hardiness / Defensive Stance / Wish-Hardiness
-  mutually remove each other via op321 in *both* directions (vanilla EE design, kept by
-  AK's Dwarven Defender Overhaul). DwD unkillability comes from passives (+20%) + stance
-  (50% all damage) + items instead — `research/06` §1/§4.
-- **Open user decisions:** comp 200 — keep SR's 20% elemental rider on Hardiness or
-  strip to vanilla-pure physical (deferred 2026-08-19).
 
 ## Status (2026-07-20)
 
@@ -111,6 +552,9 @@ base-game+SoD kits (rework, not new kits); labels `cbr_*`. Approved design:
 4. **`gh` CLI state is shared across concurrent agent sessions** — another agent may have
    switched the active account. Run `gh auth status` before any gh operation; this repo needs
    `Chrizhermann` (`gh auth switch --user Chrizhermann`).
+5. **No multi-agent research or review fan-outs unless the user explicitly asks.** Keep the
+   ambient-readiness implementation sequential and land evidence/tests/components as durable
+   work.
 
 ## Testing reality
 
@@ -137,23 +581,21 @@ session — always `--exclude` them.
 
 ## Work queue
 
-0. **Component 110 dragons — design → build**: user lever answers (asked 2026-07-20) →
-   `docs/plans/*-dragons-design.md` → implement per `research/05-dragons.md` §5.
-   Then the rest of the triage order (310/311 EEex feasibility, 410+ deity weapons, 320
-   weapon dice) per `docs/plans/2026-07-20-community-ideas-triage.md`.
-1. **Component 200 build** — formalize the Hardiness hotfix as `cbr_sr_hardiness`
-   (subcomponents 40/30, spwish12 + description strings, idempotent over the live edit)
-   per `research/06` §3.
-2. **Component 301 research** — EEex listsResolved phys-res clamp feasibility + install
-   stacking-source audit per `research/06` §4; then design → user sign-off.
-   Then **Component 121 design** — EEex ambient-at-load per `research/08` §7 (open:
-   ambient for neutral casters with SCS scripts?); 120 optional afterwards.
-3. **SR wishlist session** — *needs the user live*: walk Spell Revisions' changes, collect
-   which to keep/revert/re-tune → `research/10-sr-wishlist.md` → design 200-series
-   (SR #65 also revises Whirlwinds — flag there).
-4. **SCS component catalog** — solo-able: from the game install's WeiDU.log (414 entries;
+0. **Current-version ambient accounting and the primary urgent path are accepted; legacy
+   gameplay remains.**
+   Offline verification is green (76 focused / 253 repository), and the fresh-process `AR3000`
+   ambient test passed exact markers, one-slot deltas, and schema-2 ledgers on all four Vigil
+   casters. Brother Pol's corrected neutral-to-hostile path also passed exact normal-cast start,
+   contact, slot, effect, and fuse checks. The broader unrun matrix and the corrected legacy
+   path remain optional later acceptance work. The full procedure is in
+   `docs/plans/2026-08-27-scs-ambient-readiness-live-checklist.md`. No additional install,
+   launch, save mutation, or deployment follows from this handover without the required
+   approval for that exact step and target.
+1. **SR wishlist session** — *needs the user live*: walk Spell Revisions' changes, collect
+   which to keep/revert/re-tune → `research/10-sr-wishlist.md` → design 200-series.
+2. **SCS component catalog** — solo-able: from the game install's WeiDU.log (414 entries;
    read-only) catalog the 77 installed SCS components + balance touchpoints; propose 1xx
    candidates. (Scope inherited from chriz-sod-rebalance "Part 3".)
-5. **Formal install of comp 100 into the live game** — pending user sign-off; tail-install.
-6. **Umbrella / collection** — see `docs/plans/2026-07-03-umbrella-analysis.md`; decision
+3. **Formal install of comp 100 into the live game** — pending user sign-off; tail-install.
+4. **Umbrella / collection** — see `docs/plans/2026-07-03-umbrella-analysis.md`; decision
    pending user, work deferred until 2xx/3xx mature.

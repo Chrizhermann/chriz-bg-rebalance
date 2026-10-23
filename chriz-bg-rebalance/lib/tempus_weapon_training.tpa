@@ -4,9 +4,11 @@
 // file-based transformation:
 //   * WEAPPROF.2DA — the OHTEMPUS column caps every inherited cleric weapon,
 //     longsword/axe/crossbow, and all four fighting styles at 2.
-//   * C0PR#C4.SPL — Artisan's Tempus level-1 grant gains the longsword
-//     permission gate plus longsword and crossbow starter pips (axe pair is
-//     Artisan's own and is preserved bit-for-bit).
+//   * C0PR#C4.SPL — every ability header carrying Artisan's Tempus axe grant
+//     gains whichever of the longsword permission gate and the longsword and
+//     crossbow starter pips it lacks, inserted into that header's own effect
+//     slice (the axe pair and every other existing record are Artisan's or
+//     another mod's and stay bit-for-bit).
 //   * CBRTMG2 (+CBRTMG2L/CBRTMG2X) — an idempotent, gate-guarded migration
 //     helper for an already-joined Tempus cleric; every gate uses relation
 //     "<=" so it is correct whether an untrained proficiency stat reads 0 or
@@ -19,9 +21,8 @@
 // live install stays byte-identical.
 //
 // Requires chriz-bg-rebalance/lib/tempus_holy_power.tpa to be INCLUDEd first
-// (cbr_validate_spl_v1, cbr_append_raw_spl_effect_record,
-// cbr_append_spl_effect_record, cbr_add_basic_self_ability,
-// cbr_find_or_append_splprot).
+// (cbr_validate_spl_v1, cbr_append_spl_effect_record,
+// cbr_add_basic_self_ability, cbr_find_or_append_splprot).
 
 // The three private resrefs reserved for component 400. Never reuse CBRTMIG:
 // the dead 2026-07-14 helper of that name may still exist as an untracked
@@ -186,55 +187,84 @@ END
 // ---------------------------------------------------------------------------
 // C0PR#C4.SPL (Artisan's Tempus level-1 grant)
 // ---------------------------------------------------------------------------
+//
+// Owned behavior: every ability header that carries Artisan's axe grant
+// (opcode 326 -> C0PR#92 permission gate plus opcode 233 proficiency-92 pip)
+// also carries a longsword gate (326 -> C0PR#90) and longsword/crossbow pips
+// (233 proficiency 90/103).  Missing records are cloned from that header's
+// own axe records so power, resistance, timing, probability, and SPLPROT
+// condition follow the installed convention.  Records are located by meaning
+// inside each header's indexed effect slice; casting-feature storage, other
+// headers, extra visual/marker records, and record order are not assumed.
+// Existing records stay byte-identical; only their positions may move when a
+// slice in front of them grows.
 
-// Locate the recognized Artisan effects inside the single ability. Anything
-// duplicated is a hard failure: this library only completes the recognized
-// layout, it never repairs a mangled one.
-DEFINE_PATCH_FUNCTION cbr_wt_scan_tempus_grant
+// Compare two complete effect records byte for byte.
+DEFINE_PATCH_FUNCTION cbr_wt_records_identical
+  INT_VAR
+    first_offset  = 0
+    second_offset = 0
   RET
+    identical
+BEGIN
+  SET identical = 1
+  FOR (cbr_wt_cmp = 0; cbr_wt_cmp < 0x30; SET cbr_wt_cmp += 4) BEGIN
+    READ_LONG (first_offset + cbr_wt_cmp) cbr_wt_cmp_first
+    READ_LONG (second_offset + cbr_wt_cmp) cbr_wt_cmp_second
+    PATCH_IF (cbr_wt_cmp_first != cbr_wt_cmp_second) BEGIN
+      SET identical = 0
+    END
+  END
+END
+
+// Classify the Artisan grant records inside one ability header's slice.
+// gate/pip_ambiguous = 1 when several axe gates (pips) exist that are not
+// byte-identical, so no single clone template is defined.
+DEFINE_PATCH_FUNCTION cbr_wt_scan_grant_header
+  INT_VAR
+    header_index   = 0
+    ability_offset = 0
+    effect_offset  = 0
+  RET
+    carries_grant
     gate_axe_offset
     pip_axe_offset
+    gate_ambiguous
+    pip_ambiguous
     gate_longsword_count
     pip_longsword_count
     pip_crossbow_count
-    ability_offset
-    effect_count
+    header_level
 BEGIN
-  LPF cbr_validate_spl_v1
-    STR_VAR resource_name = ~C0PR#C4.SPL~
-    RET
-      ability_offset       = ability_offset
-      cbr_wt_ability_count = ability_count
-      cbr_wt_effect_offset = effect_offset
-      effect_count         = effect_count
-  END
-  PATCH_IF (cbr_wt_ability_count != 1) BEGIN
-    PATCH_FAIL ~CBR C0PR#C4.SPL validation failed: expected exactly one ability header, found %cbr_wt_ability_count%.~
-  END
-  READ_SHORT 0x70 cbr_wt_casting_count
-  PATCH_IF (cbr_wt_casting_count != 0) BEGIN
-    PATCH_FAIL ~CBR C0PR#C4.SPL validation failed: unexpected casting features.~
-  END
-  READ_SHORT (ability_offset + 0x20) cbr_wt_first_effect
-  PATCH_IF (cbr_wt_first_effect != 0) BEGIN
-    PATCH_FAIL ~CBR C0PR#C4.SPL validation failed: ability effects must start at record 0.~
-  END
+  SET cbr_wt_header_offset = ability_offset + (header_index * 0x28)
+  READ_SHORT (cbr_wt_header_offset + 0x10) header_level
+  READ_SHORT (cbr_wt_header_offset + 0x1e) cbr_wt_slice_count
+  READ_SHORT (cbr_wt_header_offset + 0x20) cbr_wt_slice_first
   SET gate_axe_offset = "-1"
   SET pip_axe_offset = "-1"
+  SET gate_ambiguous = 0
+  SET pip_ambiguous = 0
   SET gate_longsword_count = 0
   SET pip_longsword_count = 0
   SET pip_crossbow_count = 0
-  SET cbr_wt_gate_axe_count = 0
-  SET cbr_wt_pip_axe_count = 0
-  FOR (cbr_wt_fx = 0; cbr_wt_fx < effect_count; ++cbr_wt_fx) BEGIN
-    SET cbr_wt_fx_offset = cbr_wt_effect_offset + (cbr_wt_fx * 0x30)
+  FOR (cbr_wt_fx = cbr_wt_slice_first; cbr_wt_fx < (cbr_wt_slice_first + cbr_wt_slice_count); ++cbr_wt_fx) BEGIN
+    SET cbr_wt_fx_offset = effect_offset + (cbr_wt_fx * 0x30)
     READ_SHORT cbr_wt_fx_offset cbr_wt_opcode
     READ_LONG  (cbr_wt_fx_offset + 0x08) cbr_wt_parameter2
     READ_ASCII (cbr_wt_fx_offset + 0x14) cbr_wt_resource (8) NULL
     PATCH_IF (cbr_wt_opcode = 326) BEGIN
       PATCH_IF (~%cbr_wt_resource%~ STRING_EQUAL_CASE ~C0PR#92~) BEGIN
-        ++cbr_wt_gate_axe_count
-        SET gate_axe_offset = cbr_wt_fx_offset
+        PATCH_IF (gate_axe_offset < 0) BEGIN
+          SET gate_axe_offset = cbr_wt_fx_offset
+        END ELSE BEGIN
+          LPF cbr_wt_records_identical
+            INT_VAR first_offset = gate_axe_offset second_offset = cbr_wt_fx_offset
+            RET cbr_wt_same = identical
+          END
+          PATCH_IF (!cbr_wt_same) BEGIN
+            SET gate_ambiguous = 1
+          END
+        END
       END
       PATCH_IF (~%cbr_wt_resource%~ STRING_EQUAL_CASE ~C0PR#90~) BEGIN
         ++gate_longsword_count
@@ -242,8 +272,17 @@ BEGIN
     END
     PATCH_IF (cbr_wt_opcode = 233) BEGIN
       PATCH_IF (cbr_wt_parameter2 = 92) BEGIN
-        ++cbr_wt_pip_axe_count
-        SET pip_axe_offset = cbr_wt_fx_offset
+        PATCH_IF (pip_axe_offset < 0) BEGIN
+          SET pip_axe_offset = cbr_wt_fx_offset
+        END ELSE BEGIN
+          LPF cbr_wt_records_identical
+            INT_VAR first_offset = pip_axe_offset second_offset = cbr_wt_fx_offset
+            RET cbr_wt_same = identical
+          END
+          PATCH_IF (!cbr_wt_same) BEGIN
+            SET pip_ambiguous = 1
+          END
+        END
       END
       PATCH_IF (cbr_wt_parameter2 = 90) BEGIN
         ++pip_longsword_count
@@ -253,69 +292,193 @@ BEGIN
       END
     END
   END
-  PATCH_IF (cbr_wt_gate_axe_count != 1 || cbr_wt_pip_axe_count != 1) BEGIN
-    PATCH_FAIL ~CBR C0PR#C4.SPL validation failed: expected exactly one Artisan axe permission gate (opcode 326 -> C0PR#92) and one axe pip (opcode 233, proficiency 92).~
+  SET carries_grant = (gate_axe_offset >= 0 && pip_axe_offset >= 0)
+END
+
+// Validate the whole SPL V1 partition and classify every header.  Fails when
+// no header carries the axe pair (nothing to clone from) or when a record that
+// must be cloned has no unambiguous template.  Read-only.
+DEFINE_PATCH_FUNCTION cbr_wt_scan_tempus_grant
+  RET
+    carrying_headers
+    incomplete_headers
+    missing_records
+BEGIN
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = ~C0PR#C4.SPL~
+    RET
+      cbr_wt_ability_offset = ability_offset
+      cbr_wt_ability_count  = ability_count
+      cbr_wt_effect_offset  = effect_offset
   END
-  PATCH_IF (gate_longsword_count > 1 || pip_longsword_count > 1 || pip_crossbow_count > 1) BEGIN
-    PATCH_FAIL ~CBR C0PR#C4.SPL validation failed: duplicated longsword/crossbow grants.~
+  SET carrying_headers = 0
+  SET incomplete_headers = 0
+  SET missing_records = 0
+  FOR (cbr_wt_header = 0; cbr_wt_header < cbr_wt_ability_count; ++cbr_wt_header) BEGIN
+    LPF cbr_wt_scan_grant_header
+      INT_VAR
+        header_index   = cbr_wt_header
+        ability_offset = cbr_wt_ability_offset
+        effect_offset  = cbr_wt_effect_offset
+      RET
+        cbr_wt_carries   = carries_grant
+        cbr_wt_gate_amb  = gate_ambiguous
+        cbr_wt_pip_amb   = pip_ambiguous
+        cbr_wt_has_gate90 = gate_longsword_count
+        cbr_wt_has_pip90  = pip_longsword_count
+        cbr_wt_has_pip103 = pip_crossbow_count
+        cbr_wt_level      = header_level
+    END
+    PATCH_IF (cbr_wt_carries) BEGIN
+      ++carrying_headers
+      SET cbr_wt_missing = (cbr_wt_has_gate90 = 0) + (cbr_wt_has_pip90 = 0) + (cbr_wt_has_pip103 = 0)
+      PATCH_IF (cbr_wt_missing > 0) BEGIN
+        ++incomplete_headers
+        SET missing_records += cbr_wt_missing
+      END
+      PATCH_IF (cbr_wt_has_gate90 = 0 && cbr_wt_gate_amb) BEGIN
+        PATCH_FAIL ~CBR C0PR#C4.SPL ability header %cbr_wt_header% (level %cbr_wt_level%) has several axe permission gates (opcode 326 -> C0PR#92) that differ; the longsword gate it lacks has no unambiguous template to clone.~
+      END
+      PATCH_IF ((cbr_wt_has_pip90 = 0 || cbr_wt_has_pip103 = 0) && cbr_wt_pip_amb) BEGIN
+        PATCH_FAIL ~CBR C0PR#C4.SPL ability header %cbr_wt_header% (level %cbr_wt_level%) has several axe pips (opcode 233, proficiency 92) that differ; the longsword/crossbow pips it lacks have no unambiguous template to clone.~
+      END
+    END
+  END
+  PATCH_IF (carrying_headers = 0) BEGIN
+    PATCH_FAIL ~CBR C0PR#C4.SPL validation failed: no ability header carries Artisan's axe permission gate (opcode 326 -> C0PR#92) together with the axe pip (opcode 233, proficiency 92), so there is no Tempus grant to complete and nothing to clone the longsword/crossbow grants from.~
   END
 END
 
-// Append whichever of the three hotfix effects are missing, cloning the byte
-// layout of Artisan's own axe records so unrelated fields (power, resist,
-// timing) can never drift from the installed convention.
+// Insert a byte copy of source_offset's record at the end of one header's
+// slice and keep every index consistent: that header's count grows by one and
+// every other slice (other headers and the casting-feature slice) starting at
+// or after the insertion point moves up by one.  validate_spl_v1 guarantees
+// the effect table follows the ability table and runs to the end of the file,
+// so no other file offset moves.
+DEFINE_PATCH_FUNCTION cbr_wt_insert_slice_clone
+  INT_VAR
+    header_index   = 0
+    ability_offset = 0
+    ability_count  = 0
+    effect_offset  = 0
+    source_offset  = 0
+  RET
+    inserted_offset
+BEGIN
+  SET cbr_wt_header_offset = ability_offset + (header_index * 0x28)
+  READ_SHORT (cbr_wt_header_offset + 0x1e) cbr_wt_slice_count
+  READ_SHORT (cbr_wt_header_offset + 0x20) cbr_wt_slice_first
+  SET cbr_wt_insert_index = cbr_wt_slice_first + cbr_wt_slice_count
+  SET inserted_offset = effect_offset + (cbr_wt_insert_index * 0x30)
+  PATCH_IF (source_offset < effect_offset || (source_offset + 0x30) > BUFFER_LENGTH || inserted_offset > BUFFER_LENGTH) BEGIN
+    PATCH_FAIL ~CBR C0PR#C4.SPL completion: clone source %source_offset% or insertion point %inserted_offset% is out of bounds.~
+  END
+  SET cbr_wt_source = source_offset
+  PATCH_IF (cbr_wt_source >= inserted_offset) BEGIN
+    SET cbr_wt_source += 0x30
+  END
+  INSERT_BYTES inserted_offset 0x30
+  FOR (cbr_wt_copy = 0; cbr_wt_copy < 0x30; SET cbr_wt_copy += 4) BEGIN
+    READ_LONG (cbr_wt_source + cbr_wt_copy) cbr_wt_copy_value
+    WRITE_LONG (inserted_offset + cbr_wt_copy) cbr_wt_copy_value
+  END
+  WRITE_SHORT (cbr_wt_header_offset + 0x1e) (cbr_wt_slice_count + 1)
+  FOR (cbr_wt_other = 0; cbr_wt_other < ability_count; ++cbr_wt_other) BEGIN
+    PATCH_IF (cbr_wt_other != header_index) BEGIN
+      SET cbr_wt_other_offset = ability_offset + (cbr_wt_other * 0x28)
+      READ_SHORT (cbr_wt_other_offset + 0x20) cbr_wt_other_first
+      PATCH_IF (cbr_wt_other_first >= cbr_wt_insert_index) BEGIN
+        WRITE_SHORT (cbr_wt_other_offset + 0x20) (cbr_wt_other_first + 1)
+      END
+    END
+  END
+  READ_SHORT 0x6e cbr_wt_casting_first
+  PATCH_IF (cbr_wt_casting_first >= cbr_wt_insert_index) BEGIN
+    WRITE_SHORT 0x6e (cbr_wt_casting_first + 1)
+  END
+END
+
+// Complete every carrying header with whichever of the longsword gate,
+// longsword pip, and crossbow pip it lacks.  Records already present (one or
+// more, from another mod or a previous run) are kept and never duplicated.
 DEFINE_PATCH_FUNCTION cbr_wt_complete_tempus_grant
   RET
     appended_effects
 BEGIN
   SET appended_effects = 0
-  LPF cbr_wt_scan_tempus_grant
+  LPF cbr_wt_scan_tempus_grant END
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = ~C0PR#C4.SPL~
     RET
-      cbr_wt_gate_axe   = gate_axe_offset
-      cbr_wt_pip_axe    = pip_axe_offset
-      cbr_wt_has_gate90 = gate_longsword_count
-      cbr_wt_has_pip90  = pip_longsword_count
-      cbr_wt_has_pip103 = pip_crossbow_count
-      cbr_wt_ability    = ability_offset
-      cbr_wt_effects    = effect_count
+      cbr_wt_ability_offset = ability_offset
+      cbr_wt_ability_count  = ability_count
+      cbr_wt_effect_offset  = effect_offset
   END
-  PATCH_IF (cbr_wt_has_gate90 = 0) BEGIN
-    LPF cbr_append_raw_spl_effect_record
-      INT_VAR source_offset = cbr_wt_gate_axe
-      RET cbr_wt_new_offset = appended_offset
+  FOR (cbr_wt_header = 0; cbr_wt_header < cbr_wt_ability_count; ++cbr_wt_header) BEGIN
+    LPF cbr_wt_scan_grant_header
+      INT_VAR
+        header_index   = cbr_wt_header
+        ability_offset = cbr_wt_ability_offset
+        effect_offset  = cbr_wt_effect_offset
+      RET
+        cbr_wt_carries    = carries_grant
+        cbr_wt_gate_axe   = gate_axe_offset
+        cbr_wt_pip_axe    = pip_axe_offset
+        cbr_wt_has_gate90 = gate_longsword_count
+        cbr_wt_has_pip90  = pip_longsword_count
+        cbr_wt_has_pip103 = pip_crossbow_count
     END
-    WRITE_ASCIIE (cbr_wt_new_offset + 0x14) ~C0PR#90~ #8
-    ++appended_effects
-  END
-  PATCH_IF (cbr_wt_has_pip90 = 0) BEGIN
-    LPF cbr_append_raw_spl_effect_record
-      INT_VAR source_offset = cbr_wt_pip_axe
-      RET cbr_wt_new_offset = appended_offset
+    // Insertions land at the end of this header's slice, behind both axe
+    // templates, so their offsets stay valid across this header's edits.
+    PATCH_IF (cbr_wt_carries) BEGIN
+      PATCH_IF (cbr_wt_has_gate90 = 0) BEGIN
+        LPF cbr_wt_insert_slice_clone
+          INT_VAR
+            header_index   = cbr_wt_header
+            ability_offset = cbr_wt_ability_offset
+            ability_count  = cbr_wt_ability_count
+            effect_offset  = cbr_wt_effect_offset
+            source_offset  = cbr_wt_gate_axe
+          RET cbr_wt_new_offset = inserted_offset
+        END
+        WRITE_ASCIIE (cbr_wt_new_offset + 0x14) ~C0PR#90~ #8
+        ++appended_effects
+      END
+      PATCH_IF (cbr_wt_has_pip90 = 0) BEGIN
+        LPF cbr_wt_insert_slice_clone
+          INT_VAR
+            header_index   = cbr_wt_header
+            ability_offset = cbr_wt_ability_offset
+            ability_count  = cbr_wt_ability_count
+            effect_offset  = cbr_wt_effect_offset
+            source_offset  = cbr_wt_pip_axe
+          RET cbr_wt_new_offset = inserted_offset
+        END
+        WRITE_LONG (cbr_wt_new_offset + 0x08) 90
+        ++appended_effects
+      END
+      PATCH_IF (cbr_wt_has_pip103 = 0) BEGIN
+        LPF cbr_wt_insert_slice_clone
+          INT_VAR
+            header_index   = cbr_wt_header
+            ability_offset = cbr_wt_ability_offset
+            ability_count  = cbr_wt_ability_count
+            effect_offset  = cbr_wt_effect_offset
+            source_offset  = cbr_wt_pip_axe
+          RET cbr_wt_new_offset = inserted_offset
+        END
+        WRITE_LONG (cbr_wt_new_offset + 0x08) 103
+        ++appended_effects
+      END
     END
-    WRITE_LONG (cbr_wt_new_offset + 0x08) 90
-    ++appended_effects
   END
-  PATCH_IF (cbr_wt_has_pip103 = 0) BEGIN
-    LPF cbr_append_raw_spl_effect_record
-      INT_VAR source_offset = cbr_wt_pip_axe
-      RET cbr_wt_new_offset = appended_offset
-    END
-    WRITE_LONG (cbr_wt_new_offset + 0x08) 103
-    ++appended_effects
-  END
-  PATCH_IF (appended_effects > 0) BEGIN
-    WRITE_SHORT (cbr_wt_ability + 0x1e) (cbr_wt_effects + appended_effects)
-  END
-  // Re-validate: the completed grant must hold exactly one of each pair and
-  // still form an exact effect partition.
+  // Re-validate: the edited table must still be an exact partition and every
+  // carrying header must now hold all three grants.
   LPF cbr_wt_scan_tempus_grant
-    RET
-      cbr_wt_check_gate90  = gate_longsword_count
-      cbr_wt_check_pip90   = pip_longsword_count
-      cbr_wt_check_pip103  = pip_crossbow_count
+    RET cbr_wt_check_incomplete = incomplete_headers
   END
-  PATCH_IF (cbr_wt_check_gate90 != 1 || cbr_wt_check_pip90 != 1 || cbr_wt_check_pip103 != 1) BEGIN
-    PATCH_FAIL ~CBR C0PR#C4.SPL completion failed to produce exactly one longsword gate, longsword pip, and crossbow pip.~
+  PATCH_IF (cbr_wt_check_incomplete != 0) BEGIN
+    PATCH_FAIL ~CBR C0PR#C4.SPL completion left %cbr_wt_check_incomplete% axe-carrying ability header(s) without a longsword gate, longsword pip, and crossbow pip.~
   END
 END
 
@@ -483,19 +646,17 @@ BEGIN
       pip_crossbow_resref = EVAL ~%cbr_wt_pip_xb%~
   END
 
-  // Final verification: the transformed table and the completed grant must
-  // hold exactly the target shape, whichever path produced it.
+  // Final verification: the transformed table must hold the target caps and
+  // every axe-carrying C0PR#C4 header at least one longsword gate, longsword
+  // pip, and crossbow pip, whichever path produced them.
   COPY ~%resource_dir%/WEAPPROF.2DA~ ~%resource_dir%/WEAPPROF.2DA~
     LPF cbr_wt_transform_weapprof INT_VAR verify_only = 1 END
   BUT_ONLY
   COPY ~%resource_dir%/C0PR#C4.SPL~ ~%resource_dir%/C0PR#C4.SPL~
     LPF cbr_wt_scan_tempus_grant
-      RET
-        cbr_wt_final_gate90  = gate_longsword_count
-        cbr_wt_final_pip90   = pip_longsword_count
-        cbr_wt_final_pip103  = pip_crossbow_count
+      RET cbr_wt_final_incomplete = incomplete_headers
     END
-    PATCH_IF (cbr_wt_final_gate90 != 1 || cbr_wt_final_pip90 != 1 || cbr_wt_final_pip103 != 1) BEGIN
+    PATCH_IF (cbr_wt_final_incomplete != 0) BEGIN
       PATCH_FAIL ~CBR Tempus weapon training verification failed: C0PR#C4.SPL does not carry the completed grant set.~
     END
   BUT_ONLY

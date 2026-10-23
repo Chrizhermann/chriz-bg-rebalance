@@ -44,7 +44,7 @@ facts are:
 
 The target save discovered during the design audit is:
 
-`C:\Users\chris\OneDrive\Documents\Baldur's Gate - Enhanced Edition Trilogy\save\000000437-chat is mean dot jpg`
+`%USERPROFILE%\OneDrive\Documents\Baldur's Gate - Enhanced Edition Trilogy\save\000000437-chat is mean dot jpg`
 
 That path is deployment evidence, not an installer default. The installer must never
 search for or edit a user's saves.

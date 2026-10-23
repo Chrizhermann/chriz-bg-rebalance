@@ -1,0 +1,9 @@
+# Evidence captured read-only from the effective installed override on 2026-08-29.
+# evidence_file | sha256 | size_bytes | source_path | source_modified_utc
+SPWI611.spl.orig | a230b85a361f8d3c2f6e4eb0717cfa43f275ad15f8ed629182663ca790c3521c | 874 | C:\Games\Baldur's Gate II Enhanced Edition modded\override\SPWI611.spl | 2026-02-12T16:12:23.5636574Z
+SPWI708.spl.orig | e1888af2c41368389ee388bbf3b3c20e73559f00eb978ec913a71fc0eb09d5d3 | 874 | C:\Games\Baldur's Gate II Enhanced Edition modded\override\SPWI708.spl | 2026-02-12T16:12:39.2784614Z
+SPWI808.spl.orig | 993d5d598b24fffda5ca65ace27f6b7376c759b0a1aa6eeaf42bee6f2f98ad28 | 1066 | C:\Games\Baldur's Gate II Enhanced Edition modded\override\SPWI808.spl | 2026-02-12T16:12:23.6096304Z
+SPWI907.spl.orig | 024c77beafed4cd7b8d7e3188c1bd719426695a99f1d0f2bdfc27dc2d18a347f | 2410 | C:\Games\Baldur's Gate II Enhanced Edition modded\override\SPWI907.spl | 2026-02-12T16:12:23.6798536Z
+dw#mg14.bcs.orig | 993417a24d3a216f81ecb97c19f03ecf6b471b1c06fa94e7f2042d7231e9f43e | 887916 | C:\Games\Baldur's Gate II Enhanced Edition modded\override\dw#mg14.bcs | 2026-02-12T16:19:45.5071820Z
+dw#mg144.bcs.orig | 4dc0a804eb96e2bf5f81ed9ab954cbd205b01bdb1fc6b03bf0e60679416f4505 | 715502 | C:\Games\Baldur's Gate II Enhanced Edition modded\override\dw#mg144.bcs | 2026-02-12T16:23:01.6300436Z
+dw#mg148.bcs.orig | faed6ac12dcae02128ee3b9d0aab41fb8414220f32682cf5fd9b34cb297e7e2d | 840664 | C:\Games\Baldur's Gate II Enhanced Edition modded\override\dw#mg148.bcs | 2026-02-12T16:23:08.7938263Z

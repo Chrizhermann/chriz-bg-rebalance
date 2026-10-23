@@ -1,0 +1,266 @@
+# Compatibility audit: Rebalance, SR fork, and BuffBot
+
+Date: 2026-10-08. Status: source-only audit. All seven follow-ups are implemented
+on review branches (2026-10-17), unreleased; see
+[Implementation status](#implementation-status-2026-10-17).
+
+## Scope and evidence
+
+Applied the shared BG compatibility policy: patch intended behavior, preserve
+unrelated changes, and justify rejecting preconditions by semantics or safety,
+not by the shape of a captured installation. Reviewed current locally available
+release refs rather than assuming each primary checkout was current:
+
+| Alias | Checkout inspected | Commit / local release tag |
+| --- | --- | --- |
+| `R` | `chriz-bg-rebalance` worktree `sr-antimagic-research` | `83e51d2727192ebeff5f7a470d58122cdba80735`, implementation at `v0.8.1` |
+| `S` | `chriz-spell-revisions-patch` worktree `sr-lightning-release-20260916` | `c8494181c224d22002b5f4ee6fc4411235dd4a9f`, `v4.21-chriz.5` |
+| `B` | `bg-eeex-buffbot` main checkout | `5adbe653ff125819f4b541cf2226a9808ceeeee9`, `v1.10.0` |
+
+Paths and line numbers below were rechecked using `git show <commit>:<path>`
+against those exact snapshots. Rebalance's `v0.8.1` tag resolves to
+`09db97dc5cbd14f1b8bf7fe3af64f69bee313585`; only two handover documents differ
+between that release and recorded commit `83e51d2`, not the cited source files.
+The SR review focused on
+our changes relative to upstream `v4.21`, not a general audit of upstream SR.
+Rebalance's FoA source and tests were explicitly excluded: the lead is repairing
+them separately. BuffBot review covered its installer and targeted runtime
+validation/discovery paths, not every runtime behavior.
+
+No network refresh, game access, implementation changes, or test execution was
+performed. These are source-confirmed rejection paths for the concrete variants
+described below, not reproduced reports naming a particular third-party mod.
+This report does not establish universal compatibility or release acceptance.
+Existing worktree changes were left untouched.
+
+## Recommended first follow-ups
+
+After the separately owned FoA repair: Bracers, Emotion, elemental arrows, then
+RR migration and Tempus. Cloud resistance ownership needs a small explicit
+balance decision. Each item needs a focused refactor and regression tests;
+removing guards alone leaves algorithms that still assume the original layout.
+
+### 1. SR Bracers (component 220): unrelated item/spell changes reject installation
+
+**Source:** `R/chriz-bg-rebalance/lib/sr_bracers.tpa:244-246` requires BRAC16 to
+have exactly one ability, zero equipment effects, one charge, and specific
+targeting. Lines 148-150 require the Improved Haste donor to have one ability
+and no casting effects. Lines 171-206 restrict its effects to a fixed opcode
+list, targeting/probability, and 60-second timed payload; opcode 326 permits
+only named Tempus helpers at lines 191-196.
+
+**Concrete valid variant:** a passive equipment bonus added to BRAC16, with its
+existing Haste activation unchanged, fails the zero-equipment-effect check.
+An ancillary casting feature on otherwise unchanged Improved Haste also fails.
+Neither change inherently makes the intended Haste activation ambiguous.
+
+**Refactor:** locate and replace the Haste activation while retaining other
+abilities and equipment effects. Build its private helper from the relevant
+effective semantics, distinguishing payload from ancillary effects. Preserve
+casting hooks with their correct delivery semantics rather than dropping them.
+
+**Tests:** passive bonus; unrelated extra activation; reordered effects; donor
+casting features; multiple donor level headers; changed donor durations; retained
+unrelated data and idempotence. Keep rejection of a vanilla double-APR donor
+where this explicitly SR-specific component cannot fulfill its promised result.
+
+### 2. Emotion no-stacking (301): unrelated casting time/range is required
+
+**Source:** `R/chriz-bg-rebalance/lib/emotion_hope_courage.tpa:201-214`
+requires beneficial spells to be level 4 with one ability, school 4, target 4,
+range 50, and casting time 4.
+
+**Concrete valid variant:** Hope or Courage with casting time changed from 4 to
+3 still has the same identifiable no-stacking target, but fails with
+`CBR_EM_ERR_BENEFICIAL_PARTITION`. A range-only change similarly fails.
+
+**Refactor:** retain unrelated header fields and handle each relevant ability.
+Validate the behavior being transformed rather than authenticating the whole
+original header. Targeting changes that alter delivery require real analysis;
+casting time alone does not.
+
+**Tests:** changed casting time, range, and school; multiple level headers;
+reordered effects; preservation, repeat application, and rollback.
+
+### 3. Elemental arrows (130): unrelated damage counts as incompatible
+
+**Source:** `R/chriz-bg-rebalance/lib/elemental_arrows.tpa:38-57` requires
+every ability to be a projectile ability, every opcode 12 record to use the
+expected element and victim target, and exactly one damage record per ability.
+
+**Concrete valid variant:** an extra acid-damage rider on a fire arrow rejects
+the component even though its existing fire damage remains identifiable.
+An unrelated additional item ability also fails.
+
+**Refactor:** select the intended elemental on-hit package and retain unrelated
+damage/abilities. Define how multiple same-element packets represent the total
+before supporting them: setting every packet to 1d2 would accidentally multiply
+damage. Keep actual ambiguity and invalid-slice checks.
+
+**Tests:** unrelated damage type, unrelated ability, split intended damage,
+reordered records, preserved saves/helpers, and unchanged foreign damage.
+
+### 4. RR/SR adapter: captured spell-copy and script-token counts are mandatory
+
+**Source:** `S/live-patch/SRCB_RR_COMPAT/lib/rr_spell_semantics.tpa:142-164`
+accepts only original or already-migrated CREs with the configured exact number
+of prepared copies. Calls at lines 361, 382, and 396 use 6, 4, and 2 for
+particular RR creatures; lines 368 and 389 require zero for two others.
+Lines 214-220 require exact script symbol counts; calls at lines
+375, 403, and 407 specify 17, 13, and 12.
+
+**Concrete valid variant:** a creature retaining the same broken Chaos mapping
+but one fewer prepared copy fails migration. An otherwise equivalent RR casting
+script with an extra affected branch fails solely because its token count is
+different.
+
+**Refactor:** migrate the actual affected prepared records, retaining flags,
+existing slot budgets, and unrelated known spells. Identify RR's affected
+script behavior rather than validating total token counts. Do not blindly
+rename genuinely intentional Waves-of-Fatigue additions: mixed old/new
+semantics need an explicit classification, not a broader text replacement.
+
+**Tests:** varying prepared-copy counts; already-migrated and mixed records;
+extra unrelated script blocks; additional recognized casting branches;
+preserved memorization flags and level slot budgets; honest ambiguous cases.
+
+**Decision (Christopher, 2026-10-23):** Chaos stays SR's level-7 spell, and the
+slot budgets stay as they are. The BG2:EE 2.7.3.0 lab check of 2026-10-20 showed
+that the level-7 migration leaves Aran Linvail (`RR#ARAN2`) and the Zhentarim
+Mercenary (`RR#SFL04`) unable to cast Chaos: their moved copies land behind
+their level-7 slot counters. Moving each copy's slot along to level 7, an
+exception to the slot-budget rule above, was proposed and not adopted. Instead,
+RR's prepared level-5 Chaos copies become a level-5 spell where they stand:
+Hold Monster for `RR#ARAN2`, Feeblemind for `RR#SFL04` and Domination for
+Selina (`RR#SELI`). Their scripts cast that spell, with the target checks it
+needs. Christopher ruled out keeping them as Waves of Fatigue. Selina is a
+sorcerer and casts from her known list, so her known record changes with her
+copies, without a duplicate; wizards keep their known records. `RR#SAW09` and
+`RR#ZAER` only know the old slot and are no longer changed. Shipped in
+chriz-spell-revisions-patch v4.21-chriz.6; details in its
+`docs/plans/2026-09-02-rr-spell-semantics-compatibility-design.md`.
+
+### 5. Tempus helpers: source layout and cosmetic counts remain fixed
+
+**Sources:**
+
+- `R/chriz-bg-rebalance/lib/tempus_weapon_training.tpa:211-220` requires
+  C0PR#C4 to have one ability, no casting effects, and ability effect index zero.
+- `R/chriz-bg-rebalance/lib/tempus_chaos_tides.tpa:125-148` requires the donor
+  to start with opcode 321, permits a small opcode list, and insists on exact
+  icon/pulse counts plus one or two visual records.
+- `R/chriz-bg-rebalance/lib/tempus_holy_power.tpa:575-619` validates a
+  50-level/reference-row CLAB arrangement and particular unrelated cells before
+  applying the Holy Power change.
+
+**Concrete valid variants:** an indexed casting-feature prefix before otherwise
+unchanged proficiency grants fails the first check; a third opcode 215 visual
+or an added marker outside the allowed opcode set on the Chaos donor fails the
+second. An unrelated grant in a constrained
+CLAB cell can reject a change that should own only Holy Power grants.
+
+**Refactor:** separate these into small tasks. Traverse the indexed effect
+slices and preserve ancillary records. Locate the owned CLAB grants by meaning.
+For Chaos, redesign the rebuild to carry unowned effects before relaxing its
+input checks; the current rebuild does not preserve arbitrary records safely.
+
+**Tests:** casting-first layout; extra harmless visual/marker; different effect
+order; additional level header; alternate CLAB row placement and width;
+preserved unrelated grants; idempotence and undo.
+
+### 6. Cloud forms (320): previous resistance percentages are fingerprints
+
+**Source:** `R/chriz-bg-rebalance/lib/cloud_forms.tpa:74-75` permits only
+100 or 75 for direct physical resistance. Lines 106-108 require every GASFORM4
+donor resistance byte to equal 100.
+
+**Concrete valid variant:** an already partly nerfed, identifiable combat cloud
+with 80% physical resistance, or a donor whose elemental resistance was adjusted,
+fails despite the same transformation identity.
+
+**Decision/refactor:** state whether this component caps defenses at 75 or
+authoritatively sets owned defenses to 75. Do not silently strengthen an
+already-50% form. Once ownership is explicit, remove old-value fingerprints and
+preserve unrelated form data. Additional invulnerability mechanisms remain real
+obstacles: leaving them active must not be reported as a successful damageable
+cloud transformation.
+
+**Tests:** already-reduced values, partial prior application, unrelated effects,
+retained poison/escape behavior, real extra immunity, and private donor ownership.
+
+### 7. SR classic Lightning Bolt: unrelated damage packets are rejected
+
+**Source:** `S/spell_rev/lib/classic_lightning_bolt.tpa:54-82` counts every
+opcode 12 record, requires each to be the precise electrical delivery, then
+expects two SR packets. The tail option has the matching library under
+`live-patch/SRCB_CLASSIC_LIGHTNING/lib/`.
+
+**Concrete valid variant:** adding a non-electrical damage rider to the otherwise
+unchanged unsaved/saved electrical pair fails the classic-bolt transformation.
+
+**Refactor:** identify that electrical pair semantically and preserve unrelated
+damage. Keep genuine ambiguity checks when several indistinguishable electrical
+pairs exist. Existing tests preserve foreign non-damage records but deliberately
+reject extra damage, so the tests need to distinguish these cases too.
+
+**Tests:** non-electrical rider; reordered saved/unsaved packets; preserved later
+save penalties and casting hooks; multiple ambiguous pairs; repeat application.
+
+## Implementation status (2026-10-17)
+
+Rebalance items are on branch `claude/compat-followups-20261017` of this
+repository; items 4 and 7 are on the branch of the same name in
+chriz-spell-revisions-patch. An independent Codex source review of the first
+pass found nine further cases (activation conditions and reordered tiers in 220,
+shared slices in 301, foreign abilities and rider descriptions in 130, recipient
+resets in 404, empty level-7 rows and hexadecimal IDS in the RR adapter, and a
+non-repeatable Lightning input); each is fixed with tests on the same branches.
+Codex re-reviews of those fixes found five more (cures and poison reordered
+across 220's level headers, opcode 173 poison resistance given in parts and
+activation-only effects in 320's genie check, and in 130 a fire record shared
+with another ability and a too strict 16-bit guard on its private copy); these
+are fixed with tests as well.
+
+| # | Item | Commits | Result |
+| --- | --- | --- | --- |
+| 1 | SR Bracers 220 | `230d6b5`, review `78a3887`, `925710c` | Activation found and replaced in place; other abilities, equipped effects and donor variations kept; the call keeps the activation's chance, save and power. |
+| 2 | Emotion 301 | `75c37bd`, review `0756af9` | Real dependencies only; every level header rebuilt; descriptions state the spell's own values. |
+| 3 | Elemental arrows 130 | `8650b01`, review `c74c2a5`, `aa9734f`, `c1e88b9`, `56989a2` | Elemental damage found by behavior on the bow-fired hit only; other abilities, riders and their text kept; a damage record shared with another ability is copied first. |
+| 4 | RR/SR adapter | SR fork `5fee801`, review `85cc02d`, decision `e7a2d38` | Records recognized by the spell they name, any count; hexadecimal IDS handled. Since the decision under item 4, Chaos stays at level 7 and RR's level-5 copies become Hold Monster, Feeblemind or Domination, so nothing moves into a level-7 row. |
+| 5 | Tempus helpers 400–404 | `c6cbcd1`, `9ae46aa`, review `1f55115` | Grants and CLAB cells located by meaning; Chaos tides built from any donor tiers, recipient resets kept. |
+| 6 | Cloud forms 320 | `27d6ba9`, `6e2b038`, `1ad7ea4` | Immunity (100% or more) becomes 75%; lower values kept. Decided by Christopher (2026-10-20): 75% is the target for immunity, not a cap, so 76–99% from other mods stays. |
+| 7 | SR classic Lightning Bolt | SR fork `19fd5c9`, review `26ad3e1` | SR's damage pair identified by meaning; foreign damage kept; repeat byte-exact. |
+
+Verification: rebalance full regression 693 tests, OK, 26 skipped
+(private captures/Lua); SR fork suite 182 passed; WeiDU 249, synthetic
+fixtures and `--nogame` only. Each fix has variation tests that fail against the
+previous library. No lab install, in-game check, release or CEBG pin change.
+
+## Releases (2026-10-23)
+
+Christopher approved releasing the follow-ups on 2026-10-23. chriz-bg-rebalance
+v0.8.4 carries items 1, 2, 3, 5 and 6, plus the 220 guard-order fix and 310's
+short immunity windows; chriz-spell-revisions-patch v4.21-chriz.6 carries items
+4 and 7. The BG2:EE 2.7.3.0 lab check of 2026-10-20 ran 130, SR 80, 220, 301,
+320 and 404 in game. It found two defects, both fixed before release: 220 still
+stacked with Haste or Improved Haste cast first, and the RR adapter case under
+item 4. The CEBG pin is the collection coordinator's.
+
+## Checks not condemned by this audit
+
+- Native executable-hook signatures, bounds/index checks, genuine missing
+  capabilities, helper namespace collisions, and unsafe parallel MR writers are
+  not equivalent to reference-install fingerprints. Keep them where justified.
+- Hardiness and Spellstrike contain additional effect-count/delivery checks
+  worth a focused follow-up. This audit did not establish that every such
+  restriction is wrong; multiple effects can change the intended semantics.
+- BuffBot showed no confirmed FoA-like gameplay-layout blocker in this bounded
+  review. `B/buffbot/setup-buffbot.tp2:40-99` requires exact INI text to detect
+  active LuaJIT; lines 237-250 require `[General]` to be the first section before
+  changing the loader configuration. Compare that with InfinityLoader's actual parser
+  before calling these restrictions defective. EEex capability, mixed-loader,
+  and owned-item restoration guards have concrete safety purposes.
+
+The correct outcome is behavior-aware matching plus variation tests, not mass
+deletion of `PATCH_FAIL` or an unsupported promise that every mod combination
+will install.

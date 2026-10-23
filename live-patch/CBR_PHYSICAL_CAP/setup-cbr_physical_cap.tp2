@@ -1,0 +1,43 @@
+BACKUP ~CBR_PHYSICAL_CAP/backup~
+AUTHOR ~ChrizFader~
+VERSION ~private-oct20-immunity-windows~
+
+BEGIN ~Party physical resistance: half effectiveness above 80%, maximum 90%~
+DESIGNATED 0
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) ~This patch requires BG2EE or EET.~
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) ~This patch requires EEex.~
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) ~SPLSTATE.IDS is required.~
+
+INCLUDE ~CBR_PHYSICAL_CAP/lib/tempus_holy_power.tpa~
+INCLUDE ~CBR_PHYSICAL_CAP/lib/tempus_spec_apr_eeex.tpa~
+INCLUDE ~CBR_PHYSICAL_CAP/lib/physical_resistance.tpa~
+COPY_EXISTING ~SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
+LAF cbr_apply_physical_resistance
+  INT_VAR cap = 90
+  STR_VAR template_file = ~CBR_PHYSICAL_CAP/lua/M_CBRRES.lua~
+END
+
+// In-place runtime update for a game that already has component 0 in the
+// middle of its log: a new tail entry replaces only override/M_CBRRES.lua
+// (WeiDU keeps the old file in backup/1) and reuses the existing marker.
+BEGIN ~Update installed runtime: short immunity windows (Divine Protection) keep 100%~
+DESIGNATED 1
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~CBR_PHYSICAL_CAP/setup-cbr_physical_cap.tp2~ ~0~) ~Install component 0 first.~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) ~This patch requires BG2EE or EET.~
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) ~This patch requires EEex.~
+
+INCLUDE ~CBR_PHYSICAL_CAP/lib/tempus_holy_power.tpa~
+INCLUDE ~CBR_PHYSICAL_CAP/lib/tempus_spec_apr_eeex.tpa~
+INCLUDE ~CBR_PHYSICAL_CAP/lib/physical_resistance.tpa~
+ACTION_IF (NOT FILE_EXISTS ~override/SPLSTATE.IDS~) OR (NOT FILE_EXISTS ~override/M_CBRRES.lua~) BEGIN
+  FAIL ~Component 0 is incomplete: override/SPLSTATE.IDS and override/M_CBRRES.lua are both required.~
+END
+// An update must reuse the marker component 0 allocated, never add one.
+CLEAR_IDS_MAP
+ACTION_IF (IDS_OF_SYMBOL (~SPLSTATE~ ~CBR_PHYSICAL_SOFTCAP~) < 0) BEGIN
+  FAIL ~The CBR_PHYSICAL_SOFTCAP marker from component 0 is missing from SPLSTATE.IDS.~
+END
+LAF cbr_apply_physical_resistance
+  INT_VAR cap = 90
+  STR_VAR template_file = ~CBR_PHYSICAL_CAP/lua/M_CBRRES.lua~
+END

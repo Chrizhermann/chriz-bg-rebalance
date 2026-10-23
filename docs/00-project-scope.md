@@ -21,50 +21,92 @@ rationale, fully reversible, idempotent, testable without wrecking a live save.
   unintentional. Component restores the Adventurer's Mart five, idempotently; live saves
   with the store cached were patched directly (34 saves; backups kept). Diagnosis:
   `research/03`.
-- **121 — EEex ambient readiness at load** (user request 2026-08-23, research done,
-  **primary**). Hostile casters (option: neutral casters carrying an SCS combat script) get
-  their hour-plus buffs (Stoneskin/Ironskins, Mirror Image, Spell Shield, Armor, AoF,
-  Barkskin…) applied instantly on sprite load via EEex, consuming slots and reusing SCS's own
-  `_PREBUFF` clones — zero reaction latency, no `See()` gate, no polling. Optional measured
-  "reaction" sub-feature later. Diagnosis + design: `research/08` §5-B/§7.
-- **120 — SCS readiness vs. stealth openers** (optional, demoted): patch the compiled SCS
-  scripts so the long tier + priests get the `Detect()/Range-20` path. Only if 121's
-  ambient package leaves a gap. `research/08` §5-A.
+- **120 — SCS / SR weapon-protection semantics** ✅ IMPLEMENTED, pending controlled live
+  deployment. On the researched SR install, `WIZARD_IMPROVED_MANTLE` aliases Moment of
+  Prescience, which has no weapon-immunity effect, while SCS metadata and three generated
+  common-mage contexts still treat it as physical protection. The component resolves final
+  spell symbols dynamically, classifies the actual SPL effects, removes only the false
+  metadata and proven first-round/renewal choices, and substitutes real Mantle in the proven
+  Chain Contingency shape. A future genuine Improved Mantle makes it a byte-no-op.
+- **121 — EEex ambient readiness bridge** 🚧 V1.2 AMBIENT + NEUTRAL-TO-HOSTILE URGENT PATH
+  LIVE ACCEPTED; LEGACY LIVE TEST PENDING. A stamped, hot-reload-safe EEex module gives
+  recognized SCS casters honest long-duration readiness (one real memorized copy per genuine
+  spellbook reset) and one normal, interruptible first-contact weapon-protection cast.
+  Natural expiry can be maintained only while safely out of combat; dispel/early loss
+  suppresses maintenance. Unknown queues and Project Image states fail closed. On v1.2 one
+  deferred callback is the scheduler and one synchronous callback is an ambient-only pending
+  confirmation observer (`1/1`, total 2); legacy uses one synchronous full scheduler (`0/1`,
+  total 1). Missing synchronous confirmation support retires ambient only, so urgent can keep
+  the deferred scheduler. Both modes read the direct `m_worldTime.m_gameTime` field. Ambient
+  and urgent ownership can be retired independently when the user's future full EEex AI takes
+  over, while existing ledger export/import and real-reset accounting remain active so
+  retirement cannot lose or retain a stale charge. Component 121 changes no SPL or BCS
+  resource. The earlier clock-only v1.2 lab build passed visual delivery but failed one-slot
+  accounting. The corrected build has 76 focused tests and all 253 repository tests passing;
+  its fresh-process `AR3000` diagnostic then passed exact-marker delivery, schema-2 charging,
+  and the expected one-slot delta on all four neutral Vigil casters. A later urgent attempt
+  exposed the EEex requirement for an explicit Boolean argument to `virtual_ClearActions`.
+  With `false` supplied after the passive-only gate, the retest passed: the attack order did
+  nothing while Brother Pol remained neutral; the first hit made him hostile, after which the
+  exact normal Mantle cast started, spent one contact attempt and its slot, applied the expected
+  opcode-120 effects, and left the urgent fuse clear.
 - **Backlog:** catalog SCS components active in the target install + their balance
   touchpoints; identify small high-value tweaks. (Migrated from chriz-sod-rebalance "Part 3",
   which now points here.)
 
 ## Part 2 — Spell Revisions adjustments (components 200–299)
 
-User cherry-picks: which SR changes to keep, revert toward vanilla, or re-tune. **Needs a
+- **200 / 201 — Hardiness physical resistance** implemented in unpublished
+  v0.8.0-dev: 40% physical only (recommended vanilla resistance profile), or 30%.
+- **202 — Hardiness extra resistances** optional 20% elemental/magic-damage
+  resistance, requiring 200 or 201. Both normal and Wish Hardiness are covered;
+  duration, stacking and existing Breach behavior are unchanged. Requires SR #65.
+  See [research](../research/06-sr-hardiness.md) and the
+  [collection handover](handovers/2026-10-06-sr-hardiness-collection.md).
+  Automated checks pass; collection integration, publication and live acceptance
+  remain outstanding.
+
+- **210 — Pierce Magic** implemented in unpublished v0.8.1-dev: halves current MR,
+  bounded to a 10-40 percentage-point reduction, for five rounds. Refreshes the
+  same amount and combines with Lower Resistance. Requires SR main0 and EEex.
+- **211 — Spellstrike**: 15% arcane/divine spell failure for two rounds, refreshing
+  without self-stacking; existing protection removal retained. Requires SR main0.
+  See [implementation evidence](../research/20-sr-antimagic-implementation.md) and
+  [collection handover](handovers/2026-10-06-sr-antimagic-collection.md). Prepared
+  with automated checks; no game modification or publication. Entropy Shield is
+  still a separate, deferred research topic.
+
+Further user cherry-picks: which SR changes to keep, revert toward vanilla, or re-tune. **Needs a
 collaborative wishlist session** — the user has strong opinions here. Research doc TBD
 (`research/10-sr-wishlist.md`): walk SR's component/spell list against the user's experience,
 collect concrete gripes with numbers, then design per-spell adjustments.
 
-- **200 — Hardiness restored** (user request 2026-08-19; live hotfix already applied).
-  SR #65 "Revised Warrior HLAs" turns Hardiness (SPCL907 + Wish clone SPWISH12) from 40%
-  physical into 20%-everything. Subcomponents: **40% physical (default)** or **30%**;
-  whether to keep SR's 20% elemental/magic rider is an **open user decision**; fixes
-  descriptions; idempotent over the live hotfix; predicate on SR #65. First of the 2xx
-  "SR balances" family — each 2xx component gates on SR being installed. Diagnosis +
-  hotfix record: `research/06`.
-
 ## Part 3 — Cross-cutting audits (components 300–399)
 
+- **301 — Emotion, Courage / Emotion, Hope** ✅ IMPLEMENTED and automated-verified;
+  real spell delivery and mutual exclusion live-verified; the character-sheet status-entry
+  correction needs one final isolated manual retest. Owns the final dynamically
+  resolved spells and descriptions so
+  the two beneficial Emotions are mutually exclusive per creature (last application wins;
+  recasts refresh). Fear and Symbol, Hopelessness retain their matching hostile mechanic's
+  save/MR domain; Emotion, Hopelessness retains its unconditional Hope remover before its
+  separately saved hostile effects. Existing spell-pack presentation and scrolls are reused
+  where valid; a standalone install uses the original blue IWDEE spell icons, independently
+  extracted 13x13 IWDEE heart status icons, dynamic `STATDESC.2DA` rows/opcode 142, and a
+  privately namespaced IWDEE Emotion projectile/animation/sound graph. It constructs point-target
+  scrolls and mirrors donor-scroll store entries dynamically. Real corrected UI casts delivered
+  both complete buff sequences and replacement behavior; they also exposed the formerly absent
+  status entries. Install after IWDification, SCS, SR, and other spell/scroll/store
+  overhauls. Diagnosis: `research/11-emotion-hope-courage.md`.
 - **Save-for-half audit (candidate 300):** the generalized sweep from `research/scripts/`
   found the whole install has exactly 3 unique offenders (TK Storm; Aura's Spirit Blade katana
   + CDTweaks 2H clones; Aura's yuki-onna breath). The Aura items are parked as issues on
   `Aura_BG1_BG2_EET-Chriz-Balance-Patch` (user: low priority). A WeiDU-native generalized
   audit component is possible later but YAGNI until new offenders appear.
-- **301 — Physical-resistance cap** (user request 2026-08-19, design phase). Stop
-  physical-resistance stacking (Dwarven Defender-style kits + Defender of Easthaven + gear)
-  from trivially reaching ~100% without nerfing individual abilities: hard cap at **90%
-  (default)** or **80%** via an EEex listsResolved stat clamp (absolute writes only — see
-  `research/07` cadence), **party members only** (enemy designed immunities — golems etc. —
-  untouched; most are op120 anyway). **Planned 301c:** soft knee — points above 60% count
-  half, then cap (user-endorsed). Reference build: the AK-overhauled Dwarven Defender reaches
-  **90% physical while stanced** (kit passives 20 + stance 50 + Defender of Easthaven 20)
-  without ever using Hardiness — cap 80 trims it, cap 90 doesn't. Sketch: `research/06` §4.
+- **Reserved 310/311:** unidentified-item disguise options; EEex feasibility research remains
+  pending.
+- **Reserved 320:** weapon-damage-dice rebalance; design remains pending.
+
 ## Part 4 — Class and kit revisions (components 400–499)
 
 - **401–403 — Cleric of Tempus Holy Power** ✅ IMPLEMENTED, pending independent review and live
@@ -106,5 +148,18 @@ symbols; components idempotent + predicate-guarded. Follow CLAUDE.md.
 - [ ] SCS component catalog / touchpoint research (solo-able — see `docs/handover.md`)
 - [ ] SR wishlist session with user
 - [ ] Comp 100 formal tail-install into the live game (pending user sign-off)
+- [ ] Component 120 controlled tail-install and gameplay acceptance (implementation and
+      synthetic installer/uninstall verification complete; no active-game write yet)
+- [ ] Component 121 controlled v1.2 tail-install and gameplay acceptance (the clock-corrected
+      disposable-lab build historically passed visual delivery but failed one-slot
+      accounting; the corrected runtime has 76 focused tests and all 253 repository tests
+      passing, its fresh-process ambient delivery/accounting test passed on all four
+      neutral Vigil casters, and the corrected neutral-to-hostile urgent path passed on Brother
+      Pol with exact cast-start/contact, slot, effect, and fuse evidence; the earlier v0.11 laboratory
+      install remained inert because it referenced a nonexistent clock API and did not test
+      the corrected fallback; no component has been installed into the active playthrough
+      game; old-version live acceptance is a later separately approved stage)
 - [ ] Components 401–403 independent review and controlled live deployment (no active-game write
       has occurred during implementation)
+- [x] Component 301 implementation and automated verification
+- [ ] Component 301 final Courage/Hope character-sheet status-list retest, then active-save deployment
