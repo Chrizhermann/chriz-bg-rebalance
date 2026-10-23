@@ -180,7 +180,8 @@ lab README describes fixes for both.
 Expiry still waits for the subject's next full pass, so its timing stays native. The go-beyond
 gate below is not passed yet: explicit removal is untested. Attacks and movement, corrected
 Improved Haste and SR-shaped Haste, consecutive stops, removal during a stop, save/load and
-caster/immune subjects are open too. Details are in the
+caster/immune subjects are open too. Christopher closed the prototype step on 2026-10-24; the
+fixes for both residuals and these open items go into the next lab run. Details are in the
 [lab README](timestop-lab/README.md#corrected-captures-fixctl_01-fixstop_01-fixhaste_01-and-fixhaste_02-2026-10-23).
 
 ## Evidence identity and method

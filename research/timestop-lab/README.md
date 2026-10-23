@@ -733,6 +733,9 @@ Not covered yet:
 - There is no removal hook. A parent re-added at the same address counts as new only when its
   origin differs from the tracked one.
 
+Christopher closed step 4 on 2026-10-24 with these results. R7, R8 and the open items above
+go into the next lab run.
+
 ## Host validation
 
 ```powershell
