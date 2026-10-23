@@ -220,14 +220,29 @@ function Get-LabLoaderConfigurationSha256 {
 }
 
 function Assert-LabNoGameProcess {
+    # Since the parallel lab slots (bg_lab_slots.py, Chris 2026-10-18), other labs' hidden games may
+    # run beside this lab, and the slot tool waits only for processes of its own lab. These scripts
+    # touch only this lab, and read the source game while copying. So a process refuses when it runs
+    # from the lab or from the source game, and a game or loader refuses when its image path cannot
+    # be read, as the slot tool does.
     param([object[]] $Processes)
     if (-not $PSBoundParameters.ContainsKey('Processes')) {
         $Processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
     }
-    $running = @($Processes | Where-Object { $_.Name -in @('Baldur.exe', 'InfinityLoader.exe') })
+    $config = Get-LabConfiguration
+    $roots = @($config.LabRoot, $config.SourceRoot)
+    $running = @($Processes | Where-Object {
+        $property = $_.PSObject.Properties['ExecutablePath']
+        $path = if ($property) { [string] $property.Value } else { '' }
+        if ([string]::IsNullOrEmpty($path)) { return $_.Name -in @('Baldur.exe', 'InfinityLoader.exe') }
+        try {
+            foreach ($root in $roots) { if (Test-LabPathWithin -Path $path -Root $root) { return $true } }
+        } catch { return $true } # not an absolute path: where it runs from is unknown
+        $false
+    })
     if ($running.Count -gt 0) {
         $names = ($running | ForEach-Object { $_.Name }) -join ', '
-        throw "CBR_LAB GAME_PROCESS_OPEN: $names. Leave other agents' processes alone and retry after their session ends."
+        throw "CBR_LAB GAME_PROCESS_OPEN: $names run from this lab or its source game, or from a path that cannot be read. Leave other agents' processes alone and retry after their session ends."
     }
 }
 

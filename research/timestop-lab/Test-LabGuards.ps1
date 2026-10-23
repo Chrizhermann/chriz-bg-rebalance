@@ -112,11 +112,27 @@ Check 'Cloud exception is confined to OS Documents ancestry and exact profile' {
 Check 'Actual OS Documents profile ancestry passes read-only metadata verification' {
     Assert-LabNoReparsePath $config.ProfileRoot
 }
-Check 'Either game or loader blocks regardless of path or case' {
+Check 'A game or loader without a readable path blocks, in any case' {
     Must-Reject { Assert-LabNoGameProcess -Processes @([pscustomobject]@{Name='BALDUR.EXE'}) } 'GAME_PROCESS_OPEN'
     Must-Reject { Assert-LabNoGameProcess -Processes @([pscustomobject]@{Name='InfinityLoader.exe'}) } 'GAME_PROCESS_OPEN'
+    Must-Reject { Assert-LabNoGameProcess -Processes @([pscustomobject]@{Name='Baldur.exe'; ExecutablePath=$null}) } 'GAME_PROCESS_OPEN'
+    Must-Reject { Assert-LabNoGameProcess -Processes @([pscustomobject]@{Name='Baldur.exe'; ExecutablePath='Baldur.exe'}) } 'GAME_PROCESS_OPEN'
     Assert-LabNoGameProcess -Processes @([pscustomobject]@{Name='pwsh.exe'})
     Assert-LabNoGameProcess -Processes @()
+}
+Check 'Processes of this lab or its source game block; other labs'' games do not' {
+    foreach ($path in @(($config.LabRoot + '\Baldur.exe'), ($config.LabRoot.ToUpperInvariant() + '\InfinityLoader.exe'),
+            ($config.LabRoot + '\weidu.exe'), ($config.SourceRoot + '\Baldur.exe'))) {
+        $name = [IO.Path]::GetFileName($path)
+        Must-Reject { Assert-LabNoGameProcess -Processes @([pscustomobject]@{Name=$name; ExecutablePath=$path}) } 'GAME_PROCESS_OPEN'
+    }
+    $other = @(
+        [pscustomobject]@{Name='Baldur.exe'; ExecutablePath=(Join-Path $env:USERPROFILE 'Games\Another-Lab\game\Baldur.exe')}
+        [pscustomobject]@{Name='InfinityLoader.exe'; ExecutablePath=(Join-Path $env:USERPROFILE 'Games\Another-Lab\game\InfinityLoader.exe')}
+        [pscustomobject]@{Name='Baldur.exe'; ExecutablePath=($config.LabRoot + '-copy\Baldur.exe')}
+        [pscustomobject]@{Name='pwsh.exe'; ExecutablePath='C:\Program Files\PowerShell\7\pwsh.exe'}
+    )
+    Assert-LabNoGameProcess -Processes $other
 }
 $valid = [pscustomobject]@{
     SchemaVersion=1; LabId=$config.LabId; InstanceId=[guid]::NewGuid().ToString()

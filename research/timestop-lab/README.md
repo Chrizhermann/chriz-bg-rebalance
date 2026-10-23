@@ -123,13 +123,21 @@ Before the first quiet run:
 2. Run `python -I lab_quiet_run.py prepare <lab> <profile>`. It makes the profile
    windowed and sets every volume to 0, keeping `Baldur.lua.before-quiet-lab` as a backup.
 
-Install, staging and the preflight refuse while any `Baldur.exe` or `InfinityLoader.exe`
-runs, so this lab runs alone. Take the exclusive `bg-game-install.lock` of the shared lab
-coordination folder, wait until no BG game runs, then run
-`python -I lab_quiet_run.py run <lab> <profile> <out.json> 600`. Parallel lab slots
-(`bg_lab_slots.py`) start nothing while that lock is held. The run ends at its time limit,
-on a message box, or when the game exits; `<out.json>` records the guards' result. Release
-the lock by renaming it only after no process runs from the lab.
+Install, staging and the preflight refuse while a process runs from the lab or from the
+source game, and while a `Baldur.exe` or `InfinityLoader.exe` runs whose image path cannot
+be read. Other labs' games do not block them: since 2026-10-18 the parallel lab slots
+(`bg_lab_slots.py`) let up to five hidden lab games run at once, and these scripts touch only
+this lab. (Until 2026-10-23 any running game refused them.)
+
+The Time Stop captures took the exclusive `bg-game-install.lock` of the shared lab
+coordination folder, waited until no BG game ran, then ran
+`python -I lab_quiet_run.py run <lab> <profile> <out.json> 600`. The slots start nothing
+while that lock is held. The Time Clocks lab runs through a slot instead:
+`python -I bg_lab_slots.py run <lab> <profile> <out.json> <seconds> --owner … --purpose …`,
+which waits only for its own lab and refuses while OBS or Streamlabs runs. Either way the
+run ends at its time limit, on a message box, or when the game exits; `<out.json>` records
+the guards' result. A lock or slot is released by renaming it only after no process runs
+from the lab, and only by its holder.
 
 A failed or uncertain startup is an inspection point, not permission to retry
 repeatedly. A surviving process still blocks the next run.
