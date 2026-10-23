@@ -155,12 +155,14 @@ START or WORLD_ACTIONBAR renders. A new game therefore goes through the game's o
 clicked with `Infinity_ClickItem`, Christopher's choice on 2026-10-20.
 
 - **QA menu.** `qa_menu.py` reads the stock `UI.MENU` from `chitin.key`/BIF and writes a
-  lab-only copy. It names 15 stock items (`CBRTSQA_*`): the SoA logo, Single Player, New
+  lab-only copy. It names 18 stock items (`CBRTSQA_*`): the SoA logo, Single Player, New
   Game, the character-creation buttons, Import's Character File, the Done buttons, the
-  difficulty and the dialogue confirm button. Each name is added only where exactly one item
-  with the stock action exists. It also adds an inert START label (2.7.3 reopens START after
-  the campaign choice only on the next mouse event) and a 1×1 polling widget to the 12 menus
-  that cover START during character creation and dialogue. The builder is idempotent and
+  difficulty and the dialogue confirm button; since 2026-10-23 also the quick save button of
+  the world's left sidebar, Single Player's Load Game and the LOAD screen's Load button. Each
+  name is added only where exactly one item with the stock action exists. It also adds an
+  inert START label (2.7.3 reopens START after the campaign choice only on the next mouse
+  event) and a 1×1 polling widget to the 13 menus that cover START during character
+  creation, dialogue and loading. The builder is idempotent and
   refuses unknown actions, ambiguous or missing items and name collisions.
   `qa_menu.py describe <lab>` prints the expected hash. `Stage-Diagnostics.ps1` builds the
   copy into the lab (`cbr-generated-qa-menu-<sha16>`), stages it as `override/UI.MENU` and

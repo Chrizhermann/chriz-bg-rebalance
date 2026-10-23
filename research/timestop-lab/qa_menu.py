@@ -113,6 +113,14 @@ BINDINGS = (
             "chapterScreen:OnDoneButtonClick()"),
     Binding("WORLD_DIALOG_CONFIRM", "CBRTSQA_DIALOG_CONFIRM", "button", "text", "lua", "dialogButtonText",
             DIALOG_CONFIRM),
+    # Saving and loading: the quick save button of the world's left sidebar, Load Game in
+    # START_SP and the LOAD screen's Load button (the save is chosen in its variable first).
+    Binding("LEFT_SIDEBAR_BOTTOM", "CBRTSQA_QUICKSAVE", "button", "tooltip", "lua", "getTooltipWithHotkey(28,74261)",
+            "worldScreen:OnQuickSaveButtonClick(false)"),
+    Binding("START_SP", "CBRTSQA_LOAD_GAME", "button", "text", None, "LOAD_GAME_BUTTON",
+            "Infinity_PopMenu(); startEngine:OnLoadGameButtonClick()"),
+    Binding("LOAD", "CBRTSQA_LOAD", "button", "text", None, "LOAD_BUTTON",
+            "loadScreen:LoadGame(gameSaves.files[currentSave].fileName)"),
 )
 IDLE_MENU, IDLE_NAME = "START", "CBRTSQA_IDLE"
 # START and WORLD_ACTIONBAR already host the console's own menu. WORLD_ACTIONBAR polls here
@@ -120,7 +128,7 @@ IDLE_MENU, IDLE_NAME = "START", "CBRTSQA_IDLE"
 POLLED_MENUS = (
     "START_MAIN", "START_SP", "CHARGEN", "POPUP_THREEBUTTON", "CHARACTER_SELECT", "CHARACTER_COLOR",
     "CHARGEN_CUSTOMSOUNDS", "CHARGEN_NAME", "CHARGEN_DIFFICULTY", "CHAPTER", "WORLD_DIALOG",
-    "WORLD_ACTIONBAR",
+    "WORLD_ACTIONBAR", "LOAD",
 )
 POLL = "EEexRemote.Poll()"
 
