@@ -1,8 +1,9 @@
 #Requires -Version 7.0
 <#
 Installs the Chriz BG Time Clocks mod into the Time Clocks lab (CBR_LAB_VARIANT=timeclocks) and
-nowhere else: the Time Stop lab is refused before anything is read. It needs the validated lab
-and no Baldur.exe or InfinityLoader.exe on the PC, and never launches the game.
+nowhere else: the Time Stop lab is refused before anything is read. It needs the validated lab,
+no process running from the lab or from the source game, and no game or loader whose image path
+cannot be read (Assert-LabNoGameProcess; other labs' games may run); it never launches the game.
 
 1. The mod comes from -ModRoot, a clean checkout or worktree of chriz-bg-time-clocks: its
    committed installer and mod folder, checked blob by blob against HEAD.
