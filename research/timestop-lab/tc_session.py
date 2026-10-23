@@ -148,6 +148,7 @@ class Session:
         self.log_file = (self.output / f"tc-driver-{tag}.jsonl").open("x", encoding="utf-8")
         self.subject_id = self.controller_id = None
         self.position = (0, 0)
+        self.home = None  # Imoen's place when the party was ready; clean() walks her back to it
         self.loaded = None
         # Seams for the offline tests.
         self.send, self.collect, self.processes, self.sleep = lab_rc.send, lab_rc.collect, lab_rc.processes, time.sleep
@@ -349,6 +350,7 @@ class Session:
         if not subject or subject["name"] != SUBJECT or not controller or controller["name"] != CONTROLLER:
             raise SessionError(f"Unexpected party: {probe['actors']}")
         self.subject_id, self.controller_id = subject["id"], controller["id"]
+        self.home = (controller["x"], controller["y"])
         self.note("party", subject=subject, controller=controller, area=probe.get("area"),
                   nearby=self.rc("nearby", range="2000"))
         self.rc("sampler", "sampler-party", ids=self.party_ids(), on="1")
@@ -369,7 +371,8 @@ class Session:
 
     def clean(self, missing: int = MISSING_HP) -> None:
         """Disarmed: run until no clock fixture is left on the party, no stop runs and no tracked
-        projectile flies, then bring the subject to `missing` missing HP."""
+        projectile flies, walk Imoen back to her place, then bring the subject to `missing`
+        missing HP."""
         for attempt in range(8):
             probe = self.probe(f"clean-{attempt}", sources=CLOCK_SOURCES)
             now = probe["game_time"]
@@ -384,6 +387,17 @@ class Session:
             self.run(min(900, max([150] + [t + 15 for t in left])), f"clean{attempt}")
         else:
             raise SessionError("The lab effects or projectiles did not end.")
+        # An attack case leaves Imoen beside its target; casting from there could put her inside
+        # the next case's cloud.
+        for attempt in range(4) if self.home else ():
+            imoen = probe["actors"].get("portrait1") or {}
+            if math.hypot(imoen.get("x", 0) - self.home[0], imoen.get("y", 0) - self.home[1]) <= 16:
+                break
+            if attempt == 3:
+                raise SessionError(f"Imoen did not walk back to her place {self.home}: {imoen}")
+            self.tcq("p1", CONTROLLER, f"move:{self.home[0]}:{self.home[1]}", f"home{attempt}", idle="1")
+            self.run(60, f"home{attempt}")
+            probe = self.probe(f"home-{attempt}")
         for attempt in range(4):
             subject = self.subject(f"hp-{attempt}")
             gap = subject["max_hp"] - subject["hp"]
@@ -486,6 +500,21 @@ class Session:
         self.note("targets", label=label, targets=targets)
         return targets
 
+    def remove(self, targets: list[dict], label: str) -> None:
+        """Each target leaves the game (DestroySelf), so that no later case's spell hits it, it
+        never acts on a later case, and no hostile creature blocks a save."""
+        for number, target in enumerate(targets, 1):
+            self.tcq(str(target["id"]), target["name"], "destroy", f"{label}-destroy{number}")
+        ids = {target["id"] for target in targets}
+        for attempt in range(4):
+            self.run(8, f"{label}-leave{attempt}")
+            left = [c["id"] for c in self.rc("nearby", f"{label}-left{attempt}", range="2500")["creatures"]
+                    if c["id"] in ids and c.get("hp", 1) > 0]
+            if not left:
+                self.note("removed", label=label, targets=sorted(ids))
+                return
+        raise SessionError(f"{label}: the targets {left} did not leave")
+
 
 # ---------------------------------------------------------------------- clock cases
 def case_base(s: Session, name: str) -> dict:
@@ -551,6 +580,15 @@ def case_with(s: Session, name: str, spells: list[str]) -> dict:
     return s.case(name, setup, 315)
 
 
+def case_disease(s: Session, name: str, spells: list[str]) -> dict:
+    """CBRTDIS (2 HP each second for 8 s), alone or with more lab spells at the same tick, without
+    the regeneration fixture: every HP change of the subject is a disease pulse."""
+    def setup():
+        s.tcq("p0", SUBJECT, ";".join(f"apply:{spell}:self" for spell in spells), "-".join(spells).lower())
+        return {"spells": spells, "L0": s.subject("after-disease")["clocks"]["list"]}
+    return s.case(name, setup, 180)
+
+
 def case_save(s: Session, name: str, target: int, after_start: int, keep: str) -> dict:
     """A stop that starts `target` ticks after the fixtures; `after_start` ticks after the
     application the game is saved (and the save kept as `keep`), then runs on until both end."""
@@ -586,9 +624,11 @@ def case_load(s: Session, name: str) -> dict:
 
 # ---------------------------------------------------------------------- area cases
 # Every area case spawns its own Bounty Hunters (neutral, no scripts): about 400 px west of the
-# subject (cloud and fireball targets) or beside Imoen (melee). Imoen, the stop's caster, casts
-# with ReallyForceSpell(Point)RES; CBRTSTL stops time for 15 s. The sampler records each
-# projectile from its decode to its end, and the targets' HP and tracked effects.
+# subject (cloud and fireball targets) or beside Imoen (melee), and removes them afterwards.
+# Imoen, the stop's caster, casts with ReallyForceSpell(Point)RES; CBRTSTL stops time for 15 s.
+# Before she attacks, her target turns hostile (without scripts it still never acts): in session
+# n2 her AttackOneRound against neutral targets never hit. The sampler records each projectile
+# from its decode to its end, and the targets' HP and tracked effects.
 def _west(s: Session) -> list[tuple[int, int]]:
     x, y = s.position
     return [(x - 400, y - 30), (x - 400, y + 70)]
@@ -612,6 +652,13 @@ def _ids(s: Session, targets: list[dict]) -> dict:
     return {"targets": targets, "ids": s.party_ids(*extra), "probe_ids": ",".join(str(i) for i in extra)}
 
 
+def _area(s: Session, name: str, setup, ticks: int) -> dict:
+    """An area case without the observer; its targets leave the game afterwards."""
+    result = s.case(name, setup, ticks, observer=False)
+    s.remove(result["plan"]["targets"], name)
+    return result
+
+
 def area_existing_clouds(s: Session, name: str) -> dict:
     """A: a target's Stinking Cloud and Imoen's Cloudkill exist when the stop begins."""
     def setup():
@@ -621,7 +668,7 @@ def area_existing_clouds(s: Session, name: str) -> dict:
         s.tcq("p1", CONTROLLER, f"mark:a_caster_cloud;castpoint:SPWI502:{t2['x']}:{t2['y']};wait:45;mark:a_stop;"
               "apply:CBRTSTL:self", f"{name}-cloud-stop")
         return _ids(s, [t1, t2])
-    return s.case(name, setup, 480, observer=False)
+    return _area(s, name, setup, 480)
 
 
 def area_new_cloud(s: Session, name: str) -> dict:
@@ -631,7 +678,7 @@ def area_new_cloud(s: Session, name: str) -> dict:
         s.tcq("p1", CONTROLLER, f"wait:5;mark:b_stop;apply:CBRTSTL:self;wait:15;mark:b_cast;"
               f"castpoint:SPWI213:{t1['x']}:{t1['y']}", f"{name}-stop-cloud")
         return _ids(s, [t1])
-    return s.case(name, setup, 450, observer=False)
+    return _area(s, name, setup, 450)
 
 
 def area_missiles(s: Session, name: str) -> dict:
@@ -641,7 +688,7 @@ def area_missiles(s: Session, name: str) -> dict:
         s.tcq("p1", CONTROLLER, "wait:5;mark:c_stop;apply:CBRTSTL:self;wait:10;mark:c_missile;cast:SPWI112:t1;"
               "mark:c_fireball;cast:SPWI304:t2", f"{name}-stop-cast", t1=t1["id"], t2=t2["id"])
         return _ids(s, [t1, t2])
-    return s.case(name, setup, 420, observer=False)
+    return _area(s, name, setup, 420)
 
 
 def area_missile_in_flight(s: Session, name: str) -> dict:
@@ -651,7 +698,7 @@ def area_missile_in_flight(s: Session, name: str) -> dict:
         s.tcq("p1", CONTROLLER, "mark:c2_fireball;cast:SPWI304:t1;wait:2;mark:c2_stop;apply:CBRTSTP:self",
               f"{name}-cast-stop", t1=t1["id"])
         return _ids(s, [t1])
-    return s.case(name, setup, 300, observer=False)
+    return _area(s, name, setup, 300)
 
 
 def area_traps(s: Session, name: str) -> dict:
@@ -662,7 +709,7 @@ def area_traps(s: Session, name: str) -> dict:
               f"castpoint:SPWI712:{t1['x']}:{t1['y']};mark:d_skull;castpoint:SPWI313:{t2['x']}:{t2['y']}",
               f"{name}-stop-traps")
         return _ids(s, [t1, t2])
-    return s.case(name, setup, 480, observer=False)
+    return _area(s, name, setup, 480)
 
 
 def area_contingency(s: Session, name: str) -> dict:
@@ -670,10 +717,10 @@ def area_contingency(s: Session, name: str) -> dict:
     def setup():
         (t1,) = _targets(s, _near(s), name)
         s.tcq("p1", CONTROLLER, "apply:CBRTHIT:self;apply:CBRTCON:t1", f"{name}-prepare", t1=t1["id"])
-        s.tcq("p1", CONTROLLER, "wait:5;mark:e_stop;apply:CBRTSTL:self;wait:10;mark:e_attack;attack:t1",
+        s.tcq("p1", CONTROLLER, "wait:5;mark:e_stop;apply:CBRTSTL:self;wait:10;mark:e_attack;hostile:t1;attack:t1",
               f"{name}-stop-attack", t1=t1["id"])
         return _ids(s, [t1])
-    return s.case(name, setup, 420, observer=False)
+    return _area(s, name, setup, 420)
 
 
 def area_instant(s: Session, name: str) -> dict:
@@ -681,9 +728,9 @@ def area_instant(s: Session, name: str) -> dict:
     def setup():
         (t1,) = _targets(s, _near(s), name)
         s.tcq("p1", CONTROLLER, "apply:CBRTHIT:self;wait:5;mark:f_stop;apply:CBRTSTL:self;wait:10;mark:f_damage;"
-              "cast:CBRTDMG:t1;mark:f_attack;attack:t1", f"{name}-stop-hit", t1=t1["id"])
+              "cast:CBRTDMG:t1;mark:f_attack;hostile:t1;attack:t1", f"{name}-stop-hit", t1=t1["id"])
         return _ids(s, [t1])
-    return s.case(name, setup, 330, observer=False)
+    return _area(s, name, setup, 330)
 
 
 def area_sr_cloud(s: Session, name: str) -> dict:
@@ -697,7 +744,7 @@ def area_sr_cloud(s: Session, name: str) -> dict:
         s.tcq("p1", CONTROLLER, f"mark:g_cloud;castpoint:CBRTSRCK:{t1['x']}:{t1['y']};wait:45;mark:g_stop;"
               "apply:CBRTSTL:self", f"{name}-cloud-stop")
         return _ids(s, [t1])
-    return s.case(name, setup, 480, observer=False)
+    return _area(s, name, setup, 480)
 
 
 CASES = {
@@ -711,7 +758,8 @@ CASES = {
     "hasteout": case_haste_out,
     "slow": lambda s, n: case_with(s, n, ["CBRTSLW"]),
     "srhaste": lambda s, n: case_with(s, n, ["CBRTSRH"]),
-    "hastedis": lambda s, n: case_with(s, n, ["CBRTDIS", "CBRTHST"]),
+    "dis": lambda s, n: case_disease(s, n, ["CBRTDIS"]),
+    "hastedis": lambda s, n: case_disease(s, n, ["CBRTDIS", "CBRTHST"]),
     # A save 50 ticks after a 90-tick stop that began 30 ticks after the fixtures, and one in the
     # middle of a stop; the load case checks either in a new process.
     "save": lambda s, n: case_save(s, n, 30, 170, f"CBTC {s.tag} after stop"),

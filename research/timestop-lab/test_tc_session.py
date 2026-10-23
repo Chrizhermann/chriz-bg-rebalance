@@ -204,16 +204,26 @@ class SessionTests(unittest.TestCase):
         self.assertIn(lab_rc.lua_string("spawn:BOUNHA02:600:400"), queued)
 
 
+def argument(code: str, name: str) -> str:
+    """An argument with_arguments put into a request's code."""
+    match = re.search(name + r' = "((?:\\\d{3})*)"', code)
+    return bytes(int(digits) for digits in re.findall(r"\\(\d{3})", match.group(1))).decode("utf-8")
+
+
 class ScriptedGame:
     """Just enough game for every case: the world time moves only while unpaused, spawns appear
-    where tc-queue.lua's CreateCreature puts them, and each save rewrites the quick save. Every
-    tc-queue request runs through tc-queue.lua's own checks."""
+    where tc-queue.lua's CreateCreature puts them and leave on DestroySelf, Imoen walks where
+    she attacks or moves, and each save rewrites the quick save. Every tc-queue request runs
+    through tc-queue.lua's own checks."""
+
+    HOME = (3720, 2826)
 
     def __init__(self, test: unittest.TestCase, saves: Path):
         self.test, self.saves = test, saves
         self.time, self.paused, self.saved = 2000, True, 0
         self.objects = {10: "CBRTS Subject", 11: "Imoen"}
-        self.creatures = []
+        self.creatures, self.spawned, self.walks = [], 0, 0
+        self.imoen = self.HOME
 
     def handlers(self) -> dict:
         done = {"ok": True}
@@ -233,16 +243,27 @@ class ScriptedGame:
         return {"portrait0": {"clocks": {"list": self.time - 500}, "hp": 85, "max_hp": 98, "x": 3741, "y": 2801}}
 
     def probe(self, code):
+        x, y = self.imoen
         return {"game_time": self.time, "time_stop_remaining": 0, "sampler": {"projectiles": 0, "pending": 0},
-                "actors": {"portrait0": {"timed": []}, "portrait1": {"timed": []}}}
+                "actors": {"portrait0": {"timed": []}, "portrait1": {"timed": [], "x": x, "y": y}}}
 
     def queue(self, code):
         ok, response, _, _ = test_tc_requests.run_tc_queue(code, actors=dict(self.objects))
         self.test.assertTrue(ok, response)
         for x, y in re.findall(r'CreateCreature\("BOUNHA02",\[(\d+)\.(\d+)\],0\)', response):
-            ident = 100 + len(self.creatures)
+            ident = 100 + self.spawned
+            self.spawned += 1
             self.objects[ident] = "Bounty Hunter"
             self.creatures.append({"id": ident, "name": "Bounty Hunter", "x": int(x), "y": int(y)})
+        if "DestroySelf()" in response:
+            ident = int(argument(code, "actor"))
+            self.creatures = [c for c in self.creatures if c["id"] != ident]
+            del self.objects[ident]
+        if "AttackOneRound(" in response:
+            target = next(c for c in self.creatures if c["id"] == int(argument(code, "t1")))
+            self.imoen = (target["x"] + 30, target["y"])
+        for x, y in re.findall(r"MoveToPoint\(\[(\d+)\.(\d+)\]\)", response):
+            self.imoen, self.walks = (int(x), int(y)), self.walks + 1
         return {"queued": response}
 
     def save(self, code):
@@ -277,6 +298,7 @@ class DryRunTests(unittest.TestCase):
         self.addCleanup(self.session.log_file.close)
         self.session.send, self.session.sleep, self.session.echo = self.console.send, lambda seconds: None, False
         self.session.subject_id, self.session.controller_id = 10, 11
+        self.session.home = ScriptedGame.HOME
 
     def test_every_case_runs_against_a_scripted_game(self):
         for name in [name for name in ts.CASES if name != "load"] + ["load"]:
@@ -287,7 +309,10 @@ class DryRunTests(unittest.TestCase):
                 self.assertEqual(ts.CASES[name](self.session, name)["capture"], f"longtag8_{name}")
         queued = sum(1 for request, _, _ in self.console.sent if request == "tc-queue")
         self.assertGreater(queued, 20)
-        self.assertEqual(len(self.game.creatures), 11)  # A 2, B 1, C 2, C2 1, D 2, E 1, F 1, G 1
+        self.assertEqual(self.game.spawned, 11)  # A 2, B 1, C 2, C2 1, D 2, E 1, F 1, G 1
+        self.assertEqual(self.game.creatures, [])  # every case removed its targets
+        # After each attack case (E, F) the next clean() walked Imoen back to her place.
+        self.assertEqual((self.game.walks, self.game.imoen), (2, ScriptedGame.HOME))
 
 
 class ArgumentTests(unittest.TestCase):
