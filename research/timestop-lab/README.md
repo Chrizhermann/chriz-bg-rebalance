@@ -1,16 +1,20 @@
 # Time Stop / Haste observation lab
 
-This is disposable research infrastructure, not a balance component. It records
+This is disposable research infrastructure, not a balance component. The observer records
 native decisions without correcting clocks, rebuilding buffs, replacing healing,
-or changing attack/movement scheduling. No hooks activate merely by loading the
-diagnostic Lua module. The startup and hook-integration smoke test passed on EEex 1.3.1
+or changing attack/movement scheduling. A separate correction prototype, `CBRTFix.lua`,
+corrects two clocks for one selected subject and the two lab fixtures only
+([below](#correction-prototype-cbrtfixlua)). No hooks activate merely by loading
+either Lua module. The startup and hook-integration smoke test passed on EEex 1.3.1
 ([below](#engine-smoke-test-eeex-131-2026-10-20)). So did the first native baseline
 capture, `baseline_01` ([below](#baseline-capture-baseline_01-2026-10-20)), the two
 native Time Stop captures, `timestop_01` and `timestop_02`
 ([below](#time-stop-captures-timestop_01-and-timestop_02-2026-10-23)), and the four
 native Haste captures, `haste_01` to `haste_04`
-([below](#haste-captures-haste_01-to-haste_04-2026-10-23)). No clock correction exists
-yet, and no acceptance has run.
+([below](#haste-captures-haste_01-to-haste_04-2026-10-23)). The first four corrected
+captures followed on 2026-10-23
+([below](#corrected-captures-fixctl_01-fixstop_01-fixhaste_01-and-fixhaste_02-2026-10-23)).
+They cover the fixture cases of the acceptance plan, not all of it.
 
 The diagnosis, instruction evidence and open design questions are in
 [`../10-timestop-haste-engine-clocks.md`](../10-timestop-haste-engine-clocks.md).
@@ -169,9 +173,10 @@ clicked with `Infinity_ClickItem`, Christopher's choice on 2026-10-20.
   under `<lab>\cbr-timestop-output\rc-log\`.
 - **Requests.** `rc/*.lua` holds the requests. Read-only: `ping`, `state`, `menus`,
   `status`, `subject`, `nearby`. Changing: `watchdog`, `install`, `arm`, `stop`, `export`,
-  `start-soa`, `click`, `pick-character`, `set-name`, `dialog`, `pause`, `queue`, `quit`.
-  Each changing request checks its precondition first (menu on the stack, no transition,
-  paused game, armed or disarmed capture, the subject's name).
+  `start-soa`, `click`, `pick-character`, `set-name`, `dialog`, `pause`, `queue`, `quit`,
+  and `fix` for the [correction prototype](#correction-prototype-cbrtfixlua), whose
+  `op=status` only reads. Each changing request checks its precondition first (menu on the
+  stack, no transition, paused game, armed or disarmed capture, the subject's name).
 - **Time Stop trigger and clocks.** `queue what=timestop` makes the controller in portrait 1
   wait `SmallWait(N)` AI updates and then apply `CBRTSTP` to itself, so it is the caster
   and the subject is frozen. It refuses without an armed capture, without exactly one of
@@ -204,9 +209,11 @@ NPCs and the Jailkeep Golem are neutral.
 
 ## Diagnostic controls
 
-`M_CBRTS.lua` loads `CBRTObs.lua` and exposes `CBRTS`. It does not install hooks.
-The first engine session must verify the command surface and hook integration
-before measuring any gameplay behavior.
+`M_CBRTS.lua` loads `CBRTObs.lua` and `CBRTFix.lua` and exposes `CBRTS` and `CBRTF`.
+It does not install hooks. The first engine session must verify the command surface and
+hook integration before measuring any gameplay behavior. The steps below are the
+observer's; the correction prototype's controls are
+[further down](#correction-prototype-cbrtfixlua).
 
 1. `CBRTS.Inspect()` checks the owned lab, image identity, vtables and all eight
    instruction windows. Unexpected bytes stop installation before the first patch.
@@ -265,7 +272,7 @@ Decoder exit 0 means structurally complete evidence, **not** gameplay acceptance
 Exit 1 means incomplete/ambiguous capture; exit 2 means invalid input or I/O failure.
 Time Stop records are sampled observations, not invented exact start/end edges.
 
-The engine sessions have three bounded steps:
+The engine sessions have four bounded steps:
 
 1. A fresh baseline with the one subject, buff and regeneration effect. Verify
    native HP amount, buff expiry, worker construction and rebuilding, and complete
@@ -282,11 +289,16 @@ The engine sessions have three bounded steps:
    controls become acceptance requirements when a correction is proposed. **Done on
    2026-10-23** as `haste_01` to `haste_04`
    ([results](#haste-captures-haste_01-to-haste_04-2026-10-23)).
+4. Correct both clocks for the subject and the two fixtures, then repeat the control, the
+   Time Stop case and Haste entering and ending. **Done on 2026-10-23** as `fixctl_01`,
+   `fixstop_01`, `fixhaste_01` and `fixhaste_02`
+   ([results](#corrected-captures-fixctl_01-fixstop_01-fixhaste_01-and-fixhaste_02-2026-10-23)).
 
-Only after these traces resolve the disputed engine paths should a separate,
-actor/effect-scoped clock correction be designed. Caster/immune behavior, Slow,
-area effects, SR/SCS maintenance graphs, consecutive stops, removal/refresh and
-save/load remain explicit later gates. This lab has no current-save safety claim.
+Steps 1 to 3 resolved the disputed engine paths, and step 4 tested the first
+actor/effect-scoped correction against them. Attack and movement rates, caster/immune
+behavior, Slow, area effects, SR/SCS maintenance graphs, consecutive stops,
+removal/refresh and save/load remain explicit later gates. This lab has no current-save
+safety claim.
 
 ## Engine smoke test (EEex 1.3.1, 2026-10-20)
 
@@ -569,6 +581,158 @@ For a later correction:
 - Movement and attack were not measured. They become acceptance requirements once a
   correction is proposed.
 
+## Correction prototype `CBRTFix.lua`
+
+`CBRTFix.lua` is the first clock correction, made for step 4 only. It acts on one selected
+subject and on two effects: `CBRTBUF`, and `CBRTREG` (op98 p2=3, a regeneration worker that
+counts its phase up to the period and then heals). Both must have absolute timing
+(`0x1000`). No other effect, opcode or actor is touched. At normal speed it keeps the
+native heal pattern, including the 15-tick second interval after the first heal; it only
+removes the influence of Time Stop and Haste (Christopher's choice on 2026-10-23).
+
+Four hooks do the work. Their windows were decoded from the pinned executable like the
+observer's, and none overlaps an observer window.
+
+| Hook | Site | What it does |
+|---|---|---|
+| Frozen | `0x3ABA9D`, after the engine marks a frozen noncaster | In each world tick in which the subject is frozen, once: moves each selected parent's deadline one tick later, and the regeneration's origin (`+0x6C`) with it. This happens before that pass checks for expiry. |
+| Dispatch | `0x226543`, after the list counter is copied into the worker | Admits the tracked worker once per world tick. Its counter becomes the subject's active time (world time minus its frozen ticks) plus an offset, taken from the first admitted dispatch so that the native pulse grid is kept. A second dispatch in the same tick runs as a no-op: counter 0, elapsed 0. Any other regeneration worker of the subject stays native and is counted as unmatched. |
+| Construct | `0x1BEDD2`, after the regeneration seeds its worker | A rebuilt worker of the tracked parent gets the kept phase back, if the parent's origin moved by exactly the frozen ticks counted since. Another `CBRTREG` parent, or one whose origin does not fit, becomes the new tracked entry with the native seed. |
+| Worker exit | `0x1A5F19`, the regeneration AIUpdate epilog | Records the worker's phase. After a heal it records the phase that a native rebuild on the next un-hasted tick would seed: floor((active time + 1 − active origin)/15) mod period. |
+
+Controls, also available as the Remote Console request `fix` (`op=install`, `select`,
+`verify`, `status`, `disable`):
+
+1. `CBRTF.Install()` at the fresh main menu. It first runs `CBRTF.Inspect()`, which checks
+   the lab, the image base and timestamp, the regeneration vtable and all four windows.
+   Then it compiles the bodies and installs the hooks, disabled.
+2. `CBRTF.Select(0)` while paused, **before** the fixtures, so that the regeneration's first
+   construction is tracked. It disables the correction first, so a refused selection leaves
+   it off. It clears the counters and the tracked entry and stores the subject's pointer, ID
+   and timed-list offset. The frozen hook walks that list natively. It stays idle until the
+   walk is proven on the subject's own effects; an empty list proves nothing.
+3. Apply the fixtures, then call `CBRTF.Verify(0)` while paused. It requires the selected
+   subject, at least one timed effect, and a native walk that matches the EEex iterator. A
+   mismatch disables the correction.
+4. `CBRTF.Status()` reports the counters (frozen ticks, deadline shifts, admitted, suppressed
+   and unmatched dispatches, restored phases, new parents, heal reseeds) and the tracked
+   entry.
+5. `CBRTF.Disable()` needs no pause. One aligned store turns it off, and every later pass is
+   native. Destroying the game session disables it too.
+
+The request refuses `select` and `verify` unless the game is paused and portrait 0 carries
+the subject's name.
+
+## Corrected captures `fixctl_01`, `fixstop_01`, `fixhaste_01` and `fixhaste_02` (2026-10-23)
+
+This was step 4: the correction prototype through the fixtures, with the observer recording.
+
+- **Run.** One quiet run through `lab_quiet_run.py run … 2100`, holding the exclusive lock,
+  after a `-Refresh` restage. At the fresh main menu, `CBRTS.Install()` installed its 8
+  sites and `CBRTF.Install()` its 4, disabled. The run ended at its 2,100 s limit, which
+  closed the game without a save. No guard tripped: audio peak 0.0, pointer clip
+  unchanged, nothing left in the job.
+- **Party.** The [fresh-party sequence](#fresh-test-party-in-the-hidden-game) and the same
+  actor IDs. `ApplyDamage(Myself,20,0)` again left the subject at 83 of 98 HP. Between
+  cases, the correction was disabled, a disarmed run let every lab fixture run out, Haste
+  included, and `ApplyDamage` restored at least 6 missing HP.
+- **Trigger.** Each case started paused: `Arm(0)`, `fix op=select`, the fixtures,
+  `fix op=verify`, a `subject` probe, then the case's own event. The game then ran without a
+  pause for 20 s, 26 s in the stop case. The pause, `fix op=status`, `Stop()`, `Export()`
+  and `fix op=disable` followed.
+  - `fixctl_01`: no event, the corrected control.
+  - `fixstop_01`: `queue what=timestop`, planned as in step 2. The stop was to begin 70 ticks
+    after the fixtures, with 20 ticks left on the buff and 7 ticks after a pulse boundary.
+  - `fixhaste_01`: `queue what=haste` with `CBRTHST`, 7 ticks after the third predicted
+    heal, as in `haste_01`.
+  - `fixhaste_02`: Haste first, applied while paused, then about 14 s of hasted running and a
+    pause. The fixtures came while hasted, 79 ticks before Haste's deadline, as in
+    `haste_03`.
+
+  The stop and the Haste began on their planned ticks.
+- **Decoding.** `decode_trace.py` exited 0 for all four traces. All are complete, with all
+  records committed (451, 650, 699 and 651) and no issues. The files stay in the lab with
+  their decoded JSON/CSV, the request log, and each case's plan and correction status.
+
+Times are world ticks; +n counts from the fixtures' application. "Predicted" applies the
+native un-hasted rules from step 3 to the case's own probe counters, in active time.
+
+| Check | `fixctl_01` (control) | `fixstop_01` (Time Stop) | `fixhaste_01` (Haste in) | `fixhaste_02` (Haste out) |
+|---|---|---|---|---|
+| Fixtures | 32993. Deadlines 33083 (buff) and 33173 (regeneration). | 33308. Deadlines 33398 and 33488. | 33743. Deadlines 33833 and 33923. | 34397, while hasted. Deadlines 34487 and 34577; Haste's 34476. |
+| Event | None. | Frozen from 33378 (+70) to 33466: 89 ticks. | Haste from 33811 (+68), still on at the end. | Haste removed at 34482 (+85), 6 ticks after its deadline. |
+| Heals | +19, +34, +64, +94, +124, +154 | +18, +33, +63; after the stop +182, +212, +242 | +16, +31, +61, +91, +121, +151 | +27, +42, +72, +102, +132, +162 |
+| Against the prediction | Same ticks. | Same ticks in active time. The gap across the stop is 119 = 30 + 89. | Same ticks. | One tick early each, same spacing. |
+| HP | 83 → 89 | 89 → 95 | 85 → 91 | 84 → 90 |
+| Buff removed | 33088, deadline + 5, heal rebuild. | 33491: shifted deadline 33487 + 4, heal rebuild. | 33833, its deadline, scheduled hasted pass. | 34497, deadline + 10, scheduled pass. |
+| Regeneration removed | 33184, deadline + 11, scheduled pass. | 33588: shifted deadline 33577 + 11, scheduled pass. | 33923, its deadline, scheduled hasted pass. | 34587, deadline + 10, scheduled pass. |
+| Correction counters | 179 admitted, 0 suppressed, 0 unmatched; 7 phases restored. | 268 admitted, 0 suppressed; 89 frozen ticks, 178 deadline shifts; 8 restored. | 180 admitted, 112 suppressed; 9 restored. | 180 admitted, 84 suppressed; 9 restored. |
+
+Every case had 6 heal reseeds and 1 new parent, and no dispatch went unmatched. For
+comparison, the native captures gave 3 and 2 HP through a stop (`timestop_01`,
+`timestop_02`), 13 HP with Haste entering (`haste_01`) and 10 with Haste ending
+(`haste_03`).
+
+What this shows:
+
+- **Time Stop: lifetime and phase survive the stop.** The frozen hook moved both deadlines
+  and the origin by the 89 frozen ticks before an expiry check could see them. The buff had
+  20 ticks left when the stop began. It survived and was removed 4 ticks after its shifted
+  deadline, by a native heal rebuild. The worker's counter stood still through the stop
+  (1880 at every frozen tick) and resumed with 1881. Its remaining duration held at 110,
+  and the rebuild at the end of the stop reseeded exactly 110 from the shifted deadline.
+  The next heal was 23 ticks away when the stop began, and came 23 ticks after the first
+  free tick. All 6 HP arrived, none inside the stop, without a catch-up burst.
+- **Haste: the worker keeps world time.** Each hasted tick had two dispatches, and the second
+  ran as a no-op. The worker counted down 1 per world tick and kept the 15-tick grid, so both
+  Haste cases healed 6 times with the native spacing, like the control.
+- **Rebuilds keep the phase.** Every rebuild of the tracked worker got its phase back: after
+  each heal, at Haste's start and end, at the buff's removal and at the end of the stop. No
+  rebuild added or lost a heal, and the short second interval after the first heal stayed.
+- **The control is native.** With nothing to correct, `fixctl_01` matched the native rules
+  tick for tick: heals, removals and the worker's counters.
+- **Expiry timing stays native.** Deadlines move, but removals still wait for the subject's
+  next full pass. Under Haste that pass still runs twice per second, so hasted removals
+  come at most about 7 ticks late instead of up to 14.
+
+Two one-tick residuals remain, both under Haste:
+
+- **Grid anchor when the regeneration is applied to a hasted subject while paused.** In
+  `fixhaste_02` the first update after unpausing came at the paused world value 34397, as
+  natively in `haste_03` but not in `haste_04`. The dispatch hook took its offset from that
+  update, so every pulse came one tick earlier than an un-hasted subject with the same
+  counters would have had. Such a subject has no un-hasted grid to keep, since its list
+  counter already ran at double speed. Still, whether that update comes depends on Haste.
+  Suppressing it alone would not help: a suppressed dispatch still advances the list
+  counter (3438, 3439, … in `fixhaste_02`), so the next admitted dispatch would take the
+  same offset. A fix (R7) would record the list counter, the world value and `+0x3A0` when
+  the parent is first constructed. Since `ProcessEffectList` increments `+0x3A0` at its
+  start, the hook could then admit a dispatch at that world value only from the same call
+  (or after a rebuild of the same parent in it), and take the offset from the recorded
+  counter.
+- **Worker end after a rebuild in the second hasted update.** In `fixhaste_01` the buff's
+  removal pass at 33833 ran in the subject's second update of that tick, after the admitted
+  dispatch. It reseeded remaining = deadline − world, which the no-op dispatch then did not
+  count down. From there the remaining duration was one tick longer than at normal speed,
+  and every later heal rebuild in the same position kept it so. The worker ended at its
+  deadline, 33923, instead of one tick before it, as in the control (33172, deadline 33173). No pulse fell on that tick; one that did could
+  heal once more than at normal speed. A fix (R8) would take one tick off the seeded
+  remaining duration when a rebuild follows the tick's admitted dispatch.
+
+Not covered yet:
+
+- Attack and movement rates under Haste. The correction leaves actor scheduling,
+  `m_AISpeed` and `+0x3A0` alone, but that is not measured.
+- Corrected Improved Haste, SR-shaped Haste, and Slow. The dispatch hook can only drop
+  dispatches, not add them, so a slowed subject would keep its native slower cadence.
+- A pause during a corrected regeneration. A pause steps world time back one tick, and the
+  repeated tick after it is suppressed, so the corrected grid is locked to world time where
+  the native one shifts (step 2).
+- Consecutive stops, removal or refresh during a stop, an application mid-stop, explicit
+  removal, caster and immune subjects, save/load, time compression and area travel.
+- There is no removal hook. A parent re-added at the same address counts as new only when its
+  origin differs from the tracked one.
+
 ## Host validation
 
 ```powershell
@@ -589,6 +753,30 @@ Python tests passed. The Time Stop trigger adds 3 queue-request tests that run t
 against stub bindings; on 2026-10-23 all 16 guard groups and all 60 Python tests passed.
 The Haste trigger adds 2 more; after step 3 on 2026-10-23, all 16 guard groups and all 62
 Python tests passed.
+
+The correction prototype adds 36: 34 in `test_fix.py` and 2 for the `fix` request in
+`test_lab_rc.py`.
+
+- 18 run the four hook bodies in Unicorn on synthetic memory. They cover one deadline shift
+  per frozen world tick, one admitted dispatch per world tick on active time, the phase
+  restore across rebuilds, a reused parent address with another origin, the reseed after a
+  heal and a bounded walk of a cyclic list. One test hands its state through all four hooks
+  across a hasted heal and a stop.
+- 7 run `Select`, `Verify`, `Disable`, `Status` and `Install` against stub bindings:
+  fail-closed selection, the idle frozen hook until `Verify`, a layout mismatch, and the
+  pause and main-menu preconditions.
+- 4 emulate the native regeneration AIUpdate (`0x1A5CA0`) from the pinned executable, with
+  the hooked epilog: a suppressed dispatch is a no-op, elapsed drives the countdown, the
+  pulse rule holds, and a frozen worker leaves through the patched epilog untouched.
+- 5 check the windows in the pinned executable: whole instructions without relative
+  operands, no direct branch and no table or pointer into a window, the role registers, and
+  no overlap with the observer's windows.
+
+A scratch mutation check replaced 15 single guards or rules in `CBRTFix.lua`, one at a time:
+among them the once-per-tick guards, the resref and opcode filters, the origin check, the
+reseed formula, and fail-closed selection and verification. `test_fix.py` failed for every
+mutant. After step 4 on 2026-10-23, all 16 guard groups and all 98 Python tests passed.
+
 Fixture and decoder tests use synthetic data; assembly tests use synthetic memory
 and the pinned executable on disk. They do not execute the game or prove the
 EEex trampoline integration works at runtime.
