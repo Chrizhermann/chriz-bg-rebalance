@@ -68,8 +68,24 @@ class ReportTests(unittest.TestCase):
                          (10, 50, None, [[52, 80, 215]]))
 
     def test_repeated_effects_keep_their_own_rows(self):
-        self.assertEqual(tc_report.effects("A/1/4096/5,A/1/4096/9,B/2/1/0"),
-                         {"A/1": (4096, 5), "A/1#2": (4096, 9), "B/2": (1, 0)})
+        self.assertEqual(tc_report.copies("A/1/4096/5,A/1/4096/9,B/2/1/0"),
+                         {"A/1": [(4096, 5), (4096, 9)], "B/2": [(1, 0)]})
+        # Session d2's case A: a stop moved the first sleep, a pulse added a second, then the
+        # first went and the list moved the second to the front. Its row must stay its own.
+        records = [{"k": "header", "lab": "x", "records": 5}, sample(31, fx="S/39/4096/166"),
+                   sample(68, fx="S/39/4096/167"), sample(290, fx="S/39/4096/389"),
+                   sample(332, fx="S/39/4096/389,S/39/4096/466"), sample(410, fx="S/39/4096/466")]
+        rows = tc_report.summarize(records[0], records[1:])["actors"]["10"]["effects"]
+        self.assertEqual((rows["S/39"]["deadline"], rows["S/39"]["moves"][-1], rows["S/39"]["removed"]),
+                         (166, [290, 167, 389], 410))
+        self.assertEqual((rows["S/39#2"]["seen"], rows["S/39#2"]["deadline"], rows["S/39#2"]["moves"],
+                          rows["S/39#2"]["removed"]), (332, 466, [], None))
+        self.assertEqual(sum(new - old for _, old, new in rows["S/39"]["moves"]), 223)
+
+    def test_a_copy_moves_by_at_most_the_ticks_elapsed(self):
+        self.assertEqual(tc_report.match([100, 200], [200, 104], 3), ([(1, 0), (0, 1)], [], []))
+        self.assertEqual(tc_report.match([100], [150], 3), ([], [0], [0]))
+        self.assertEqual(tc_report.match([100], [101], 0), ([(0, 0)], [], []))
 
 
 if __name__ == "__main__":

@@ -5,7 +5,9 @@ Usage: python -B research/timestop-lab/tc_report.py SAMPLES.jsonl [--json OUT]
 
 Read only. Times are world ticks (15 per second). For each tracked creature: HP changes, AI
 speed changes and each tracked effect (source/opcode) with its deadline when first seen,
-every deadline move and its removal. For each projectile: its decode, the tick it got an ID,
+every deadline move and its removal. Copies of one effect that a creature has at the same time
+(a cloud's next pulse) get rows of their own ('#2', ...), told apart by their deadlines, since
+the engine reorders its list when one goes. For each projectile: its decode, the tick it got an ID,
 the ticks it moved, its area counters (arrival, remaining explosions, pulse countdown) when
 they changed, and its end. Stops: the ticks the counter at game +0x9690 was set, and the caster.
 Marks: the labels script actions recorded. A record is kept only when something changed, so
@@ -27,17 +29,34 @@ def load(path: Path) -> tuple[dict, list[dict]]:
     return lines[0], lines[1:]
 
 
-def effects(text: str) -> dict[str, tuple[int, int]]:
-    """'SRC/op/timing/deadline,...' -> {'SRC/op': (timing, deadline)}; a second copy gets '#2'."""
-    out: dict[str, tuple[int, int]] = {}
+def copies(text: str) -> dict[str, list[tuple[int, int]]]:
+    """'SRC/op/timing/deadline,...' -> {'SRC/op': [(timing, deadline), ...]} in list order."""
+    out: dict[str, list[tuple[int, int]]] = {}
     for item in filter(None, (text or "").split(",")):
         source, opcode, timing, deadline = item.split("/")
-        key, n = f"{source}/{opcode}", 1
-        while key in out:
-            n += 1
-            key = f"{source}/{opcode}#{n}"
-        out[key] = (int(timing), int(deadline))
+        out.setdefault(f"{source}/{opcode}", []).append((int(timing), int(deadline)))
     return out
+
+
+def match(before: list[int], now: list[int], elapsed: int) -> tuple[list[tuple[int, int]], list[int], list[int]]:
+    """Pairs (index before, index now) of the same copies of one effect, then the indexes of the
+    copies that went and of those that came. A copy keeps its deadline, or a stop moves it later
+    by at most one tick per tick elapsed (plus one: a creature's first frozen pass counts one);
+    the engine reorders the list when a copy goes, so the order alone cannot tell them apart."""
+    pairs, left, new = [], set(range(len(before))), set(range(len(now)))
+    for i in sorted(left):
+        j = next((j for j in sorted(new) if now[j] == before[i]), None)
+        if j is not None:
+            pairs.append((i, j))
+            left.discard(i)
+            new.discard(j)
+    for i, j in sorted(((i, j) for i in left for j in new if 0 < now[j] - before[i] <= elapsed + 1),
+                       key=lambda p: (now[p[1]] - before[p[0]], p)):
+        if i in left and j in new:
+            pairs.append((i, j))
+            left.discard(i)
+            new.discard(j)
+    return pairs, sorted(left), sorted(new)
 
 
 def stops(samples: list[dict]) -> list[dict]:
@@ -60,6 +79,7 @@ def summarize(header: dict, records: list[dict]) -> dict:
     marks = [{"label": r["label"], "w": r["w"], "actor": r.get("actor")} for r in records if r.get("k") == "mark"]
     actors: dict[int, dict] = {}
     previous: dict[int, dict] = {}
+    live: dict[int, dict[str, list[tuple[str, int]]]] = {}  # per actor: effect -> [(row, deadline)]
     for record in samples:
         for state in record.get("a", []):
             ident = state["id"]
@@ -73,20 +93,41 @@ def summarize(header: dict, records: list[dict]) -> dict:
                 entry["hp"].append([record["w"], state["hp"]])
             if last is None or last.get("sp") != state["sp"]:
                 entry["speed"].append([record["w"], state["sp"]])
-            now, before = effects(state.get("fx", "")), effects((last or {}).get("fx", ""))
-            for key, (timing, deadline) in now.items():
-                item = entry["effects"].setdefault(key, {"seen": record["w"], "timing": timing, "deadline": deadline,
-                                                         "moves": [], "removed": None})
-                if key in before and before[key][1] != deadline:
-                    item["moves"].append([record["w"], before[key][1], deadline])
-                if key not in before and item["removed"] is not None:
-                    # Removed, then applied again (a cloud's next pulse): [removed, again, deadline].
-                    item.setdefault("again", []).append([item["removed"], record["w"], deadline])
-                    item["removed"] = None
-            for key in before:
-                if key not in now and key in entry["effects"]:
-                    entry["effects"][key]["removed"] = record["w"]
-            previous[ident] = state
+            now, held = copies(state.get("fx", "")), live.setdefault(ident, {})
+            elapsed = max(record["w"] - last["w"], 0) if last else 0
+            rows = entry["effects"]
+            for group in sorted(set(now) | set(held)):
+                before, current = held.get(group, []), now.get(group, [])
+                pairs, went, came = match([d for _, d in before], [d for _, d in current], elapsed)
+                names: list[str | None] = [None] * len(current)
+                for i, j in pairs:
+                    name, old = before[i]
+                    if current[j][1] != old:
+                        rows[name]["moves"].append([record["w"], old, current[j][1]])
+                    names[j] = name
+                for i in went:
+                    rows[before[i][0]]["removed"] = record["w"]
+                for j in came:
+                    timing, deadline = current[j]
+                    again = next((name for name, row in rows.items()
+                                  if name.split("#")[0] == group and row["removed"] is not None), None)
+                    if again:
+                        # Removed, then applied again (a cloud's next pulse): [removed, again, deadline].
+                        rows[again].setdefault("again", []).append([rows[again]["removed"], record["w"], deadline])
+                        rows[again]["removed"] = None
+                        names[j] = again
+                        continue
+                    name, n = group, 1
+                    while name in rows:
+                        n += 1
+                        name = f"{group}#{n}"
+                    rows[name] = {"seen": record["w"], "timing": timing, "deadline": deadline, "moves": [],
+                                  "removed": None}
+                    names[j] = name
+                held[group] = [(names[j], current[j][1]) for j in range(len(current))]
+                if not current:
+                    del held[group]
+            previous[ident] = {**state, "w": record["w"]}
     projectiles: dict[int, dict] = {}
     decodes = []
     for record in records:
