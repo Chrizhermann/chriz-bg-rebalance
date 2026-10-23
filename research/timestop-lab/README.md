@@ -932,13 +932,17 @@ periodic list as a whole.
 
 ```powershell
 pwsh -NoProfile -File research/timestop-lab/Test-LabGuards.ps1
-$env:CBRTS_TEST_DEPS = '%USERPROFILE%\AppData\Local\Temp\cbr-timestop-research-20260926\pylibs'
+# once: the pinned native-analysis wheels, into a directory outside %TEMP%
+python -m pip install --no-deps --only-binary=:all: --require-hashes --target <dir> -r research/timestop-lab/test-requirements.txt
+$env:CBRTS_TEST_DEPS = '<dir>'
+$env:CBRTS_TEST_EXE = '<a copy of the pinned Baldur.exe>'  # optional; default is the Steam install
+$env:PYTHONPATH = '<repository>\tests'
 python -B -m unittest discover -s research/timestop-lab -p 'test_*.py' -v
 ```
 
 Python 3.11, `lupa.luajit21`, Capstone 5.0.9, pefile 2024.8.26,
 Keystone 0.9.2 and Unicorn 2.1.4 were used. The extra native-analysis libraries
-are in the temporary dependency directory, not installed into the game.
+are in their own dependency directory, not installed into the game.
 For the 1.3.1 pin on 2026-10-20, the same versions were installed with
 `pip install --no-deps --require-hashes --target <dir>` beside lupa 2.8 (LuaJIT 2.1):
 all 14 guard groups and all 32 Python tests passed. With the smoke-test fixes above there
@@ -974,11 +978,21 @@ mutant. After step 4 on 2026-10-23, all 16 guard groups and all 98 Python tests 
 
 The [Time Clocks lab](#time-clocks-lab-2026-10-23) adds its variant, installer, requests,
 driver, report and Spell Revisions staging. On 2026-10-24 all 21 guard groups passed with
-`CBR_LAB_VARIANT` unset and set to `timeclocks`, and so did the 96 tests of the modules that
-need no native-analysis library, under both:
+`CBR_LAB_VARIANT` unset and set to `timeclocks`, and so did the tests of the modules that
+need no native-analysis library (96, and 98 with the correction prototype's request), under
+both:
 `python -B -m unittest test_tc_session test_tc_requests test_lab_rc test_fixtures test_lab_variant test_decode_trace test_qa_menu test_sr_cloudkill test_tc_report`
-in `research/timestop-lab`, with `PYTHONPATH` at the repository's `tests`. The dependency
-directory above is no longer on this PC, so `test_observer.py` did not run.
+in `research/timestop-lab`, with `PYTHONPATH` at the repository's `tests`.
+
+`test_observer.py` and `test_fix.py` need the native-analysis libraries. The first
+dependency directory, `%LOCALAPPDATA%\Temp\cbr-timestop-research-20260926\pylibs` from the
+offline research of 2026-09-26, was gone by 2026-10-18; the reinstall of 2026-10-20 went
+into a session's scratch folder, also under `%TEMP%`. On 2026-10-24 that install, checked
+file by file against its wheels' `RECORD` hashes, was copied to
+`%LOCALAPPDATA%\cbr-test-deps\timestop-lab-20261024`, and `test-requirements.txt` now pins
+the four wheels for a fresh install. With it and a copy of the pinned executable in
+`CBRTS_TEST_EXE`, after merging the correction prototype, all 143 tests passed under both
+variants (98 above, `test_observer.py` 11 and `test_fix.py` 34), and all 21 guard groups.
 Fixture and decoder tests use synthetic data; assembly tests use synthetic memory
 and the pinned executable on disk. They do not execute the game or prove the
 EEex trampoline integration works at runtime.
