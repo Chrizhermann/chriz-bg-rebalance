@@ -7,9 +7,12 @@ Read only. Times are world ticks (15 per second). For each tracked creature: HP 
 speed changes and each tracked effect (source/opcode) with its deadline when first seen,
 every deadline move and its removal. Copies of one effect that a creature has at the same time
 (a cloud's next pulse) get rows of their own ('#2', ...), told apart by their deadlines, since
-the engine reorders its list when one goes. For each projectile: its decode, the tick it got an ID,
-the ticks it moved, its area counters (arrival, remaining explosions, pulse countdown) when
-they changed, and its end. Stops: the ticks the counter at game +0x9690 was set, and the caster.
+the engine reorders its list when one goes. A deadline counts as moved only in a pass of the
+creature through its effect list, by at most the ticks since its pass before; any other change
+is a removal and a new copy (an 'again' entry when it can take a removed copy's row). For each
+projectile: its decode, the tick it got an ID, the ticks it moved, its area counters (arrival,
+remaining explosions, pulse countdown) when they changed, and its end. Stops: the ticks the
+counter at game +0x9690 was set, and the caster.
 Marks: the labels script actions recorded. A record is kept only when something changed, so
 a tick without a record repeats the one before it.
 """
@@ -38,11 +41,11 @@ def copies(text: str) -> dict[str, list[tuple[int, int]]]:
     return out
 
 
-def match(before: list[int], now: list[int], elapsed: int) -> tuple[list[tuple[int, int]], list[int], list[int]]:
+def match(before: list[int], now: list[int], most: int) -> tuple[list[tuple[int, int]], list[int], list[int]]:
     """Pairs (index before, index now) of the same copies of one effect, then the indexes of the
     copies that went and of those that came. A copy keeps its deadline, or a stop moves it later
-    by at most one tick per tick elapsed (plus one: a creature's first frozen pass counts one);
-    the engine reorders the list when a copy goes, so the order alone cannot tell them apart."""
+    by at most `most` ticks (see `summarize`); the engine reorders the list when a copy goes, so
+    the order alone cannot tell them apart."""
     pairs, left, new = [], set(range(len(before))), set(range(len(now)))
     for i in sorted(left):
         j = next((j for j in sorted(new) if now[j] == before[i]), None)
@@ -50,7 +53,7 @@ def match(before: list[int], now: list[int], elapsed: int) -> tuple[list[tuple[i
             pairs.append((i, j))
             left.discard(i)
             new.discard(j)
-    for i, j in sorted(((i, j) for i in left for j in new if 0 < now[j] - before[i] <= elapsed + 1),
+    for i, j in sorted(((i, j) for i in left for j in new if 0 < now[j] - before[i] <= most),
                        key=lambda p: (now[p[1]] - before[p[0]], p)):
         if i in left and j in new:
             pairs.append((i, j))
@@ -79,6 +82,7 @@ def summarize(header: dict, records: list[dict]) -> dict:
     marks = [{"label": r["label"], "w": r["w"], "actor": r.get("actor")} for r in records if r.get("k") == "mark"]
     actors: dict[int, dict] = {}
     previous: dict[int, dict] = {}
+    passes: dict[int, int] = {}  # per actor: the tick of its last pass through its effect list
     live: dict[int, dict[str, list[tuple[str, int]]]] = {}  # per actor: effect -> [(row, deadline)]
     for record in samples:
         for state in record.get("a", []):
@@ -94,11 +98,20 @@ def summarize(header: dict, records: list[dict]) -> dict:
             if last is None or last.get("sp") != state["sp"]:
                 entry["speed"].append([record["w"], state["sp"]])
             now, held = copies(state.get("fx", "")), live.setdefault(ident, {})
-            elapsed = max(record["w"] - last["w"], 0) if last else 0
+            # A stop moves a creature's deadlines only in its passes through its effect list, each
+            # time by at most the ticks since its pass before (at least one: its first frozen pass
+            # counts one). A pass advances the check counter `ck` (+0x3A0); a sleeping creature,
+            # for one, has a pass only every third tick. Without `ck`, any record may show a pass.
+            most = 0
+            if last is None:
+                passes[ident] = record["w"]
+            elif "ck" not in state or state["ck"] != last.get("ck"):
+                most = max(record["w"] - passes[ident], 1)
+                passes[ident] = record["w"]
             rows = entry["effects"]
             for group in sorted(set(now) | set(held)):
                 before, current = held.get(group, []), now.get(group, [])
-                pairs, went, came = match([d for _, d in before], [d for _, d in current], elapsed)
+                pairs, went, came = match([d for _, d in before], [d for _, d in current], most)
                 names: list[str | None] = [None] * len(current)
                 for i, j in pairs:
                     name, old = before[i]

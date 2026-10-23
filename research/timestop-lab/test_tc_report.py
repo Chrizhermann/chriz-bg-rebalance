@@ -12,9 +12,11 @@ sys.dont_write_bytecode = True
 import tc_report
 
 
-def sample(w, ts=0, hp=80, sp=1, fx="", pj=()):
-    return {"k": "s", "w": w, "p": False, "ts": ts, "tc": 11 if ts else -1,
-            "a": [{"id": 10, "hp": hp, "sp": sp, "fx": fx}], "pj": list(pj)}
+def sample(w, ts=0, hp=80, sp=1, fx="", pj=(), ck=None):
+    actor = {"id": 10, "hp": hp, "sp": sp, "fx": fx}
+    if ck is not None:
+        actor["ck"] = ck
+    return {"k": "s", "w": w, "p": False, "ts": ts, "tc": 11 if ts else -1, "a": [actor], "pj": list(pj)}
 
 
 class ReportTests(unittest.TestCase):
@@ -82,10 +84,26 @@ class ReportTests(unittest.TestCase):
                           rows["S/39#2"]["removed"]), (332, 466, [], None))
         self.assertEqual(sum(new - old for _, old, new in rows["S/39"]["moves"]), 223)
 
-    def test_a_copy_moves_by_at_most_the_ticks_elapsed(self):
-        self.assertEqual(tc_report.match([100, 200], [200, 104], 3), ([(1, 0), (0, 1)], [], []))
-        self.assertEqual(tc_report.match([100], [150], 3), ([], [0], [0]))
-        self.assertEqual(tc_report.match([100], [101], 0), ([(0, 0)], [], []))
+    def test_a_copy_moves_by_at_most_the_given_ticks(self):
+        self.assertEqual(tc_report.match([100, 200], [200, 104], 4), ([(1, 0), (0, 1)], [], []))
+        self.assertEqual(tc_report.match([100], [104], 3), ([], [0], [0]))
+        self.assertEqual(tc_report.match([100], [101], 1), ([(0, 0)], [], []))
+        self.assertEqual(tc_report.match([100], [101], 0), ([], [0], [0]))
+
+    def test_a_creature_with_sparse_passes_keeps_its_moves(self):
+        # Session d2's case A: the sleeping target had a pass only every third tick (its check
+        # counter `ck`), and each frozen pass moved its deadlines by the ticks since the one
+        # before, the first by one. A copy that changes without a pass came anew.
+        records = [{"k": "header", "lab": "x", "records": 9},
+                   sample(65, ck=31, fx="S/39/4096/166"), sample(66, ck=31, fx="S/39/4096/166"),
+                   sample(68, ts=180, ck=32, fx="S/39/4096/167"), sample(70, ts=176, ck=32, fx="S/39/4096/167"),
+                   sample(71, ts=174, ck=33, fx="S/39/4096/170"), sample(74, ts=168, ck=34, fx="S/39/4096/173"),
+                   sample(75, ts=166, ck=34, fx="S/39/4096/175"), sample(77, ts=162, ck=35, fx="S/39/4096/178")]
+        rows = tc_report.summarize(records[0], records[1:])["actors"]["10"]["effects"]
+        self.assertEqual(rows["S/39"]["moves"], [[68, 166, 167], [71, 167, 170], [74, 170, 173], [77, 175, 178]])
+        self.assertEqual((rows["S/39"]["removed"], rows["S/39"]["again"]), (None, [[75, 75, 175]]))
+        self.assertEqual(rows["S/39"]["deadline"], 166)
+        self.assertNotIn("S/39#2", rows)
 
 
 if __name__ == "__main__":
