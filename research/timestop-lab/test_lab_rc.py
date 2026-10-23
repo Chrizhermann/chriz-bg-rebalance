@@ -78,7 +78,14 @@ class RequestSyntaxTests(unittest.TestCase):
                              "pause.lua": ("NO_GAME", "PAUSE_STATE_UNCHANGED"),
                              "dialog.lua": ("CONFIRM_MODE_REQUIRED", "DIALOG_BUTTON_NOT_CLICKABLE"),
                              "pick-character.lua": ("AMBIGUOUS_CHARACTER", "CHARACTER_NOT_FOUND"),
-                             "quit.lua": ("STOP_FIRST",)}.items():
+                             "quit.lua": ("STOP_FIRST",),
+                             "tc-queue.lua": ("PAUSE_FIRST", "NOT_THE_ACTOR", "ACTOR_BUSY", "TIME_STOP_ACTIVE",
+                                              "UNKNOWN_STEP", "INVALID_TARGET"),
+                             "sampler.lua": ("EEEX_REQUIRED", "CONSOLE_REQUIRED", "UNEXPECTED_OBJECT_ARRAY"),
+                             "sampler-export.lua": ("SAMPLER_FIRST", "EXISTS"),
+                             "save.lua": ("PAUSE_FIRST", "NOT_THE_WORLD_SCREEN", "IN_DIALOGUE", "SIDEBAR_GREYED"),
+                             "load-save.lua": ("EXPECTED_MENU", "SAVE_NOT_FOUND", "AMBIGUOUS_SAVE"),
+                             "party-ai.lua": ("NO_GAME", "PARTY_AI_UNCHANGED")}.items():
             text = (REQUESTS / name).read_text(encoding="utf-8")
             for guard in guards:
                 self.assertIn(guard, text, f"{name} lacks {guard}")
