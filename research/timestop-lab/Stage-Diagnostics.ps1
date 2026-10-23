@@ -113,7 +113,10 @@ $sources = [ordered]@{
     'override\M_EEexRC.lua' = Join-Path $remote 'eeexremote\M_EEexRC.lua'
     'override\EEexRC.menu' = Join-Path $remote 'eeexremote\EEexRC.menu'
 }
-foreach ($resref in @('CBRTBUF','CBRTREG','CBRTHST','CBRTIHS','CBRTSTP')) {
+$resrefs = @('CBRTBUF','CBRTREG','CBRTHST','CBRTIHS','CBRTSTP')
+# The Time Clocks lab also gets Slow, Spell Revisions' Haste and a disease (build_fixtures.py).
+if ($config.Variant -ceq 'timeclocks') { $resrefs += @('CBRTSLW','CBRTSRH','CBRTDIS') }
+foreach ($resref in $resrefs) {
     $sources["override\$resref.SPL"] = Join-Path $generated "$resref.SPL"
 }
 # Built from the stock UI.MENU in the lab's own BIF, never from an override copy.
@@ -151,7 +154,7 @@ foreach ($entry in $sources.GetEnumerator()) {
 }
 $idPath = Join-Path $lab 'CBRTSLab.id'
 Assert-LabNoReparsePath $idPath
-$idText = "CBR TimeStop Lab 2730`n"
+$idText = $config.IdText
 if ((Test-Path -LiteralPath $idPath) -and [IO.File]::ReadAllText($idPath) -cne $idText) { throw 'Lab ID collision.' }
 $output = Join-Path $lab 'cbr-timestop-output'
 Assert-LabNoReparsePath $output

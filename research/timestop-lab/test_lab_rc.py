@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -211,14 +212,14 @@ class QueueRequestTests(unittest.TestCase):
 class ExitTests(unittest.TestCase):
     """A game that exits can never answer: requests end as "exited", never stay pending."""
 
-    PATHS = ("LAB", "OVERRIDE", "LOG", "PENDING", "COMMAND", "CLAIM", "RESULT", "EXIT_POLL", "processes")
+    PATHS = ("LAB", "LAB_ID", "OVERRIDE", "LOG", "PENDING", "COMMAND", "CLAIM", "RESULT", "EXIT_POLL", "processes")
     GAME = {"ProcessId": 1, "Name": "Baldur.exe", "ExecutablePath": "lab", "ours": True}
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
         (root / "override").mkdir()
-        (root / "CBRTSLab.id").write_bytes(b"CBR TimeStop Lab 2730\n")
+        (root / "CBRTSLab.id").write_bytes(lab_rc.LAB_ID)
         self.saved = {name: getattr(lab_rc, name) for name in self.PATHS}
         lab_rc.LAB, lab_rc.OVERRIDE = root, root / "override"
         lab_rc.LOG = root / "cbr-timestop-output" / "rc-log"
@@ -311,6 +312,42 @@ class ExitTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertTrue(lab_rc.COMMAND.exists())
         self.assertTrue(lab_rc.PENDING.exists())
+
+
+class VariantTests(unittest.TestCase):
+    """CBR_LAB_VARIANT picks the lab, as for the PowerShell scripts; nothing else is accepted."""
+
+    def load(self, variant):
+        environment = {key: value for key, value in os.environ.items() if key != "CBR_LAB_VARIANT"}
+        if variant is not None:
+            environment["CBR_LAB_VARIANT"] = variant
+        program = ("import json, lab_rc; print(json.dumps([str(lab_rc.LAB), lab_rc.LAB_ID.decode(), "
+                   "str(lab_rc.LOG), str(lab_rc.COMMAND)]))")
+        return subprocess.run([sys.executable, "-B", "-c", program], cwd=Path(__file__).resolve().parent,
+                              env=environment, capture_output=True, text=True, timeout=60)
+
+    def test_each_variant_names_its_own_lab_and_identity(self):
+        games = Path(os.environ["USERPROFILE"]) / "Games"
+        for variant, folder, name in ((None, "CBR-TimeStop-2.7.3.0", "CBR TimeStop Lab 2730"),
+                                      ("", "CBR-TimeStop-2.7.3.0", "CBR TimeStop Lab 2730"),
+                                      ("timestop", "CBR-TimeStop-2.7.3.0", "CBR TimeStop Lab 2730"),
+                                      ("timeclocks", "CBR-TimeClocks-2.7.3.0", "CBR TimeClocks Lab 2730")):
+            with self.subTest(variant=variant):
+                done = self.load(variant)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                lab, identity, log, command = json.loads(done.stdout)
+                self.assertEqual(Path(lab), games / folder)
+                self.assertEqual(identity, name + "\n")
+                self.assertEqual(Path(log), games / folder / "cbr-timestop-output" / "rc-log")
+                self.assertEqual(Path(command), games / folder / "override" / "eeex_remote_cmd.lua")
+
+    def test_an_unknown_variant_stops_before_any_lab_is_used(self):
+        for variant in ("TimeClocks", "timeclocks ", "other"):
+            with self.subTest(variant=variant):
+                done = self.load(variant)
+                self.assertNotEqual(done.returncode, 0)
+                self.assertIn("unknown CBR_LAB_VARIANT", done.stderr)
+                self.assertEqual(done.stdout, "")
 
 
 if __name__ == "__main__":

@@ -47,10 +47,14 @@ local function readFile(path)
     local f = assert(io.open(path, "rb"), "Missing lab guard: "..path)
     local s = f:read("*a"); f:close(); return s
 end
+-- The labs Stage-Diagnostics.ps1 builds (CBR_LAB_VARIANT): each names itself in its ID file,
+-- and its engine.lua must name the same profile.
+T.labs = {["CBR TimeStop Lab 2730"] = true, ["CBR TimeClocks Lab 2730"] = true}
 local function assertLab()
-    assert(readFile("CBRTSLab.id") == "CBR TimeStop Lab 2730\n", "Not the owned lab")
-    assert(readFile("engine.lua"):match('engine_name%s*=%s*"CBR TimeStop Lab 2730"'),
-        "Wrong game profile")
+    local id = readFile("CBRTSLab.id"):match("^([^\n]*)\n$")
+    assert(id and T.labs[id], "Not the owned lab")
+    -- The names contain no pattern characters.
+    assert(readFile("engine.lua"):match('engine_name%s*=%s*"' .. id .. '"'), "Wrong game profile")
 end
 local function assertPaused()
     local chitin = EngineGlobals and EngineGlobals.g_pBaldurChitin

@@ -39,33 +39,6 @@ function Save-Manifest {
     Write-OwnedJson -Path $manifestPath -Value $script:manifest
 }
 
-function Get-TreeInventory {
-    param([string] $Root)
-    $full = ConvertTo-LabFullPath $Root
-    foreach ($file in @(Get-LabPhysicalFiles $full)) {
-        [pscustomobject]@{
-            RelativePath = $file.FullName.Substring($full.Length + 1).Replace('\', '/')
-            Size = $file.Length
-            Sha256 = Get-LabSha256 $file.FullName
-        }
-    }
-}
-
-function Get-InventoryDigest {
-    param([object[]] $Inventory)
-    $rows = @{}
-    foreach ($item in $Inventory) { $rows[$item.RelativePath] = $item.Sha256 }
-    [string[]] $keys = @($rows.Keys)
-    [Array]::Sort($keys, [StringComparer]::Ordinal)
-    $lines = foreach ($key in $keys) { "$key`t$($rows[$key])" }
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try {
-        $bytes = $utf8.GetBytes(($lines -join "`n") + "`n")
-        ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
-    }
-    finally { $sha.Dispose() }
-}
-
 function Copy-OwnedFile {
     param([string] $Source, [string] $Destination, [string] $ExpectedHash)
     if (-not (Test-LabPathWithin -Path $Destination -Root $lab)) { throw 'CBR_LAB COPY_OUTSIDE_LAB' }
@@ -107,8 +80,8 @@ function Assert-StagedInputs {
         (Get-LabSha256 (Join-Path $lab 'weidu.exe')) -cne $expectedWeidu) {
         throw 'CBR_LAB STAGED_EXECUTABLE_MISMATCH'
     }
-    $inventory = @(Get-TreeInventory (Join-Path $lab 'EEex'))
-    if ((Get-InventoryDigest $inventory) -cne $expectedEEexTree) { throw 'CBR_LAB EEEX_STAGE_MISMATCH' }
+    $inventory = @(Get-LabTreeInventory (Join-Path $lab 'EEex'))
+    if ((Get-LabInventoryDigest $inventory) -cne $expectedEEexTree) { throw 'CBR_LAB EEEX_STAGE_MISMATCH' }
     Assert-LabProfile $script:manifest
 }
 
@@ -159,20 +132,20 @@ if ($Phase -ceq 'Copy') {
         if (Test-LabPathWithin -Path $inputPath -Root $lab) { throw 'CBR_LAB INPUT_INSIDE_DESTINATION' }
     }
     Assert-LabPristineSource
-    $eeexInventory = @(Get-TreeInventory (Join-Path $archive 'EEex'))
-    if ((Get-InventoryDigest $eeexInventory) -cne $expectedEEexTree) { throw 'CBR_LAB PINNED_EEEX_ARCHIVE_REQUIRED' }
+    $eeexInventory = @(Get-LabTreeInventory (Join-Path $archive 'EEex'))
+    if ((Get-LabInventoryDigest $eeexInventory) -cne $expectedEEexTree) { throw 'CBR_LAB PINNED_EEEX_ARCHIVE_REQUIRED' }
     if ((Get-LabSha256 $weidu) -cne $expectedWeidu -or
         [Diagnostics.FileVersionInfo]::GetVersionInfo($weidu).FileVersion -cne '251.00') {
         throw 'CBR_LAB PINNED_WEIDU_25100_REQUIRED'
     }
     # Hash and reject linked source trees before creating the destination.
-    $sourceInventory = @(Get-TreeInventory $config.SourceRoot)
+    $sourceInventory = @(Get-LabTreeInventory $config.SourceRoot)
     Assert-LabNoReparsePath $config.ProfileRoot
     if (Test-Path -LiteralPath $lab) {
         $script:manifest = Read-LabManifest
         if ($manifest.Phase -cnotin @('Copying', 'Copied')) { throw 'CBR_LAB COPY_AFTER_INSTALL_REFUSED' }
         if ($manifest.EEexTreeSha256 -cne $expectedEEexTree -or $manifest.WeiduSha256 -cne $expectedWeidu -or
-            $manifest.SourceTreeSha256 -cne (Get-InventoryDigest $sourceInventory)) {
+            $manifest.SourceTreeSha256 -cne (Get-LabInventoryDigest $sourceInventory)) {
             throw 'CBR_LAB COPY_INPUTS_CHANGED'
         }
         if (Test-Path -LiteralPath $config.ProfileRoot) {
@@ -187,12 +160,12 @@ if ($Phase -ceq 'Copy') {
     else {
         if (Test-Path -LiteralPath $config.ProfileRoot) { throw 'CBR_LAB PROFILE_ALREADY_EXISTS_UNRELATED' }
         $script:manifest = [pscustomobject][ordered]@{
-            SchemaVersion = 1; LabId = 'cbr-timestop-2730'; InstanceId = [guid]::NewGuid().ToString()
+            SchemaVersion = 1; LabId = $config.LabId; InstanceId = [guid]::NewGuid().ToString()
             LabRoot = $lab; ProfileRoot = $config.ProfileRoot; EngineName = $config.EngineName
             SourceRoot = $config.SourceRoot; ExeSha256 = $config.ExeSha256
             EEexCommit = $config.EEexCommit; EEexVersion = $config.EEexVersion
             EEexTreeSha256 = $expectedEEexTree; WeiduSha256 = $expectedWeidu; WeiduVersion = 25100
-            SourceTreeSha256 = Get-InventoryDigest $sourceInventory
+            SourceTreeSha256 = Get-LabInventoryDigest $sourceInventory
             Phase = 'Copying'; CreatedUtc = [DateTime]::UtcNow.ToString('o'); InstalledHashes = $null
         }
         $null = [IO.Directory]::CreateDirectory($lab)
@@ -283,8 +256,8 @@ else {
         if ($manifest.Phase -cnotin @('Installed', 'Validated')) { throw 'CBR_LAB SUCCESSFUL_INSTALL_REQUIRED' }
         $manifest.InstalledHashes = Assert-InstalledEEex
         # This checks that all pristine inputs remain byte-identical after setup.
-        $sourceInventory = @(Get-TreeInventory $config.SourceRoot)
-        if ((Get-InventoryDigest $sourceInventory) -cne $manifest.SourceTreeSha256) {
+        $sourceInventory = @(Get-LabTreeInventory $config.SourceRoot)
+        if ((Get-LabInventoryDigest $sourceInventory) -cne $manifest.SourceTreeSha256) {
             throw 'CBR_LAB SOURCE_CHANGED_SINCE_COPY'
         }
         $manifest.Phase = 'Validated'

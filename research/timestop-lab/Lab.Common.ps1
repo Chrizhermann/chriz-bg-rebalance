@@ -1,18 +1,40 @@
-# Shared guards for this one disposable lab. Dot-sourcing performs no I/O or setup.
+# Shared guards for the disposable labs. Dot-sourcing performs no I/O or setup.
 Set-StrictMode -Version Latest
+
+# The scripts build one of two labs, chosen by CBR_LAB_VARIANT: the Time Stop observation lab
+# (unset or 'timestop') or the lab for the Chriz BG Time Clocks mod ('timeclocks'). Each has its
+# own folder, engine name, profile, lab ID and ownership markers, so neither ever touches the
+# other's files. Any other value is refused.
+function Get-LabVariant {
+    $name = if ([string]::IsNullOrEmpty($env:CBR_LAB_VARIANT)) { 'timestop' } else { $env:CBR_LAB_VARIANT }
+    if ($name -ceq 'timestop') {
+        return [pscustomobject]@{Name='timestop'; Folder='CBR-TimeStop-2.7.3.0'; EngineName='CBR TimeStop Lab 2730'
+            LabId='cbr-timestop-2730'; MarkerName='.cbr-timestop-lab.json'}
+    }
+    if ($name -ceq 'timeclocks') {
+        return [pscustomobject]@{Name='timeclocks'; Folder='CBR-TimeClocks-2.7.3.0'; EngineName='CBR TimeClocks Lab 2730'
+            LabId='cbr-timeclocks-2730'; MarkerName='.cbr-timeclocks-lab.json'}
+    }
+    throw 'CBR_LAB UNKNOWN_VARIANT'
+}
 
 function Get-LabConfiguration {
     $documents = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
     if ([string]::IsNullOrWhiteSpace($documents)) { throw 'CBR_LAB DOCUMENTS_PATH_UNAVAILABLE' }
+    $variant = Get-LabVariant
     [pscustomobject]@{
-        LabRoot = (Join-Path $env:USERPROFILE 'Games\CBR-TimeStop-2.7.3.0')
+        Variant = $variant.Name
+        LabId = $variant.LabId
+        LabRoot = (Join-Path $env:USERPROFILE ('Games\' + $variant.Folder))
         SourceRoot = "C:\Program Files (x86)\Steam\steamapps\common\Baldur's Gate II Enhanced Edition"
-        EngineName = 'CBR TimeStop Lab 2730'
-        ProfileRoot = Join-Path $documents 'CBR TimeStop Lab 2730'
+        EngineName = $variant.EngineName
+        ProfileRoot = Join-Path $documents $variant.EngineName
         ExeSha256 = 'b51093a49140b2b8a7c046b4652bb8e535be24ebbc12b1d735e0b94217a14d57'
         EEexCommit = 'a6d21abe44e20509f5d0259ccc6c7e7f9d12b285'
         EEexVersion = '1.3.1'
-        MarkerName = '.cbr-timestop-lab.json'
+        MarkerName = $variant.MarkerName
+        # The lab identity file the observer and the console client check.
+        IdText = $variant.EngineName + "`n"
     }
 }
 
@@ -146,6 +168,33 @@ function Get-LabSha256 {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
 }
 
+function Get-LabTreeInventory {
+    param([Parameter(Mandatory)][string] $Root)
+    $full = ConvertTo-LabFullPath $Root
+    foreach ($file in @(Get-LabPhysicalFiles $full)) {
+        [pscustomobject]@{
+            RelativePath = $file.FullName.Substring($full.Length + 1).Replace('\', '/')
+            Size = $file.Length
+            Sha256 = Get-LabSha256 $file.FullName
+        }
+    }
+}
+
+function Get-LabInventoryDigest {
+    param([object[]] $Inventory)
+    $rows = @{}
+    foreach ($item in $Inventory) { $rows[$item.RelativePath] = $item.Sha256 }
+    [string[]] $keys = @($rows.Keys)
+    [Array]::Sort($keys, [StringComparer]::Ordinal)
+    $lines = foreach ($key in $keys) { "$key`t$($rows[$key])" }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($lines -join "`n") + "`n")
+        ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally { $sha.Dispose() }
+}
+
 function ConvertTo-LabLoaderConfiguration {
     # InfinityLoader writes its own cache into the [Auto-Generated] section on launch: the
     # executable's file time (CachedExeTime=) and resolved pattern addresses (CachedAddress=).
@@ -191,7 +240,7 @@ function Assert-LabManifestValues {
         if ($null -eq $Manifest.PSObject.Properties[$property]) { throw 'CBR_LAB INVALID_OWNERSHIP_MARKER' }
     }
     $instance = [guid]::Empty
-    if ($Manifest.SchemaVersion -ne 1 -or $Manifest.LabId -cne 'cbr-timestop-2730' -or
+    if ($Manifest.SchemaVersion -ne 1 -or $Manifest.LabId -cne $config.LabId -or
         -not [guid]::TryParse([string] $Manifest.InstanceId, [ref] $instance) -or
         $Manifest.LabRoot -ine $config.LabRoot -or $Manifest.ProfileRoot -ine $config.ProfileRoot -or
         $Manifest.EngineName -cne $config.EngineName -or $Manifest.SourceRoot -ine $config.SourceRoot -or
@@ -257,4 +306,88 @@ function Get-LabEEexComponents {
         throw 'CBR_LAB INVALID_COMPONENT_ORDER_OR_DUPLICATE'
     }
     $components
+}
+
+# The Chriz BG Time Clocks components (Time Clocks lab only) and the CBTCOPT.2DA switches each
+# sets. Options need their base component; 220 turns off the SLOW switch 200 turns on.
+# A plain hashtable: an ordered one would read an integer key as a position.
+$script:LabTimeClocksComponents = @{
+    100 = @{Requires = $null; Switches = @{TIME_STOP = 1}}
+    110 = @{Requires = 100; Switches = @{STOP_NEW_EFFECTS = 1}}
+    120 = @{Requires = 100; Switches = @{STOP_ACTORS = 1}}
+    200 = @{Requires = $null; Switches = @{HASTE = 1; SLOW = 1}}
+    210 = @{Requires = 200; Switches = @{HASTE_SCOPE = 1}}
+    220 = @{Requires = 200; Switches = @{SLOW = 0}}
+    230 = @{Requires = $null; Switches = @{HASTE_EXPIRY = 1}}
+}
+$script:LabTimeClocksSwitchNames = @('TIME_STOP', 'STOP_NEW_EFFECTS', 'STOP_ACTORS', 'HASTE', 'HASTE_SCOPE', 'SLOW',
+    'HASTE_EXPIRY')
+
+function Assert-LabTimeClocksComponents {
+    # Known components, ascending (the install order), each once, each option after its base.
+    param([AllowEmptyCollection()][int[]] $Components)
+    $seen = @{}
+    $previous = -1
+    foreach ($component in $Components) {
+        if (-not $script:LabTimeClocksComponents.Contains($component)) { throw "CBR_LAB UNKNOWN_TIMECLOCKS_COMPONENT: $component" }
+        if ($component -le $previous) { throw 'CBR_LAB TIMECLOCKS_COMPONENTS_NOT_ASCENDING' }
+        $base = $script:LabTimeClocksComponents[$component].Requires
+        if ($null -ne $base -and -not $seen.ContainsKey($base)) { throw "CBR_LAB TIMECLOCKS_OPTION_WITHOUT_BASE: $component" }
+        $seen[$component] = $true
+        $previous = $component
+    }
+}
+
+function Get-LabTimeClocksSwitches {
+    # The switch values CBTCOPT.2DA must hold after installing these components in order.
+    param([AllowEmptyCollection()][int[]] $Components)
+    Assert-LabTimeClocksComponents $Components
+    $switches = [ordered]@{}
+    foreach ($name in $script:LabTimeClocksSwitchNames) { $switches[$name] = 0 }
+    foreach ($component in $Components) {
+        foreach ($entry in $script:LabTimeClocksComponents[$component].Switches.GetEnumerator()) {
+            $switches[$entry.Key] = $entry.Value
+        }
+    }
+    $switches
+}
+
+function Read-LabTimeClocksTable {
+    # The rows of a CBTCOPT.2DA (2DA V1.0, column VALUE): name -> integer. Anything else fails.
+    param([Parameter(Mandatory)][AllowEmptyString()][string] $Text)
+    $lines = @($Text -split '\r?\n' | Where-Object { $_.Trim().Length -gt 0 })
+    if ($lines.Count -lt 3 -or $lines[0].Trim() -cne '2DA V1.0' -or $lines[2].Trim() -cne 'VALUE') {
+        throw 'CBR_LAB TIMECLOCKS_TABLE_MALFORMED'
+    }
+    $rows = [ordered]@{}
+    foreach ($line in $lines[3..($lines.Count - 1)]) {
+        if ($line -notmatch '^\s*([A-Z_][A-Z0-9_]*)\s+(-?[0-9]+)\s*$' -or $rows.Contains($Matches[1])) {
+            throw 'CBR_LAB TIMECLOCKS_TABLE_MALFORMED'
+        }
+        $rows[$Matches[1]] = [int] $Matches[2]
+    }
+    $rows
+}
+
+function Get-LabWeiDUStack {
+    # The lab's WeiDU.log in install order: EEex's components (Get-LabEEexComponents), then the
+    # Chriz BG Time Clocks components (Time Clocks lab), nothing else and nothing in between.
+    param([Parameter(Mandatory)][AllowEmptyString()][string] $LogText)
+    $eeex = [Collections.Generic.List[string]]::new()
+    $clocks = [Collections.Generic.List[int]]::new()
+    foreach ($line in ($LogText -split '\r?\n')) {
+        if ($line -match '^\s*(?://.*)?$') { continue }
+        if ($line -match '^\s*~(?:[^~]*[/\\])?SETUP-CHRIZ-BG-TIME-CLOCKS\.TP2~\s+#0\s+#([0-9]+)\s+//') {
+            $clocks.Add([int] $Matches[1])
+            continue
+        }
+        if ($clocks.Count -gt 0) { throw 'CBR_LAB UNEXPECTED_WEIDU_COMPONENT_OR_VERSION' }
+        $eeex.Add($line)
+    }
+    $components = @($clocks)
+    if ($components.Count -gt 0 -and (Get-LabConfiguration).Variant -cne 'timeclocks') {
+        throw 'CBR_LAB UNEXPECTED_WEIDU_COMPONENT_OR_VERSION'
+    }
+    Assert-LabTimeClocksComponents $components
+    [pscustomobject]@{EEex = @(Get-LabEEexComponents ($eeex -join "`n")); TimeClocks = $components}
 }

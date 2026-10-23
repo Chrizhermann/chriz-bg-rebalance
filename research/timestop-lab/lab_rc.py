@@ -17,6 +17,8 @@ A game that exits can never answer: --expect-exit (for a request that quits the 
 game never claimed out of override, so that no later start runs it.
 Evidence goes to <lab>/cbr-timestop-output/rc-log/, outside the repository. This client
 never starts, stops or clicks a game itself.
+The lab is the one CBR_LAB_VARIANT names, as for the PowerShell scripts: the Time Stop lab
+(unset or "timestop") or the Time Clocks lab ("timeclocks"); any other value is refused.
 """
 
 from __future__ import annotations
@@ -32,7 +34,14 @@ import sys
 import time
 import uuid
 
-LAB = Path(os.environ["USERPROFILE"]) / "Games" / "CBR-TimeStop-2.7.3.0"
+# Variant -> (lab folder, engine name), as in Lab.Common.ps1.
+VARIANTS = {"timestop": ("CBR-TimeStop-2.7.3.0", "CBR TimeStop Lab 2730"),
+            "timeclocks": ("CBR-TimeClocks-2.7.3.0", "CBR TimeClocks Lab 2730")}
+VARIANT = os.environ.get("CBR_LAB_VARIANT") or "timestop"
+if VARIANT not in VARIANTS:
+    raise SystemExit(f"CBR_RC_ERROR: unknown CBR_LAB_VARIANT {VARIANT!r}")
+LAB = Path(os.environ["USERPROFILE"]) / "Games" / VARIANTS[VARIANT][0]
+LAB_ID = (VARIANTS[VARIANT][1] + "\n").encode("ascii")
 OVERRIDE = LAB / "override"
 LOG = LAB / "cbr-timestop-output" / "rc-log"
 PENDING = LOG / "pending.json"
@@ -53,7 +62,7 @@ def utc() -> str:
 
 def assert_lab() -> None:
     marker = LAB / "CBRTSLab.id"
-    if not marker.is_file() or marker.read_bytes() != b"CBR TimeStop Lab 2730\n":
+    if not marker.is_file() or marker.read_bytes() != LAB_ID:
         raise ClientError(f"Not the owned lab: {LAB}")
 
 

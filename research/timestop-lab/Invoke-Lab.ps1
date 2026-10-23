@@ -10,11 +10,32 @@ $lab = Assert-LabRoot
 $manifest = Read-LabManifest
 Assert-LabProfile $manifest
 if ($manifest.Phase -cne 'Validated') { throw 'Baseline not validated.' }
+# The Time Clocks lab: Install-TimeClocks.ps1 records the WeiDU.log it left and the mod's files.
+$clocks = $null
+if ($config.Variant -ceq 'timeclocks') {
+    $clocksPath = Join-Path $lab 'cbr-timeclocks.json'
+    Assert-LabNoReparsePath $clocksPath
+    if (Test-Path -LiteralPath $clocksPath) {
+        $clocks = [IO.File]::ReadAllText($clocksPath) | ConvertFrom-Json
+        if ($clocks.InstanceId -cne $manifest.InstanceId) { throw 'Time Clocks record identity mismatch.' }
+    }
+}
 foreach ($entry in $manifest.InstalledHashes.PSObject.Properties) {
     $path = Join-Path $lab $entry.Name
     # The loader adds its own address cache to InfinityLoader.ini on every launch.
     $hash = if ($entry.Name -ceq 'InfinityLoader.ini') { Get-LabLoaderConfigurationSha256 $path } else { Get-LabSha256 $path }
-    if ($hash -cne $entry.Value) { throw "Changed installed asset: $($entry.Name)" }
+    $expected = if ($clocks -and $entry.Name -ceq 'WeiDU.log') { $clocks.WeiDULogSha256 } else { $entry.Value }
+    if ($hash -cne $expected) { throw "Changed installed asset: $($entry.Name)" }
+}
+if ($clocks) {
+    $stack = Get-LabWeiDUStack ([IO.File]::ReadAllText((Join-Path $lab 'WeiDU.log')))
+    if ((@($stack.EEex) -join ',') -cne '0,1,8' -or (@($stack.TimeClocks) -join ',') -cne (@($clocks.Components) -join ',')) {
+        throw 'Time Clocks components differ from their record.'
+    }
+    foreach ($entry in $clocks.Installed.PSObject.Properties) {
+        if (-not (Test-LabPathWithin -Path (Join-Path $lab $entry.Name) $lab)) { throw 'Invalid Time Clocks path.' }
+        if ((Get-LabSha256 (Join-Path $lab $entry.Name)) -cne $entry.Value) { throw "Changed Time Clocks file: $($entry.Name)" }
+    }
 }
 if ((Get-LabSha256 (Join-Path $lab 'Baldur.exe')) -cne $config.ExeSha256) { throw 'Changed game executable.' }
 $diagnosticPath = Join-Path $lab 'cbr-diagnostics.json'
@@ -29,8 +50,9 @@ foreach ($entry in $diagnostics.Files.PSObject.Properties) {
 }
 if (-not $Launch) {
     $processes = @(Get-CimInstance Win32_Process | Where-Object Name -in @('Baldur.exe','InfinityLoader.exe'))
-    [pscustomobject]@{Validated=$true; LabRoot=$lab; Profile=$config.ProfileRoot;
-        GameProcesses=$processes.Count; Launched=$false} | ConvertTo-Json -Compress
+    $mod = if ($clocks) { [pscustomobject]@{Commit=$clocks.ModCommit; Components=@($clocks.Components)} } else { $null }
+    [pscustomobject]@{Validated=$true; LabRoot=$lab; Profile=$config.ProfileRoot; TimeClocks=$mod;
+        GameProcesses=$processes.Count; Launched=$false} | ConvertTo-Json -Compress -Depth 4
     return
 }
 $mutex = [Threading.Mutex]::new($false, 'Local\ChrizInfinityEngineLab')
