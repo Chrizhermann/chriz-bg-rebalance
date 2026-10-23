@@ -8,7 +8,7 @@ and no Baldur.exe or InfinityLoader.exe on the PC, and never launches the game.
    committed installer and mod folder, checked blob by blob against HEAD.
 2. The lab's installed Time Clocks components are uninstalled through WeiDU, the newest first.
    Then override and EEex_scripts must match the inventory recorded before the first install
-   (the console's own eeex_remote_* files aside).
+   (the console's own eeex_remote_* files and the staged diagnostic assets aside).
 3. The lab's previous copy of the mod is moved aside into cbr-timeclocks-previous-<UTC>, never
    deleted, and the checkout's files take its place.
 4. WeiDU installs -Components in order (none: the mod stays uninstalled). WeiDU.log must then
@@ -64,11 +64,22 @@ function Get-VerifiedModSource {
 }
 
 function Get-OwnedInventory {
-    # override and EEex_scripts, without the console's own request, result and ready files.
+    # override and EEex_scripts, without the console's own request, result and ready files and
+    # without the staged diagnostic assets, which Stage-Diagnostics owns and the preflight checks.
+    $staged = @{}
+    $diagnosticPath = Join-Path $lab 'cbr-diagnostics.json'
+    Assert-LabNoReparsePath $diagnosticPath
+    if (Test-Path -LiteralPath $diagnosticPath) {
+        foreach ($entry in ([IO.File]::ReadAllText($diagnosticPath) | ConvertFrom-Json).Files.PSObject.Properties) {
+            $staged[$entry.Name.Replace('\', '/')] = $true
+        }
+    }
     $rows = foreach ($tree in @('override', 'EEex_scripts')) {
         foreach ($item in @(Get-LabTreeInventory (Join-Path $lab $tree))) {
             if ($tree -ceq 'override' -and $item.RelativePath -match '^eeex_remote_[^/]*$') { continue }
-            [pscustomobject]@{RelativePath = "$tree/$($item.RelativePath)"; Size = $item.Size; Sha256 = $item.Sha256}
+            $relative = "$tree/$($item.RelativePath)"
+            if ($staged.ContainsKey($relative)) { continue }
+            [pscustomobject]@{RelativePath = $relative; Size = $item.Size; Sha256 = $item.Sha256}
         }
     }
     $rows = @($rows)
