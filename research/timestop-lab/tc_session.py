@@ -546,7 +546,7 @@ def case_with(s: Session, name: str, spells: list[str]) -> dict:
     """The fixtures, then more lab spells on the subject at the same tick (Slow, SR's Haste, ...)."""
     def setup():
         l0 = s.fixtures()
-        s.tcq("p0", SUBJECT, ";".join(f"apply:{spell}:self" for spell in spells), "+".join(spells).lower())
+        s.tcq("p0", SUBJECT, ";".join(f"apply:{spell}:self" for spell in spells), "-".join(spells).lower())
         return {"L0": l0, "spells": spells}
     return s.case(name, setup, 315)
 

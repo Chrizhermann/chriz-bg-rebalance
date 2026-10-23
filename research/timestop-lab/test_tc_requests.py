@@ -28,41 +28,48 @@ def code(name: str, arguments: dict[str, str]) -> str:
     return lab_rc.with_arguments(text, arguments) if arguments else text
 
 
+def run_tc_queue(text: str, paused=1, action=0, stop=0, actors=None):
+    """tc-queue.lua's code (arguments filled in) against stub bindings: the party is 10 and 11,
+    `actors` maps object IDs to names. Returns (ok, response or error, responses queued,
+    "actor|stored targets")."""
+    runtime = lupa.LuaRuntime(unpack_returned_tuples=True)
+    attempt = runtime.eval("""function(code, paused, action, stop, game, objects)
+        local queued, stored = {}, {}
+        local byId = {}
+        for id, name in pairs(objects) do
+            byId[id] = {m_id = id, _name = name, m_objectType = 1, m_curAction = {m_actionID = action}}
+        end
+        CGameObjectType = {SPRITE = 1}
+        EngineGlobals = {g_pBaldurChitin = {m_pEngineWorld = {m_bPaused = paused, m_bHardPaused = 0},
+            m_pObjectGame = {_ptr = game, m_worldTime = {m_gameTime = 1000}}}}
+        EEex_Sprite_GetInPortrait = function(slot) return byId[({[0] = 10, [1] = 11})[slot]] end
+        EEex_GameObject_Get = function(id) return byId[id] end
+        EEex_Sprite_GetName = function(sprite) return sprite._name end
+        EEex_UDToPtr = function(value) return value._ptr end
+        EEex_Read32 = function(address)
+            assert(address == game + 0x9690, "unexpected read")
+            return stop
+        end
+        EEex_AIBase_SetStoredScriptingTarget = function(actor, key, target)
+            stored[#stored + 1] = actor._name .. ":" .. key .. "=" .. target.m_id
+        end
+        EEex_Action_QueueResponseStringOnAIBase = function(response, actor)
+            queued[#queued + 1] = {response = response, actor = actor._name}
+        end
+        local ok, result = pcall(assert(loadstring(code, "@tc-queue.lua")))
+        if not ok then return false, tostring(result), #queued, table.concat(stored, ";") end
+        return true, result.queued, #queued, queued[1].actor .. "|" .. table.concat(stored, ";")
+    end""")
+    objects = actors if actors is not None else {10: "CBRTS Subject", 11: "Imoen", 4242: "Bounty Hunter"}
+    return attempt(text, paused, action, stop, GAME, runtime.table_from(objects))
+
+
 @unittest.skipIf(lupa is None, "lupa with LuaJIT 2.1 is not installed")
 class TcQueueTests(unittest.TestCase):
     """tc-queue.lua: the response it queues on whom, the targets it binds, what it refuses."""
 
     def queue(self, arguments, paused=1, action=0, stop=0, actors=None):
-        runtime = lupa.LuaRuntime(unpack_returned_tuples=True)
-        attempt = runtime.eval("""function(code, paused, action, stop, game, objects)
-            local queued, stored = {}, {}
-            local byId = {}
-            for id, name in pairs(objects) do
-                byId[id] = {m_id = id, _name = name, m_objectType = 1, m_curAction = {m_actionID = action}}
-            end
-            CGameObjectType = {SPRITE = 1}
-            EngineGlobals = {g_pBaldurChitin = {m_pEngineWorld = {m_bPaused = paused, m_bHardPaused = 0},
-                m_pObjectGame = {_ptr = game, m_worldTime = {m_gameTime = 1000}}}}
-            EEex_Sprite_GetInPortrait = function(slot) return byId[({[0] = 10, [1] = 11})[slot]] end
-            EEex_GameObject_Get = function(id) return byId[id] end
-            EEex_Sprite_GetName = function(sprite) return sprite._name end
-            EEex_UDToPtr = function(value) return value._ptr end
-            EEex_Read32 = function(address)
-                assert(address == game + 0x9690, "unexpected read")
-                return stop
-            end
-            EEex_AIBase_SetStoredScriptingTarget = function(actor, key, target)
-                stored[#stored + 1] = actor._name .. ":" .. key .. "=" .. target.m_id
-            end
-            EEex_Action_QueueResponseStringOnAIBase = function(response, actor)
-                queued[#queued + 1] = {response = response, actor = actor._name}
-            end
-            local ok, result = pcall(assert(loadstring(code, "@tc-queue.lua")))
-            if not ok then return false, tostring(result), #queued, table.concat(stored, ";") end
-            return true, result.queued, #queued, queued[1].actor .. "|" .. table.concat(stored, ";")
-        end""")
-        objects = actors if actors is not None else {10: "CBRTS Subject", 11: "Imoen", 4242: "Bounty Hunter"}
-        return attempt(code("tc-queue.lua", arguments), paused, action, stop, GAME, runtime.table_from(objects))
+        return run_tc_queue(code("tc-queue.lua", arguments), paused, action, stop, actors)
 
     def test_steps_become_the_matching_actions(self):
         ok, response, count, who = self.queue({

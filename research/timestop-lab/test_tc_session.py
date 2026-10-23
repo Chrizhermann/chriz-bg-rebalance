@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ sys.dont_write_bytecode = True
 os.environ.setdefault("USERPROFILE", str(Path.home()))
 import lab_rc
 import tc_session as ts
+import test_tc_requests
 
 
 class RulesTests(unittest.TestCase):
@@ -200,6 +202,92 @@ class SessionTests(unittest.TestCase):
         self.assertEqual((target["id"], target["off_spot"], ran), (77, 11, [8]))
         queued = next(code for request, _, code in self.console.sent if request == "tc-queue")
         self.assertIn(lab_rc.lua_string("spawn:BOUNHA02:600:400"), queued)
+
+
+class ScriptedGame:
+    """Just enough game for every case: the world time moves only while unpaused, spawns appear
+    where tc-queue.lua's CreateCreature puts them, and each save rewrites the quick save. Every
+    tc-queue request runs through tc-queue.lua's own checks."""
+
+    def __init__(self, test: unittest.TestCase, saves: Path):
+        self.test, self.saves = test, saves
+        self.time, self.paused, self.saved = 2000, True, 0
+        self.objects = {10: "CBRTS Subject", 11: "Imoen"}
+        self.creatures = []
+
+    def handlers(self) -> dict:
+        done = {"ok": True}
+        return {"pause": self.pause, "subject": self.subject, "tc-probe": self.probe, "tc-queue": self.queue,
+                "nearby": lambda code: {"creatures": list(self.creatures)}, "save": self.save,
+                "queue": {"queued": "x"}, "sampler": done, "sampler-export": done, "arm": done, "stop": done,
+                "export": done, "menus": {"top": "WORLD_ACTIONBAR"}}
+
+    def pause(self, code):
+        paused, before = lab_rc.lua_string("paused") in code, self.time
+        if not paused and not self.paused:
+            self.time += 40
+        toggled, self.paused = self.paused != paused, paused
+        return {"before": {"game_time": before}, "after": {"game_time": self.time}, "toggled": toggled}
+
+    def subject(self, code):
+        return {"portrait0": {"clocks": {"list": self.time - 500}, "hp": 85, "max_hp": 98, "x": 3741, "y": 2801}}
+
+    def probe(self, code):
+        return {"game_time": self.time, "time_stop_remaining": 0, "sampler": {"projectiles": 0, "pending": 0},
+                "actors": {"portrait0": {"timed": []}, "portrait1": {"timed": []}}}
+
+    def queue(self, code):
+        ok, response, _, _ = test_tc_requests.run_tc_queue(code, actors=dict(self.objects))
+        self.test.assertTrue(ok, response)
+        for x, y in re.findall(r'CreateCreature\("BOUNHA02",\[(\d+)\.(\d+)\],0\)', response):
+            ident = 100 + len(self.creatures)
+            self.objects[ident] = "Bounty Hunter"
+            self.creatures.append({"id": ident, "name": "Bounty Hunter", "x": int(x), "y": int(y)})
+        return {"queued": response}
+
+    def save(self, code):
+        quick = self.saves / "000000000-Quick-Save"
+        quick.mkdir(exist_ok=True)
+        (quick / "BALDUR.GAM").write_bytes(b"GAME")
+        self.saved += 1
+        os.utime(quick / "BALDUR.GAM", (1_000_000 + self.saved,) * 2)
+        return {"queued": "CBRTSQA_QUICKSAVE"}
+
+
+@unittest.skipIf(test_tc_requests.lupa is None, "lupa with LuaJIT 2.1 is not installed")
+class DryRunTests(unittest.TestCase):
+    """Every case against a scripted game, under the longest tag: each console label is usable
+    and tc-queue.lua accepts every step list the cases queue (session n1 stopped on a label)."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix="cbr-tc-dry-")
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        lab, profile = root / "lab", root / "profile"
+        (lab / "override").mkdir(parents=True)
+        (lab / "override" / "CBRTSRCK.SPL").write_bytes(b"")  # areag needs SR's Cloudkill staged
+        (profile / "save").mkdir(parents=True)
+        patcher = mock.patch.multiple(lab_rc, VARIANT="timeclocks", LAB=lab, OVERRIDE=lab / "override",
+                                      LAB_ID=b"CBR TimeClocks Lab 2730\n")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.console, self.game = FakeConsole(), ScriptedGame(self, profile / "save")
+        self.console.handlers.update(self.game.handlers())
+        self.session = ts.Session("longtag8", "defaults", profile=profile)
+        self.addCleanup(self.session.log_file.close)
+        self.session.send, self.session.sleep, self.session.echo = self.console.send, lambda seconds: None, False
+        self.session.subject_id, self.session.controller_id = 10, 11
+
+    def test_every_case_runs_against_a_scripted_game(self):
+        for name in [name for name in ts.CASES if name != "load"] + ["load"]:
+            with self.subTest(case=name):
+                if name == "load":  # the copy the save case kept
+                    self.session.loaded = "000000800-CBTC longtag8 after stop"
+                self.session.position = (3741, 2801)
+                self.assertEqual(ts.CASES[name](self.session, name)["capture"], f"longtag8_{name}")
+        queued = sum(1 for request, _, _ in self.console.sent if request == "tc-queue")
+        self.assertGreater(queued, 20)
+        self.assertEqual(len(self.game.creatures), 11)  # A 2, B 1, C 2, C2 1, D 2, E 1, F 1, G 1
 
 
 class ArgumentTests(unittest.TestCase):
