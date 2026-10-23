@@ -1,5 +1,26 @@
 # chriz-bg-rebalance — Handover
 
+## October 23 — v0.8.4: October audit follow-ups, 220 guard order, 310 immunity windows
+
+Christopher approved the release on 2026-10-23. It contains PR #10 (follow-ups
+1, 2, 3, 5 and 6 of the October 8 audit: 220, 301, 130, 400–404, 320), PR #11
+(310: short immunity windows keep 100%, his option A of October 20) and PR #14
+(220: the bracers' guard before SR Haste's own protection, found in the 2.7.3.0
+lab of October 20). The audit's items 4 and 7 are in chriz-spell-revisions-patch
+v4.21-chriz.6; the RR decision is recorded under item 4 of the audit. Tag
+`v0.8.4` and the GitHub release are made from this release PR's merge commit.
+
+Verified: full regression 711 tests, OK, 26 skipped (private captures) with
+WeiDU 249.
+`tools/package_sr_antimagic.py` rebuilds v0.8.3's six published files byte for
+byte from its tag; v0.8.4's are built the same way from a clean checkout of the
+new tag.
+
+Open:
+- In-game checks of 220 as released (the lab confirmed its guard order on
+  patched spell copies) and of 400–403.
+- The CEBG pin: the collection coordinator updates it.
+
 ## October 17 — compatibility follow-ups from the October 8 audit (unreleased)
 
 Branch `claude/compat-followups-20261017` implements follow-ups 1, 2, 3, 5 and 6

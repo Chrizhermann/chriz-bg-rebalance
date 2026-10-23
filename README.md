@@ -5,7 +5,7 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.8.3.** Pierce Magic has a bounded five-round MR
+**Version: v0.8.4.** Pierce Magic has a bounded five-round MR
 reduction; Spellstrike causes 15% spell failure for two rounds.
 Hardiness has a recommended 40% physical-only
 profile, a 30% alternative, and an optional SR damage-resistance add-on.
@@ -14,8 +14,11 @@ Blinding Strike, party physical resistance capped at 90%, and damageable clouds.
 Apex Dragons supports both SCS difficulty-control systems.
 Component 302 gives Flail of the Ages' Slow a saving throw and
 lets its +5 version work with Haste; v0.8.2 extends it to modded flail layouts. Component 301 makes Emotion, Courage and
-Emotion, Hope mutually exclusive. New in v0.8.3: each temporary potion type works once at a
+Emotion, Hope mutually exclusive. Since v0.8.3, each temporary potion type works once at a
 time (330/331), and Heroism, Greater Heroism and the Potion of Heroism no longer combine (332).
+New in v0.8.4: 130, 220, 301, 320 and the Tempus components 400–404 keep other mods' changes
+to what they patch; the bracers no longer stack with Haste cast first; and party physical
+resistance (310) leaves short immunity spells such as Divine Protection at 100%.
 Kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.
@@ -63,7 +66,7 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 220 | SR adjustments | Bracers of Blinding Strike: self-only SR Improved Haste | Automated checks passed; both cast orders checked in the 2.7.3.0 lab |
 | 301 | Cross-cutting audits | Emotion, Courage / Emotion, Hope: mutually exclusive beneficial emotions | ✅ implemented and automated-verified; delivery/mutual exclusion live-verified, status-entry retest pending |
 | 302 | Cross-cutting audits | Flail of the Ages: saves against Slow; +5 allows Haste | Isolated WeiDU checks passed; in-game check pending |
-| 310 | Cross-cutting audits | Party physical resistance: half effectiveness above 80%, maximum 90% | Automated checks passed; in-engine check pending |
+| 310 | Cross-cutting audits | Party physical resistance: half effectiveness above 80%, maximum 90%; short immunity windows keep 100% | Automated checks passed; in-engine check pending |
 | 320 | Cross-cutting audits | Combat clouds: 75% damage resistance instead of invulnerability | Automated checks passed; combat check pending |
 | 330 / 331 | Cross-cutting audits | Potion uniqueness: one dose of each temporary potion type at a time (331: Potions of Genius still stack) | Automated checks and lab install passed; in-game check pending |
 | 332 | Cross-cutting audits | Heroism family: Heroism, Greater Heroism and the Potion of Heroism do not combine | Automated checks and lab install passed; in-game check pending |
