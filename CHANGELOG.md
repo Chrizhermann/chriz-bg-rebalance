@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- The package scripts write the `.sha256` files with LF line endings on every
+  system, so `sha256sum -c` accepts them. The published files of v0.8.1 to
+  v0.8.5 end in CRLF and stay as they are; remove the carriage return before
+  checking one, for example `tr -d '\r' < FILE.sha256 | sha256sum -c`.
+
 ## v0.8.5 — 2026-10-25
 
 - Add Chris Revisions (340): Christopher's spell balance changes in one

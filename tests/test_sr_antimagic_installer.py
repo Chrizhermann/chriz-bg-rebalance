@@ -215,7 +215,8 @@ class AntimagicInstallerTests(unittest.TestCase):
         for name in expected:
             archive = output / name
             digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-            self.assertEqual(f"{digest}  {name}", archive.with_suffix(".zip.sha256").read_text().strip())
+            # Exact bytes: sha256sum -c rejects the CRLF that text mode writes on Windows.
+            self.assertEqual(f"{digest}  {name}\n".encode(), archive.with_suffix(".zip.sha256").read_bytes())
         anti = output / f"CBR_SR_ANTIMAGIC-{version}-windows.zip"
         with zipfile.ZipFile(anti) as bundle:
             # An exact publication allowlist also proves no bulk SR files,

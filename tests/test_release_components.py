@@ -165,8 +165,8 @@ class ReleaseComponentsTests(unittest.TestCase):
         archives = build(output)
         full = next(p for p in archives if p.name.startswith("chriz-bg-rebalance-"))
         digest = hashlib.sha256(full.read_bytes()).hexdigest()
-        self.assertEqual(f"{digest}  {full.name}",
-                         full.with_suffix(".zip.sha256").read_text().strip())
+        self.assertEqual(f"{digest}  {full.name}\n".encode(),
+                         full.with_suffix(".zip.sha256").read_bytes())
         resources = arrow_resources()
         resources.update(bracers_resources())
         resources["DVGASFRM.ITM"] = form("DVGASFRM.ITM")

@@ -13,6 +13,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def write_checksum(archive: Path) -> None:
+    # Bytes, not text: text mode would end the line in CRLF on Windows, and
+    # sha256sum -c then looks for a file name ending in a carriage return.
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    archive.with_suffix(archive.suffix + ".sha256").write_bytes(f"{digest}  {archive.name}\n".encode())
+
+
 def build(output: Path) -> list[Path]:
     setup = ROOT / "setup-chriz-bg-rebalance.tp2"
     version = re.search(r"VERSION ~([^~]+)~", setup.read_text(encoding="utf-8")).group(1)
@@ -46,8 +53,7 @@ def build(output: Path) -> list[Path]:
                 entry.compress_type = zipfile.ZIP_DEFLATED
                 entry.external_attr = 0o644 << 16
                 bundle.writestr(entry, source.read_bytes())
-        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-        archive.with_suffix(archive.suffix + ".sha256").write_text(f"{digest}  {archive.name}\n")
+        write_checksum(archive)
         result.append(archive)
     return result
 
