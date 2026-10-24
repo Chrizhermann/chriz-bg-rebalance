@@ -31,6 +31,52 @@ and Bless at level-up; Prayer and Recitation in both orders and from opposing
 casters; Bless durations at levels 1, 10 and 20); the collection's curation
 entry; tag/release only with Christopher's approval.
 
+## October 23 — v0.8.4: October audit follow-ups, 220 guard order, 310 immunity windows
+
+Christopher approved the release on 2026-10-23. It contains PR #10 (follow-ups
+1, 2, 3, 5 and 6 of the October 8 audit: 220, 301, 130, 400–404, 320), PR #11
+(310: short immunity windows keep 100%, his option A of October 20) and PR #14
+(220: the bracers' guard before SR Haste's own protection, found in the 2.7.3.0
+lab of October 20). The audit's items 4 and 7 are in chriz-spell-revisions-patch
+v4.21-chriz.6; the RR decision is recorded under item 4 of the audit. Tag
+`v0.8.4` and the GitHub release are made from this release PR's merge commit.
+
+Verified: full regression 711 tests, OK, 26 skipped (private captures) with
+WeiDU 249.
+`tools/package_sr_antimagic.py` rebuilds v0.8.3's six published files byte for
+byte from its tag; v0.8.4's are built the same way from a clean checkout of the
+new tag.
+
+Open:
+- In-game checks of 220 as released (the lab confirmed its guard order on
+  patched spell copies) and of 400–403.
+- The CEBG pin: the collection coordinator updates it.
+
+## October 17 — compatibility follow-ups from the October 8 audit (unreleased)
+
+Branch `claude/compat-followups-20261017` implements follow-ups 1, 2, 3, 5 and 6
+of `docs/audits/2026-10-08-sr-rebalance-compatibility.md` (220, 301, 130,
+400–404, 320); 4 and 7 are on the branch of the same name in
+chriz-spell-revisions-patch. Each component finds what it owns by meaning, keeps
+other mods' changes and fails only for a stated reason. An independent Codex
+review of the first pass found nine more cases, all fixed with tests. Details:
+the audit's implementation status and each component's research note.
+
+Verified: full regression 693 tests, OK, 26 skipped (private
+captures/Lua); SR fork suite 182 passed. WeiDU 249, synthetic fixtures
+and `--nogame` only; no lab install or in-game check.
+
+Decided (Christopher, 2026-10-20): in cloud forms 320, 75% is the target for
+immunity, not a cap. Only resistances of 100% or more become 75%; 76–99% from
+other mods stays. The branch already implements this.
+
+Open:
+- In-game checks of the changed components.
+- Version, tag and release, and the CEBG pin, need Christopher's approval; the
+  collection coordinator updates the pin after a release.
+- Still open in their own repositories: the modpack/SoD audit and the forks
+  audit (`docs/audits/README.md`).
+
 ## October 14 — v0.8.3 candidate: potion uniqueness and Heroism family (local, unpublished)
 
 Components 330/331 (choose one) and 332 follow the behaviour Christopher agreed

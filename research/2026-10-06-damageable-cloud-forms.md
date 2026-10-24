@@ -160,6 +160,44 @@ Primary opcode semantics were checked against IESDP:
 [opcode 151](https://gibberlings3.github.io/iesdp/opcodes/bgee.htm#op151), and
 [opcode 98](https://gibberlings3.github.io/iesdp/opcodes/bgee.htm#op98).
 
+## Compatibility revision, 2026-10-17
+
+The 2026-10-08 owner audit found that the installer treated the provider
+layouts above as fingerprints: physical values had to be exactly 100 or 75,
+regeneration and four physical resistances had to exist, and the SCS donor had
+to have 100 in all eleven resistance bytes. Valid variations from other mods,
+such as an already reduced or vulnerable channel, a form without regeneration,
+or a donor with partial values, stopped the installation. The owned values are
+now defined by the policy above, not by the stock numbers:
+
+- A cloud resistance effect (opcodes 27-31, 84-89, set mode, on the cloud for
+  the form's duration) with a value of 100 or more becomes 75. Values are read
+  signed. Anything lower, including negative values, is kept.
+- The SCS donor clone applies the same rule to each CRE V1.0 resistance byte
+  0x59-0x63 except 0x5d, which is always 0 (unchanged policy).
+- Kept failures, each with a concrete reason: another immunity (opcodes 208,
+  120, 101/12) would keep the cloud invulnerable; a resistance delivered in
+  another mode, to another target or with another timing cannot be attributed
+  to the cloud; partial magic resistance is outside this design; a resource
+  without the gas form (opcode 53 gas animation or opcode 135 GASFORM4) is no
+  longer a combat cloud; malformed tables and donors.
+- Not required any more: regeneration, a fixed number of physical
+  resistances, and exact stock values. A form without immunity-level values is
+  left as it is with a message.
+- The English SR summon text claims 75% against physical, elemental and magic
+  damage with poison immunity. It is written only when the changed DVGASFRM.ITM's
+  equipped effects (its activations apply only when used and do not count)
+  have exactly 75 on every resistance record, cover the nine channels the stock
+  item sets (27-31, 86-89; the stock item has no 84/85) and still give poison
+  immunity: opcode 101 against opcode 25, or opcode 173 records adding up to
+  100 or more (opcode 173 has no mode and stacks on EE 2.5 and later).
+  Otherwise the text is kept and the installer warns.
+
+Balance decision (Christopher, 2026-10-20): the audit asked whether 75% is a
+target or a maximum. It is the target for immunity, not a cap: only resistances
+of 100% or more become 75%, and a cloud at 76-99% from another mod stays there.
+`cbr_cloud_resistance` is the single place that applies this rule.
+
 ## Applied private repair — October 6
 
 Target: `%USERPROFILE%\Games\Chriz Easy BG\game`, game/loader closed.

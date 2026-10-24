@@ -21,6 +21,57 @@
   - A part whose spells are missing is skipped; a part that cannot be changed
     safely is left unchanged with a warning. Descriptions and scrolls say so.
 
+## v0.8.4 — 2026-10-23
+
+- Bracers of Blinding Strike (220) now keep other mods' changes to the bracers
+  and to SR's Improved Haste: equipped bonuses, extra abilities, reordered or
+  extra effects, level-scaled, reordered or longer SR Improved Haste and casting
+  features. The SR copy lasts as long as the bracers' own activation (20 seconds
+  on the stock item) and keeps the activation's chance, saving throw and power.
+  Changes a self-only copy cannot represent stop the installation with a
+  message instead of producing a different spell.
+- Bracers of Blinding Strike (220) and SR's Haste or Improved Haste no longer
+  stack when the spell is cast first. The bracers' guard now sits before the
+  spell's own protection, behind which the engine ignores it; a repeat run
+  moves a guard that an earlier version left there. Found in the BG2:EE
+  2.7.3.0 lab.
+- Elemental arrows (130) change only each arrow's bow-fired hit and find its
+  elemental damage by what it does. Other damage types, helper effects, other
+  abilities such as activations, reordered abilities and effects from other
+  mods are kept. An arrow without that damage on its bow-fired hit is left
+  unchanged with a warning; two such damage effects in one ability stop the
+  installation. If another ability or the equipped effects share that damage
+  record, the bow-fired hit gets its own copy, so the other ability keeps its
+  damage. Descriptions change only the clauses for that damage, its save and
+  the removed bonuses, in the male and female text; other riders and claims
+  keep their wording.
+- Emotion, Courage / Emotion, Hope (301) accept other casting times, ranges,
+  schools and several level headers, also headers that share or overlap effect
+  records. Their descriptions state the spell's own school, level, range and
+  casting time; unchanged spells keep the old text.
+- Tempus weapon training (400) completes every level header that carries
+  Artisan's axe grant, wherever its effects sit, and keeps longsword or
+  crossbow grants that are already there.
+- Holy Power (401–403) keeps the first five Holy Power grants in any row of the
+  kit table, so Artisan's Kitpack and other table layouts work; other grants in
+  the table stay as they are.
+- Chaos of Battle (404) builds its tides from any number of donor tiers and
+  keeps other mods' visuals, sounds and markers; each tier's strength follows
+  its minimum level as before. A new tide clears the previous one from every
+  recipient, also when the donor has other self-removers.
+- Combat cloud forms (320) change only resistances of 100% or more, to 75%.
+  Lower values from other mods, including vulnerabilities, stay as they are;
+  forms without regeneration or with fewer resistances are supported. The
+  English genie description changes only when the worn genie form ends up at
+  75% on all its resistances, with poison immunity; otherwise it is kept with a
+  warning.
+- Party physical resistance (310): short immunity windows keep 100%. While one
+  timed effect grants full immunity to a damage type on its own, such as SCS's
+  Divine Protection and Greater Divine Protection, that type is not capped. The
+  exception lasts exactly as long as the effect. Stacked bonuses, equipment,
+  passives and forms stay capped at 90%. Party and enemies now get the same
+  Divine Protection, and its description is accurate again.
+
 ## v0.8.3 — 2026-10-14
 
 - Add potion uniqueness (330, or 331 where Potions of Genius still stack): each

@@ -1,6 +1,8 @@
 # Compatibility audit: Rebalance, SR fork, and BuffBot
 
-Date: 2026-10-08. Status: source-only audit; findings are pending implementation.
+Date: 2026-10-08. Status: source-only audit. All seven follow-ups are implemented
+on review branches (2026-10-17), unreleased; see
+[Implementation status](#implementation-status-2026-10-17).
 
 ## Scope and evidence
 
@@ -122,6 +124,22 @@ semantics need an explicit classification, not a broader text replacement.
 extra unrelated script blocks; additional recognized casting branches;
 preserved memorization flags and level slot budgets; honest ambiguous cases.
 
+**Decision (Christopher, 2026-10-23):** Chaos stays SR's level-7 spell, and the
+slot budgets stay as they are. The BG2:EE 2.7.3.0 lab check of 2026-10-20 showed
+that the level-7 migration leaves Aran Linvail (`RR#ARAN2`) and the Zhentarim
+Mercenary (`RR#SFL04`) unable to cast Chaos: their moved copies land behind
+their level-7 slot counters. Moving each copy's slot along to level 7, an
+exception to the slot-budget rule above, was proposed and not adopted. Instead,
+RR's prepared level-5 Chaos copies become a level-5 spell where they stand:
+Hold Monster for `RR#ARAN2`, Feeblemind for `RR#SFL04` and Domination for
+Selina (`RR#SELI`). Their scripts cast that spell, with the target checks it
+needs. Christopher ruled out keeping them as Waves of Fatigue. Selina is a
+sorcerer and casts from her known list, so her known record changes with her
+copies, without a duplicate; wizards keep their known records. `RR#SAW09` and
+`RR#ZAER` only know the old slot and are no longer changed. Shipped in
+chriz-spell-revisions-patch v4.21-chriz.6; details in its
+`docs/plans/2026-09-02-rr-spell-semantics-compatibility-design.md`.
+
 ### 5. Tempus helpers: source layout and cosmetic counts remain fixed
 
 **Sources:**
@@ -187,6 +205,46 @@ reject extra damage, so the tests need to distinguish these cases too.
 
 **Tests:** non-electrical rider; reordered saved/unsaved packets; preserved later
 save penalties and casting hooks; multiple ambiguous pairs; repeat application.
+
+## Implementation status (2026-10-17)
+
+Rebalance items are on branch `claude/compat-followups-20261017` of this
+repository; items 4 and 7 are on the branch of the same name in
+chriz-spell-revisions-patch. An independent Codex source review of the first
+pass found nine further cases (activation conditions and reordered tiers in 220,
+shared slices in 301, foreign abilities and rider descriptions in 130, recipient
+resets in 404, empty level-7 rows and hexadecimal IDS in the RR adapter, and a
+non-repeatable Lightning input); each is fixed with tests on the same branches.
+Codex re-reviews of those fixes found five more (cures and poison reordered
+across 220's level headers, opcode 173 poison resistance given in parts and
+activation-only effects in 320's genie check, and in 130 a fire record shared
+with another ability and a too strict 16-bit guard on its private copy); these
+are fixed with tests as well.
+
+| # | Item | Commits | Result |
+| --- | --- | --- | --- |
+| 1 | SR Bracers 220 | `230d6b5`, review `78a3887`, `925710c` | Activation found and replaced in place; other abilities, equipped effects and donor variations kept; the call keeps the activation's chance, save and power. |
+| 2 | Emotion 301 | `75c37bd`, review `0756af9` | Real dependencies only; every level header rebuilt; descriptions state the spell's own values. |
+| 3 | Elemental arrows 130 | `8650b01`, review `c74c2a5`, `aa9734f`, `c1e88b9`, `56989a2` | Elemental damage found by behavior on the bow-fired hit only; other abilities, riders and their text kept; a damage record shared with another ability is copied first. |
+| 4 | RR/SR adapter | SR fork `5fee801`, review `85cc02d`, decision `e7a2d38` | Records recognized by the spell they name, any count; hexadecimal IDS handled. Since the decision under item 4, Chaos stays at level 7 and RR's level-5 copies become Hold Monster, Feeblemind or Domination, so nothing moves into a level-7 row. |
+| 5 | Tempus helpers 400–404 | `c6cbcd1`, `9ae46aa`, review `1f55115` | Grants and CLAB cells located by meaning; Chaos tides built from any donor tiers, recipient resets kept. |
+| 6 | Cloud forms 320 | `27d6ba9`, `6e2b038`, `1ad7ea4` | Immunity (100% or more) becomes 75%; lower values kept. Decided by Christopher (2026-10-20): 75% is the target for immunity, not a cap, so 76–99% from other mods stays. |
+| 7 | SR classic Lightning Bolt | SR fork `19fd5c9`, review `26ad3e1` | SR's damage pair identified by meaning; foreign damage kept; repeat byte-exact. |
+
+Verification: rebalance full regression 693 tests, OK, 26 skipped
+(private captures/Lua); SR fork suite 182 passed; WeiDU 249, synthetic
+fixtures and `--nogame` only. Each fix has variation tests that fail against the
+previous library. No lab install, in-game check, release or CEBG pin change.
+
+## Releases (2026-10-23)
+
+Christopher approved releasing the follow-ups on 2026-10-23. chriz-bg-rebalance
+v0.8.4 carries items 1, 2, 3, 5 and 6, plus the 220 guard-order fix and 310's
+short immunity windows; chriz-spell-revisions-patch v4.21-chriz.6 carries items
+4 and 7. The BG2:EE 2.7.3.0 lab check of 2026-10-20 ran 130, SR 80, 220, 301,
+320 and 404 in game. It found two defects, both fixed before release: 220 still
+stacked with Haste or Improved Haste cast first, and the RR adapter case under
+item 4. The CEBG pin is the collection coordinator's.
 
 ## Checks not condemned by this audit
 

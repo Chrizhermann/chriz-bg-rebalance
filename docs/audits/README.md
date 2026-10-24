@@ -25,8 +25,12 @@ checkout/ref, affected paths, plausible counterexamples, and tests to add.
    the jailbreak's silent wrong-spell fallback, then fixed dialogue IDs/counts,
    encounter-coordinate fingerprints, creature/effect-layout restrictions.
 2. [Rebalance, SR and BuffBot](2026-10-08-sr-rebalance-compatibility.md): Bracers,
-   Emotion, elemental arrows, RR spell migration, Tempus, and SR Lightning Bolt.
-   Cloud resistance ownership needs a balance decision before refactoring.
+   Emotion, elemental arrows, RR spell migration, Tempus, cloud forms and SR
+   Lightning Bolt are released in chriz-bg-rebalance v0.8.4 and
+   chriz-spell-revisions-patch v4.21-chriz.6 (2026-10-23); see its implementation
+   status and releases. Cloud forms: Christopher decided on 2026-10-20 that 75% is
+   the target for immunity, not a cap. RR: on 2026-10-23 he decided that Chaos
+   stays a level-7 spell and RR's level-5 copies get level-5 replacements.
 3. [Artisan, Bardic, Aura and Randomiser](2026-10-08-forks-compatibility.md):
    Bardic's Abettor payload and Artisan's standalone Fighter Modals retrofit.
    No comparable defect established in inspected Aura/BuffBot paths. Randomiser's

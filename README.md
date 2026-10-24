@@ -5,7 +5,7 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.8.3.** Pierce Magic has a bounded five-round MR
+**Version: v0.8.4.** Pierce Magic has a bounded five-round MR
 reduction; Spellstrike causes 15% spell failure for two rounds.
 Hardiness has a recommended 40% physical-only
 profile, a 30% alternative, and an optional SR damage-resistance add-on.
@@ -14,8 +14,11 @@ Blinding Strike, party physical resistance capped at 90%, and damageable clouds.
 Apex Dragons supports both SCS difficulty-control systems.
 Component 302 gives Flail of the Ages' Slow a saving throw and
 lets its +5 version work with Haste; v0.8.2 extends it to modded flail layouts. Component 301 makes Emotion, Courage and
-Emotion, Hope mutually exclusive. New in v0.8.3: each temporary potion type works once at a
+Emotion, Hope mutually exclusive. Since v0.8.3, each temporary potion type works once at a
 time (330/331), and Heroism, Greater Heroism and the Potion of Heroism no longer combine (332).
+New in v0.8.4: 130, 220, 301, 320 and the Tempus components 400–404 keep other mods' changes
+to what they patch; the bracers no longer stack with Haste cast first; and party physical
+resistance (310) leaves short immunity spells such as Divine Protection at 100%.
 Kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.
@@ -60,10 +63,10 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 202 | SR adjustments | Hardiness: optional extra 20% damage resistances | Requires 200 or 201; live acceptance pending |
 | 210 | SR adjustments | EEex Pierce Magic: halve MR, bounded to 10-40 points, for five rounds | Automated checks passed; live acceptance pending |
 | 211 | SR adjustments | Spellstrike: 15% spell failure for two rounds | Automated checks passed; live acceptance pending |
-| 220 | SR adjustments | Bracers of Blinding Strike: SR Improved Haste, 20 seconds | Automated checks passed; in-engine check pending |
+| 220 | SR adjustments | Bracers of Blinding Strike: self-only SR Improved Haste | Automated checks passed; both cast orders checked in the 2.7.3.0 lab |
 | 301 | Cross-cutting audits | Emotion, Courage / Emotion, Hope: mutually exclusive beneficial emotions | ✅ implemented and automated-verified; delivery/mutual exclusion live-verified, status-entry retest pending |
 | 302 | Cross-cutting audits | Flail of the Ages: saves against Slow; +5 allows Haste | Isolated WeiDU checks passed; in-game check pending |
-| 310 | Cross-cutting audits | Party physical resistance: half effectiveness above 80%, maximum 90% | Automated checks passed; in-engine check pending |
+| 310 | Cross-cutting audits | Party physical resistance: half effectiveness above 80%, maximum 90%; short immunity windows keep 100% | Automated checks passed; in-engine check pending |
 | 320 | Cross-cutting audits | Combat clouds: 75% damage resistance instead of invulnerability | Automated checks passed; combat check pending |
 | 330 / 331 | Cross-cutting audits | Potion uniqueness: one dose of each temporary potion type at a time (331: Potions of Genius still stack) | Automated checks and lab install passed; in-game check pending |
 | 332 | Cross-cutting audits | Heroism family: Heroism, Greater Heroism and the Potion of Heroism do not combine | Automated checks and lab install passed; in-game check pending |
@@ -96,13 +99,19 @@ the new source pin, dependencies, selections and recipe checks still required.
 Acid arrows deal **1d3 acid**, cold arrows **1d2 cold**, and standard/kobold
 fire arrows **1d2 fire** without their +2 attack/physical-damage bonus.
 Other special arrows, original saving throws and SCS troll helpers are unchanged.
+Only each arrow's bow-fired hit changes: other abilities, other damage riders and
+their description text stay as they are, in the male and female strings. If
+another ability shares the hit's damage effect, the hit gets its own copy first.
 This fills the EET gap in SCS's own elemental-arrow option; requires EET and
 SCS general spell tweaks (2000). Install after other arrow/item changes.
 
 ### Component 220 — SR Bracers of Blinding Strike
 
-The bracers grant **SR Improved Haste (+1 APR)**, still self-only for 20 seconds
-and once per day. The effective SR bonuses and existing Tempus bridge are retained.
+The bracers grant **SR Improved Haste (+1 APR)**, still self-only and once per day,
+for as long as their own activation lasts (20 seconds on the stock item). The
+effective SR bonuses and existing Tempus bridge are retained. Other mods' changes
+to the bracers or to SR's Improved Haste are kept; a change a self-only copy
+cannot represent stops the installation with a message instead.
 Ordinary/Improved Haste cannot stack with the bracers by changing cast order.
 Requires SR main component 0; install after other Haste/item changes.
 Wish's mechanics are not changed by this component.
@@ -173,17 +182,21 @@ Bless at their next level-up; this is not yet checked in the game.
 
 ### Component 320 — Damageable combat clouds
 
-Cloud-granted 100% damage resistances become **75%**. Regeneration, duration,
-poison immunity and AI remain unchanged. Supported forms include SR/SCS genies,
+Cloud-granted damage immunity (a resistance of 100% or more) becomes **75%**.
+Regeneration, duration, poison immunity and AI remain unchanged. Supported forms include SR/SCS genies,
 the known EE/SoD combat clouds, Ascension Bodhi's combat form and SCS vampire
 tactical mist. Scripted death escapes and quest protections stay intact.
 
-Existing lower resistances stay lower; no protection is added to open channels.
+Lower resistances stay as they are, including other mods' partial values and
+vulnerabilities; no protection is added to open channels.
 Cloud-added MR100 is neutralized; SCS tactical mist has MR0 while transformed.
 Normal-form data is unchanged, but a cloud's flat-set values can temporarily
 replace stronger natural resistance. Install after the cloud-form providers.
-No EEex is required. English SR summon descriptions are updated; other wording
-is left intact with a warning. Unknown resource layouts reject transactionally.
+No EEex is required. English SR summon descriptions are updated when the genie
+form ends up exactly 75% on its nine damage channels with poison immunity; other
+wording or values keep the text, with a warning. Resistances the component cannot
+attribute to the cloud, further immunities and malformed resources stop the
+installation without changes.
 See [scope and exclusions](research/2026-10-06-damageable-cloud-forms.md).
 
 ### Component 310 — Party physical resistance
@@ -192,6 +205,14 @@ Physical resistance above **80% counts at half strength**, up to **90%**:
 90% becomes 85%, and 100% becomes 90%. Odd points round down. Applies separately
 to slashing, crushing, piercing and missile resistance for party members only.
 Enemies, summons and elemental/magic resistance are unchanged.
+
+**Short immunity windows keep 100%.** While a single timed effect grants full
+immunity to a damage type on its own (SCS's Divine Protection and Greater Divine
+Protection set all four to 100% for three rounds), that type is not capped. The
+exception starts and ends with that effect, including dispels and saved games.
+Stacked bonuses, equipment, kit passives and shapeshift forms stay capped. A
+window delivered through an opcode-177 EFF wrapper is not recognised (none is
+known); it stays at 90%.
 
 Requires EEex and BG2:EE/EET. Launch through InfinityLoader. This operates on
 the resistance the engine has calculated, including its normal stacking rules;

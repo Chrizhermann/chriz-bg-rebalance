@@ -688,6 +688,93 @@ allocated spell. They leave unrelated BIF and override resources unchanged. The 
 contains original installer code and text plus the thirteen independently extracted IWDEE
 presentation assets; it contains no copied IWDification or SCS binaries.
 
+## Compatibility revision (2026-10-17)
+
+Follow-up to `docs/audits/2026-10-08-sr-rebalance-compatibility.md`, item 2. The beneficial
+validator previously authenticated the whole decoded header: school 4, exactly one ability,
+range 50, and casting time 4. A Hope or Courage with casting time 3, or only another range,
+therefore failed with `CBR_EM_ERR_BENEFICIAL_PARTITION`, although the transformation (canonical
+ownership of both beneficial payloads plus reciprocal removal) does not depend on those fields.
+
+Validation now keeps only real dependencies, each with its own token and a message naming the
+file and the obstacle: SPL V1 signature (`CBR_EM_ERR_SPL_SIGNATURE`); effect-table bounds and
+no unreferenced effect record (`CBR_EM_ERR_BENEFICIAL_PARTITION`, `CBR_EM_ERR_CASTING_PARTITION`;
+see "Shared effect slices" below); wizard spell type 1
+(`CBR_EM_ERR_BENEFICIAL_TYPE`); spell level 4, because the installer maps both symbols to
+level-four wizard slots and calls `ADD_SPELL ... 2 4` (`CBR_EM_ERR_BENEFICIAL_LEVEL`); at least
+one ability header (`CBR_EM_ERR_BENEFICIAL_NO_ABILITY`); and target type 4 in every header
+(`CBR_EM_ERR_BENEFICIAL_TARGET`). The target check is deliberate: the description and the area
+delivery assume a point-targeted area spell, and analysing other delivery is out of scope.
+School, range, casting time, projectile, and the number of headers are preserved, not checked.
+
+Every ability (level) header is rebuilt. Casting features stay a verbatim prefix; each header
+receives its own transitions, cleanses, its own presentation records (61/141/142/174/215) in
+donor order, the standalone opcode 142 where applicable, the canonical payload, the canonical
+opcode-328 marker, and its own foreign 328 markers in donor order. Non-effect header bytes of
+every header are preserved. Ownership is otherwise unchanged: other records in a beneficial
+header are still replaced by the canonical package, exactly as before.
+
+Descriptions are generated per spell after allocation and before any string is resolved. The
+installer reads the spell's school (`0x25`), level (`0x34`), and the first header's range
+(`+0x0E`) and casting time (`+0x12`) and fills placeholders in `@3012`/`@3014`. WeiDU 249
+evaluates `%variable%` references in TRA text when the string is used, and loads TRA line
+breaks as LF regardless of the file's CRLF/LF layout; both were checked with a real WeiDU run.
+The school line uses `@3031`-`@3038`, BG2:EE's English spellings (Abjuration,
+Conjuration/Summoning, Divination, Enchantment/Charm, Illusion/Phantasm, Evocation,
+Necromancy, Alteration), chosen as the dominant forms in the reference installation's
+`dialog.tlk` (read-only count of parenthesized school lines). An unknown school value omits
+the line and warns; headers that disagree on range or casting time are described by the first
+header, with a warning. Canonical spells resolve to the previous text byte for byte: synthetic
+installs of all four symbol layouts and the transformer harness produced identical override
+trees and `dialog.tlk` before and after the change, so existing installations reuse their TLK
+strings. Scrolls carry the same strrefs and therefore show the same generated text.
+
+Known limits: "Area of Effect: 7-foot radius" and the 300-second duration remain fixed text;
+the projectile is not analysed, and the duration belongs to the owned payload. The range is
+printed as the raw header value followed by "ft.", as in the original text. Only English text
+exists. Non-point-targeted variants are rejected rather than supported. Coverage is automated
+(`tests/test_emotion_hope_courage_variants.py`: casting time 3, range 60, school 8 and an
+unnamed school, two level headers including disagreeing ones, reordered presentation and
+markers, repeat application, reinstall/uninstall, late-failure rollback, and target-type
+rejection); none of these variants was verified in game.
+
+### Shared effect slices (2026-10-17)
+
+Review finding: two otherwise valid level headers that reference the same recipient-effect
+slice were rejected with `CBR_EM_ERR_BENEFICIAL_PARTITION`, because the SPL partition validator
+required every effect record to be owned by exactly one slice. That fingerprinted the storage
+layout: the engine reads each header's `(first, count)` independently, so headers may share one
+slice, start inside another header's slice, or reuse casting-feature records. Both rebuilds
+(beneficial and adverse) append each header's new slice after the original table, read only that
+header's original `(first, count)`, and delete the original table afterwards, so every header's
+output depends only on its own view. Exclusive ownership had no correctness reason.
+
+SPL validation (`cbr_em_validate_spl`, used by the beneficial and adverse validators and
+rebuilds, the Horror checks and the native seed) now accepts shared and partly overlapping
+slices. Every such layout produces byte-for-byte the same output as the same spell stored with a
+separate copy of each header's slice, and the output is disjoint again. Rejections that remain:
+table and slice bounds, and an effect record that no slice references. No engine path reads an
+unreferenced record, the rebuild would silently drop it, and it usually means that a header's
+count or first index is wrong; the message names the file and the record. Because shared input
+records are copied once per header, the rebuilt table can outgrow the input, so each rebuilt
+`(first, count)` is checked against the 16-bit SPL fields (`CBR_EM_ERR_REBUILT_SLICE`) before it
+is written. Before this check, an overflow would have been caught only indirectly, as an
+unreferenced record in the post-rebuild validation.
+
+Scroll ITMs keep exact one-owner coverage. The installer's scroll discovery applies the same
+rule and relies on it to ignore an overlapping candidate donor scroll
+(`test_malformed_matching_fallback_donor_is_ignored`); relaxing that is a separate decision about
+donor ambiguity, not part of this fix.
+
+Coverage (`tests/test_emotion_hope_courage_variants.py`, `EmotionSliceLayoutTests` and
+`test_shared_and_overlapping_slices_install_with_canonical_descriptions`): two level headers
+sharing one slice, partly overlapping level headers, a casting record shared with the first
+header (the former `beneficial_overlap` rejection case), adverse spells whose last header shares
+the first header's slice, equivalence with the separately stored layout, repeat application,
+unrelated files and header bytes, kept orphan rejections with their message, and the public
+installer with canonical descriptions unchanged byte for byte. The 16-bit overflow check has no
+fixture: reaching it needs more than 65,535 rebuilt records. None of this was verified in game.
+
 ## Evidence boundaries
 
 The production installation at `C:\Games\Baldur's Gate II Enhanced Edition modded` and its
