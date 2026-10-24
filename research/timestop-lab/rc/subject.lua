@@ -1,4 +1,5 @@
--- Read-only: the party slots, HP, fixture effects and raw effect clocks, Time Stop state.
+-- Read-only: the party slots, HP, lab fixture effects (every CBRT* source) and raw effect
+-- clocks, Time Stop state.
 local function try(f)
     local ok, value = pcall(f)
     if ok then return value end
@@ -17,6 +18,8 @@ local function actor(slot)
         x = try(function() return sprite.m_pos.x end), y = try(function() return sprite.m_pos.y end),
         ai_speed = try(function() return EEex_ReadU8(EEex_UDToPtr(sprite) + 0x58) end),
         action = try(function() return sprite.m_curAction.m_actionID end),
+        -- STATE_HASTED 0x8000, STATE_SLOWED 0x10000 (active stats).
+        state = try(function() return EEex_Sprite_GetState(sprite) end),
         -- Raw clocks of the pinned 2.7.3.0 layout. +0x3A0: a full effect check runs only when
         -- its value mod 15 equals the actor ID mod 15 (ProcessEffectList 0x3ABB7C-0x3ABBC5).
         -- +0x1A08 is the regenerated periodic list; the dispatcher copies its counter +0x38 into
@@ -31,7 +34,7 @@ local function actor(slot)
     try(function()
         EEex_Utility_IterateCPtrList(sprite.m_timedEffectList, function(effect)
             local source = effect.m_sourceRes:get()
-            if source == "CBRTBUF" or source == "CBRTREG" or source == "CBRTHST" or source == "CBRTIHS" then
+            if source:sub(1, 4) == "CBRT" then
                 out.fixtures[#out.fixtures + 1] = {source = source, opcode = effect.m_effectId,
                     timing = effect.m_durationType, deadline = effect.m_duration}
             end

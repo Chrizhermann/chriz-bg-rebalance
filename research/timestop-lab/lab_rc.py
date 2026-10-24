@@ -39,6 +39,9 @@ PENDING = LOG / "pending.json"
 COMMAND, CLAIM, RESULT = (OVERRIDE / "eeex_remote_cmd.lua", OVERRIDE / "eeex_remote_cmd.lua.run",
                           OVERRIDE / "eeex_remote_result.json")
 NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,40}$")
+# A reserved word is no table key in `{name = value}`; such a request would not even compile.
+LUA_KEYWORDS = frozenset("and break do else elseif end false for function goto if in local nil not or "
+                         "repeat return then true until while".split())
 LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,60}$")
 EXIT_POLL = 1.0  # Seconds between process checks while a game may be exiting.
 
@@ -64,6 +67,9 @@ def lua_string(value: str) -> str:
 
 def with_arguments(code: str, arguments: dict[str, str]) -> str:
     """Insert `local ARGS = {...}` after the console's leading --@ directive lines."""
+    for name in arguments:
+        if not NAME.match(name) or name in LUA_KEYWORDS:
+            raise ValueError(f"Invalid argument name {name!r}")
     lines = code.splitlines(keepends=True)
     directives = 0
     while directives < len(lines) and lines[directives].startswith("--@"):
@@ -256,7 +262,7 @@ def main(argv: list[str] | None = None) -> int:
                 values = {}
                 for item in args.arg:
                     name, separator, value = item.partition("=")
-                    if not separator or not NAME.match(name) or name in values:
+                    if not separator or not NAME.match(name) or name in LUA_KEYWORDS or name in values:
                         raise ClientError(f"Invalid --arg {item!r}")
                     values[name] = value
                 if values:

@@ -114,8 +114,8 @@ $sources = [ordered]@{
     'override\M_EEexRC.lua' = Join-Path $remote 'eeexremote\M_EEexRC.lua'
     'override\EEexRC.menu' = Join-Path $remote 'eeexremote\EEexRC.menu'
 }
-foreach ($resref in @('CBRTBUF','CBRTREG','CBRTHST','CBRTIHS','CBRTSTP')) {
-    $sources["override\$resref.SPL"] = Join-Path $generated "$resref.SPL"
+foreach ($entry in $fixtures.Files.PSObject.Properties) {
+    $sources["override\$($entry.Name)"] = Join-Path $generated $entry.Name
 }
 # Built from the stock UI.MENU in the lab's own BIF, never from an override copy.
 $qaMenu = Get-CurrentQAMenu $lab
