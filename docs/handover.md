@@ -1,6 +1,6 @@
 # chriz-bg-rebalance — Handover
 
-## October 23 — Chris Revisions (340): Aid, Luck, Bless, Chaotic Commands, Prayer and Recitation (unreleased)
+## October 23–25 — Chris Revisions (340): Aid, Luck, Bless, Chaotic Commands, Prayer and Recitation (unreleased)
 
 Component 340 holds Christopher's spell revisions as parts of one component, at
 his request: Aid hit points only, Luck 90 seconds, Bless 30 seconds + 1 round
@@ -23,8 +23,9 @@ release-package test. Scratch installs on copies of the CEBG game's resources
 (with SCS's prebuff map) and of the 2.6.6.0 reference install, each with its
 `dialog.tlk`, changed only the expected files, recognized every description and
 uninstalled cleanly. With the original BIFF files the Prayer/Recitation part was
-skipped. Full regression `python -B -m unittest discover -s tests -t .`: see the
-latest PR verification. Not launched in a game.
+skipped. Full regression `python -B -m unittest discover -s tests -t .` on the
+branch merged with v0.8.4 (2026-10-25): 738 tests OK, 26 skipped (private
+captures) with WeiDU 249. Not launched in a game.
 
 Open: in-game check (the 1d8 hit point roll; druids receiving Chaotic Commands
 and Bless at level-up; Prayer and Recitation in both orders and from opposing
