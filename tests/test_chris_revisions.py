@@ -400,8 +400,8 @@ class CombinedTests(Fixture):
         self.assertEqual({"SPPR201.SPL", "C0TRBS2.SPL", "SPWI209.SPL", "SCRL93.ITM", "SPPR101.SPL",
                           "SPPR508.SPL", "SPPR327.SPL", "SPPR422.SPL", "#RECITEG.SPL", "#RECITEB.SPL",
                           "CDID327.ITM", "CDID422.ITM", "CBRCOPY.ITM"}, self.changed(game))
-        for text in ("Aid installed", "Luck installed", "Bless installed", "druids can learn and cast it again",
-                     "Prayer and Recitation installed"):
+        for text in ("Aid installed", "Luck installed", "Bless installed", "Bless: druids can learn and cast it again",
+                     "Chaotic Commands: druids can learn and cast it again", "Prayer and Recitation installed"):
             self.assertIn(text, output)
         self.assertNotIn("skipped", output)
         self.repeat(game)
@@ -427,6 +427,7 @@ class CombinedTests(Fixture):
         output = self.install(game)
         self.assertIn("Aid skipped; SPELL.IDS has no CLERIC_AID entry", output)
         self.assertIn("Bless skipped; SPELL.IDS has no CLERIC_BLESS entry", output)
+        self.assertIn("Bless for druids skipped; SPELL.IDS has no CLERIC_BLESS entry", output)
         self.assertIn("Chaotic Commands skipped; SPELL.IDS has no CLERIC_CHAOTIC_COMMANDS entry", output)
         self.assertIn("Prayer and Recitation skipped; SPELL.IDS has no CLERIC_RECITATION entry", output)
         self.assertEqual({"SPWI209.SPL"}, self.changed(game))
@@ -606,7 +607,7 @@ class BlessTests(Fixture):
                                            ("CLERIC_BLESS_PREBUFF", "dwsp101"))
         return game
 
-    def assert_bless(self, game, name, build):
+    def assert_bless(self, game, name, build, *, druids=False):
         """Abilities for levels 1-20, each lasting 30 s + 6 s per level, with the old fields."""
         before, after = game.original[name], game.snapshot()[name]
         old, new = SplFile.from_bytes(before), SplFile.from_bytes(after)
@@ -616,9 +617,13 @@ class BlessTests(Fixture):
             self.assertEqual(build(bless_duration(ability.required_level)), ability.effects,
                              (name, ability.required_level))
             self.assertEqual(kept(old.abilities[0].raw), kept(ability.raw), name)
-        # In the header only the description, the ability count and the effect offset change.
-        self.assertEqual(before[:0x50] + before[0x54:0x68] + before[0x6E:0x72],
-                         after[:0x50] + after[0x54:0x68] + after[0x6E:0x72])
+        # In the header only the description, the ability count and the effect offset
+        # change, and for the resolved spell Spell Revisions' druid exclusion.
+        expected = bytearray(before[:0x72])
+        if druids:
+            struct.pack_into("<I", expected, 0x1E, struct.unpack_from("<I", before, 0x1E)[0] & 0x7FFFFFFF)
+        self.assertEqual(bytes(expected[:0x50] + expected[0x54:0x68] + expected[0x6E:0x72]),
+                         after[:0x50] + after[0x54:0x68] + after[0x6E:0x72], name)
         self.assertEqual((20, 0x72 + 20 * 0x28), struct.unpack_from("<HI", after, 0x68))
 
     def test_spell_revisions_bless_lasts_30_seconds_plus_a_round_per_level(self):
@@ -629,10 +634,13 @@ class BlessTests(Fixture):
         self.assertEqual({"SPPR101.SPL", "C0BLESS.SPL", "DWSP101.SPL", "CBRBLESS.ITM"}, self.changed(game))
         self.assertIn("Bless installed", output)
         self.assertIn("Changed: SPPR101 C0BLESS DWSP101", output)
-        for name, build in (("SPPR101", bless_effects), ("C0BLESS", bless_effects),
-                            ("DWSP101", prebuff_bless_effects)):
-            self.assert_bless(game, name + ".SPL", build)
+        self.assertIn("Bless: druids can learn and cast it again", output)
+        # Only the learnable spell loses the druid exclusion; the copies keep their flags.
+        for name, build, druids in (("SPPR101", bless_effects, True), ("C0BLESS", bless_effects, False),
+                                    ("DWSP101", prebuff_bless_effects, False)):
+            self.assert_bless(game, name + ".SPL", build, druids=druids)
             self.assertEqual(SR_BLESS_NEW, description(game, after[name + ".SPL"]))
+        self.assertEqual(0, struct.unpack_from("<I", after["SPPR101.SPL"], 0x1E)[0])
         self.assertEqual(after["SPPR101.SPL"][0x50:0x54], after["CBRBLESS.ITM"][0x54:0x58])
         self.assertEqual(prebuff_map, self.prebuff_map.read_bytes())
         self.uninstall(game)
@@ -643,7 +651,8 @@ class BlessTests(Fixture):
                                                level=1, desc=NATIVE_BLESS_REF)})
         # A map entry for a file that does not exist is ignored.
         scs_prebuff_map(game, ("CLERIC_BLESS_PREBUFF", "dwsp101"))
-        self.install(game)
+        output = self.install(game)
+        self.assertIn("Bless is already available to druids; nothing changed", output)
         self.assertEqual({"SPPR101.SPL"}, self.changed(game))
         self.assert_bless(game, "SPPR101.SPL", native_bless_effects)
         self.assertEqual(NATIVE_BLESS_NEW, description(game, game.snapshot()["SPPR101.SPL"]))
@@ -670,18 +679,29 @@ class BlessTests(Fixture):
         self.install(game)
         self.repeat(game)
 
+    def assert_only_druid_access(self, game, name="SPPR101.SPL"):
+        """The duration part left the spell alone; the druid part still applied."""
+        expected = bytearray(game.original[name])
+        struct.pack_into("<I", expected, 0x1E, struct.unpack_from("<I", expected, 0x1E)[0] & 0x7FFFFFFF)
+        self.assertEqual(bytes(expected), game.snapshot()[name])
+
     def test_conflicting_or_missing_bless_bonus_is_left_unchanged(self):
         conflict = self.game({"SPPR101.SPL": sr_bless(effects=(*bless_effects(300), fx(130, 1, pw=1, du=60))),
                               "SPWI209.SPL": luck()})
-        self.left_unchanged(conflict, "Chris Revisions: Bless left unchanged: SPPR101.spl (ability for level 1) "
-                            "has Bless bonuses with different durations", "SPPR101.SPL")
-        self.assertEqual({"SPWI209.SPL"}, self.changed(conflict))
+        output = self.install(conflict, warnings=True)
+        self.assertIn("Chris Revisions: Bless left unchanged: SPPR101.spl (ability for level 1) "
+                      "has Bless bonuses with different durations", output)
+        self.assertIn("Bless: druids can learn and cast it again", output)
+        self.assert_only_druid_access(conflict)
+        self.assertEqual({"SPPR101.SPL", "SPWI209.SPL"}, self.changed(conflict))
         # SCS's prebuff copy changes with the spell, so one that cannot stops both.
         missing = self.game({"SPPR101.SPL": sr_bless(),
                              "DWSP101.SPL": sr_bless(effects=(fx(142, 0, 17, pw=1, du=300),))})
         scs_prebuff_map(missing, ("CLERIC_BLESS_PREBUFF", "DWSP101"))
-        self.left_unchanged(missing, "DWSP101.spl (ability for level 1) has no timed Bless bonus",
-                            "SPPR101.SPL", "DWSP101.SPL")
+        output = self.install(missing, warnings=True)
+        self.assertIn("DWSP101.spl (ability for level 1) has no timed Bless bonus", output)
+        self.assert_only_druid_access(missing)
+        self.assertEqual(missing.original["DWSP101.SPL"], missing.snapshot()["DWSP101.SPL"])
 
     def test_unrecognized_description_warns_and_keeps_the_text(self):
         game = self.game({"SPPR101.SPL": sr_bless(desc=GERMAN_REF)})

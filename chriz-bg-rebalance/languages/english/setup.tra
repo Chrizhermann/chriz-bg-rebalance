@@ -281,5 +281,5 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @3406 = ~Bless installed: it now lasts 30 seconds + 1 round per caster level (36 to 150 seconds). Changed:%cr_members%~
 @3411 = ~Recitation does not stack with Prayer. On each creature, Recitation's bonus replaces a Prayer bonus and its penalty replaces a Prayer penalty; while Recitation lasts, Prayer adds no bonus or penalty of the same kind.~
 @3412 = ~Prayer does not stack with Recitation. A creature with Recitation's bonus gains no bonus from Prayer, a creature with Recitation's penalty suffers no penalty from Prayer, and a later Recitation replaces Prayer's bonus or penalty.~
-@3500 = ~Chaotic Commands: druids can learn and cast it again.~
-@3501 = ~Chaotic Commands is already available to druids; nothing changed.~
+@3500 = ~%cr_spell%: druids can learn and cast it again.~
+@3501 = ~%cr_spell% is already available to druids; nothing changed.~

@@ -67,7 +67,7 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 320 | Cross-cutting audits | Combat clouds: 75% damage resistance instead of invulnerability | Automated checks passed; combat check pending |
 | 330 / 331 | Cross-cutting audits | Potion uniqueness: one dose of each temporary potion type at a time (331: Potions of Genius still stack) | Automated checks and lab install passed; in-game check pending |
 | 332 | Cross-cutting audits | Heroism family: Heroism, Greater Heroism and the Potion of Heroism do not combine | Automated checks and lab install passed; in-game check pending |
-| 340 | Cross-cutting audits | Chris Revisions: Aid hit points only, Luck 90 seconds, Bless 30 seconds + 1 round per level, Chaotic Commands for druids, Prayer and Recitation not cumulative | Automated checks passed; in-game check pending |
+| 340 | Cross-cutting audits | Chris Revisions: Aid hit points only, Luck 90 seconds, Bless 30 seconds + 1 round per level, Bless and Chaotic Commands for druids, Prayer and Recitation not cumulative | Automated checks passed; in-game check pending |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
@@ -149,7 +149,8 @@ Spell Revisions, the same final values apply.
 - **Bless** lasts **30 seconds + 1 round per caster level**: 36 seconds at
   level 1, 90 at level 10 and 150 from level 20, instead of 5 turns (Spell
   Revisions) or 6 rounds (unmodded). Its bonus is unchanged, and SCS's instant
-  prebuff copy of Bless changes with it.
+  prebuff copy of Bless changes with it. Druids, and rangers with them, can
+  cast Bless again, as in the unmodded game.
 - **Chaotic Commands** is available to druids again at spell level 5, as in
   the unmodded game; Spell Revisions had made it a cleric-only spell.
 - **Prayer and Recitation** (IWD divine spells, for example from IWDification)
@@ -164,8 +165,8 @@ installed. A part that cannot be changed safely is left unchanged with an
 installation warning; the other parts still apply. English descriptions of the
 spells and their scrolls are updated; other wording stays as it is, with a
 warning. No EEex is needed. Effects already active in a save keep their old
-values until they end. Existing druids should receive Chaotic Commands at their
-next level-up; this is not yet checked in the game.
+values until they end. Existing druids should receive Chaotic Commands and
+Bless at their next level-up; this is not yet checked in the game.
 [Aid, Luck and Chaotic Commands](research/2026-10-23-aid-luck-chaotic-commands.md),
 [Prayer and Recitation](research/2026-10-23-prayer-recitation.md),
 [Bless](research/2026-10-23-bless.md).

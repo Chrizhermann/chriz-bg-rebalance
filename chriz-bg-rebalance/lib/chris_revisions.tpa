@@ -4,7 +4,8 @@
 // research/2026-10-23-prayer-recitation.md and research/2026-10-23-bless.md
 //
 // Parts: Aid (hit points only), Luck (90 seconds), Bless (30 seconds + 1 round
-// per level), Chaotic Commands (druids), Prayer and Recitation (not cumulative).
+// per level, and druids), Chaotic Commands (druids), Prayer and Recitation (not
+// cumulative).
 // Each part resolves its spells through SPELL.IDS. A part whose spells are not
 // installed is skipped. A part that cannot be changed safely is found by a dry
 // run and left unchanged with a warning, so the other parts still apply.
@@ -856,9 +857,10 @@ BEGIN
   LAM cbr_cr_report_skip
 END
 
-// Chaotic Commands: only the druid bit of the priest class flags is cleared. For
-// priest spells the high word of the exclusion flags (0x20) selects the classes:
-// 0x8000 excludes druids and rangers, 0x4000 clerics and paladins.
+// Druid access (Chaotic Commands, Bless): only the druid bit of the priest class
+// flags is cleared. For priest spells the high word of the exclusion flags (0x20)
+// selects the classes: 0x8000 excludes druids and rangers, 0x4000 clerics and
+// paladins. cr_spell names the spell in the messages.
 DEFINE_PATCH_MACRO cbr_cr_druid_patch
 BEGIN
   SET cr_changed = 0
@@ -1259,7 +1261,15 @@ BEGIN
   OUTER_SET cr_base = 1000
   LAM cbr_cr_family_part
 
+  OUTER_SPRINT cr_what ~Bless for druids~
+  OUTER_SPRINT cr_spell ~Bless~
+  OUTER_SPRINT cr_symbol ~CLERIC_BLESS~
+  OUTER_SPRINT cr_prefix ~SPPR~
+  OUTER_SET cr_base = 1000
+  LAM cbr_cr_druid_part
+
   OUTER_SPRINT cr_what ~Chaotic Commands~
+  OUTER_SPRINT cr_spell ~Chaotic Commands~
   OUTER_SPRINT cr_symbol ~CLERIC_CHAOTIC_COMMANDS~
   OUTER_SPRINT cr_prefix ~SPPR~
   OUTER_SET cr_base = 1000

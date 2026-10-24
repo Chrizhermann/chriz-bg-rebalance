@@ -4,8 +4,9 @@
 
 Component 340 holds Christopher's spell revisions as parts of one component, at
 his request: Aid hit points only, Luck 90 seconds, Bless 30 seconds + 1 round
-per level (36–150 seconds), Chaotic Commands for druids, and Prayer/Recitation
-not cumulative (Bless and Chant keep stacking). The parts were first built as
+per level (36–150 seconds), Bless and Chaotic Commands for druids (decided
+October 25; rangers share the flag), and Prayer/Recitation not cumulative
+(Bless and Chant keep stacking). The parts were first built as
 components 340, 341 and 350; future revisions join 340 as further parts instead
 of new components. A part without its spells is skipped; one that cannot be
 changed safely is left unchanged with a warning while the others apply. Family
@@ -25,11 +26,10 @@ uninstalled cleanly. With the original BIFF files the Prayer/Recitation part was
 skipped. Full regression `python -B -m unittest discover -s tests -t .`: see the
 latest PR verification. Not launched in a game.
 
-Open: in-game check (the 1d8 hit point roll; druids receiving Chaotic Commands at
-level-up; Prayer and Recitation in both orders and from opposing casters; Bless
-durations at levels 1, 10 and 20); whether druids get Bless back (SR excludes
-them; Christopher has not decided); the collection's curation entry; tag/release
-only with Christopher's approval.
+Open: in-game check (the 1d8 hit point roll; druids receiving Chaotic Commands
+and Bless at level-up; Prayer and Recitation in both orders and from opposing
+casters; Bless durations at levels 1, 10 and 20); the collection's curation
+entry; tag/release only with Christopher's approval.
 
 ## October 14 — v0.8.3 candidate: potion uniqueness and Heroism family (local, unpublished)
 

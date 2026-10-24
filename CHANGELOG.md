@@ -11,7 +11,8 @@
   - Luck and its exact copies last 15 rounds; the bonuses are unchanged.
   - Bless lasts 30 seconds + 1 round per caster level (36 to 150 seconds,
     the maximum from level 20) instead of a fixed duration. Exact copies and
-    SCS's instant prebuff copy change with it.
+    SCS's instant prebuff copy change with it. Spell Revisions' druid
+    exclusion is removed, so druids and rangers can cast Bless again.
   - Chaotic Commands: only Spell Revisions' druid exclusion is removed, so
     druids can cast it again at spell level 5.
   - Prayer and Recitation no longer stack: on each creature, Recitation's
