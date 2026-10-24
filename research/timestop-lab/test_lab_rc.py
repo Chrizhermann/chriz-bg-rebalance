@@ -52,6 +52,15 @@ class ArgumentTests(unittest.TestCase):
             self.assertEqual(lab_rc.main(["lua", "x", "return 1", "--arg", "bad-name=1"]), 2)
         self.assertIn("Invalid --arg", error.getvalue())
 
+    def test_lua_keywords_are_no_argument_names(self):
+        for name in ("then", "end", "nil"):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    lab_rc.with_arguments("return 1", {name: "x"})
+                with contextlib.redirect_stderr(io.StringIO()) as error:
+                    self.assertEqual(lab_rc.main(["lua", "x", "return 1", "--arg", f"{name}=1"]), 2)
+                self.assertIn("Invalid --arg", error.getvalue())
+
 
 @unittest.skipIf(lupa is None, "lupa with LuaJIT 2.1 is not installed")
 class RequestSyntaxTests(unittest.TestCase):
@@ -73,7 +82,13 @@ class RequestSyntaxTests(unittest.TestCase):
                                            "FIXTURES_PRESENT", "NO_CONTROLLER", "NOT_THE_CONTROLLER",
                                            "CONTROLLER_BUSY", "FIXTURES_FIRST", "TIME_STOP_ACTIVE",
                                            "INVALID_WAIT", "UNKNOWN_SPELL", "SUBJECT_BUSY",
-                                           "HASTE_PRESENT", "FIXTURES_MIXED"),
+                                           "SPEED_PRESENT", "FIXTURES_MIXED", "UNKNOWN_CASTER",
+                                           "STEP_NEEDS_CONTROLLER", "UNKNOWN_STEP", "PLAYER1_NOT_THE_SUBJECT",
+                                           "INVALID_STEP_WAIT", "IMMUNITY_PRESENT", "INVALID_REAPPLY_WAIT",
+                                           "INVALID_POINT", "NOT_A_DUMMY", "DUMMY_HELD", "DUMMY_NOT_HELD",
+                                           "ACTIVITY_NOT_ARMED", "UNKNOWN_FIXTURE", "BUFF_ONLY_FIRST"),
+                             "activity.lua": ("INSTALL_FIRST", "NOT_THE_SUBJECT", "UNKNOWN_OP"),
+                             "save.lua": ("EXPECTED_MENU:LOAD", "NO_SAVE_LIST", "SAVE_MATCHES"),
                              "pause.lua": ("NO_GAME", "PAUSE_STATE_UNCHANGED"),
                              "dialog.lua": ("CONFIRM_MODE_REQUIRED", "DIALOG_BUTTON_NOT_CLICKABLE"),
                              "pick-character.lua": ("AMBIGUOUS_CHARACTER", "CHARACTER_NOT_FOUND"),
@@ -90,28 +105,48 @@ class QueueRequestTests(unittest.TestCase):
     """queue.lua against stub bindings: what it queues on whom, and what it refuses."""
 
     GAME = 0x5000  # Stub CInfGame pointer; +0x9690 is the Time Stop counter.
+    DUMMY = 77
 
     def queue(self, arguments, paused=1, armed=True, fixtures=("CBRTBUF", "CBRTREG"),
-              controller=("Imoen", 2), stop=0, action=0):
+              controller=("Imoen", 2), stop=0, action=0, player1=10, dummy=("BATIN01", ("CBRTDUM",) * 2),
+              activity=(True, 10)):
+        """Runs queue.lua; returns (ok, queued or error, queue count, target name). self.side holds
+        the scripting target the request stored on the subject and whether it cleared its actions."""
         runtime = lupa.LuaRuntime(unpack_returned_tuples=True)
         attempt = runtime.eval("""function(code, paused, armed, sources, controllerName, controllerID,
-                stop, game, action)
-            local queued = {}
-            local function actor(id, name, list)
-                return {m_id = id, _name = name, m_timedEffectList = list or {},
-                    m_baseStats = {m_hitPoints = 80}, m_curAction = {m_actionID = action}}
+                stop, game, action, player1, dummyID, dummyRes, dummySources, activityArmed, activitySubject)
+            local queued, side = {}, {}
+            local function list(entries)
+                local out = {}
+                if type(entries) == "table" then return out end  -- No Python list: no effects.
+                for source in python.iter(entries) do
+                    out[#out + 1] = {m_sourceRes = {get = function() return source end}}
+                end
+                return out
             end
-            local list = {}
-            for source in python.iter(sources) do
-                list[#list + 1] = {m_sourceRes = {get = function() return source end}}
+            local function actor(id, name, entries, resref)
+                return {m_id = id, _name = name, m_timedEffectList = list(entries),
+                    m_baseStats = {m_hitPoints = 80}, m_curAction = {m_actionID = action},
+                    m_resref = {get = function() return resref end},
+                    isSprite = function() return true end,
+                    setStoredScriptingTarget = function(self, key, target) side.stored = {key, target.m_id} end,
+                    virtual_ClearActions = function(self, flag) side.cleared = flag end}
             end
-            local actors = {[0] = actor(10, "CBRTS Subject", list)}
-            if controllerName then actors[1] = actor(controllerID, controllerName) end
+            local actors = {[0] = actor(10, "CBRTS Subject", sources, "CHARBASE")}
+            if controllerName then actors[1] = actor(controllerID, controllerName, {}, "IMOEN") end
+            local objects = {[10] = actors[0]}
+            if dummyRes then objects[dummyID] = actor(dummyID, "Bat", dummySources, dummyRes) end
             EngineGlobals = {g_pBaldurChitin = {m_pEngineWorld = {m_bPaused = paused, m_bHardPaused = 0},
                 m_pObjectGame = {_ptr = game, m_worldTime = {m_gameTime = 1000}}}}
             CBRTS = {Status = function() return {armed = armed} end}
+            CBRTA = {armed = activityArmed, subject = activitySubject}
             EEex_Sprite_GetInPortrait = function(slot) return actors[slot] end
             EEex_Sprite_GetName = function(sprite) return sprite._name end
+            EEex_GameObject_Get = function(id) return objects[id] end
+            EEex_Object_EvalStringAsAIBase = function(text, caller)
+                assert(text == "Player1", "unexpected object")
+                return objects[player1] or actors[1]
+            end
             EEex_Utility_IterateCPtrList = function(entries, f) for _, e in ipairs(entries) do f(e) end end
             EEex_UDToPtr = function(value) return value._ptr end
             EEex_Read32 = function(address)
@@ -122,13 +157,27 @@ class QueueRequestTests(unittest.TestCase):
                 queued[#queued + 1] = {response = response, target = target._name}
             end
             local ok, result = pcall(assert(loadstring(code, "@queue.lua")))
-            if not ok then return false, tostring(result), #queued end
-            return true, result.queued, #queued, queued[1].target
+            local stored = side.stored and (side.stored[1] .. "=" .. side.stored[2]) or nil
+            if not ok then return false, tostring(result), #queued, nil, stored, side.cleared end
+            return true, result.queued, #queued, queued[1].target, stored, side.cleared
         end""")
         code = lab_rc.with_arguments((REQUESTS / "queue.lua").read_text(encoding="utf-8"),
                                      {"subject": "CBRTS Subject", **arguments})
         name, identity = controller if controller else (None, None)
-        return attempt(code, paused, armed, list(fixtures), name, identity, stop, self.GAME, action)
+        dummy_res, dummy_sources = dummy if dummy else (None, ())
+        active, subject = activity if activity else (False, None)
+        *result, stored, cleared = attempt(code, paused, armed, list(fixtures), name, identity, stop, self.GAME,
+                                           action, player1, self.DUMMY, dummy_res, list(dummy_sources),
+                                           active, subject)
+        self.side = {"stored": stored, "cleared": cleared}
+        return tuple(result)
+
+    def refused(self, base, cases):
+        for guard, (arguments, state) in cases.items():
+            with self.subTest(guard=guard):
+                ok, error, count = self.queue({**base, **arguments}, **state)[:3]
+                self.assertEqual((ok, count), (False, 0))
+                self.assertIn(guard, error)
 
     def test_timestop_runs_on_the_controller_after_its_wait(self):
         ok, response, count, target = self.queue({"what": "timestop", "controller": "Imoen", "wait": "66"})
@@ -139,7 +188,7 @@ class QueueRequestTests(unittest.TestCase):
 
     def test_timestop_refuses_without_its_case(self):
         base = {"what": "timestop", "controller": "Imoen", "wait": "66"}
-        cases = {
+        self.refused(base, {
             "PAUSE_FIRST": ({}, {"paused": 0}),
             "ARM_FIRST": ({}, {"armed": False}),
             "NO_CONTROLLER": ({}, {"controller": None}),
@@ -147,12 +196,8 @@ class QueueRequestTests(unittest.TestCase):
             "CONTROLLER_BUSY": ({}, {"action": 23}),
             "FIXTURES_FIRST": ({}, {"fixtures": ("CBRTREG",)}),
             "TIME_STOP_ACTIVE": ({}, {"stop": 90}),
-        }
-        for guard, (arguments, state) in cases.items():
-            with self.subTest(guard=guard):
-                ok, error, count = self.queue({**base, **arguments}, **state)[:3]
-                self.assertEqual((ok, count), (False, 0))
-                self.assertIn(guard, error)
+            "UNKNOWN_CASTER": ({"caster": "Imoen"}, {}),
+        })
         with self.subTest(guard="NOT_THE_CONTROLLER", case="the subject itself"):
             ok, error, count = self.queue(base, controller=("Imoen", 10))[:3]
             self.assertEqual((ok, count), (False, 0))
@@ -167,36 +212,169 @@ class QueueRequestTests(unittest.TestCase):
                 self.assertEqual((ok, count), (False, 0))
                 self.assertIn("INVALID_WAIT", error)
 
-    def test_haste_runs_on_the_subject_after_its_wait(self):
-        for spell in ("CBRTHST", "CBRTIHS"):
+    def test_the_subject_can_cast_its_own_stop(self):
+        ok, response, count, target = self.queue({"what": "timestop", "caster": "subject", "wait": "20"},
+                                                 controller=None)
+        self.assertTrue(ok, response)
+        self.assertEqual((response, count, target),
+                         ('SmallWait(20)\nApplySpellRES("CBRTSTP",Myself)', 1, "CBRTS Subject"))
+        base = {"what": "timestop", "caster": "subject", "wait": "20"}
+        self.refused(base, {"SUBJECT_BUSY": ({}, {"action": 23}),
+                            "STEP_NEEDS_CONTROLLER": ({"step": "remove", "step_wait": "5"}, {})})
+
+    def test_steps_during_the_stop_follow_on_the_controller(self):
+        expected = {
+            "stop": 'SmallWait(120)\nApplySpellRES("CBRTSTP",Myself)',
+            "remove": 'SmallWait(120)\nApplySpellRES("CBRTRMR",Player1)',
+            "refresh": 'SmallWait(120)\nApplySpellRES("CBRTRMR",Player1)\nApplySpellRES("CBRTREG",Player1)',
+            "apply": 'SmallWait(120)\nApplySpellRES("CBRTREG",Player1)',
+        }
+        for step, tail in expected.items():
+            with self.subTest(step=step):
+                fixtures = ("CBRTBUF",) if step == "apply" else ("CBRTBUF", "CBRTREG")
+                ok, response, count, target = self.queue(
+                    {"what": "timestop", "controller": "Imoen", "wait": "20", "step": step, "step_wait": "120"},
+                    fixtures=fixtures)
+                self.assertTrue(ok, response)
+                self.assertEqual((response, count, target),
+                                 ('SmallWait(20)\nApplySpellRES("CBRTSTP",Myself)\n' + tail, 1, "Imoen"))
+        ok, response, _, _ = self.queue({"what": "timestop", "controller": "Imoen", "wait": "20", "step": "remove",
+                                         "step_wait": "0"})
+        self.assertEqual((ok, response),
+                         (True, 'SmallWait(20)\nApplySpellRES("CBRTSTP",Myself)\nApplySpellRES("CBRTRMR",Player1)'))
+
+    def test_steps_during_the_stop_refuse_a_foreign_case(self):
+        base = {"what": "timestop", "controller": "Imoen", "wait": "20", "step": "remove", "step_wait": "30"}
+        self.refused(base, {
+            "UNKNOWN_STEP": ({"step": "dispel"}, {}),
+            "INVALID_STEP_WAIT": ({"step_wait": "301"}, {}),
+            "PLAYER1_NOT_THE_SUBJECT": ({}, {"player1": 2}),
+            "BUFF_ONLY_FIRST": ({"step": "apply"}, {}),
+            "FIXTURES_FIRST": ({"step": "refresh"}, {"fixtures": ()}),
+        })
+
+    def test_speed_runs_on_the_subject_after_its_wait(self):
+        for spell in ("CBRTHST", "CBRTIHS", "CBRTWHS", "CBRTSRH", "CBRTSLW"):
             with self.subTest(spell=spell):
-                ok, response, count, target = self.queue({"what": "haste", "spell": spell, "wait": "74"})
+                ok, response, count, target = self.queue({"what": "speed", "spell": spell, "wait": "74"})
                 self.assertTrue(ok, response)
                 self.assertEqual((response, count, target),
                                  (f'SmallWait(74)\nApplySpellRES("{spell}",Myself)', 1, "CBRTS Subject"))
-        ok, response, _, _ = self.queue({"what": "haste", "spell": "CBRTHST", "wait": "0"}, fixtures=())
-        self.assertEqual((ok, response), (True, 'ApplySpellRES("CBRTHST",Myself)'))
+        ok, response, _, _ = self.queue({"what": "speed", "spell": "CBRTSLW", "wait": "0"}, fixtures=())
+        self.assertEqual((ok, response), (True, 'ApplySpellRES("CBRTSLW",Myself)'))
 
-    def test_haste_refuses_without_a_clean_case(self):
-        base = {"what": "haste", "spell": "CBRTHST", "wait": "74"}
-        cases = {
+    def test_speed_refuses_without_a_clean_case(self):
+        base = {"what": "speed", "spell": "CBRTHST", "wait": "74"}
+        self.refused(base, {
             "ARM_FIRST": ({}, {"armed": False}),
             "UNKNOWN_SPELL": ({"spell": "CBRTSTP"}, {}),
             "SUBJECT_BUSY": ({}, {"action": 23}),
-            "HASTE_PRESENT": ({}, {"fixtures": ("CBRTBUF", "CBRTREG", "CBRTIHS")}),
+            "SPEED_PRESENT": ({}, {"fixtures": ("CBRTBUF", "CBRTREG", "CBRTSLW")}),
             "FIXTURES_MIXED": ({}, {"fixtures": ("CBRTREG",)}),
             "TIME_STOP_ACTIVE": ({}, {"stop": 90}),
             "INVALID_WAIT": ({"wait": "301"}, {}),
-        }
-        for guard, (arguments, state) in cases.items():
-            with self.subTest(guard=guard):
-                ok, error, count = self.queue({**base, **arguments}, **state)[:3]
+        })
+        for present in ("CBRTHST", "CBRTIHS", "CBRTWHS", "CBRTSRH"):
+            with self.subTest(guard="SPEED_PRESENT", present=present):
+                ok, error, count = self.queue({**base, "spell": "CBRTSLW"}, fixtures=(present,))[:3]
                 self.assertEqual((ok, count), (False, 0))
-                self.assertIn(guard, error)
+                self.assertIn("SPEED_PRESENT", error)
         with self.subTest(guard="FIXTURES_MIXED", case="two of each"):
             ok, error, count = self.queue(base, fixtures=("CBRTBUF", "CBRTREG") * 2)[:3]
             self.assertEqual((ok, count), (False, 0))
             self.assertIn("FIXTURES_MIXED", error)
+
+    def test_immunity_comes_before_the_fixtures(self):
+        ok, response, count, target = self.queue({"what": "immunity"}, fixtures=())
+        self.assertTrue(ok, response)
+        self.assertEqual((response, count, target), ('ApplySpellRES("CBRTTSI",Myself)', 1, "CBRTS Subject"))
+        self.refused({"what": "immunity"}, {
+            "ARM_FIRST": ({}, {"armed": False, "fixtures": ()}),
+            "SUBJECT_BUSY": ({}, {"action": 23, "fixtures": ()}),
+            "IMMUNITY_PRESENT": ({}, {"fixtures": ("CBRTTSI",)}),
+            "FIXTURES_PRESENT": ({}, {}),
+            "TIME_STOP_ACTIVE": ({}, {"stop": 90, "fixtures": ()}),
+        })
+
+    def test_removal_and_reapplication_run_on_the_subject(self):
+        ok, response, count, target = self.queue({"what": "remove", "spell": "CBRTRMR", "wait": "50",
+                                                  "reapply_wait": "30"})
+        self.assertTrue(ok, response)
+        self.assertEqual((response, count, target), (
+            'SmallWait(50)\nApplySpellRES("CBRTRMR",Myself)\nSmallWait(30)\nApplySpellRES("CBRTREG",Myself)',
+            1, "CBRTS Subject"))
+        ok, response, _, _ = self.queue({"what": "remove", "spell": "CBRTRMB", "wait": "0"})
+        self.assertEqual((ok, response), (True, 'ApplySpellRES("CBRTRMB",Myself)'))
+        self.refused({"what": "remove", "spell": "CBRTRMR", "wait": "50"}, {
+            "ARM_FIRST": ({}, {"armed": False}),
+            "UNKNOWN_SPELL": ({"spell": "CBRTREG"}, {}),
+            "SUBJECT_BUSY": ({}, {"action": 23}),
+            "FIXTURES_FIRST": ({}, {"fixtures": ("CBRTBUF",)}),
+            "TIME_STOP_ACTIVE": ({}, {"stop": 90}),
+            "INVALID_REAPPLY_WAIT": ({"reapply_wait": "-1"}, {}),
+        })
+
+    def test_dummy_is_created_by_the_idle_controller(self):
+        ok, response, count, target = self.queue({"what": "dummy", "controller": "Imoen", "x": "3480", "y": "2850"},
+                                                 armed=False)
+        self.assertTrue(ok, response)
+        self.assertEqual((response, count, target), ('CreateCreature("BATIN01",[3480.2850],0)', 1, "Imoen"))
+        self.refused({"what": "dummy", "controller": "Imoen", "x": "3480", "y": "2850"}, {
+            "DISARMED_ONLY": ({}, {}),
+            "CONTROLLER_BUSY": ({}, {"armed": False, "action": 23}),
+            "INVALID_POINT": ({"x": "-1"}, {"armed": False}),
+        })
+
+    def test_hold_runs_on_the_dummy_only(self):
+        ok, response, count, target = self.queue({"what": "hold", "id": str(self.DUMMY)}, dummy=("BATIN01", ()))
+        self.assertTrue(ok, response)
+        self.assertEqual((response, count, target), ('ApplySpellRES("CBRTDUM",Myself)', 1, "Bat"))
+        self.refused({"what": "hold", "id": str(self.DUMMY)}, {
+            "DUMMY_HELD": ({}, {}),
+            "NOT_A_DUMMY": ({}, {"dummy": ("RAT", ())}),
+        })
+        for other in ("10", "999", "x"):
+            with self.subTest(guard="NOT_A_DUMMY", id=other):
+                ok, error, count = self.queue({"what": "hold", "id": other}, dummy=("BATIN01", ()))[:3]
+                self.assertEqual((ok, count), (False, 0))
+                self.assertIn("NOT_A_DUMMY", error)
+
+    def test_activity_walks_then_attacks_the_held_dummy(self):
+        ok, response, count, target = self.queue({"what": "activity", "id": str(self.DUMMY), "x": "3512",
+                                                  "y": "2850"})
+        self.assertTrue(ok, response)
+        self.assertEqual((response, count, target),
+                         ('MoveToPoint([3512.2850])\nAttack(EEex_Target("CBRTDummy"))', 1, "CBRTS Subject"))
+        self.assertEqual(self.side["stored"], f"CBRTDummy={self.DUMMY}")
+        self.refused({"what": "activity", "id": str(self.DUMMY), "x": "3512", "y": "2850"}, {
+            "ACTIVITY_NOT_ARMED": ({}, {"activity": (False, 10)}),
+            "SUBJECT_BUSY": ({}, {"action": 23}),
+            "DUMMY_NOT_HELD": ({}, {"dummy": ("BATIN01", ("CBRTDUM",))}),
+            "NOT_A_DUMMY": ({"id": "10"}, {}),
+            "INVALID_POINT": ({"y": "2850.5"}, {}),
+        })
+        with self.subTest(guard="ACTIVITY_NOT_ARMED", case="armed on another actor"):
+            ok, error, count = self.queue({"what": "activity", "id": str(self.DUMMY), "x": "1", "y": "1"},
+                                          activity=(True, 2))[:3]
+            self.assertEqual((ok, count), (False, 0))
+            self.assertIn("ACTIVITY_NOT_ARMED", error)
+
+    def test_walk_clears_the_subject_first(self):
+        ok, response, count, target = self.queue({"what": "walk", "x": "3704", "y": "2850"}, armed=False,
+                                                 action=23)
+        self.assertTrue(ok, response)
+        self.assertEqual((response, count, target), ("MoveToPoint([3704.2850])", 1, "CBRTS Subject"))
+        self.assertIs(self.side["cleared"], False)
+        self.refused({"what": "walk", "x": "3704", "y": "2850"}, {"DISARMED_ONLY": ({}, {})})
+
+    def test_halt_lets_the_controller_clear_the_subject(self):
+        ok, response, count, target = self.queue({"what": "halt", "controller": "Imoen"}, armed=False)
+        self.assertTrue(ok, response)
+        self.assertEqual((response, count, target), ("ClearActions(Player1)", 1, "Imoen"))
+        self.refused({"what": "halt", "controller": "Imoen"}, {
+            "DISARMED_ONLY": ({}, {}),
+            "PLAYER1_NOT_THE_SUBJECT": ({}, {"armed": False, "player1": 2}),
+            "NOT_THE_CONTROLLER": ({"controller": "Jaheira"}, {"armed": False})})
 
     def test_fixtures_go_only_onto_a_clean_subject(self):
         ok, response, count, target = self.queue({"what": "fixtures"}, fixtures=())
@@ -208,6 +386,140 @@ class QueueRequestTests(unittest.TestCase):
                 ok, error, count = self.queue({"what": "fixtures"}, fixtures=leftover)[:3]
                 self.assertEqual((ok, count), (False, 0))
                 self.assertIn("FIXTURES_PRESENT", error)
+
+    def test_one_fixture_alone(self):
+        ok, response, count, target = self.queue({"what": "fixtures", "only": "CBRTBUF"}, fixtures=())
+        self.assertTrue(ok, response)
+        self.assertEqual((response, count, target), ('ApplySpellRES("CBRTBUF",Myself)', 1, "CBRTS Subject"))
+        ok, response, _, _ = self.queue({"what": "fixtures", "only": "CBRTREG"}, fixtures=("CBRTBUF",))
+        self.assertEqual((ok, response), (True, 'ApplySpellRES("CBRTREG",Myself)'))
+        self.refused({"what": "fixtures", "only": "CBRTBUF"}, {
+            "FIXTURES_PRESENT": ({}, {"fixtures": ("CBRTBUF",)}),
+            "UNKNOWN_FIXTURE": ({"only": "CBRTSTP"}, {"fixtures": ()}),
+            "ARM_FIRST": ({}, {"armed": False, "fixtures": ()}),
+        })
+
+
+@unittest.skipIf(lupa is None, "lupa with LuaJIT 2.1 is not installed")
+class ActivityRequestTests(unittest.TestCase):
+    """activity.lua against stub listeners: registration once, recording only the armed subject."""
+
+    def setUp(self):
+        self.runtime = lupa.LuaRuntime(unpack_returned_tuples=True)
+        self.runtime.execute("""
+            listeners = {action = {}, hit = {}}
+            world = 500
+            subject = {m_id = 10, _name = "CBRTS Subject", m_pos = {x = 3704, y = 2850}}
+            other = {m_id = 2, _name = "Imoen", m_pos = {x = 1, y = 1}}
+            EngineGlobals = {g_pBaldurChitin = {m_pObjectGame = {m_worldTime = {}}}}
+            setmetatable(EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime,
+                {__index = function() return world end})
+            EEex_Sprite_GetInPortrait = function(slot) if slot == 0 then return subject end end
+            EEex_Sprite_GetName = function(sprite) return sprite._name end
+            EEex_Action_AddSpriteStartedActionListener = function(f) listeners.action[#listeners.action + 1] = f end
+            EEex_Sprite_AddBlockWeaponHitListener = function(f) listeners.hit[#listeners.hit + 1] = f end
+            function act(sprite, id) return listeners.action[1](sprite, {m_actionID = id}) end
+            function hit(attacker, target)
+                return listeners.hit[1]({attackingSprite = attacker, targetSprite = target})
+            end
+        """)
+
+    def request(self, arguments):
+        code = lab_rc.with_arguments((REQUESTS / "activity.lua").read_text(encoding="utf-8"), arguments)
+        attempt = self.runtime.eval("""function(code)
+            local ok, result = pcall(assert(loadstring(code, "@activity.lua")))
+            return ok, ok and result or tostring(result)
+        end""")
+        return attempt(code)
+
+    def test_install_registers_both_listeners_once(self):
+        self.assertFalse(self.request({"op": "arm", "subject": "CBRTS Subject"})[0])
+        for _ in range(2):
+            ok, result = self.request({"op": "install"})
+            self.assertTrue(ok, result)
+        self.assertEqual((len(self.runtime.eval("listeners.action")), len(self.runtime.eval("listeners.hit"))), (1, 1))
+
+    def test_records_only_the_armed_subject_and_never_blocks(self):
+        self.request({"op": "install"})
+        g = self.runtime.globals()
+        self.assertIsNone(g.act(g.subject, 23))  # Not armed yet: nothing recorded.
+        ok, result = self.request({"op": "arm", "subject": "CBRTS Subject"})
+        self.assertTrue(ok, result)
+        g.world = 510
+        self.assertIsNone(g.act(g.subject, 23))
+        self.assertIsNone(g.act(g.other, 3))
+        g.world = 530
+        self.assertIsNone(g.hit(g.subject, g.other))
+        self.assertIsNone(g.hit(g.other, g.subject))
+        ok, result = self.request({"op": "disarm"})
+        g.world = 540
+        g.hit(g.subject, g.other)
+        ok, result = self.request({"op": "read"})
+        self.assertTrue(ok, result)
+        self.assertEqual((result.armed, result.subject, result.overflow, result.game_time), (False, 10, False, 540))
+        self.assertEqual([(a.w, a.id, a.x, a.y) for a in result.actions.values()], [(510, 23, 3704, 2850)])
+        self.assertEqual([(h.w, h.target) for h in result.hits.values()], [(530, 2)])
+
+    def test_arming_clears_and_overflow_stops_recording(self):
+        self.request({"op": "install"})
+        self.request({"op": "arm", "subject": "CBRTS Subject"})
+        g = self.runtime.globals()
+        for _ in range(501):
+            g.hit(g.subject, g.other)
+        ok, result = self.request({"op": "read"})
+        self.assertEqual((len(result.hits), result.armed, result.overflow), (500, False, True))
+        ok, result = self.request({"op": "arm", "subject": "CBRTS Subject"})
+        self.assertEqual((len(result.hits), result.armed, result.overflow), (0, True, False))
+
+    def test_refusals(self):
+        self.assertIn("INSTALL_FIRST", self.request({"op": "read"})[1])
+        self.request({"op": "install"})
+        self.assertIn("NOT_THE_SUBJECT", self.request({"op": "arm", "subject": "Imoen"})[1])
+        self.assertIn("UNKNOWN_OP", self.request({"op": "export"})[1])
+
+
+@unittest.skipIf(lupa is None, "lupa with LuaJIT 2.1 is not installed")
+class SaveRequestTests(unittest.TestCase):
+    """save.lua against a stub load screen list."""
+
+    def save(self, arguments, names=("Auto-Save", "Quick-Save"), on_stack=True):
+        runtime = lupa.LuaRuntime(unpack_returned_tuples=True)
+        attempt = runtime.eval("""function(code, names, onStack)
+            gameSaves = {files = {}}
+            for name in python.iter(names) do
+                -- As in the stock list: slotName is the save's name, sName the party leader's.
+                gameSaves.files[#gameSaves.files + 1] = {slotName = name, sName = "CBRTS Subject",
+                    fileName = "00000000" .. #gameSaves.files .. "-" .. name}
+            end
+            currentSave = nil
+            Infinity_IsMenuOnStack = function(menu) return onStack and menu == "LOAD" and 1 or 0 end
+            local ok, result = pcall(assert(loadstring(code, "@save.lua")))
+            if not ok then return false, tostring(result), currentSave end
+            return true, #result.saves, currentSave
+        end""")
+        code = lab_rc.with_arguments((REQUESTS / "save.lua").read_text(encoding="utf-8"), arguments)
+        return attempt(code, list(names), on_stack)
+
+    def test_select_sets_the_lists_own_variable(self):
+        self.assertEqual(self.save({"op": "list"}), (True, 2, None))
+        self.assertEqual(self.save({"op": "select", "prefix": "Quick"}), (True, 2, 2))
+        # Rotated quick saves: only the exact folder name tells them apart.
+        names = ("Quick-Save", "Auto-Save", "Quick-Save-2")
+        self.assertIn("SAVE_MATCHES:2", self.save({"op": "select", "prefix": "Quick"}, names=names)[1])
+        self.assertEqual(self.save({"op": "select", "file": "000000002-Quick-Save-2"}, names=names), (True, 3, 3))
+        self.assertEqual(self.save({"op": "select", "file": "000000000-Quick-Save"}, names=names), (True, 3, 1))
+
+    def test_select_refuses_no_or_several_matches(self):
+        for names, guard in ((("Auto-Save",), "SAVE_MATCHES:0"), (("Quick-Save", "Quick-Save"), "SAVE_MATCHES:2")):
+            with self.subTest(names=names):
+                ok, error, current = self.save({"op": "select", "prefix": "Quick"}, names=names)
+                self.assertEqual((ok, current), (False, None))
+                self.assertIn(guard, error)
+        self.assertIn("EXPECTED_MENU:LOAD", self.save({"op": "list"}, on_stack=False)[1])
+        self.assertIn("ARGS.file or ARGS.prefix required", self.save({"op": "select"})[1])
+        both = {"op": "select", "prefix": "Quick", "file": "000000001-Quick-Save"}
+        self.assertIn("ARGS.file or ARGS.prefix required", self.save(both)[1])
+        self.assertIn("SAVE_MATCHES:0", self.save({"op": "select", "file": "000000001-Quick"})[1])
 
 
 @unittest.skipIf(lupa is None, "lupa with LuaJIT 2.1 is not installed")

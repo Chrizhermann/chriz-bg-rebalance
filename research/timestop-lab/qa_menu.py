@@ -13,7 +13,7 @@ listens while one of its host menus (START, WORLD_ACTIONBAR) renders. The QA cop
 * adds one inert 1x1 text to START: on 2.7.3 a campaign choice finishes only on the next
   mouse event, which a queued click on it provides;
 * adds a 1x1 ``EEexRemote.Poll()`` text to the menus that are on top while a new game is
-  created and entered, so console requests are admitted there too.
+  created and entered, or a quick save is reloaded, so console requests are admitted there too.
 
 The input is the stock UI.MENU from the lab's own chitin.key and BIF, read only. The output
 is created exclusively; nothing is launched, installed or overwritten. Adapted from
@@ -80,7 +80,8 @@ DIALOG_CONFIRM = """
     end
 """
 
-# BG2:EE 2.7.3.0 stock items on the way from the main menu into a new Shadows of Amn game.
+# BG2:EE 2.7.3.0 stock items on the way from the main menu into a new Shadows of Amn game,
+# and for one quick save and its reload.
 BINDINGS = (
     Binding("START", "CBRTSQA_SOA", "text", "bam", None, "LOGOSOA",
             "logoFrame = 0 startEngine:OnSoAButtonClick(true) Infinity_PushMenu('START_MAIN')"),
@@ -113,6 +114,18 @@ BINDINGS = (
             "chapterScreen:OnDoneButtonClick()"),
     Binding("WORLD_DIALOG_CONFIRM", "CBRTSQA_DIALOG_CONFIRM", "button", "text", "lua", "dialogButtonText",
             DIALOG_CONFIRM),
+    # Quick save in the world, then back through the options screen's Load Game into that save.
+    Binding("LEFT_SIDEBAR_BOTTOM", "CBRTSQA_QUICKSAVE", "button", "tooltip", "lua",
+            "getTooltipWithHotkey(28,74261)", "worldScreen:OnQuickSaveButtonClick(false)"),
+    Binding("LEFT_SIDEBAR", "CBRTSQA_OPTIONS", "button", "tooltip", "lua", "getTooltipWithHotkey(7,16311)",
+            "e:GetActiveEngine():OnLeftPanelButtonClick(7)"),
+    Binding("ESC_MENU", "CBRTSQA_ESC_LOAD", "button", "text", None, "LOAD_GAME_BUTTON",
+            "popup2Button(19531, 'LOAD_BUTTON', function() optionsScreen:LoadGame() end)"),
+    Binding("POPUP_TWOBUTTON", "CBRTSQA_POPUP2_OK", "button", "text", "lua",
+            "getUiString(Popup2Button.okText or 'DONE_BUTTON')",
+            "Infinity_PopMenu('POPUP_TWOBUTTON') if (Popup2Button.okFunc) then Popup2Button.okFunc() end"),
+    Binding("LOAD", "CBRTSQA_LOAD_GAME", "button", "text", None, "LOAD_BUTTON",
+            "loadScreen:LoadGame(gameSaves.files[currentSave].fileName)"),
 )
 IDLE_MENU, IDLE_NAME = "START", "CBRTSQA_IDLE"
 # START and WORLD_ACTIONBAR already host the console's own menu. WORLD_ACTIONBAR polls here
@@ -120,7 +133,7 @@ IDLE_MENU, IDLE_NAME = "START", "CBRTSQA_IDLE"
 POLLED_MENUS = (
     "START_MAIN", "START_SP", "CHARGEN", "POPUP_THREEBUTTON", "CHARACTER_SELECT", "CHARACTER_COLOR",
     "CHARGEN_CUSTOMSOUNDS", "CHARGEN_NAME", "CHARGEN_DIFFICULTY", "CHAPTER", "WORLD_DIALOG",
-    "WORLD_ACTIONBAR",
+    "WORLD_ACTIONBAR", "ESC_MENU", "POPUP_TWOBUTTON", "LOAD",
 )
 POLL = "EEexRemote.Poll()"
 
