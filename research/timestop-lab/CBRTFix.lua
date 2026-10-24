@@ -4,10 +4,17 @@
 --   Time Stop: in each world tick in which the engine marks the subject frozen, every selected
 --     timed parent's deadline (and the regeneration origin) moves one tick later, before that
 --     pass checks for expiry. Effects applied mid-stop earn only the later ticks.
---   Haste: the selected regeneration worker runs at most once per world tick, on a pulse counter
---     that follows the subject's active time (world time minus its frozen ticks).
---   Rebuilds keep the worker's phase. After a heal the kept phase is the one a native, un-hasted
---     rebuild one tick later would seed (Christopher's choice on 2026-10-23).
+--   Haste and Slow: the selected regeneration worker runs at most once per active tick (world
+--     time minus the subject's frozen ticks), on a pulse counter that follows active time. A
+--     slowed subject's sparser updates count down every active tick since the last one and
+--     deliver the pulse that fell in between (Christopher's choice on 2026-10-25: normalize Slow).
+--   The first counter is the list counter at the regeneration's construction, on the
+--     construction's own active tick, or on the next one when the subject had already processed
+--     that world value (an application while paused: a pause steps world time back one tick) or
+--     the tick was frozen. An extra hasted update at the paused world value is held.
+--   Rebuilds keep the worker's phase, and the reseeded remaining duration counts from the tick
+--     of the rebuild. After a heal the kept phase is the one a native, un-hasted rebuild one tick
+--     later would seed (Christopher's choice on 2026-10-23).
 if CBRTF then return end
 CBRTF = {schema = 1, installed = false}
 local F = CBRTF
@@ -20,10 +27,12 @@ for i, name in ipairs(regs) do saved[name] = (#regs - i) * 8 end
 
 -- Block offsets. Lua writes the block only while the game is paused; the hooks while it runs.
 local B = {enabled=0, subject=8, subjectID=16, frozen=20, lastFrozen=24, listOffset=28,
-    chitin=32, regenVtable=40, listVerified=48, shifts=52, admitted=56, suppressed=60, unmatched=64,
-    restored=68, newParents=72, healReseeds=76, phaseRecords=80,
+    chitin=32, regenVtable=40, listVerified=48, lastDispatchWorld=52, lastDispatchCall=56,
+    shifts=60, admitted=64, suppressed=68, unmatched=72, restored=76, newParents=80,
+    healReseeds=84, phaseRecords=88, heldFirst=92, stretched=96, longGaps=100,
     parent=128, worker=136, origin0=144, frozen0=148, kappa=152, kappaSet=156,
-    lastAdmitted=160, phase=164, phaseBefore=168, period=172, valid=176, activeOrigin=180}
+    lastAdmitted=160, phase=164, phaseBefore=168, period=172, valid=176, activeOrigin=180,
+    seedCounter=184, firstT=188, lastT=192, nextT=196, dispatchT=200}
 F.layout = B
 
 -- Each window was decoded from the pinned executable; none holds a relative operand or a
@@ -40,6 +49,9 @@ F.sites = {
     -- Regeneration AIUpdate epilog, reached by every return path.
     {id=4, name="worker_exit", rva=0x1A5F19, bytes="48 83 C4 58 5E 5B", kind="before",
         actor="rsi", worker="rbx"},
+    -- Periodic dispatch entry: every ProcessEffectList tail and time compression call it.
+    {id=5, name="dispatch_entry", rva=0x226513, bytes="48 8B 79 08 45 8B F0 4C 8B FA 48 8B F1 48 8B EF",
+        kind="after", actor="r15"},
 }
 
 local CBRTREG, CBRTBUF = "0x0047455254524243", "0x0046554254524243"
@@ -121,6 +133,16 @@ function F.BuildAssembly(site, block)
         emit("jz "..label(fail))
         emit("mov ebp, dword ptr [rax+0x3FA0]")
     end
+    -- Active time T = world time minus frozen ticks, into `dest`. A pause steps world time back
+    -- one tick; a frozen tick counted above the current world value has not passed yet.
+    local function activeTime(dest)
+        emit("mov "..dest..", ebp")
+        emit("sub "..dest..", dword ptr "..at(B.frozen))
+        emit("cmp ebp, dword ptr "..at(B.lastFrozen))
+        emit("jae "..label("active"))
+        emit("inc "..dest)
+        emit(label("active")..":")
+    end
     local function subjectOnly()
         emit("cmp r13, qword ptr "..at(B.subject))
         emit("jne "..label("exit"))
@@ -192,28 +214,125 @@ function F.BuildAssembly(site, block)
         worldTime("exit")
         emit("movzx eax, word ptr [r15+0x1A]")
         emit("mov dword ptr "..at(B.phaseBefore)..", eax")
-        emit("cmp ebp, dword ptr "..at(B.lastAdmitted))
-        emit("jbe "..label("suppress"))
-        emit("mov dword ptr "..at(B.lastAdmitted)..", ebp")
-        emit("mov eax, ebp")
-        emit("sub eax, dword ptr "..at(B.frozen)) -- active time T
+        activeTime("eax")
         emit("cmp dword ptr "..at(B.kappaSet)..", 1")
-        emit("je "..label("counter"))
-        -- The first admitted pass keeps the native pulse grid: kappa + T = the copied counter.
-        emit("mov ecx, dword ptr [r15+0x1C]")
-        emit("sub ecx, eax")
-        emit("mov dword ptr "..at(B.kappa)..", ecx")
+        emit("je "..label("steady"))
+        -- The first counter is the list counter at construction, delivered on the active tick the
+        -- construct body chose (held dispatches have advanced the list since); kappa + T keeps
+        -- that grid. Dispatches before that tick are held.
+        emit("mov ecx, dword ptr "..at(B.firstT))
+        emit("cmp eax, ecx")
+        emit("jl "..label("hold"))
+        emit("mov edx, dword ptr "..at(B.seedCounter))
+        emit("sub edx, ecx")
+        emit("mov dword ptr "..at(B.kappa)..", edx")
         emit("mov dword ptr "..at(B.kappaSet)..", 1")
+        -- The seeded remaining duration counts from that tick at the earliest.
+        emit("cmp dword ptr "..at(B.nextT)..", ecx")
+        emit("jge "..label("anchored"))
+        emit("mov dword ptr "..at(B.nextT)..", ecx")
+        emit(label("anchored")..":")
+        emit("dec ecx")
+        emit("mov dword ptr "..at(B.lastT)..", ecx")
+        -- One delivery per active tick: a second hasted update, a frozen tick and the repeated
+        -- tick after a pause run as no-op calls.
+        emit(label("steady")..":")
+        emit("mov ecx, eax")
+        emit("sub ecx, dword ptr "..at(B.lastT)) -- the gap since the last delivered tick
+        emit("jle "..label("suppress"))
+        emit("mov dword ptr "..at(B.lastAdmitted)..", ebp")
+        emit("mov r10d, eax") -- the active tick this dispatch delivers
+        -- A native elapsed other than 1 (time compression) passes unchanged.
+        emit("cmp qword ptr [rsp+"..saved.r8.."], 1")
+        emit("jne "..label("counter"))
+        -- Count down every active tick since the first one not yet counted; a rebuild reseeds
+        -- from its own tick. 1 normally, 2 slowed or after a rebuild in a second hasted update.
+        emit("mov edx, eax")
+        emit("sub edx, dword ptr "..at(B.nextT))
+        emit("inc edx")
+        emit("jns "..label("elapsed"))
+        emit("xor edx, edx")
+        emit(label("elapsed")..":")
+        emit("cmp edx, 1")
+        emit("je "..label("gap"))
+        emit("mov qword ptr [rsp+"..saved.r8.."], rdx")
+        emit("jb "..label("gap"))
+        emit("inc dword ptr "..at(B.stretched))
+        emit(label("gap")..":")
+        emit("cmp ecx, 2")
+        emit("jb "..label("counter"))
+        -- Deliver nothing past the tick the remaining duration runs out, nextT + remaining - 1:
+        -- an unslowed worker ends there.
+        emit("mov r11d, dword ptr [r15+0x28]")
+        emit("add r11d, dword ptr "..at(B.nextT))
+        emit("dec r11d")
+        emit("cmp r11d, eax")
+        emit("jge "..label("scan"))
+        emit("mov r10d, dword ptr "..at(B.lastT))
+        emit("inc r10d")
+        emit("cmp r11d, r10d")
+        emit("jl "..label("capped"))
+        emit("mov r10d, r11d")
+        emit(label("capped")..":")
+        emit("mov ecx, r10d")
+        emit("sub ecx, dword ptr "..at(B.lastT))
+        -- Deliver the latest pulse boundary, (counter + 1) % 15 == 0, since the last delivered tick.
+        -- The worker adds one pulse per whole 15 ticks of elapsed itself, so for a gap of 15 or
+        -- more only a boundary in the gap's remainder (gap % 15 ticks at its end) is delivered.
+        emit(label("scan")..":")
+        emit("mov r9d, r10d")
+        emit("add r9d, dword ptr "..at(B.kappa))
+        emit("cmp ecx, 2")
+        emit("jb "..label("store"))
+        emit("cmp ecx, 15")
+        emit("jb "..label("boundary"))
+        emit("inc dword ptr "..at(B.longGaps))
+        emit("mov r8d, eax")
+        emit("mov eax, ecx")
+        emit("xor edx, edx")
+        emit("mov r11d, 15")
+        emit("div r11d")
+        emit("mov ecx, edx")
+        emit("mov eax, r8d")
+        emit(label("boundary")..":")
+        emit("mov r8d, eax")
+        emit("lea eax, [r9+1]")
+        emit("xor edx, edx")
+        emit("mov r11d, 15")
+        emit("div r11d")
+        emit("mov eax, r8d")
+        emit("cmp edx, ecx")
+        emit("jb "..label("pulse"))
+        -- No boundary in the remainder. The counter itself is one only when a gap of whole
+        -- periods ends on a boundary, which elapsed has already paid for.
+        emit("test edx, edx")
+        emit("jnz "..label("store"))
+        emit("dec r9d")
+        emit("jmp "..label("store"))
+        emit(label("pulse")..":")
+        emit("sub r9d, edx")
+        emit("sub r10d, edx")
+        emit("jmp "..label("store"))
         emit(label("counter")..":")
-        emit("add eax, dword ptr "..at(B.kappa))
-        emit("mov dword ptr [r15+0x1C], eax")
+        emit("mov r9d, r10d")
+        emit("add r9d, dword ptr "..at(B.kappa)) -- the counter kappa + T
+        emit(label("store")..":")
+        emit("mov dword ptr [r15+0x1C], r9d")
+        emit("mov dword ptr "..at(B.dispatchT)..", r10d")
+        emit("mov dword ptr "..at(B.lastT)..", eax")
+        emit("inc eax")
+        emit("mov dword ptr "..at(B.nextT)..", eax")
         emit("inc dword ptr "..at(B.admitted))
         emit("jmp "..label("exit"))
-        -- A second pass in the same tick runs as a no-op: elapsed 0, no 15-tick boundary.
+        emit(label("hold")..":")
+        emit("inc dword ptr "..at(B.heldFirst))
+        emit("jmp "..label("noop"))
         emit(label("suppress")..":")
+        emit("inc dword ptr "..at(B.suppressed))
+        -- A no-op call: elapsed 0 and no 15-tick boundary.
+        emit(label("noop")..":")
         emit("mov dword ptr [r15+0x1C], 0")
         emit("mov qword ptr [rsp+"..saved.r8.."], 0")
-        emit("inc dword ptr "..at(B.suppressed))
         emit("jmp "..label("exit"))
         emit(label("unmatched")..":")
         emit("inc dword ptr "..at(B.unmatched))
@@ -233,6 +352,8 @@ function F.BuildAssembly(site, block)
         emit("jne "..label("exit"))
         emit("cmp dword ptr [r14+0x10], 98")
         emit("jne "..label("exit"))
+        worldTime("exit")
+        activeTime("r9d")
         emit("cmp dword ptr "..at(B.valid)..", 1")
         emit("jne "..label("new"))
         emit("cmp r14, qword ptr "..at(B.parent))
@@ -248,6 +369,8 @@ function F.BuildAssembly(site, block)
         emit("mov word ptr [r15+0x1A], ax")
         emit("mov qword ptr "..at(B.worker)..", r15")
         emit("inc dword ptr "..at(B.restored))
+        -- The seeded remaining duration (deadline - world) counts from this tick on.
+        emit("mov dword ptr "..at(B.nextT)..", r9d")
         emit("jmp "..label("exit"))
         emit(label("new")..":")
         emit("mov qword ptr "..at(B.parent)..", r14")
@@ -267,9 +390,30 @@ function F.BuildAssembly(site, block)
         emit("mov dword ptr "..at(B.phaseBefore)..", eax")
         emit("movzx eax, word ptr [r15+0x18]")
         emit("mov dword ptr "..at(B.period)..", eax")
+        emit("mov eax, dword ptr [r13+0x1A40]") -- the regenerated list's counter (+0x1A08 +0x38)
+        emit("mov dword ptr "..at(B.seedCounter)..", eax")
+        emit("mov dword ptr "..at(B.nextT)..", r9d")
+        emit("mov dword ptr "..at(B.dispatchT)..", r9d")
+        -- The first counter's active tick: this one, or the next when no ProcessEffectList call
+        -- is running (+0x3A0 rises at each call's start) and the subject has already processed
+        -- this world value, or when the frozen body has counted this tick.
+        emit("mov eax, dword ptr [r13+0x3A0]")
+        emit("cmp eax, dword ptr "..at(B.lastDispatchCall))
+        emit("jne "..label("running"))
+        emit("cmp ebp, dword ptr "..at(B.lastDispatchWorld))
+        emit("jbe "..label("later"))
+        emit(label("running")..":")
+        emit("cmp dword ptr "..at(B.frozen)..", 0")
+        emit("je "..label("first"))
+        emit("cmp ebp, dword ptr "..at(B.lastFrozen))
+        emit("jne "..label("first"))
+        emit(label("later")..":")
+        emit("inc r9d")
+        emit(label("first")..":")
+        emit("mov dword ptr "..at(B.firstT)..", r9d")
         emit("mov dword ptr "..at(B.valid)..", 1")
         emit("inc dword ptr "..at(B.newParents))
-    else
+    elseif site.id == 4 then
         emit("cmp dword ptr "..at(B.valid)..", 1")
         emit("jne "..label("exit"))
         emit("cmp r15, qword ptr "..at(B.worker))
@@ -286,10 +430,9 @@ function F.BuildAssembly(site, block)
         emit("cmp dword ptr "..at(B.phaseBefore)..", edx")
         emit("jne "..label("record"))
         -- This call healed (period - 1 -> 0). Keep the phase a native rebuild on the next
-        -- un-hasted tick would seed: floor((T + 1 - activeOrigin) / 15) % period.
-        worldTime("record")
-        emit("mov eax, ebp")
-        emit("sub eax, dword ptr "..at(B.frozen))
+        -- un-hasted tick would seed: floor((T + 1 - activeOrigin) / 15) % period, with T the
+        -- active tick whose pulse this dispatch delivered.
+        emit("mov eax, dword ptr "..at(B.dispatchT))
         emit("inc eax")
         emit("sub eax, dword ptr "..at(B.activeOrigin))
         emit("xor edx, edx")
@@ -302,6 +445,17 @@ function F.BuildAssembly(site, block)
         emit(label("record")..":")
         emit("mov dword ptr "..at(B.phase)..", r9d")
         emit("inc dword ptr "..at(B.phaseRecords))
+    elseif site.id == 5 then
+        subjectOnly()
+        worldTime("exit")
+        emit("mov eax, dword ptr [r13+0x3A0]")
+        emit("mov dword ptr "..at(B.lastDispatchCall)..", eax")
+        -- The highest world value processed: a pause's step back does not lower it.
+        emit("cmp ebp, dword ptr "..at(B.lastDispatchWorld))
+        emit("jbe "..label("exit"))
+        emit("mov dword ptr "..at(B.lastDispatchWorld)..", ebp")
+    else
+        error("Unknown correction site "..tostring(site.id))
     end
     emit(label("exit")..":")
     for i=#regs,1,-1 do emit("pop "..regs[i]) end
@@ -376,6 +530,7 @@ function F.Select(portrait)
     assert(offset > 0 and offset < 0x10000, "Unexpected timed effect list offset")
     -- An empty list proves no layout; the frozen body then stays idle until Verify().
     local verified = verifyList(sprite) > 0
+    local world = EngineGlobals.g_pBaldurChitin.m_pObjectGame.m_worldTime.m_gameTime
     ffi.fill(ffi.cast("void*", F.block+B.shifts), 128-B.shifts, 0)
     ffi.fill(ffi.cast("void*", F.block+B.parent), SIZE-B.parent, 0)
     EEex_WritePtr(F.block+B.subject, pointer)
@@ -384,6 +539,10 @@ function F.Select(portrait)
     EEex_Write32(F.block+B.lastFrozen, 0)
     EEex_Write32(F.block+B.listOffset, offset)
     EEex_Write32(F.block+B.listVerified, verified and 1 or 0)
+    -- Paused, world time stands one tick behind the last tick processed (EEex's B3TimeStep notes
+    -- the same step back). No ProcessEffectList call of the subject runs during this request.
+    EEex_Write32(F.block+B.lastDispatchWorld, world + 1)
+    EEex_Write32(F.block+B.lastDispatchCall, EEex_Read32(pointer + 0x3A0))
     F.sessionEnded = false
     EEex_Write32(F.block+B.enabled, 1)
     return F.Status()
@@ -422,8 +581,12 @@ function F.Status()
         frozen_ticks=u32("frozen"), last_frozen_world=u32("lastFrozen"), shifts=u32("shifts"),
         admitted=u32("admitted"), suppressed=u32("suppressed"), unmatched=u32("unmatched"),
         restored=u32("restored"), new_parents=u32("newParents"), heal_reseeds=u32("healReseeds"),
-        phase_records=u32("phaseRecords"),
+        phase_records=u32("phaseRecords"), held_first=u32("heldFirst"), stretched=u32("stretched"),
+        long_gaps=u32("longGaps"), last_dispatch_world=u32("lastDispatchWorld"),
+        last_dispatch_call=u32("lastDispatchCall"),
         entry={valid=u32("valid") == 1, kappa=u32("kappa"), kappa_set=u32("kappaSet") == 1,
             last_admitted=u32("lastAdmitted"), phase=u32("phase"), period=u32("period"),
-            origin0=u32("origin0"), frozen0=u32("frozen0"), active_origin=u32("activeOrigin")}}
+            origin0=u32("origin0"), frozen0=u32("frozen0"), active_origin=u32("activeOrigin"),
+            seed_counter=u32("seedCounter"), first_t=u32("firstT"), last_t=u32("lastT"),
+            next_t=u32("nextT"), dispatch_t=u32("dispatchT")}}
 end
