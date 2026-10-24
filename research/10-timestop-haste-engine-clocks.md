@@ -184,6 +184,39 @@ caster/immune subjects are open too. Christopher closed the prototype step on 20
 fixes for both residuals and these open items go into the next lab run. Details are in the
 [lab README](timestop-lab/README.md#corrected-captures-fixctl_01-fixstop_01-fixhaste_01-and-fixhaste_02-2026-10-23).
 
+Update 2026-10-25, lab step 5: the revised correction (five hooks) fixed both residuals, and on
+Christopher's choice it now also runs periodic effects in world time under Slow, while
+movement and attacks stay slowed. One run gave 29 traces; 27 decoded complete, and the two
+armed after a load were incomplete as expected.
+
+- **Haste.** Normal, Improved and Weak Haste, entering and ending, healed on the un-hasted
+  ticks, and the worker ended at deadline − 1. SR-shaped Haste has no op16: the subject keeps
+  one update per tick, so nothing needs correcting.
+- **Slow.** Natively the slowed subject updates every second tick and healed 3 times instead of
+  6. Corrected, it healed 6 times, at most one tick late, because a heal can only land on one of
+  its updates.
+- **Pauses.** Nine pauses, with and without Haste, left the corrected heals on their ticks.
+- **Stops.** Two stops in a row shifted the deadlines by each frozen tick once (178). A
+  regeneration removed during a stop stayed removed. One applied or refreshed during a stop got
+  no credit for the frozen time: its first tick was the first free one, and its whole duration
+  ran after the stop. Removal and reapplication without a stop behaved the same.
+- **Caster and immune subjects.** The engine freezes neither, the correction counted no frozen
+  tick, and their effects ran in world time through the stop, as natively.
+- **Attacks and movement.** Native and corrected Haste both walked 192 pixels in 11 ticks
+  instead of 22 and hit 5 times instead of 4 in the same time, while only the corrected subject's
+  regeneration kept world time (6 heals instead of 14).
+- **Save/load.** Shifted deadlines and the regeneration's origin are native effect fields: a
+  quick save kept them, and the reload restored them. The correction's own phase state is not
+  saved; after the load the regeneration ran natively, on a grid restarted with the subject's
+  list counter, 2 ticks off here but with the same heal count.
+
+Expiry still waits for the subject's next full pass. The four go-beyond conditions below held
+for the fixture: frozen-path interception, Haste-independent pulse phase, ordinary expiry and
+explicit removal. That covers one subject and two lab effects; whether to go beyond the
+prototype is Christopher's decision. Saving during a stop, time compression, area transition, area effects,
+maintenance graphs, other periodic opcodes and party/enemy symmetry are open. Details are in
+the [lab README](timestop-lab/README.md#lab-run-of-2026-10-25-step-5).
+
 ## Evidence identity and method
 
 The current executable inspected was
@@ -410,12 +443,12 @@ effect-instance matching, stacked identical effects and component removal need a
 | SR versus non-SR | Installed SR4.19 `SPWI305/SPWI613` and SCS35.21 `DWSW305/DWSW613` contain op176 movement and op1 APR, **no op16/317** across their reachable effects. SR source `spell_rev/lib/kreso_haste_slow.tph:115–130,189–200` confirms the distinction. Base `DATA/SPELLS.BIF` instead has op16 p2=0/1. Names and shared SCS spell-state markers cannot select the engine correction. |
 | SCS / Time Stop | Installed SPWI909 op328 state180 lasts18s while op231 carries36s. Neither the marker nor an assumed SPL length defines actual stop state. Keep SCS encounter timers/prebuff logic outside scope; source-specific corrections stay with their owner. |
 | Maintenance graphs | `tempus_holy_power.tpa:1253–1279` couples op272 upkeep with same-deadline delayed op321 cleanup; `:2270–2279` uses31-tick op44/97 children for Slow coverage. A second op272 APR bridge is at `:3173–3179`, with one-second child at `:2944–2949`. Freezing only the positive parent can leave children expired or let cleanup remove them. Haste normalization must not blanket-select op272. |
-| Caster / immune actors | Native workers continue for both. Decide whether buff duration and periodic effects should also continue for each category, including gaining/losing immunity during a stop. Initial prototype tests only a consistently nonimmune noncaster. |
-| Slow / disease | Decide whether to preserve their native slower cadence or normalize them too; the first Haste test excludes both. Disease is both a periodic family and potentially a timing modifier. |
+| Caster / immune actors | Native workers continue for both. Decide whether buff duration and periodic effects should also continue for each category, including gaining/losing immunity during a stop. Lab 2026-10-25: the engine freezes neither a caster nor an op310-immune subject; with the correction selected, both kept world time, buff expiry included. Gaining or losing immunity during a stop is untested. |
+| Slow / disease | Slow decided 2026-10-25 (Christopher): periodic effects run in world time under Slow too; movement and attacks stay slowed. Lab 2026-10-25: corrected, 6 heals instead of 3, at most one tick late, since a slowed actor updates every second tick. Disease is both a periodic family and potentially a timing modifier; untested. |
 | Area spells | Projectiles, area hazards and their lifetimes have separate code. Decide whether creation, lifetime, pulses and hitting frozen targets should each pause. Actor-local success makes no claim about them. |
-| Save/load / time compression | Absolute deadlines, parent phase origin, rebuilt workers and side metadata must agree. Do not save raw pointers. `CompressTime` separately calls `HandlePersistantEffects` at `0x350212`, forwarding a larger elapsed argument. Rest/travel/load cannot be treated as ordinary callbacks. Exact serialization coverage and current-save compatibility remain unproved. |
-| Consecutive stops | Count each actual frozen tick once, even with back-to-back stops or caster replacement; effects applied midway receive only subsequent compensation. State read at a callback alone can miss a start/end between sparse passes. Observe transition ordering explicitly. |
-| Removal / refresh | Dispel, cure, explicit source removal, charge depletion, death and refresh remain native operations. Clock suspension must not become removal immunity. Clear/rebind metadata on removal, copy and worker rebuilding; address reuse is not identity. Action322 must still remove effects according to their corrected remaining lifetime. |
+| Save/load / time compression | Absolute deadlines, parent phase origin, rebuilt workers and side metadata must agree. Do not save raw pointers. `CompressTime` separately calls `HandlePersistantEffects` at `0x350212`, forwarding a larger elapsed argument. Rest/travel/load cannot be treated as ordinary callbacks. Exact serialization coverage and current-save compatibility remain unproved. Lab 2026-10-25: a quick save after a corrected stop kept the shifted deadlines and the regeneration's origin through the reload; the correction's phase state is not saved, and after the load the grid restarted with the subject's list counter. A quick save shortly after a stop wrote nothing once (cause not isolated); saving during a stop is untested. |
+| Consecutive stops | Count each actual frozen tick once, even with back-to-back stops or caster replacement; effects applied midway receive only subsequent compensation. State read at a callback alone can miss a start/end between sparse passes. Observe transition ordering explicitly. Lab 2026-10-25: two stops 16 ticks apart counted each frozen tick once (178); an effect applied mid-stop was compensated only for the frozen ticks after it. Caster replacement is untested. |
+| Removal / refresh | Dispel, cure, explicit source removal, charge depletion, death and refresh remain native operations. Clock suspension must not become removal immunity. Clear/rebind metadata on removal, copy and worker rebuilding; address reuse is not identity. Action322 must still remove effects according to their corrected remaining lifetime. Lab 2026-10-25: op321 removal stayed removal, during a stop and without one, and a refresh during a stop started a full new duration after the stop. Dispel, cure, charge depletion, death and Action322 are untested. |
 | Component removal | Adjusted native deadlines and temporary metadata must have a defined removal/load policy. Prefer no new save format, but that is not proof a save remains safe without the component. No active-playthrough hotpatch promise. |
 
 Binary anchors for the compatibility reading (all under the read-only game directory):
@@ -440,6 +473,12 @@ fixture it met the Time Stop requirements of step 2 and the healing requirements
 with a one-tick phase offset in one Haste case. In every case the rebuilds kept the phase
 without a duplicate HP event, the first item of step 4. Attacks and movement, the other Haste
 cases and the rest of steps 4 and 5 are open (see the update above).
+
+Status 2026-10-25: lab step 5 covered steps 3 and 4 for the fixture: Improved and SR-shaped
+Haste, attacks and movement, two consecutive stops, removal, refresh and application during a
+stop. Of step 5 it covered save/reload after a stop and pauses. Saving during a stop, rest/time
+compression, area transition, process restart, component absence, poison, the maintenance
+fixture and party/enemy symmetry remain.
 
 Use a disposable BG2:EE **2.7.3.0 / EEex 1.3.1** copy and establish unmodified controls.
 Match its executable to the current fingerprint above, then validate candidate patch
