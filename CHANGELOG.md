@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.8.5 — 2026-10-25
 
 - Add Chris Revisions (340): Christopher's spell balance changes in one
   component, with or without Spell Revisions.
