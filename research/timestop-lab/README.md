@@ -14,7 +14,10 @@ native Haste captures, `haste_01` to `haste_04`
 ([below](#haste-captures-haste_01-to-haste_04-2026-10-23)). The first four corrected
 captures followed on 2026-10-23
 ([below](#corrected-captures-fixctl_01-fixstop_01-fixhaste_01-and-fixhaste_02-2026-10-23)).
-They cover the fixture cases of the acceptance plan, not all of it.
+On 2026-10-25, step 5 tested the revised correction with the other Haste kinds, Slow, pauses,
+stops with removal or application in them, caster and immune subjects, attacks, movement and
+save/load ([below](#lab-run-of-2026-10-25-step-5)). Area effects, time compression and the other
+later gates are still open.
 
 The diagnosis, instruction evidence and open design questions are in
 [`../10-timestop-haste-engine-clocks.md`](../10-timestop-haste-engine-clocks.md).
@@ -151,13 +154,16 @@ START or WORLD_ACTIONBAR renders. A new game therefore goes through the game's o
 clicked with `Infinity_ClickItem`, Christopher's choice on 2026-10-20.
 
 - **QA menu.** `qa_menu.py` reads the stock `UI.MENU` from `chitin.key`/BIF and writes a
-  lab-only copy. It names 15 stock items (`CBRTSQA_*`): the SoA logo, Single Player, New
+  lab-only copy. It names 20 stock items (`CBRTSQA_*`): the SoA logo, Single Player, New
   Game, the character-creation buttons, Import's Character File, the Done buttons, the
-  difficulty and the dialogue confirm button. Each name is added only where exactly one item
+  difficulty and the dialogue confirm button; and for one save and reload, the left sidebar's
+  quick-save and options buttons, the options screen's Load Game, the two-button popup's
+  confirm and the load screen's Load button. Each name is added only where exactly one item
   with the stock action exists. It also adds an inert START label (2.7.3 reopens START after
-  the campaign choice only on the next mouse event) and a 1×1 polling widget to the 12 menus
-  that cover START during character creation and dialogue. The builder is idempotent and
-  refuses unknown actions, ambiguous or missing items and name collisions.
+  the campaign choice only on the next mouse event) and a 1×1 polling widget to the 15 menus
+  that cover START or the world during character creation, dialogue and the reload. The
+  builder is idempotent and refuses unknown actions, ambiguous or missing items and name
+  collisions.
   `qa_menu.py describe <lab>` prints the expected hash. `Stage-Diagnostics.ps1` builds the
   copy into the lab (`cbr-generated-qa-menu-<sha16>`), stages it as `override/UI.MENU` and
   records the builder, stock and output hashes. The preflight checks it like every other
@@ -172,29 +178,47 @@ clicked with `Infinity_ClickItem`, Christopher's choice on 2026-10-20.
   never claimed out of `override`, so that no later start runs it. Every exchange is logged
   under `<lab>\cbr-timestop-output\rc-log\`.
 - **Requests.** `rc/*.lua` holds the requests. Read-only: `ping`, `state`, `menus`,
-  `status`, `subject`, `nearby`. Changing: `watchdog`, `install`, `arm`, `stop`, `export`,
-  `start-soa`, `click`, `pick-character`, `set-name`, `dialog`, `pause`, `queue`, `quit`,
-  and `fix` for the [correction prototype](#correction-prototype-cbrtfixlua), whose
-  `op=status` only reads. Each changing request checks its precondition first (menu on the
-  stack, no transition, paused game, armed or disarmed capture, the subject's name).
+  `status`, `subject`, `nearby`, `creature`. Changing: `watchdog`, `install`, `arm`, `stop`,
+  `export`, `start-soa`, `click`, `pick-character`, `set-name`, `dialog`, `pause`, `queue`,
+  `quit`, `fix` for the [correction prototype](#correction-prototype-cbrtfixlua), `activity`
+  for the [activity recorder](#activity-recorder-and-weapon-hit-dummy) and `save` for the load
+  screen's list. `fix op=status`, `activity op=read` and `save op=list` only read. `save
+  op=select` takes the save's exact folder (`file`) or the start of its name (`prefix`). The
+  list shows the name from `slotName`; `sName` is the party leader's name. The engine rotates
+  quick saves through `Quick-Save`, `Quick-Save-2` and `Quick-Save-3`, so a prefix can match
+  several. Each changing
+  request checks its precondition first (menu on the stack, no transition, paused game, armed
+  or disarmed capture, the subject's name). `lab_rc.py` refuses Lua reserved words as argument
+  names, because `{then = …}` would not compile.
 - **Time Stop trigger and clocks.** `queue what=timestop` makes the controller in portrait 1
   wait `SmallWait(N)` AI updates and then apply `CBRTSTP` to itself, so it is the caster
   and the subject is frozen. It refuses without an armed capture, without exactly one of
   each fixture on the subject, while a stop runs, with a busy controller, or with the subject
-  as controller. `queue what=fixtures` refuses while a fixture from an earlier case is still
-  on the subject. `subject` also reports each actor's current action and the raw counters
-  behind native effect timing on 2.7.3.0:
+  as controller. `caster=subject` lets the subject cast its own stop instead. With the
+  controller as caster, `step` adds one action `step_wait` AI updates after the stop, while
+  the subject is frozen: a second stop (`stop`), `CBRTRMR` on `Player1` (`remove`),
+  `CBRTRMR` and then `CBRTREG` (`refresh`), or `CBRTREG` alone (`apply`, only with `CBRTBUF`
+  alone on the subject before, because the correction verifies its list walk on a timed
+  effect). The request first checks that `Player1` resolves to the subject.
+  `queue what=fixtures` refuses while a fixture from an earlier case is still on the subject;
+  `only=CBRTBUF` or `only=CBRTREG` applies just one of them. `queue what=immunity` applies
+  `CBRTTSI` before the fixtures, and `queue what=remove` applies `CBRTRMR` or `CBRTRMB` after
+  `SmallWait(N)`, optionally reapplying the removed fixture `reapply_wait` updates later.
+  `subject` also reports every lab fixture (`CBRT*`), each actor's current action and state
+  flags, and the raw counters behind native effect timing on 2.7.3.0:
   - `+0x3A0`: the full effect check runs only when this value mod 15 equals the actor ID
     mod 15 (`0x3ABB7C–0x3ABBC5`).
   - `+0x1A08+0x38`: the regenerated periodic list's counter, which the dispatcher copies into
     each worker (`0x22653D`).
   - `+0x520C`: the frozen-actor marker (`0x3ABA9D`).
   - `+0x4BA4`: `m_newEffect`, which is set when a stop ends (`0x3ABACE`).
-- **Haste trigger.** `queue what=haste` makes the subject wait `SmallWait(N)` AI updates and
-  then apply `CBRTHST` (Haste) or `CBRTIHS` (Improved Haste) to itself. It refuses without
-  an armed capture, with a busy subject, with a Haste fixture already on it, with a partial
-  or doubled fixture set, or while a stop runs. `subject` lists the Haste fixtures with their
-  deadlines. Its `ai_speed` is `m_AISpeed` (`+0x58`): 1 at normal speed, 0 while hasted.
+- **Speed trigger.** `queue what=speed` (until 2026-10-24 `what=haste`) makes the subject wait
+  `SmallWait(N)` AI updates and then apply `CBRTHST` (Haste), `CBRTIHS` (Improved Haste),
+  `CBRTWHS` (Weak Haste), `CBRTSRH` (SR-shaped Haste) or `CBRTSLW` (Slow) to itself. It
+  refuses without an armed capture, with a busy subject, with a speed fixture already on it,
+  with a partial or doubled fixture set, or while a stop runs. `subject` lists the speed
+  fixtures with their deadlines. Its `ai_speed` is `m_AISpeed` (`+0x58`): 1 at normal speed,
+  0 while hasted and 3 while slowed.
 
 The 2026-10-20 sequence: `ping`, `watchdog`, `ping`, `state`, `install`, `status`, then
 `start-soa`, `click` Single Player and New Game, `click` Import and Character File,
@@ -246,11 +270,20 @@ safety. First compare an uninstrumented control with installed-but-disarmed hook
 | `CBRTHST` | op16, p2=0, twenty seconds | Native Haste control |
 | `CBRTIHS` | op16, p2=1, twenty seconds | Native Improved Haste control |
 | `CBRTSTP` | op231, encoded twelve seconds | Native six-second Time Stop request |
+| `CBRTWHS` | op16, p2=2, twenty seconds | Weak Haste: speed without attack bonus |
+| `CBRTSRH` | op176 p1=6, op1 p1=6, op142 icon 38; twenty seconds | SR-shaped Haste: Spell Revisions 4.19 builds its Haste (`SPWI305`) from movement rate and attacks per round, without op16 |
+| `CBRTSLW` | op40, twenty seconds | Native Slow |
+| `CBRTTSI` | op310, p2=1, forty seconds | Time Stop immunity |
+| `CBRTRMB`, `CBRTRMR` | op321 type 0, instant, resource `CBRTBUF` or `CBRTREG` | Explicit removal of one fixture |
+| `CBRTDUM` | op208 p1=1 and op175 p1=0 p2=2 (any creature), 900 seconds | Keeps the weapon-hit dummy alive and helpless, so every swing at it hits |
 
 The engine must confirm actual durations. These resources have one single-target
-ability and one effect, no TLK or secondary-resource dependency, and no area effect.
-Baseline fixtures ignore MR and are nondispellable; use explicit source removal
-for the first removal test, not a dispel check that cannot affect this fixture.
+ability, no TLK or secondary-resource dependency, and no area effect. All but `CBRTSRH`
+and `CBRTDUM` carry one effect. Fixtures ignore MR and are nondispellable; removal tests use
+explicit source removal (`CBRTRMB`, `CBRTRMR`), not a dispel check that cannot affect them.
+The removal fixtures name only lab fixtures, since op321 with an empty resource would strip
+every effect without a parent resource. The first five keep the bytes of the captures up to
+step 4; `test_fixtures.py` pins their hashes.
 
 ## Evidence and smallest next test
 
@@ -293,12 +326,16 @@ The engine sessions have four bounded steps:
    Time Stop case and Haste entering and ending. **Done on 2026-10-23** as `fixctl_01`,
    `fixstop_01`, `fixhaste_01` and `fixhaste_02`
    ([results](#corrected-captures-fixctl_01-fixstop_01-fixhaste_01-and-fixhaste_02-2026-10-23)).
+5. Repeat with the revised correction and add Improved, Weak and SR-shaped Haste, Slow, pauses,
+   consecutive stops, removal, refresh and application during a stop, explicit removal, caster
+   and immune subjects, attacks and movement, and save/load. **Done on 2026-10-25**
+   ([results](#lab-run-of-2026-10-25-step-5)).
 
-Steps 1 to 3 resolved the disputed engine paths, and step 4 tested the first
-actor/effect-scoped correction against them. Attack and movement rates, caster/immune
-behavior, Slow, area effects, SR/SCS maintenance graphs, consecutive stops,
-removal/refresh and save/load remain explicit later gates. This lab has no current-save
-safety claim.
+Steps 1 to 3 resolved the disputed engine paths, step 4 tested the first actor/effect-scoped
+correction against them, and step 5 the robustness cases. Saving during a stop, time
+compression and rest, area transition, area effects, SR/SCS maintenance graphs, other periodic
+opcodes, party/enemy symmetry and component absence remain explicit later gates. This lab has
+no current-save safety claim.
 
 ## Engine smoke test (EEex 1.3.1, 2026-10-20)
 
@@ -583,45 +620,107 @@ For a later correction:
 
 ## Correction prototype `CBRTFix.lua`
 
-`CBRTFix.lua` is the first clock correction, made for step 4 only. It acts on one selected
-subject and on two effects: `CBRTBUF`, and `CBRTREG` (op98 p2=3, a regeneration worker that
-counts its phase up to the period and then heals). Both must have absolute timing
-(`0x1000`). No other effect, opcode or actor is touched. At normal speed it keeps the
-native heal pattern, including the 15-tick second interval after the first heal; it only
-removes the influence of Time Stop and Haste (Christopher's choice on 2026-10-23).
+`CBRTFix.lua` is the first clock correction, made for step 4 and revised on 2026-10-25. It
+acts on one selected subject and on two effects: `CBRTBUF`, and `CBRTREG` (op98 p2=3, a
+regeneration worker that counts its phase up to the period and then heals). Both must have
+absolute timing (`0x1000`). No other effect, opcode or actor is touched. At normal speed it
+keeps the native heal pattern, including the 15-tick second interval after the first heal; it
+only removes the influence of Time Stop, Haste and Slow. Christopher chose the native pattern
+on 2026-10-23, and on 2026-10-25 that periodic effects run in world time under Slow too, while
+movement and attacks stay slowed.
 
-Four hooks do the work. Their windows were decoded from the pinned executable like the
+Five hooks do the work. Their windows were decoded from the pinned executable like the
 observer's, and none overlaps an observer window.
 
 | Hook | Site | What it does |
 |---|---|---|
-| Frozen | `0x3ABA9D`, after the engine marks a frozen noncaster | In each world tick in which the subject is frozen, once: moves each selected parent's deadline one tick later, and the regeneration's origin (`+0x6C`) with it. This happens before that pass checks for expiry. |
-| Dispatch | `0x226543`, after the list counter is copied into the worker | Admits the tracked worker once per world tick. Its counter becomes the subject's active time (world time minus its frozen ticks) plus an offset, taken from the first admitted dispatch so that the native pulse grid is kept. A second dispatch in the same tick runs as a no-op: counter 0, elapsed 0. Any other regeneration worker of the subject stays native and is counted as unmatched. |
-| Construct | `0x1BEDD2`, after the regeneration seeds its worker | A rebuilt worker of the tracked parent gets the kept phase back, if the parent's origin moved by exactly the frozen ticks counted since. Another `CBRTREG` parent, or one whose origin does not fit, becomes the new tracked entry with the native seed. |
+| Frozen | `0x3ABA9D`, after the engine marks a frozen noncaster | In each world tick in which the subject is frozen, once: moves each selected parent's deadline one tick later, and the regeneration's origin (`+0x6C`) with it. This happens before that pass checks for expiry. An immune subject or the caster never reaches this site (`0x3ABA67–0x3ABA9B`). |
+| Dispatch entry | `0x226513`, at the start of the periodic-list dispatch | For the subject, records `+0x3A0` of its current `ProcessEffectList` call (raised at the start of every call) and the highest world tick whose dispatch ran. The construct hook uses both to tell whether a new regeneration's first tick was already processed. The dispatcher has two direct callers, both checked: `0x39D5DD` (time compression) and `0x3ADFF7`. |
+| Dispatch | `0x226543`, after the list counter is copied into the worker | Runs the tracked worker on the subject's active time T: world time minus its frozen ticks, plus one for the frozen tick that a pause repeats. The first admitted dispatch waits for the parent's first active tick and keeps the native grid through an offset from the list counter recorded at construction. After that, one dispatch per active tick is admitted; a repeated tick or a second hasted dispatch runs as a no-op (counter 0, elapsed 0). Elapsed is the number of active ticks since the last admitted dispatch, so the worker counts down once per world tick. When a slowed subject skips ticks, the hook scans them for a pulse boundary and delivers it, capped at the parent's last tick; gaps of 15 or more pay whole periods. Any other regeneration worker of the subject stays native and is counted as unmatched. |
+| Construct | `0x1BEDD2`, after the regeneration seeds its worker | A rebuilt worker of the tracked parent gets the kept phase back, if the parent's origin moved by exactly the frozen ticks counted since; its countdown resumes on the next active tick. Another `CBRTREG` parent, or one whose origin does not fit, becomes the new tracked entry with the native seed. Its first tick is the construction's active tick, or the next one when the tick was already processed: an application outside the subject's call after its dispatch, one while paused, or one in a counted frozen tick. |
 | Worker exit | `0x1A5F19`, the regeneration AIUpdate epilog | Records the worker's phase. After a heal it records the phase that a native rebuild on the next un-hasted tick would seed: floor((active time + 1 − active origin)/15) mod period. |
+
+The 2026-10-25 revision fixed both one-tick residuals of step 4 and normalized Slow:
+
+- **R7, grid anchor.** A regeneration applied while paused to a hasted subject took its offset
+  from the extra hasted update at the paused world value. The first tick now comes from the
+  construction, so that update is held (`held_first`) and the grid matches an un-hasted
+  subject's.
+- **R8, worker end.** A rebuild in the second hasted update of a tick reseeded remaining =
+  deadline − world after the tick's admitted dispatch. The countdown now resumes on the next
+  active tick, and every hasted elapsed of the corrected worker covers the active ticks since
+  the last admitted dispatch (`stretched` counts the ones above 1).
+- **Slow.** A dispatch hook that could only drop dispatches kept a slowed subject on its slower
+  native cadence. Elapsed now covers the skipped ticks, and the boundary scan delivers their
+  pulse.
+
+Remaining limits, all covered by host tests:
+
+- An application while paused during a stop misses the shift for the frozen tick that the
+  pause repeats, so it behaves as applied one active tick earlier.
+- A stop that starts between a hasted subject's two updates of a tick counts that tick as
+  frozen.
+- A regeneration first built inside a slowed subject's own update can anchor one tick late;
+  slowed heals land within one tick of an un-slowed subject's.
+- Gaps of 15 ticks or more give the exact pulse count, but the heal phase only approximately.
+- Native pauses shift the native grid one tick each; the corrected grid stays locked to active
+  time.
+- Native Slow also slows the subject's expiry checks, which the correction leaves alone.
+- The design assumes that `ProcessEffectList` reaches its dispatch in every call that raised
+  `+0x3A0`; an early exit would leave the recorded call behind.
 
 Controls, also available as the Remote Console request `fix` (`op=install`, `select`,
 `verify`, `status`, `disable`):
 
 1. `CBRTF.Install()` at the fresh main menu. It first runs `CBRTF.Inspect()`, which checks
-   the lab, the image base and timestamp, the regeneration vtable and all four windows.
+   the lab, the image base and timestamp, the regeneration vtable and all five windows.
    Then it compiles the bodies and installs the hooks, disabled.
 2. `CBRTF.Select(0)` while paused, **before** the fixtures, so that the regeneration's first
    construction is tracked. It disables the correction first, so a refused selection leaves
    it off. It clears the counters and the tracked entry and stores the subject's pointer, ID
-   and timed-list offset. The frozen hook walks that list natively. It stays idle until the
-   walk is proven on the subject's own effects; an empty list proves nothing.
+   and timed-list offset. Paused, world time stands one tick behind the last processed tick,
+   so it records that tick and the subject's current `+0x3A0` for the construct hook. The
+   frozen hook walks the timed list natively. It stays idle until the walk is proven on the
+   subject's own effects; an empty list proves nothing.
 3. Apply the fixtures, then call `CBRTF.Verify(0)` while paused. It requires the selected
    subject, at least one timed effect, and a native walk that matches the EEex iterator. A
    mismatch disables the correction.
 4. `CBRTF.Status()` reports the counters (frozen ticks, deadline shifts, admitted, suppressed
-   and unmatched dispatches, restored phases, new parents, heal reseeds) and the tracked
-   entry.
+   and unmatched dispatches, restored phases, new parents, heal reseeds, held first
+   dispatches, stretched elapsed values, long gaps) and the tracked entry.
 5. `CBRTF.Disable()` needs no pause. One aligned store turns it off, and every later pass is
    native. Destroying the game session disables it too.
 
 The request refuses `select` and `verify` unless the game is paused and portrait 0 carries
 the subject's name.
+
+## Activity recorder and weapon-hit dummy
+
+Attack and movement checks need records that the effect observer does not keep.
+
+- **Recorder.** The request `activity` keeps its state in the global `CBRTA`. `op=install`
+  registers two EEex listeners once per game process: every action the armed subject starts
+  (world time, action ID, position), and every weapon swing of the armed subject that hits
+  (world time, target ID). Both listeners return nothing, so they never block a hit or change
+  an action. `op=arm` starts recording for portrait 0 and clears earlier records; `op=read` and
+  `op=disarm` return them. More than 500 records of either kind end the recording with
+  `overflow`.
+- **Dummy.** EEex calls the weapon-hit listener after a hit roll succeeds, never on a miss. So
+  the target is a creature that every swing hits: `queue what=dummy` lets the controller create
+  `BATIN01` (a neutral bat without scripts, 8 HP), and `queue what=hold` makes it apply
+  `CBRTDUM` to itself. A held creature is helpless, which the engine's hit roll turns into an
+  automatic hit, and the minimum of 1 HP keeps it alive. `creature` reads the dummy's effects.
+- **Walk and attack.** `queue what=activity` stores the dummy as the subject's EEex scripting
+  target and queues `MoveToPoint` to a given point, then `Attack(EEex_Target("CBRTDummy"))`.
+  The movement time is the gap between the starts of the two actions.
+- **Back to the start.** The attack on the dummy never ends by itself, and the subject's own
+  `ClearActions` empties its queue but leaves the current action running. `queue what=halt`
+  therefore lets the controller run `ClearActions(Player1)`, which ends it. `queue what=walk`
+  then drops the subject's queued actions and walks it back.
+
+The walk runs along a straight row of free search-map cells in AR0602, west from (3704, 2850)
+to (3512, 2850), with the dummy at (3480, 2850). Those points come from the area's own search
+map (`AR0602SR.BMP` in the lab's BIF) around the party's position after the opening.
 
 ## Corrected captures `fixctl_01`, `fixstop_01`, `fixhaste_01` and `fixhaste_02` (2026-10-23)
 
@@ -734,7 +833,143 @@ Not covered yet:
   origin differs from the tracked one.
 
 Christopher closed step 4 on 2026-10-24 with these results. R7, R8 and the open items above
-go into the next lab run.
+went into the next lab run, step 5 ([below](#lab-run-of-2026-10-25-step-5)).
+
+## Lab run of 2026-10-25 (step 5)
+
+Step 5 tested the 2026-10-25 revision of `CBRTFix.lua` (R7, R8, Slow) and the items that step 4
+left open: the other Haste kinds, Slow, pauses, stops with a step in them, explicit removal,
+caster and immune subjects, attacks and movement, and save/load.
+
+- **Run.** One quiet run through `lab_quiet_run.py run … 3600`, holding the exclusive lock, after
+  a `-Refresh` restage with the twelve fixtures. At the fresh main menu, `CBRTS.Install()`
+  installed its 8 sites, `CBRTF.Install()` its 5, disabled, and `activity op=install` its two
+  listeners. The party came from the [fresh-party sequence](#fresh-test-party-in-the-hidden-game).
+  Between cases, the correction was disabled, a disarmed run let every lab fixture run out, and
+  `ApplyDamage` restored at least 6 missing HP. `rc/quit.lua` ended the run after 2,684 s, and the
+  lock was released right after. No guard tripped: audio peak 0.0, pointer clip unchanged,
+  nothing left in the job.
+- **Trigger.** As in step 4, each case started paused: `Arm(0)`, `fix op=select` in corrected
+  cases, the fixtures, `fix op=verify`, a `subject` probe, then the case's own event.
+- **Decoding.** `decode_trace.py` exited 0 for 27 of the 29 traces: complete, no issues. The two
+  captures armed after a load exited 1, as they should: the subject's worker was built during the
+  load, before the capture, so its events lack a construct (`unmatched_selected_worker`). The
+  files stay in the lab with their decoded JSON/CSV, the request log, and each case's plan and
+  correction status.
+
+Times are world ticks; +n counts from the fixtures' application. "Prediction" applies the native
+un-hasted rules from step 3 to the case's own probe counters, in active time.
+
+### Speed effects and pauses
+
+| Case | Event | Heals against the prediction | Worker end | Correction |
+|---|---|---|---|---|
+| `fixctl_11` | None. | Same 6 ticks. | Deadline − 1. | 179 admitted. |
+| `fixhaste_11` | Haste from +74. | Same 6 ticks. | Deadline − 1 (step 4: the deadline). | 105 suppressed, 4 stretched. |
+| `fixhaste_12` | Haste first; the fixtures while hasted; Haste off at +78. | Same 6 ticks (step 4: one tick early each). | Deadline − 1. | 1 held first dispatch. |
+| `fixihaste_11` | Improved Haste from +80. | Same 6 ticks. | Deadline − 1. | 99 suppressed. |
+| `fixihaste_12` | Improved Haste first; off at +75. | Same 6 ticks. | Deadline − 1. | 75 suppressed. |
+| `fixwhaste_11` | Weak Haste (op16 type 2) from +80. | Same 6 ticks. | Deadline − 1. | 99 suppressed. |
+| `fixsrhaste_11` | SR-shaped Haste queued for +74. | Same 6 ticks. | Deadline − 1. | None suppressed. |
+| `natslow_11` | Native Slow first, not corrected. | 3 heals, 60 ticks apart. | Deadline + 19. | — |
+| `fixslow_11` | Slow first. | 6 heals; 3 of them one tick late. | Deadline. | 83 stretched. |
+| `fixslow_12` | Slow from +68. | 6 heals; 3 of them one tick late. | Deadline. | 53 stretched. |
+| `fixpause_11` | 9 pauses of 1.4 s. | Same 6 ticks. | Deadline − 1. | 4 repeated ticks suppressed. |
+| `fixpause_12` | Haste first, then 9 pauses. | Same 6 ticks. | Deadline − 1. | 184 suppressed. |
+
+Haste, Improved Haste, Weak Haste and Slow began on their planned ticks. The hasted subject got
+two dispatches per world tick (`m_AISpeed` 0), the slowed one a dispatch every second tick
+(`m_AISpeed` 3, `STATE_SLOWED`). SR-shaped Haste set no state flag and left one dispatch per tick.
+
+### Stops, removal and refresh
+
+| Case | Event | Heals | Buff | Regeneration | Correction |
+|---|---|---|---|---|---|
+| `fixstop_11` | Two stops of 89 frozen ticks, +74 to +162 and +179 to +267. | +23, +38, +68, then +276, +306, +336: the prediction in active time. None inside a stop. | 16 ticks left when the first stop began, all used between the stops. Removed at its shifted deadline, the first free tick after the second stop. | Removed 2 ticks after its shifted deadline; worker end deadline − 1. | 178 frozen ticks, 356 shifts. |
+| `fixstop_12` | Stop from +70; 30 ticks in, `CBRTRMR` removes the regeneration. | +19, +34, +64 before the stop, none after. | 20 ticks left at the stop. Survived it; removed 12 ticks after its shifted deadline. | Removed in the stop's 31st tick, its workers destroyed. | 89 frozen ticks; 119 shifts (89 buff, 30 regeneration). |
+| `fixstop_13` | The buff alone; stop from +41; 30 ticks in, `CBRTREG` applied. | 6 in the native pattern, the first 24 ticks after the stop. | 49 ticks left at the stop; removed 13 ticks after its shifted deadline. | Deadline moved by the 59 frozen ticks after the application; removed 3 ticks after it. | 89 frozen ticks, 59 held first dispatches. |
+| `fixstop_14` | Stop from +66; 30 ticks in, `CBRTRMR` and then `CBRTREG` (refresh). | +27, +42 from the first parent, then 6 from the new one in the native pattern, the first 21 ticks after the stop: 8 in all. | 24 ticks left at the stop; removed 5 ticks after its shifted deadline. | The new parent's deadline moved by the 59 frozen ticks after it; removed at that deadline. | 89 frozen ticks, 2 new parents, 59 held. |
+| `fixremove_11` | No stop; `CBRTRMR` at +50, `CBRTREG` again at +80. | +17, +32, then 6 from the new parent in the native pattern: 8 in all. | Native. | First parent's workers destroyed at +50; the new parent removed 4 ticks after its deadline. | 2 new parents. |
+| `fixcaster_11` | The subject casts a stop at +70. | The 6 predicted ticks, 3 during the stop. | Removed inside the stop, 5 ticks after its deadline. | Native. | 0 frozen ticks. |
+| `fiximmune_11` | `CBRTTSI` (op310) on the subject; the controller's stop at +70. | The 6 predicted ticks, 3 during the stop. | Removed inside the stop, 2 ticks after its deadline. | Native. | 0 frozen ticks. |
+
+The observer's removal site does not see op321 removals: `fixstop_12`, `fixstop_14` and
+`fixremove_11` show them only as destroyed workers and missing dispatches.
+
+### Attacks and movement
+
+The subject walked 192 pixels from (3704, 2850) to (3512, 2850) and then attacked the held
+dummy; each recording lasted 253 to 256 ticks.
+
+| Case | Speed, correction | Walk | Hits | Heals |
+|---|---|---|---|---|
+| `act_nrm_11` | Normal; native; party AI on. | 22 ticks. | 4 (gaps 40, 70, 90). | 6; the 4th one pulse late (below). |
+| `act_nrm_12` | Normal; native. | 22 ticks. | 4 (gaps 40, 50, 100). | 6, the prediction. |
+| `act_hst_11` | Haste; native. | 11 ticks. | 5 (gaps 45, 59, 46, 45). | 14; worker end 12 ticks early. |
+| `act_hstfix_11` | Haste; corrected. | 11 ticks. | 5 (gaps 55, 45, 50, 50). | 6, the prediction; worker end deadline − 1. |
+
+After `act_nrm_11` the subject kept attacking, and the walk back failed: its own
+`ClearActions` leaves the current action running. The controller's `ClearActions(Player1)`
+ended it, which became `queue what=halt`. Before `act_nrm_12`, `game:ToggleAI()` turned the
+party AI off, so the last three cases ran only the queued actions. In `act_nrm_11` the buff's
+removal at +91 rebuilt the list between two pulses and reseeded phase 0, so the 4th heal came
+15 ticks late. The correction keeps the phase across such a rebuild.
+
+### Save and reload
+
+Three tries; the third gave the full answer.
+
+- **`fixsave_11`.** A corrected stop from +70; all 6 heals came on the predicted ticks before the
+  quick save at +249. The regeneration's deadline stood at 41797 instead of 41708 and its origin
+  at 41617 instead of 41528, both shifted by the 89 frozen ticks. The reloaded game ran 46 ticks
+  before the first pause, enough for the regeneration's last 20 ticks to run out. Then the
+  selection failed: `save.lua` compared the prefix with `sName`, the party leader's name, while
+  the load screen shows `slotName`.
+- **`fixsave_12`.** With `slotName` fixed, the first request the game claimed after the load
+  paused it, 10 ticks after the load. But the quick save, taken 28 ticks after a stop's end,
+  had written nothing, so this loaded `fixsave_11`'s save. The stop's op231 effect lasts 180
+  ticks on its caster and was most likely still running; the cause is not isolated. The
+  regeneration came back with the shifted deadline 41797 and origin 41617 and was removed at that
+  deadline (`fixload_12`), with no heal after the load.
+- **`fixsave_13`.** A stop from +6 and the quick save at +207, after the caster's op231 effect had
+  run out; the click wrote at once. Before it, 4 heals on the predicted ticks. The engine rotates
+  quick saves through `Quick-Save`, `Quick-Save-2` and `Quick-Save-3`, so the reload named the
+  folder exactly. The regeneration came back with the same deadline (42174) and origin. The
+  correction's own state is not saved, so it ran natively after the load. The remaining two heals
+  came, 6 in all, at 42118 (inferred from HP and the list grid) and 42148, against 42116 and 42146
+  on the corrected grid: the load restarted the subject's list counter. The worker ended at
+  deadline − 1.
+
+### What this shows
+
+- **R7 and R8 are fixed.** Every Haste case, normal, Improved and Weak, entering and ending,
+  healed on the un-hasted ticks with the worker ending at deadline − 1, like the control.
+- **SR-shaped Haste needs no correction.** Without op16 the subject keeps one update per tick, so
+  the fixture behaves like the control.
+- **Slow is normalized.** 6 heals instead of 3. A slowed subject updates only every second tick,
+  so a heal that falls on the other tick comes one tick late, and so does the worker's end. That
+  is as close as a dispatch-side correction can get.
+- **Pauses leave the corrected grid alone.** With and without Haste, 9 pauses changed nothing:
+  each repeated tick was suppressed.
+- **Stops count each frozen tick once, and removal stays removal.** Two stops in a row shifted
+  the deadlines by 178. An effect removed during a stop stayed removed. An effect applied or
+  refreshed during a stop got no credit for the frozen time: its first tick was the first free
+  tick, and its whole duration ran after the stop. Removal and reapplication without a stop
+  behaved the same.
+- **Caster and immune subjects stay native.** The engine does not freeze them, the correction
+  counted no frozen tick, and their buff expired inside the stop.
+- **Attacks and movement keep their native acceleration.** Corrected Haste walked as fast and hit
+  as often as native Haste while the regeneration kept world time.
+- **Shifted deadlines survive save/load; the phase does not.** Deadlines and the regeneration's
+  origin are native effect fields, saved and loaded unchanged. After a load the correction must
+  be selected again; the native grid restarts, here 2 ticks off, with the heal count unchanged.
+- **Expiry timing stays native.** Removals still wait for the subject's next full pass: up to 14
+  ticks late at normal speed, about 7 hasted, and 21 for the natively slowed regeneration.
+
+Not covered yet: saving during a stop, time compression and rest, area transition, area
+effects, SR/SCS maintenance graphs, other periodic opcodes (poison, disease), party/enemy
+symmetry, component absence and a clean process restart. The quick save after the stop that
+wrote nothing is unexplained.
 
 ## Host validation
 
@@ -779,6 +1014,16 @@ A scratch mutation check replaced 15 single guards or rules in `CBRTFix.lua`, on
 among them the once-per-tick guards, the resref and opcode filters, the origin check, the
 reseed formula, and fail-closed selection and verification. `test_fix.py` failed for every
 mutant. After step 4 on 2026-10-23, all 16 guard groups and all 98 Python tests passed.
+
+The 2026-10-25 revision and step 5 bring the total to 145 Python tests: `test_fix.py` 61,
+`test_lab_rc.py` 36, `test_decode_trace.py` 17, `test_qa_menu.py` 12, `test_observer.py` 11
+and `test_fixtures.py` 8. `test_fix.py` adds the R7 and R8 cases, slowed dispatches, the
+boundary scan and the pause and stop limits. `test_lab_rc.py` adds the new `queue` variants,
+the activity recorder, the save list (with the rotated quick saves and the leader name in
+`sName`), `halt`, and the refusal of Lua reserved words as argument names. `test_fixtures.py`
+pins the first five fixtures' bytes and keeps the removal fixtures on lab resources. The
+mutation check now has 34 mutants, and `test_fix.py` fails for each. After step 5, all 16
+guard groups and all 145 Python tests passed.
 
 Fixture and decoder tests use synthetic data; assembly tests use synthetic memory
 and the pinned executable on disk. They do not execute the game or prove the
