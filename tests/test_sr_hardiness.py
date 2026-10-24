@@ -541,8 +541,8 @@ class HardinessInstallerTests(HardinessTestCase):
                 installer = "Setup-cbr_sr_hardiness.exe" if tail else "Setup-chriz-bg-rebalance.exe"
                 self.assertEqual(WEIDU.read_bytes(), bundle.read(installer))
             expected_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
-            self.assertEqual(f"{expected_hash}  {archive.name}",
-                             archive.with_suffix(".zip.sha256").read_text().strip())
+            self.assertEqual(f"{expected_hash}  {archive.name}\n".encode(),
+                             archive.with_suffix(".zip.sha256").read_bytes())
 
 
 if __name__ == "__main__":

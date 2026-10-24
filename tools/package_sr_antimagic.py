@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import re
 import sys
 import zipfile
@@ -10,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from tools.package_sr_hardiness import build as build_base
+from tools.package_sr_hardiness import build as build_base, write_checksum
 
 
 def build(output: Path) -> list[Path]:
@@ -39,8 +38,7 @@ def build(output: Path) -> list[Path]:
             entry.compress_type = zipfile.ZIP_DEFLATED
             entry.external_attr = 0o644 << 16
             bundle.writestr(entry, source.read_bytes())
-    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    archive.with_suffix(".zip.sha256").write_text(f"{digest}  {archive.name}\n")
+    write_checksum(archive)
     return result + [archive]
 
 
