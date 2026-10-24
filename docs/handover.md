@@ -1,5 +1,24 @@
 # chriz-bg-rebalance — Handover
 
+## October 25 — v0.8.5: Chris Revisions (340)
+
+Christopher asked for this release on 2026-10-25. It contains PR #13 (component
+340, Chris Revisions: Aid, Luck, Bless with druid access, Chaotic Commands,
+Prayer and Recitation; entry below) and PR #12 (the October 11 general spell
+balance review, research only). No other component changed. Tag `v0.8.5` and
+the GitHub release are made from this release PR's merge commit, after his OK to
+merge; if that happens on a later day, the changelog and release-note dates move
+with it.
+
+Verified: full regression 738 tests, OK, 26 skipped (private captures) with
+WeiDU 249. `tools/package_sr_antimagic.py` builds the three packages and their
+checksums from the release branch; the published ones are built the same way
+from a clean checkout of the new tag.
+
+Open:
+- In-game checks of 340 (listed in the entry below).
+- The CEBG pin: the collection coordinator updates it.
+
 ## October 23–25 — Chris Revisions (340): Aid, Luck, Bless, Chaotic Commands, Prayer and Recitation (unreleased)
 
 Component 340 holds Christopher's spell revisions as parts of one component, at
