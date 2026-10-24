@@ -183,10 +183,10 @@ class ReleaseComponentsTests(unittest.TestCase):
                 self.assertEqual(source.read_bytes(), bundle.read(name), name)
             setup = bundle.read("setup-chriz-bg-rebalance.tp2").decode("utf-8")
             ids = [int(x) for x in re.findall(r"DESIGNATED\s+(\d+)", setup)]
-            for component in (130, 200, 201, 202, 210, 211, 220, 310, 320, 330, 331, 332):
+            for component in (130, 200, 201, 202, 210, 211, 220, 310, 320, 330, 331, 332, 340):
                 self.assertEqual(1, ids.count(component))
             self.assertNotIn(311, ids)
-            self.assertEqual([130, 220, 320, 330, 331, 332], ids[-6:])
+            self.assertEqual([130, 220, 320, 330, 331, 332, 340], ids[-7:])
             bundle.extractall(g.root)
         # Execute the package's own WeiDU and staged sources, not repo files.
         p = subprocess.run([str(g.root / "Setup-chriz-bg-rebalance.exe"),

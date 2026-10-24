@@ -29,6 +29,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/sr_antimagic.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/sr_spellstrike.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/potion_uniqueness.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/chris_revisions.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -1624,3 +1625,9 @@ BEGIN @332 DESIGNATED 332 GROUP @1300 LABEL ~cbr_heroism_family~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9330
 REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9331
 LAF cbr_install_potion_uniqueness INT_VAR heroism = 1 END
+
+// Chris Revisions: research/2026-10-23-aid-luck-chaotic-commands.md and
+// research/2026-10-23-prayer-recitation.md
+BEGIN @340 DESIGNATED 340 GROUP @1300 LABEL ~cbr_chris_revisions~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9340
+LAF cbr_install_chris_revisions END

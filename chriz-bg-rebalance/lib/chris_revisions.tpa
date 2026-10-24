@@ -1,0 +1,1280 @@
+// Component 340, Chris Revisions: Christopher's spell balance changes, with or
+// without Spell Revisions. Decisions and evidence:
+// research/2026-10-23-aid-luck-chaotic-commands.md,
+// research/2026-10-23-prayer-recitation.md and research/2026-10-23-bless.md
+//
+// Parts: Aid (hit points only), Luck (90 seconds), Bless (30 seconds + 1 round
+// per level, and druids), Chaotic Commands (druids), Prayer and Recitation (not
+// cumulative).
+// Each part resolves its spells through SPELL.IDS. A part whose spells are not
+// installed is skipped. A part that cannot be changed safely is found by a dry
+// run and left unchanged with a warning, so the other parts still apply.
+//
+// Aid, Luck and Bless also change exact copies of their spell: spells whose
+// abilities and effects match it byte for byte (Bardic Wonders' Troubadour copies
+// Aid that way), and the instant prebuff copy that SCS's own map lists for it.
+// Membership arrays store the call's generation number, as in
+// potion_uniqueness.tpa, because WeiDU keeps array entries between components.
+
+// In a dry run (cr_check = 1) cr_msg becomes the part's problem; otherwise the
+// installation stops with it.
+DEFINE_PATCH_MACRO cbr_cr_problem
+BEGIN
+  PATCH_IF cr_check BEGIN
+    PATCH_IF (STRING_LENGTH ~%cr_problem%~ = 0) BEGIN SPRINT cr_problem ~%cr_msg%~ END
+  END ELSE BEGIN
+    PATCH_FAIL ~CBR %cr_what%: %cr_msg%~
+  END
+END
+
+// Bounds-checked SPL layout. Sets cr_ok, cr_ab, cr_nab, cr_fx, cr_nfx,
+// cr_cast_first, cr_cast_n; cr_std = 1 when the effect table follows the
+// abilities and fills the rest of the file, which a table rebuild needs.
+DEFINE_PATCH_MACRO cbr_cr_layout
+BEGIN
+  SET cr_ok = 0
+  SET cr_std = 0
+  SET cr_ab = 0
+  SET cr_nab = 0
+  SET cr_fx = 0
+  SET cr_nfx = 0
+  SET cr_cast_first = 0
+  SET cr_cast_n = 0
+  SPRINT cr_hdr ~~
+  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+    READ_ASCII 0 cr_hdr (8)
+    PATCH_IF (~%cr_hdr%~ STR_EQ ~SPL V1  ~) BEGIN
+      READ_LONG  0x64 cr_ab
+      READ_SHORT 0x68 cr_nab
+      READ_LONG  0x6a cr_fx
+      READ_SHORT 0x6e cr_cast_first
+      READ_SHORT 0x70 cr_cast_n
+      PATCH_IF ((cr_ab >= 0x72) AND ((cr_ab + cr_nab * 0x28) <= BUFFER_LENGTH)
+        AND (cr_fx >= 0x72) AND (cr_fx <= BUFFER_LENGTH)) BEGIN
+        SET cr_nfx = (BUFFER_LENGTH - cr_fx) / 0x30
+        SET cr_ok = ((cr_cast_first + cr_cast_n) <= cr_nfx)
+        FOR (cr_la = 0; cr_ok AND (cr_la < cr_nab); ++cr_la) BEGIN
+          READ_SHORT (cr_ab + cr_la * 0x28 + 0x1e) cr_ln
+          READ_SHORT (cr_ab + cr_la * 0x28 + 0x20) cr_lf
+          PATCH_IF ((cr_lf + cr_ln) > cr_nfx) BEGIN SET cr_ok = 0 END
+        END
+        SET cr_std = (cr_ok AND ((cr_ab + cr_nab * 0x28) <= cr_fx)
+          AND (((BUFFER_LENGTH - cr_fx) MODULO 0x30) = 0))
+      END
+    END
+  END
+END
+
+// The abilities and their effects as text, without table positions (cr_sig).
+DEFINE_PATCH_MACRO cbr_cr_signature
+BEGIN
+  SPRINT cr_sig ~%cr_nab%~
+  FOR (cr_sa = 0; cr_sa < cr_nab; ++cr_sa) BEGIN
+    SET cr_at = cr_ab + cr_sa * 0x28
+    READ_SHORT (cr_at + 0x1e) cr_sn
+    READ_SHORT (cr_at + 0x20) cr_sf
+    FOR (cr_sj = 0; cr_sj < 10; ++cr_sj) BEGIN
+      // 0x20 is the first-effect index: a position, not content.
+      PATCH_IF (cr_sj = 8) BEGIN
+        READ_SHORT (cr_at + 0x22) cr_sv
+      END ELSE BEGIN
+        READ_LONG (cr_at + cr_sj * 4) cr_sv
+      END
+      SPRINT cr_sig ~%cr_sig%,%cr_sv%~
+    END
+    FOR (cr_sj = 0; cr_sj < cr_sn * 12; ++cr_sj) BEGIN
+      READ_LONG (cr_fx + cr_sf * 0x30 + cr_sj * 4) cr_sv
+      SPRINT cr_sig ~%cr_sig%,%cr_sv%~
+    END
+    SPRINT cr_sig ~%cr_sig%;~
+  END
+END
+
+// cr_res is a member of this call's family: cr_member_hit = 1.
+DEFINE_PATCH_MACRO cbr_cr_is_member
+BEGIN
+  SET cr_member_hit = 0
+  TO_UPPER cr_res
+  PATCH_IF (VARIABLE_IS_SET $cbr_cr_member(~%cr_res%~)) BEGIN
+    PATCH_IF ($cbr_cr_member(~%cr_res%~) = cbr_cr_gen) BEGIN SET cr_member_hit = 1 END
+  END
+END
+
+// Appends a copy of the effect at cr_src; cr_dst is the copy's offset.
+DEFINE_PATCH_MACRO cbr_cr_append_copy
+BEGIN
+  SET cr_dst = BUFFER_LENGTH
+  INSERT_BYTES cr_dst 0x30
+  FOR (cr_c = 0; cr_c < 12; ++cr_c) BEGIN
+    READ_LONG (cr_src + cr_c * 4) cr_v
+    WRITE_LONG (cr_dst + cr_c * 4) cr_v
+  END
+END
+
+// Appends an effect that is delivered like the one at cr_tsrc (target, power,
+// resistance, probability, saving throw), so it reaches the same creatures;
+// every other field is cleared. cr_dst is its offset.
+DEFINE_PATCH_MACRO cbr_cr_append_like
+BEGIN
+  SET cr_src = cr_tsrc
+  LPM cbr_cr_append_copy
+  WRITE_SHORT cr_dst 0
+  WRITE_LONG (cr_dst + 0x04) 0
+  WRITE_LONG (cr_dst + 0x08) 0
+  WRITE_BYTE (cr_dst + 0x0c) 0
+  WRITE_LONG (cr_dst + 0x0e) 0
+  WRITE_LONG (cr_dst + 0x14) 0
+  WRITE_LONG (cr_dst + 0x18) 0
+  WRITE_LONG (cr_dst + 0x1c) 0
+  WRITE_LONG (cr_dst + 0x20) 0
+  WRITE_LONG (cr_dst + 0x2c) 0
+END
+
+// Resolves cr_symbol to cr_anchor (cr_prefix + slot; cr_base 1000 for priest,
+// 2000 for wizard spells). cr_found = 0 without the symbol; a symbol that maps
+// outside the range or to a missing file becomes cr_problem.
+DEFINE_ACTION_MACRO cbr_cr_resolve
+BEGIN
+  OUTER_SET cr_found = 0
+  OUTER_SPRINT cr_problem ~~
+  CLEAR_IDS_MAP
+  OUTER_SET cr_id = IDS_OF_SYMBOL (~spell~ ~%cr_symbol%~)
+  ACTION_IF (cr_id >= 0) BEGIN
+    ACTION_IF ((cr_id < (cr_base + 100)) OR (cr_id > (cr_base + 999))) BEGIN
+      OUTER_SPRINT cr_problem ~SPELL.IDS maps %cr_symbol% outside the %cr_prefix% spells.~
+    END ELSE BEGIN
+      OUTER_SET cr_slot = cr_id - cr_base
+      OUTER_SPRINT cr_anchor ~%cr_prefix%%cr_slot%~
+      ACTION_IF FILE_EXISTS_IN_GAME ~%cr_anchor%.spl~ BEGIN
+        OUTER_SET cr_found = 1
+      END ELSE BEGIN
+        OUTER_SPRINT cr_problem ~SPELL.IDS maps %cr_symbol% to the missing %cr_anchor%.spl.~
+      END
+    END
+  END
+END
+
+// Reports a part that was not applied.
+DEFINE_ACTION_MACRO cbr_cr_report_skip
+BEGIN
+  ACTION_IF (STRING_LENGTH ~%cr_problem%~ > 0) BEGIN
+    WARN @3405
+  END ELSE ACTION_IF (NOT cr_found) BEGIN
+    PRINT @3404
+  END
+END
+
+// The family: cr_anchor first, then its exact copies in the order WeiDU lists
+// them, then SCS's instant prebuff copies of cr_symbol, as
+// $cbr_cr_fam(0 .. cr_nfam - 1) and $cbr_cr_member(RESREF). SCS's map
+// (weidu_external/data/stratagems/instant_prebuff_spells.2da) names a prebuff
+// copy %cr_symbol%_PREBUFF: the spell without its cosmetic effects, which SCS's
+// casters apply at once. It is not an exact copy, but it is the same spell.
+DEFINE_ACTION_MACRO cbr_cr_collect_family
+BEGIN
+  ACTION_IF (NOT VARIABLE_IS_SET cbr_cr_gen) BEGIN OUTER_SET cbr_cr_gen = 0 END
+  OUTER_SET cbr_cr_gen = cbr_cr_gen + 1
+  OUTER_SET cr_anchor_nab = 0
+  OUTER_SET cr_anchor_n0 = 0
+  OUTER_SPRINT cr_anchor_sig ~~
+  COPY_EXISTING ~%cr_anchor%.spl~ ~override~
+    LPM cbr_cr_layout
+    PATCH_IF (cr_ok AND (cr_nab > 0)) BEGIN
+      LPM cbr_cr_signature
+      SPRINT cr_anchor_sig ~%cr_sig%~
+      SET cr_anchor_nab = cr_nab
+      READ_SHORT (cr_ab + 0x1e) cr_anchor_n0
+    END
+  BUT_ONLY
+  OUTER_SET cr_nfam = 1
+  OUTER_SPRINT $cbr_cr_fam(~0~) ~%cr_anchor%~
+  OUTER_SET $cbr_cr_member(~%cr_anchor%~) = cbr_cr_gen
+  // Without a usable anchor there is nothing to compare; the dry run reports it.
+  ACTION_IF (cr_anchor_nab > 0) BEGIN
+    COPY_EXISTING_REGEXP GLOB ~^.+\.spl$~ ~override~
+      SPRINT cr_res ~%SOURCE_RES%~
+      LPM cbr_cr_is_member
+      PATCH_IF NOT cr_member_hit BEGIN
+        LPM cbr_cr_layout
+        // Cheap filters first; only a full match is a copy.
+        PATCH_IF (cr_ok AND (cr_nab = cr_anchor_nab)) BEGIN
+          READ_SHORT (cr_ab + 0x1e) cr_n0
+          PATCH_IF (cr_n0 = cr_anchor_n0) BEGIN
+            LPM cbr_cr_signature
+            PATCH_IF (~%cr_sig%~ STR_EQ ~%cr_anchor_sig%~) BEGIN
+              SPRINT $cbr_cr_fam(~%cr_nfam%~) ~%cr_res%~
+              SET cr_nfam += 1
+              SET $cbr_cr_member(~%cr_res%~) = cbr_cr_gen
+            END
+          END
+        END
+      END
+    BUT_ONLY
+  END
+  OUTER_SPRINT cr_map ~weidu_external/data/stratagems/instant_prebuff_spells.2da~
+  ACTION_IF FILE_EXISTS ~%cr_map%~ BEGIN
+    OUTER_SPRINT cr_key ~%cr_symbol%_PREBUFF~
+    OUTER_SET cr_npre = 0
+    COPY ~%cr_map%~ ~%cr_map%~
+      READ_ASCII 0 cr_map_text (BUFFER_LENGTH)
+      INNER_PATCH ~%cr_map_text%~ BEGIN
+        REPLACE_EVALUATE CASE_INSENSITIVE
+          ~^\([^ %TAB%%WNL%%MNL%%LNL%]+\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
+        BEGIN
+          PATCH_IF (~%MATCH1%~ STRING_EQUAL_CASE ~%cr_key%~) BEGIN
+            SPRINT $cbr_cr_pre(~%cr_npre%~) ~%MATCH2%~
+            SET cr_npre += 1
+          END
+        END
+          ~~
+      END
+    BUT_ONLY
+    OUTER_FOR (cr_pi = 0; cr_pi < cr_npre; ++cr_pi) BEGIN
+      OUTER_SPRINT cr_res $cbr_cr_pre(~%cr_pi%~)
+      ACTION_TO_UPPER cr_res
+      OUTER_SET cr_new_member = 0
+      ACTION_IF ((STRING_LENGTH ~%cr_res%~) <= 8) BEGIN
+        ACTION_IF FILE_EXISTS_IN_GAME ~%cr_res%.spl~ BEGIN
+          OUTER_SET cr_new_member = 1
+          ACTION_IF VARIABLE_IS_SET $cbr_cr_member(~%cr_res%~) BEGIN
+            ACTION_IF ($cbr_cr_member(~%cr_res%~) = cbr_cr_gen) BEGIN OUTER_SET cr_new_member = 0 END
+          END
+        END
+      END
+      ACTION_IF cr_new_member BEGIN
+        OUTER_SPRINT $cbr_cr_fam(~%cr_nfam%~) ~%cr_res%~
+        OUTER_SET cr_nfam = cr_nfam + 1
+        OUTER_SET $cbr_cr_member(~%cr_res%~) = cbr_cr_gen
+      END
+    END
+  END
+  OUTER_SPRINT cr_members ~~
+  OUTER_FOR (cr_fi = 0; cr_fi < cr_nfam; ++cr_fi) BEGIN
+    OUTER_SPRINT cr_member $cbr_cr_fam(~%cr_fi%~)
+    OUTER_SPRINT cr_members ~%cr_members% %cr_member%~
+  END
+END
+
+// Aid for one family member. Per ability, L = max(ability level, 3), the
+// cleric's minimum level for a 2nd-level spell, as Spell Revisions uses it:
+// - the timed opcode-129 payload goes. A timed opcode-18 type-0 bonus becomes
+//   min(L, 10) + 1d8 hit points; without one (native Aid) the opcode 129 itself
+//   becomes that bonus, keeping its delivery fields;
+// - every timed effect that lasted exactly as long as the payload lasts 60 * L
+//   seconds (glow, icon, end sound);
+// - the ability starts with one opcode-321 refresh per family member, so a recast
+//   of any member replaces the bonus instead of stacking it. The ability's first
+//   family refresh is the template; otherwise Spell Revisions' form is used.
+// Each ability gets its own copy of its effects; casting effects stay first.
+DEFINE_PATCH_MACRO cbr_cr_aid_patch
+BEGIN
+  LPM cbr_cr_layout
+  PATCH_IF ((NOT cr_std) OR (cr_nab = 0)) BEGIN
+    SPRINT cr_msg ~%SOURCE_FILE% has invalid or unsupported ability/effect tables.~
+    LPM cbr_cr_problem
+  END ELSE BEGIN
+    // Plan every ability before anything changes.
+    SET cr_valid = 1
+    FOR (cr_a = 0; cr_a < cr_nab; ++cr_a) BEGIN
+      SET cr_at = cr_ab + cr_a * 0x28
+      READ_SHORT (cr_at + 0x10) cr_level
+      READ_SHORT (cr_at + 0x1e) cr_n
+      READ_SHORT (cr_at + 0x20) cr_first
+      SET cr_n129 = 0
+      SET cr_n18 = 0
+      SET cr_i129 = 0
+      SET cr_i18 = 0
+      SET cr_tpl = (0 - 1)
+      FOR (cr_i = 0; cr_i < cr_n; ++cr_i) BEGIN
+        SET cr_e = cr_fx + (cr_first + cr_i) * 0x30
+        READ_SHORT cr_e cr_op
+        PATCH_IF (cr_op = 129) BEGIN
+          SET cr_n129 += 1
+          SET cr_i129 = cr_i
+        END
+        PATCH_IF (cr_op = 18) BEGIN
+          SET cr_n18 += 1
+          SET cr_i18 = cr_i
+        END
+        PATCH_IF ((cr_op = 321) AND (cr_tpl < 0)) BEGIN
+          READ_ASCII (cr_e + 0x14) cr_res (8) NULL
+          LPM cbr_cr_is_member
+          PATCH_IF cr_member_hit BEGIN SET cr_tpl = cr_i END
+        END
+      END
+      SET cr_bad = 0
+      SET cr_drop = (0 - 1)
+      SET cr_pay = 0
+      SET cr_ptarget = 0
+      SET cr_old = 0
+      PATCH_IF ((cr_n129 > 1) OR (cr_n18 > 1) OR ((cr_n129 = 0) AND (cr_n18 = 0))) BEGIN
+        SPRINT cr_msg ~%SOURCE_FILE% (ability for level %cr_level%) does not have exactly one Aid payload; found %cr_n129% opcode-129 and %cr_n18% opcode-18 effects.~
+        LPM cbr_cr_problem
+        SET cr_bad = 1
+      END ELSE PATCH_IF (cr_n129 = 1) BEGIN
+        SET cr_pay = cr_i129
+        SET cr_e = cr_fx + (cr_first + cr_i129) * 0x30
+        READ_BYTE (cr_e + 0x02) cr_ptarget
+        READ_BYTE (cr_e + 0x0c) cr_ptiming
+        READ_LONG (cr_e + 0x0e) cr_old
+        PATCH_IF ((cr_ptiming != 0) OR (cr_old <= 0)) BEGIN
+          SPRINT cr_msg ~%SOURCE_FILE% (ability for level %cr_level%) has an opcode-129 effect that is not a timed bonus.~
+          LPM cbr_cr_problem
+          SET cr_bad = 1
+        END ELSE PATCH_IF (cr_n18 = 1) BEGIN
+          SET cr_e = cr_fx + (cr_first + cr_i18) * 0x30
+          READ_BYTE (cr_e + 0x02) cr_t18
+          READ_LONG (cr_e + 0x08) cr_p2
+          READ_BYTE (cr_e + 0x0c) cr_tm18
+          READ_LONG (cr_e + 0x0e) cr_d18
+          PATCH_IF ((cr_t18 != cr_ptarget) OR (cr_p2 != 0) OR (cr_tm18 != 0) OR (cr_d18 != cr_old)) BEGIN
+            SPRINT cr_msg ~%SOURCE_FILE% (ability for level %cr_level%) has opcode-129 and opcode-18 effects that do not form one timed bonus.~
+            LPM cbr_cr_problem
+            SET cr_bad = 1
+          END
+          SET cr_drop = cr_i129
+          SET cr_pay = cr_i18
+        END
+      END ELSE BEGIN
+        // Already converted: one timed type-0 bonus with 1d8.
+        SET cr_pay = cr_i18
+        SET cr_e = cr_fx + (cr_first + cr_i18) * 0x30
+        READ_BYTE (cr_e + 0x02) cr_ptarget
+        READ_LONG (cr_e + 0x08) cr_p2
+        READ_BYTE (cr_e + 0x0c) cr_ptiming
+        READ_LONG (cr_e + 0x0e) cr_old
+        READ_LONG (cr_e + 0x1c) cr_dice
+        READ_LONG (cr_e + 0x20) cr_sides
+        PATCH_IF ((cr_p2 != 0) OR (cr_ptiming != 0) OR (cr_old <= 0) OR (cr_dice != 1) OR (cr_sides != 8)) BEGIN
+          SPRINT cr_msg ~%SOURCE_FILE% (ability for level %cr_level%) has no opcode-129 payload and no timed 1d8 hit point bonus.~
+          LPM cbr_cr_problem
+          SET cr_bad = 1
+        END
+      END
+      PATCH_IF cr_bad BEGIN SET cr_valid = 0 END
+      PATCH_IF (cr_level < 3) BEGIN SET cr_l = 3 END ELSE BEGIN SET cr_l = cr_level END
+      SET $cbr_cr_ab_new(~%cr_a%~) = 60 * cr_l
+      PATCH_IF (cr_l > 10) BEGIN SET $cbr_cr_ab_hp(~%cr_a%~) = 10 END ELSE BEGIN SET $cbr_cr_ab_hp(~%cr_a%~) = cr_l END
+      SET $cbr_cr_ab_pay(~%cr_a%~) = cr_pay
+      SET $cbr_cr_ab_drop(~%cr_a%~) = cr_drop
+      SET $cbr_cr_ab_old(~%cr_a%~) = cr_old
+      SET $cbr_cr_ab_tpl(~%cr_a%~) = cr_tpl
+      SET $cbr_cr_ab_target(~%cr_a%~) = cr_ptarget
+    END
+
+    // Build the new table after the old one, then remove the old one.
+    PATCH_IF (cr_valid AND (NOT cr_check)) BEGIN
+      SET cr_total = cr_nfx
+      SET cr_out = 0
+      FOR (cr_i = 0; cr_i < cr_cast_n; ++cr_i) BEGIN
+        SET cr_src = cr_fx + (cr_cast_first + cr_i) * 0x30
+        LPM cbr_cr_append_copy
+        SET cr_out += 1
+      END
+      WRITE_SHORT 0x6e 0
+      FOR (cr_a = 0; cr_a < cr_nab; ++cr_a) BEGIN
+        SET cr_at = cr_ab + cr_a * 0x28
+        READ_SHORT (cr_at + 0x1e) cr_n
+        READ_SHORT (cr_at + 0x20) cr_first
+        SET cr_start = cr_out
+        FOR (cr_m = 0; cr_m < cr_nfam; ++cr_m) BEGIN
+          SPRINT cr_mres $cbr_cr_fam(~%cr_m%~)
+          PATCH_IF ($cbr_cr_ab_tpl(~%cr_a%~) >= 0) BEGIN
+            SET cr_src = cr_fx + (cr_first + $cbr_cr_ab_tpl(~%cr_a%~)) * 0x30
+            LPM cbr_cr_append_copy
+          END ELSE BEGIN
+            // Spell Revisions' refresh: non-dispellable, ignores magic resistance,
+            // on the payload's recipient.
+            SET cr_dst = BUFFER_LENGTH
+            INSERT_BYTES cr_dst 0x30
+            WRITE_SHORT cr_dst 321
+            WRITE_BYTE (cr_dst + 0x02) $cbr_cr_ab_target(~%cr_a%~)
+            WRITE_BYTE (cr_dst + 0x0c) 1
+            WRITE_BYTE (cr_dst + 0x12) 100
+          END
+          WRITE_ASCIIE (cr_dst + 0x14) ~%cr_mres%~ #8
+          SET cr_out += 1
+        END
+        FOR (cr_i = 0; cr_i < cr_n; ++cr_i) BEGIN
+          SET cr_src = cr_fx + (cr_first + cr_i) * 0x30
+          READ_SHORT cr_src cr_op
+          SET cr_skip = (cr_i = $cbr_cr_ab_drop(~%cr_a%~))
+          PATCH_IF (cr_op = 321) BEGIN
+            READ_ASCII (cr_src + 0x14) cr_res (8) NULL
+            LPM cbr_cr_is_member
+            PATCH_IF cr_member_hit BEGIN SET cr_skip = 1 END
+          END
+          PATCH_IF (NOT cr_skip) BEGIN
+            LPM cbr_cr_append_copy
+            PATCH_IF (cr_i = $cbr_cr_ab_pay(~%cr_a%~)) BEGIN
+              WRITE_SHORT cr_dst 18
+              WRITE_LONG (cr_dst + 0x04) $cbr_cr_ab_hp(~%cr_a%~)
+              WRITE_LONG (cr_dst + 0x08) 0
+              WRITE_LONG (cr_dst + 0x0e) $cbr_cr_ab_new(~%cr_a%~)
+              WRITE_LONG (cr_dst + 0x1c) 1
+              WRITE_LONG (cr_dst + 0x20) 8
+            END ELSE BEGIN
+              READ_BYTE (cr_src + 0x0c) cr_tm
+              READ_LONG (cr_src + 0x0e) cr_du
+              PATCH_IF (((cr_tm = 0) OR (cr_tm = 3) OR (cr_tm = 4)) AND (cr_du = $cbr_cr_ab_old(~%cr_a%~))) BEGIN
+                WRITE_LONG (cr_dst + 0x0e) $cbr_cr_ab_new(~%cr_a%~)
+              END
+            END
+            SET cr_out += 1
+          END
+        END
+        WRITE_SHORT (cr_at + 0x20) cr_start
+        WRITE_SHORT (cr_at + 0x1e) (cr_out - cr_start)
+      END
+      DELETE_BYTES cr_fx (cr_total * 0x30)
+    END
+  END
+END
+
+// Luck for one family member: every timed effect that lasts exactly as long as
+// the Luck bonus (opcode 133, else a timed opcode-22 luck bonus) now lasts 90
+// seconds. Other durations, such as a short glow, stay.
+DEFINE_PATCH_MACRO cbr_cr_luck_patch
+BEGIN
+  LPM cbr_cr_layout
+  PATCH_IF ((NOT cr_ok) OR (cr_nab = 0)) BEGIN
+    SPRINT cr_msg ~%SOURCE_FILE% has invalid ability/effect tables.~
+    LPM cbr_cr_problem
+  END ELSE BEGIN
+    // Plan first: abilities may share effect records.
+    SET cr_valid = 1
+    FOR (cr_i = 0; cr_i < cr_nfx; ++cr_i) BEGIN SET $cbr_cr_set(~%cr_i%~) = 0 END
+    FOR (cr_a = 0; cr_a < cr_nab; ++cr_a) BEGIN
+      SET cr_at = cr_ab + cr_a * 0x28
+      READ_SHORT (cr_at + 0x10) cr_level
+      READ_SHORT (cr_at + 0x1e) cr_n
+      READ_SHORT (cr_at + 0x20) cr_first
+      SET cr_old = (0 - 1)
+      SET cr_bad = 0
+      PATCH_FOR_EACH cr_luck_op IN 133 22 BEGIN
+        PATCH_IF (cr_old < 0) BEGIN
+          FOR (cr_i = 0; cr_i < cr_n; ++cr_i) BEGIN
+            SET cr_e = cr_fx + (cr_first + cr_i) * 0x30
+            READ_SHORT cr_e cr_op
+            READ_BYTE (cr_e + 0x0c) cr_tm
+            READ_LONG (cr_e + 0x0e) cr_du
+            PATCH_IF ((cr_op = cr_luck_op) AND (cr_tm = 0)) BEGIN
+              PATCH_IF ((cr_old >= 0) AND (cr_du != cr_old)) BEGIN SET cr_bad = 1 END
+              SET cr_old = cr_du
+            END
+          END
+        END
+      END
+      PATCH_IF cr_bad BEGIN
+        SPRINT cr_msg ~%SOURCE_FILE% (ability for level %cr_level%) has Luck bonuses with different durations.~
+        LPM cbr_cr_problem
+        SET cr_valid = 0
+      END ELSE PATCH_IF (cr_old <= 0) BEGIN
+        SPRINT cr_msg ~%SOURCE_FILE% (ability for level %cr_level%) has no timed Luck bonus.~
+        LPM cbr_cr_problem
+        SET cr_valid = 0
+      END ELSE BEGIN
+        FOR (cr_i = 0; cr_i < cr_n; ++cr_i) BEGIN
+          SET cr_e = cr_fx + (cr_first + cr_i) * 0x30
+          READ_BYTE (cr_e + 0x0c) cr_tm
+          READ_LONG (cr_e + 0x0e) cr_du
+          PATCH_IF (((cr_tm = 0) OR (cr_tm = 3) OR (cr_tm = 4)) AND (cr_du = cr_old)) BEGIN
+            SET cr_gi = cr_first + cr_i
+            SET $cbr_cr_set(~%cr_gi%~) = 1
+          END
+        END
+      END
+    END
+    PATCH_IF (cr_valid AND (NOT cr_check)) BEGIN
+      FOR (cr_i = 0; cr_i < cr_nfx; ++cr_i) BEGIN
+        PATCH_IF ($cbr_cr_set(~%cr_i%~)) BEGIN
+          WRITE_LONG (cr_fx + cr_i * 0x30 + 0x0e) 90
+        END
+      END
+    END
+  END
+END
+
+// Bless for one family member: one ability per caster level from 1 to 20, lasting
+// 30 seconds + 1 round per level (36 to 150 seconds). Each new ability copies the
+// ability the game used at its level: the one with the highest level not above
+// it, else the lowest. Every timed effect that lasted exactly as long as its
+// Bless bonus (opcode 130) lasts the new time (icon, spell state, end sound);
+// other durations, such as a short visual, stay. Abilities for levels above 20
+// stay, with the level-20 duration. Each ability gets its own copy of its
+// effects; casting effects stay first.
+DEFINE_PATCH_MACRO cbr_cr_bless_patch
+BEGIN
+  LPM cbr_cr_layout
+  PATCH_IF ((NOT cr_std) OR (cr_nab = 0)) BEGIN
+    SPRINT cr_msg ~%SOURCE_FILE% has invalid or unsupported ability/effect tables.~
+    LPM cbr_cr_problem
+  END ELSE BEGIN
+    SET cr_valid = 1
+    FOR (cr_a = 0; cr_a < cr_nab; ++cr_a) BEGIN
+      SET cr_at = cr_ab + cr_a * 0x28
+      READ_SHORT (cr_at + 0x10) cr_level
+      READ_SHORT (cr_at + 0x1e) cr_n
+      READ_SHORT (cr_at + 0x20) cr_first
+      SET cr_old = (0 - 1)
+      SET cr_bad = 0
+      FOR (cr_i = 0; cr_i < cr_n; ++cr_i) BEGIN
+        SET cr_e = cr_fx + (cr_first + cr_i) * 0x30
+        READ_SHORT cr_e cr_op
+        READ_BYTE (cr_e + 0x0c) cr_tm
+        READ_LONG (cr_e + 0x0e) cr_du
+        PATCH_IF ((cr_op = 130) AND (cr_tm = 0)) BEGIN
+          PATCH_IF ((cr_old >= 0) AND (cr_du != cr_old)) BEGIN SET cr_bad = 1 END
+          SET cr_old = cr_du
+        END
+      END
+      PATCH_IF cr_bad BEGIN
+        SPRINT cr_msg ~%SOURCE_FILE% (ability for level %cr_level%) has Bless bonuses with different durations.~
+        LPM cbr_cr_problem
+        SET cr_valid = 0
+      END ELSE PATCH_IF (cr_old <= 0) BEGIN
+        SPRINT cr_msg ~%SOURCE_FILE% (ability for level %cr_level%) has no timed Bless bonus.~
+        LPM cbr_cr_problem
+        SET cr_valid = 0
+      END
+      SET $cbr_cr_ab_old(~%cr_a%~) = cr_old
+      SET $cbr_cr_ab_lvl(~%cr_a%~) = cr_level
+    END
+
+    PATCH_IF (cr_valid AND (NOT cr_check)) BEGIN
+      // The new levels: 1 to 20, then the spell's own levels above 20.
+      SET cr_nt = 0
+      FOR (cr_l = 1; cr_l <= 20; ++cr_l) BEGIN
+        SET $cbr_cr_tl(~%cr_nt%~) = cr_l
+        SET cr_nt += 1
+      END
+      SET cr_l = 20
+      SET cr_more = 1
+      WHILE cr_more BEGIN
+        SET cr_next = 0x10000
+        FOR (cr_a = 0; cr_a < cr_nab; ++cr_a) BEGIN
+          SET cr_lv = $cbr_cr_ab_lvl(~%cr_a%~)
+          PATCH_IF ((cr_lv > cr_l) AND (cr_lv < cr_next)) BEGIN SET cr_next = cr_lv END
+        END
+        PATCH_IF (cr_next < 0x10000) BEGIN
+          SET $cbr_cr_tl(~%cr_nt%~) = cr_next
+          SET cr_nt += 1
+          SET cr_l = cr_next
+        END ELSE BEGIN
+          SET cr_more = 0
+        END
+      END
+
+      // Build the new effect table after the old one.
+      SET cr_total = cr_nfx
+      SET cr_out = 0
+      FOR (cr_i = 0; cr_i < cr_cast_n; ++cr_i) BEGIN
+        SET cr_src = cr_fx + (cr_cast_first + cr_i) * 0x30
+        LPM cbr_cr_append_copy
+        SET cr_out += 1
+      END
+      FOR (cr_k = 0; cr_k < cr_nt; ++cr_k) BEGIN
+        SET cr_l = $cbr_cr_tl(~%cr_k%~)
+        SET cr_tpl = (0 - 1)
+        SET cr_low = 0
+        FOR (cr_a = 0; cr_a < cr_nab; ++cr_a) BEGIN
+          SET cr_lv = $cbr_cr_ab_lvl(~%cr_a%~)
+          PATCH_IF (cr_lv <= cr_l) BEGIN
+            PATCH_IF (cr_tpl < 0) BEGIN
+              SET cr_tpl = cr_a
+            END ELSE PATCH_IF (cr_lv >= $cbr_cr_ab_lvl(~%cr_tpl%~)) BEGIN
+              SET cr_tpl = cr_a
+            END
+          END
+          PATCH_IF (cr_lv < $cbr_cr_ab_lvl(~%cr_low%~)) BEGIN SET cr_low = cr_a END
+        END
+        PATCH_IF (cr_tpl < 0) BEGIN SET cr_tpl = cr_low END
+        PATCH_IF (cr_l > 20) BEGIN SET cr_bdur = 150 END ELSE BEGIN SET cr_bdur = 30 + 6 * cr_l END
+        SET cr_at = cr_ab + cr_tpl * 0x28
+        READ_SHORT (cr_at + 0x1e) cr_n
+        READ_SHORT (cr_at + 0x20) cr_first
+        SET cr_old = $cbr_cr_ab_old(~%cr_tpl%~)
+        SET $cbr_cr_tt(~%cr_k%~) = cr_tpl
+        SET $cbr_cr_ts(~%cr_k%~) = cr_out
+        SET $cbr_cr_tn(~%cr_k%~) = cr_n
+        FOR (cr_i = 0; cr_i < cr_n; ++cr_i) BEGIN
+          SET cr_src = cr_fx + (cr_first + cr_i) * 0x30
+          LPM cbr_cr_append_copy
+          READ_BYTE (cr_src + 0x0c) cr_tm
+          READ_LONG (cr_src + 0x0e) cr_du
+          PATCH_IF (((cr_tm = 0) OR (cr_tm = 3) OR (cr_tm = 4)) AND (cr_du = cr_old)) BEGIN
+            WRITE_LONG (cr_dst + 0x0e) cr_bdur
+          END
+          SET cr_out += 1
+        END
+      END
+
+      // Then the new ability table after the old one; the old tables go.
+      SET cr_abend = cr_ab + cr_nab * 0x28
+      INSERT_BYTES cr_abend (cr_nt * 0x28)
+      FOR (cr_k = 0; cr_k < cr_nt; ++cr_k) BEGIN
+        SET cr_src = cr_ab + $cbr_cr_tt(~%cr_k%~) * 0x28
+        SET cr_dst = cr_abend + cr_k * 0x28
+        FOR (cr_c = 0; cr_c < 10; ++cr_c) BEGIN
+          READ_LONG (cr_src + cr_c * 4) cr_v
+          WRITE_LONG (cr_dst + cr_c * 4) cr_v
+        END
+        WRITE_SHORT (cr_dst + 0x10) $cbr_cr_tl(~%cr_k%~)
+        WRITE_SHORT (cr_dst + 0x1e) $cbr_cr_tn(~%cr_k%~)
+        WRITE_SHORT (cr_dst + 0x20) $cbr_cr_ts(~%cr_k%~)
+      END
+      DELETE_BYTES cr_ab (cr_nab * 0x28)
+      SET cr_fx2 = cr_fx + (cr_nt - cr_nab) * 0x28
+      DELETE_BYTES cr_fx2 (cr_total * 0x30)
+      WRITE_SHORT 0x68 cr_nt
+      WRITE_LONG  0x6a cr_fx2
+      WRITE_SHORT 0x6e 0
+    END
+  END
+END
+
+// The family part's patch for cr_kind.
+DEFINE_PATCH_MACRO cbr_cr_family_patch
+BEGIN
+  PATCH_IF (~%cr_kind%~ STR_EQ ~aid~) BEGIN
+    LPM cbr_cr_aid_patch
+  END ELSE PATCH_IF (~%cr_kind%~ STR_EQ ~bless~) BEGIN
+    LPM cbr_cr_bless_patch
+  END ELSE BEGIN
+    LPM cbr_cr_luck_patch
+  END
+END
+
+// Records that the description cr_text (strref cr_ref) became cr_new_ref, for
+// items that show the same text.
+DEFINE_PATCH_MACRO cbr_cr_record_text
+BEGIN
+  SET cr_dup = 0
+  FOR (cr_t = 0; cr_t < cr_ntxt; ++cr_t) BEGIN
+    PATCH_IF ($cbr_cr_txt_oref(~%cr_t%~) = cr_ref) BEGIN SET cr_dup = 1 END
+  END
+  PATCH_IF NOT cr_dup BEGIN
+    SPRINT $cbr_cr_txt_old(~%cr_ntxt%~) ~%cr_text%~
+    SET $cbr_cr_txt_oref(~%cr_ntxt%~) = cr_ref
+    SET $cbr_cr_txt_ref(~%cr_ntxt%~) = cr_new_ref
+    SET cr_ntxt += 1
+  END
+END
+
+// Rewrites the text at cr_off with the phrases of cr_kind (aid, luck or bless).
+// Text that is not recognized stays unchanged; cr_warn = 1 reports it. With
+// cr_record = 1 the change is recorded for cbr_cr_item_descriptions.
+DEFINE_PATCH_MACRO cbr_cr_description
+BEGIN
+  READ_LONG cr_off cr_ref
+  PATCH_IF (cr_ref > 0) BEGIN
+    GET_STRREF cr_ref cr_text
+    INNER_PATCH_SAVE cr_new_text ~%cr_text%~ BEGIN
+      PATCH_IF (~%cr_kind%~ STR_EQ ~aid~) BEGIN
+        REPLACE_TEXTUALLY ~gains a [+]1 bonus to attack rolls, damage rolls,? and saving throws, plus ~ ~gains ~
+        REPLACE_TEXTUALLY ~gains the benefits of a Bless spell ([^)]*) and a special bonus of 1d8 additional Hit Points~ ~gains a special bonus of 1d8 additional Hit Points +1 per level of the caster (up to a maximum of 1d8+10)~
+        REPLACE_TEXTUALLY ~Duration:[^%WNL%%MNL%%LNL%]*~ ~Duration: 1 turn/level~
+      END ELSE PATCH_IF (~%cr_kind%~ STR_EQ ~bless~) BEGIN
+        REPLACE_TEXTUALLY ~Duration:[^%WNL%%MNL%%LNL%]*~ ~Duration: 5 rounds + 1 round/level (maximum 25 rounds)~
+      END ELSE BEGIN
+        REPLACE_TEXTUALLY ~Duration:[^%WNL%%MNL%%LNL%]*~ ~Duration: 15 rounds~
+        REPLACE_TEXTUALLY ~for the next \([0-9a-z]+ \)?\(round\|turn\|hour\|minute\|second\)s?~ ~for the next 15 rounds~
+      END
+    END
+    PATCH_IF (~%cr_kind%~ STR_EQ ~aid~) BEGIN
+      SET cr_known = (((INDEX (CASE_SENSITIVE EXACT_MATCH ~Duration: 1 turn/level~ ~%cr_new_text%~)) >= 0)
+        AND ((INDEX (CASE_SENSITIVE EXACT_MATCH ~1d8~ ~%cr_new_text%~)) >= 0)
+        AND ((INDEX (CASE_INSENSITIVE EXACT_MATCH ~bonus to attack rolls~ ~%cr_new_text%~)) < 0)
+        AND ((INDEX (CASE_INSENSITIVE EXACT_MATCH ~benefits of a Bless spell~ ~%cr_new_text%~)) < 0))
+    END ELSE PATCH_IF (~%cr_kind%~ STR_EQ ~bless~) BEGIN
+      SET cr_known = ((INDEX (CASE_SENSITIVE EXACT_MATCH ~Duration: 5 rounds + 1 round/level (maximum 25 rounds)~ ~%cr_new_text%~)) >= 0)
+    END ELSE BEGIN
+      SET cr_known = ((INDEX (CASE_SENSITIVE EXACT_MATCH ~Duration: 15 rounds~ ~%cr_new_text%~)) >= 0)
+    END
+    PATCH_IF cr_known BEGIN
+      PATCH_IF NOT (~%cr_new_text%~ STR_EQ ~%cr_text%~) BEGIN
+        SET cr_new_ref = RESOLVE_STR_REF (~%cr_new_text%~)
+        WRITE_LONG cr_off cr_new_ref
+        PATCH_IF cr_record BEGIN LPM cbr_cr_record_text END
+      END
+    END ELSE PATCH_IF cr_warn BEGIN
+      PATCH_WARN ~CBR %cr_what%: the description of %SOURCE_FILE% has different or untranslated text; left unchanged.~
+    END
+  END
+END
+
+// The description of the resolved Prayer or Recitation spell (cr_kind, English
+// name cr_name) gets cr_note. It replaces Recitation's sentence that calls the
+// two cumulative; other English text gets it as a paragraph, with a warning for
+// Recitation, whose wording was not the expected one. Untranslated text stays
+// unchanged with a warning.
+DEFINE_PATCH_MACRO cbr_cr_note_description
+BEGIN
+  READ_LONG 0x50 cr_ref
+  PATCH_IF (cr_ref > 0) BEGIN
+    GET_STRREF cr_ref cr_text
+    PATCH_IF ((INDEX (CASE_SENSITIVE EXACT_MATCH ~%cr_note%~ ~%cr_text%~)) < 0) BEGIN
+      SPRINT cr_new_text ~%cr_text%~
+      PATCH_IF (~%cr_kind%~ STR_EQ ~recitation~) BEGIN
+        INNER_PATCH_SAVE cr_new_text ~%cr_text%~ BEGIN
+          REPLACE_TEXTUALLY ~Recitation does not nullify a Prayer spell[^.]*\.~ ~%cr_note%~
+        END
+      END
+      PATCH_IF (~%cr_new_text%~ STR_EQ ~%cr_text%~) BEGIN
+        PATCH_IF (((INDEX (CASE_SENSITIVE EXACT_MATCH ~Duration:~ ~%cr_text%~)) >= 0)
+          AND ((INDEX (CASE_SENSITIVE EXACT_MATCH ~%cr_name%~ ~%cr_text%~)) >= 0)) BEGIN
+          SPRINT cr_new_text ~%cr_text%%cr_nl%%cr_nl%%cr_note%~
+          PATCH_IF (~%cr_kind%~ STR_EQ ~recitation~) BEGIN
+            PATCH_WARN ~CBR %cr_what%: the description of %SOURCE_FILE% does not have the expected sentence about Prayer; the note was added at the end.~
+          END
+        END ELSE BEGIN
+          PATCH_WARN ~CBR %cr_what%: the description of %SOURCE_FILE% has different or untranslated text; left unchanged.~
+        END
+      END
+      PATCH_IF NOT (~%cr_new_text%~ STR_EQ ~%cr_text%~) BEGIN
+        SET cr_new_ref = RESOLVE_STR_REF (~%cr_new_text%~)
+        WRITE_LONG 0x50 cr_new_ref
+        LPM cbr_cr_record_text
+      END
+    END
+  END
+END
+
+// Effects cr_s_first .. + cr_s_n of an item that teach a family member.
+DEFINE_PATCH_MACRO cbr_cr_teach_slice
+BEGIN
+  FOR (cr_i = 0; cr_i < cr_s_n; ++cr_i) BEGIN
+    SET cr_e = cr_ifx + (cr_s_first + cr_i) * 0x30
+    PATCH_IF ((cr_e + 0x30) <= BUFFER_LENGTH) BEGIN
+      READ_SHORT cr_e cr_op
+      PATCH_IF (cr_op = 147) BEGIN
+        READ_ASCII (cr_e + 0x14) cr_res (8) NULL
+        LPM cbr_cr_is_member
+        PATCH_IF cr_member_hit BEGIN SET cr_teach = 1 END
+      END
+    END
+  END
+END
+
+// Item descriptions. An item that shows a changed spell description exactly (a
+// priest scroll that casts the spell, such as IWDification's) shows the new one:
+// $cbr_cr_txt_old(k) becomes $cbr_cr_txt_ref(k), k < cr_ntxt. With
+// cr_teach_scan = 1, an item that teaches a family member (opcode 147, wizard
+// scrolls) gets the same text update as the spell; its identified description
+// warns when it is not recognized.
+DEFINE_ACTION_MACRO cbr_cr_item_descriptions
+BEGIN
+  OUTER_SET cr_record = 0
+  ACTION_IF ((cr_ntxt > 0) OR cr_teach_scan) BEGIN
+    COPY_EXISTING_REGEXP GLOB ~^.+\.itm$~ ~override~
+      PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+        READ_ASCII 0 cr_hdr (8)
+        PATCH_IF (~%cr_hdr%~ STR_EQ ~ITM V1  ~) BEGIN
+          PATCH_FOR_EACH cr_off IN 0x50 0x54 BEGIN
+            READ_LONG cr_off cr_ref
+            PATCH_IF ((cr_ref > 0) AND (cr_ntxt > 0)) BEGIN
+              SET cr_hit = (0 - 1)
+              FOR (cr_t = 0; cr_t < cr_ntxt; ++cr_t) BEGIN
+                PATCH_IF (cr_ref = $cbr_cr_txt_oref(~%cr_t%~)) BEGIN SET cr_hit = cr_t END
+              END
+              PATCH_IF (cr_hit < 0) BEGIN
+                GET_STRREF cr_ref cr_itext
+                FOR (cr_t = 0; cr_t < cr_ntxt; ++cr_t) BEGIN
+                  SPRINT cr_old_text $cbr_cr_txt_old(~%cr_t%~)
+                  PATCH_IF (~%cr_itext%~ STR_EQ ~%cr_old_text%~) BEGIN SET cr_hit = cr_t END
+                END
+              END
+              PATCH_IF (cr_hit >= 0) BEGIN
+                WRITE_LONG cr_off $cbr_cr_txt_ref(~%cr_hit%~)
+              END
+            END
+          END
+          SET cr_teach = 0
+          READ_LONG  0x64 cr_iab
+          READ_SHORT 0x68 cr_inab
+          READ_LONG  0x6a cr_ifx
+          PATCH_IF (cr_teach_scan AND (cr_iab >= 0x72) AND ((cr_iab + cr_inab * 0x38) <= BUFFER_LENGTH) AND (cr_ifx >= 0x72)) BEGIN
+            READ_SHORT 0x6e cr_s_first
+            READ_SHORT 0x70 cr_s_n
+            LPM cbr_cr_teach_slice
+            FOR (cr_ia = 0; cr_ia < cr_inab; ++cr_ia) BEGIN
+              READ_SHORT (cr_iab + cr_ia * 0x38 + 0x1e) cr_s_n
+              READ_SHORT (cr_iab + cr_ia * 0x38 + 0x20) cr_s_first
+              LPM cbr_cr_teach_slice
+            END
+          END
+          PATCH_IF cr_teach BEGIN
+            SET cr_off = 0x54
+            SET cr_warn = 1
+            LPM cbr_cr_description
+            SET cr_off = 0x50
+            SET cr_warn = 0
+            LPM cbr_cr_description
+          END
+        END
+      END
+    BUT_ONLY IF_EXISTS
+  END
+END
+
+// Aid (cr_kind aid), Luck (luck) or Bless (bless): the resolved spell and its
+// copies.
+DEFINE_ACTION_MACRO cbr_cr_family_part
+BEGIN
+  OUTER_SET cr_ntxt = 0
+  LAM cbr_cr_resolve
+  ACTION_IF cr_found BEGIN
+    LAM cbr_cr_collect_family
+    // Dry run over the whole family first: nothing is written.
+    OUTER_SET cr_check = 1
+    OUTER_FOR (cr_fi = 0; cr_fi < cr_nfam; ++cr_fi) BEGIN
+      OUTER_SPRINT cr_member $cbr_cr_fam(~%cr_fi%~)
+      COPY_EXISTING ~%cr_member%.spl~ ~override~ LPM cbr_cr_family_patch BUT_ONLY
+    END
+    OUTER_SET cr_check = 0
+    ACTION_IF (STRING_LENGTH ~%cr_problem%~ = 0) BEGIN
+      OUTER_FOR (cr_fi = 0; cr_fi < cr_nfam; ++cr_fi) BEGIN
+        OUTER_SPRINT cr_member $cbr_cr_fam(~%cr_fi%~)
+        COPY_EXISTING ~%cr_member%.spl~ ~override~
+          LPM cbr_cr_family_patch
+          SET cr_off = 0x50
+          SET cr_warn = 1
+          SET cr_record = 1
+          LPM cbr_cr_description
+        BUT_ONLY
+      END
+      OUTER_SET cr_teach_scan = 1
+      LAM cbr_cr_item_descriptions
+      ACTION_IF (~%cr_kind%~ STR_EQ ~aid~) BEGIN
+        PRINT @3401
+      END ELSE ACTION_IF (~%cr_kind%~ STR_EQ ~bless~) BEGIN
+        PRINT @3406
+      END ELSE BEGIN
+        PRINT @3402
+      END
+    END
+  END
+  LAM cbr_cr_report_skip
+END
+
+// Druid access (Chaotic Commands, Bless): only the druid bit of the priest class
+// flags is cleared. For priest spells the high word of the exclusion flags (0x20)
+// selects the classes: 0x8000 excludes druids and rangers, 0x4000 clerics and
+// paladins. cr_spell names the spell in the messages.
+DEFINE_PATCH_MACRO cbr_cr_druid_patch
+BEGIN
+  SET cr_changed = 0
+  LPM cbr_cr_layout
+  PATCH_IF (BUFFER_LENGTH < 0x72) BEGIN
+    SPRINT cr_msg ~%SOURCE_FILE% has a truncated SPL header.~
+    LPM cbr_cr_problem
+  END ELSE PATCH_IF NOT (~%cr_hdr%~ STR_EQ ~SPL V1  ~) BEGIN
+    SPRINT cr_msg ~%SOURCE_FILE% is not an SPL V1 file.~
+    LPM cbr_cr_problem
+  END ELSE BEGIN
+    READ_SHORT 0x1c cr_type
+    READ_SHORT 0x20 cr_classes
+    PATCH_IF (cr_type != 2) BEGIN
+      SPRINT cr_msg ~%SOURCE_FILE% is not a priest spell (type %cr_type%).~
+      LPM cbr_cr_problem
+    END ELSE PATCH_IF ((cr_classes BAND 0x8000) != 0) BEGIN
+      // Both class bits set means no priest can learn it: a hidden helper, not a
+      // restriction to lift.
+      PATCH_IF ((cr_classes BAND 0x4000) != 0) BEGIN
+        SPRINT cr_msg ~%SOURCE_FILE% is excluded for every priest class; it is not made learnable.~
+        LPM cbr_cr_problem
+      END ELSE PATCH_IF (NOT cr_check) BEGIN
+        WRITE_SHORT 0x20 (cr_classes BAND 0x7fff)
+        SET cr_changed = 1
+      END
+    END
+  END
+END
+
+DEFINE_ACTION_MACRO cbr_cr_druid_part
+BEGIN
+  LAM cbr_cr_resolve
+  ACTION_IF cr_found BEGIN
+    OUTER_SET cr_check = 1
+    COPY_EXISTING ~%cr_anchor%.spl~ ~override~ LPM cbr_cr_druid_patch BUT_ONLY
+    OUTER_SET cr_check = 0
+    ACTION_IF (STRING_LENGTH ~%cr_problem%~ = 0) BEGIN
+      OUTER_SET cr_changed = 0
+      COPY_EXISTING ~%cr_anchor%.spl~ ~override~ LPM cbr_cr_druid_patch BUT_ONLY
+      ACTION_IF cr_changed BEGIN PRINT @3500 END ELSE BEGIN PRINT @3501 END
+    END
+  END
+  LAM cbr_cr_report_skip
+END
+
+// The payload spells of cr_anchor for cr_role (prayer or recitation): the spell
+// and the spells it casts (opcode 146 or 148), two levels deep, that carry timed
+// opcode-54 or opcode-325 increments. Positive ones are bonuses (sign 1), negative
+// ones penalties (sign 2): $cbr_cr_pay(role sign k), $cbr_cr_payn(role sign).
+// Per spell, $cbr_cr_casts(RES) = 1 when its abilities cast spells.
+DEFINE_ACTION_MACRO cbr_cr_payloads
+BEGIN
+  ACTION_IF (NOT VARIABLE_IS_SET cbr_cr_gen) BEGIN OUTER_SET cbr_cr_gen = 0 END
+  OUTER_SET cbr_cr_gen = cbr_cr_gen + 1
+  OUTER_SET $cbr_cr_payn(~%cr_role%~ ~1~) = 0
+  OUTER_SET $cbr_cr_payn(~%cr_role%~ ~2~) = 0
+  OUTER_SET cr_qn = 1
+  OUTER_SPRINT $cbr_cr_q(~0~) ~%cr_anchor%~
+  OUTER_SET $cbr_cr_qd(~0~) = 0
+  OUTER_SET $cbr_cr_seen(~%cr_anchor%~) = cbr_cr_gen
+  OUTER_FOR (cr_qi = 0; cr_qi < cr_qn; ++cr_qi) BEGIN
+    OUTER_SPRINT cr_qres $cbr_cr_q(~%cr_qi%~)
+    OUTER_SET cr_depth = $cbr_cr_qd(~%cr_qi%~)
+    COPY_EXISTING ~%cr_qres%.spl~ ~override~
+      LPM cbr_cr_layout
+      PATCH_IF (NOT cr_ok) BEGIN
+        SPRINT cr_msg ~%SOURCE_FILE% has invalid ability/effect tables.~
+        LPM cbr_cr_problem
+      END ELSE BEGIN
+        SET cr_pos = 0
+        SET cr_neg = 0
+        SET cr_casts = 0
+        // Ability -1 stands for the casting effects.
+        FOR (cr_a = (0 - 1); cr_a < cr_nab; ++cr_a) BEGIN
+          PATCH_IF (cr_a < 0) BEGIN
+            SET cr_first = cr_cast_first
+            SET cr_n = cr_cast_n
+          END ELSE BEGIN
+            READ_SHORT (cr_ab + cr_a * 0x28 + 0x1e) cr_n
+            READ_SHORT (cr_ab + cr_a * 0x28 + 0x20) cr_first
+          END
+          FOR (cr_i = 0; cr_i < cr_n; ++cr_i) BEGIN
+            SET cr_e = cr_fx + (cr_first + cr_i) * 0x30
+            READ_SHORT cr_e cr_op
+            READ_LONG (cr_e + 0x04) cr_p1
+            READ_LONG (cr_e + 0x08) cr_p2
+            READ_BYTE (cr_e + 0x0c) cr_tm
+            PATCH_IF (((cr_op = 54) OR (cr_op = 325)) AND (cr_tm = 0) AND (cr_p2 = 0)) BEGIN
+              PATCH_IF (cr_p1 > 0) BEGIN SET cr_pos += 1 END
+              PATCH_IF (cr_p1 < 0) BEGIN SET cr_neg += 1 END
+            END
+            PATCH_IF ((cr_op = 146) OR (cr_op = 148)) BEGIN
+              // Casting effects reach only the caster, not the payload's targets.
+              PATCH_IF (cr_a >= 0) BEGIN SET cr_casts = 1 END
+              READ_ASCII (cr_e + 0x14) cr_child (8) NULL
+              TO_UPPER cr_child
+              PATCH_IF ((cr_depth < 2) AND (STRING_LENGTH ~%cr_child%~ > 0)) BEGIN
+                PATCH_IF (FILE_EXISTS_IN_GAME ~%cr_child%.spl~) BEGIN
+                  SET cr_new = 1
+                  PATCH_IF (VARIABLE_IS_SET $cbr_cr_seen(~%cr_child%~)) BEGIN
+                    PATCH_IF ($cbr_cr_seen(~%cr_child%~) = cbr_cr_gen) BEGIN SET cr_new = 0 END
+                  END
+                  PATCH_IF cr_new BEGIN
+                    SPRINT $cbr_cr_q(~%cr_qn%~) ~%cr_child%~
+                    SET $cbr_cr_qd(~%cr_qn%~) = cr_depth + 1
+                    SET $cbr_cr_seen(~%cr_child%~) = cbr_cr_gen
+                    SET cr_qn += 1
+                  END
+                END
+              END
+            END
+          END
+        END
+        SET $cbr_cr_casts(~%cr_qres%~) = cr_casts
+        PATCH_IF ((cr_pos > 0) AND (cr_neg > 0)) BEGIN
+          SPRINT cr_msg ~%SOURCE_FILE% gives both bonuses and penalties to attack rolls or saving throws, so they cannot be kept apart.~
+          LPM cbr_cr_problem
+        END ELSE PATCH_IF ((cr_pos > 0) OR (cr_neg > 0)) BEGIN
+          PATCH_IF (cr_pos > 0) BEGIN SET cr_sign = 1 END ELSE BEGIN SET cr_sign = 2 END
+          SET cr_k = $cbr_cr_payn(~%cr_role%~ ~%cr_sign%~)
+          SPRINT $cbr_cr_pay(~%cr_role%~ ~%cr_sign%~ ~%cr_k%~) ~%cr_qres%~
+          SET $cbr_cr_payn(~%cr_role%~ ~%cr_sign%~) = cr_k + 1
+        END
+      END
+    BUT_ONLY
+  END
+END
+
+// Copies the Recitation record at cr_src; a block of a paired Prayer payload
+// lasts as long as the ability's bonus (cr_dur).
+DEFINE_PATCH_MACRO cbr_cr_copy_synced
+BEGIN
+  LPM cbr_cr_append_copy
+  READ_SHORT cr_src cr_op
+  PATCH_IF (cr_op = 206) BEGIN
+    READ_ASCII (cr_src + 0x14) cr_res (8) NULL
+    FOR (cr_k = 0; cr_k < cr_np; ++cr_k) BEGIN
+      SPRINT cr_p $cbr_cr_rp(~%cr_r%~ ~%cr_k%~)
+      PATCH_IF (~%cr_res%~ STRING_EQUAL_CASE ~%cr_p%~) BEGIN
+        WRITE_LONG (cr_dst + 0x0e) cr_dur
+      END
+    END
+  END
+  SET cr_out += 1
+END
+
+// One Recitation payload (cr_r). For every Prayer payload of the same kind
+// ($cbr_cr_rp(cr_r k)), each ability removes it (opcode 321) and blocks it for
+// the ability's bonus duration (opcode 206, without feedback). Added records are
+// delivered like the ability's first bonus effect and follow its refreshes of
+// itself, which would otherwise remove them; existing ones are reused, with the
+// block's duration kept equal to the bonus. Spell states stay as they are: SCS
+// tests Prayer's state on the caster's enemies, so copying it to Recitation
+// would change when the other side casts Prayer.
+DEFINE_PATCH_MACRO cbr_cr_recitation_patch
+BEGIN
+  LPM cbr_cr_layout
+  PATCH_IF ((NOT cr_std) OR (cr_nab = 0)) BEGIN
+    SPRINT cr_msg ~%SOURCE_FILE% has invalid or unsupported ability/effect tables.~
+    LPM cbr_cr_problem
+  END ELSE BEGIN
+    SET cr_valid = 1
+    SET cr_np = $cbr_cr_rpn(~%cr_r%~)
+    FOR (cr_a = 0; cr_a < cr_nab; ++cr_a) BEGIN
+      SET cr_at = cr_ab + cr_a * 0x28
+      READ_SHORT (cr_at + 0x10) cr_level
+      READ_SHORT (cr_at + 0x1e) cr_n
+      READ_SHORT (cr_at + 0x20) cr_first
+      SET cr_dur = (0 - 1)
+      SET cr_tpl = (0 - 1)
+      SET cr_bad = 0
+      FOR (cr_i = 0; cr_i < cr_n; ++cr_i) BEGIN
+        SET cr_e = cr_fx + (cr_first + cr_i) * 0x30
+        READ_SHORT cr_e cr_op
+        READ_LONG (cr_e + 0x08) cr_p2
+        READ_BYTE (cr_e + 0x0c) cr_tm
+        READ_LONG (cr_e + 0x0e) cr_du
+        PATCH_IF (((cr_op = 54) OR (cr_op = 325)) AND (cr_tm = 0) AND (cr_p2 = 0)) BEGIN
+          PATCH_IF (cr_tpl < 0) BEGIN
+            SET cr_tpl = cr_i
+            SET cr_dur = cr_du
+          END ELSE PATCH_IF (cr_du != cr_dur) BEGIN
+            SET cr_bad = 1
+          END
+        END
+      END
+      PATCH_IF ((cr_tpl < 0) OR (cr_dur <= 0) OR cr_bad) BEGIN
+        SPRINT cr_msg ~%SOURCE_FILE% (ability for level %cr_level%) has no single timed bonus duration.~
+        LPM cbr_cr_problem
+        SET cr_valid = 0
+      END
+      SET $cbr_cr_ab_tpl(~%cr_a%~) = cr_tpl
+      SET $cbr_cr_ab_dur(~%cr_a%~) = cr_dur
+    END
+
+    PATCH_IF (cr_valid AND (NOT cr_check)) BEGIN
+      SET cr_total = cr_nfx
+      SET cr_out = 0
+      FOR (cr_i = 0; cr_i < cr_cast_n; ++cr_i) BEGIN
+        SET cr_src = cr_fx + (cr_cast_first + cr_i) * 0x30
+        LPM cbr_cr_append_copy
+        SET cr_out += 1
+      END
+      WRITE_SHORT 0x6e 0
+      FOR (cr_a = 0; cr_a < cr_nab; ++cr_a) BEGIN
+        SET cr_at = cr_ab + cr_a * 0x28
+        READ_SHORT (cr_at + 0x1e) cr_n
+        READ_SHORT (cr_at + 0x20) cr_first
+        SET cr_start = cr_out
+        SET cr_dur = $cbr_cr_ab_dur(~%cr_a%~)
+        SET cr_tsrc = cr_fx + (cr_first + $cbr_cr_ab_tpl(~%cr_a%~)) * 0x30
+        // New records go after the leading refreshes and after the last refresh
+        // of the payload itself.
+        SET cr_lead = 0
+        SET cr_more = 1
+        FOR (cr_i = 0; cr_i < cr_n; ++cr_i) BEGIN
+          SET cr_e = cr_fx + (cr_first + cr_i) * 0x30
+          READ_SHORT cr_e cr_op
+          PATCH_IF (cr_op = 321) BEGIN
+            READ_ASCII (cr_e + 0x14) cr_res (8) NULL
+            PATCH_IF (cr_more OR (~%cr_res%~ STRING_EQUAL_CASE ~%cr_r%~)) BEGIN SET cr_lead = cr_i + 1 END
+          END ELSE BEGIN
+            SET cr_more = 0
+          END
+        END
+        // What the ability already has.
+        FOR (cr_k = 0; cr_k < cr_np; ++cr_k) BEGIN
+          SPRINT cr_p $cbr_cr_rp(~%cr_r%~ ~%cr_k%~)
+          SET $cbr_cr_has321(~%cr_k%~) = 0
+          SET $cbr_cr_has206(~%cr_k%~) = 0
+          FOR (cr_i = 0; cr_i < cr_n; ++cr_i) BEGIN
+            SET cr_e = cr_fx + (cr_first + cr_i) * 0x30
+            READ_SHORT cr_e cr_op
+            PATCH_IF ((cr_op = 321) OR (cr_op = 206)) BEGIN
+              READ_ASCII (cr_e + 0x14) cr_res (8) NULL
+              PATCH_IF (~%cr_res%~ STRING_EQUAL_CASE ~%cr_p%~) BEGIN
+                PATCH_IF (cr_op = 321) BEGIN
+                  SET $cbr_cr_has321(~%cr_k%~) = 1
+                END ELSE BEGIN
+                  SET $cbr_cr_has206(~%cr_k%~) = 1
+                END
+              END
+            END
+          END
+        END
+        FOR (cr_i = 0; cr_i < cr_lead; ++cr_i) BEGIN
+          SET cr_src = cr_fx + (cr_first + cr_i) * 0x30
+          LPM cbr_cr_copy_synced
+        END
+        FOR (cr_k = 0; cr_k < cr_np; ++cr_k) BEGIN
+          SPRINT cr_p $cbr_cr_rp(~%cr_r%~ ~%cr_k%~)
+          PATCH_IF NOT $cbr_cr_has321(~%cr_k%~) BEGIN
+            LPM cbr_cr_append_like
+            WRITE_SHORT cr_dst 321
+            WRITE_BYTE (cr_dst + 0x0c) 1
+            WRITE_ASCIIE (cr_dst + 0x14) ~%cr_p%~ #8
+            SET cr_out += 1
+          END
+        END
+        FOR (cr_k = 0; cr_k < cr_np; ++cr_k) BEGIN
+          SPRINT cr_p $cbr_cr_rp(~%cr_r%~ ~%cr_k%~)
+          PATCH_IF NOT $cbr_cr_has206(~%cr_k%~) BEGIN
+            LPM cbr_cr_append_like
+            WRITE_SHORT cr_dst 206
+            WRITE_LONG (cr_dst + 0x04) (0 - 1)
+            WRITE_LONG (cr_dst + 0x0e) cr_dur
+            WRITE_ASCIIE (cr_dst + 0x14) ~%cr_p%~ #8
+            SET cr_out += 1
+          END
+        END
+        FOR (cr_i = cr_lead; cr_i < cr_n; ++cr_i) BEGIN
+          SET cr_src = cr_fx + (cr_first + cr_i) * 0x30
+          LPM cbr_cr_copy_synced
+        END
+        WRITE_SHORT (cr_at + 0x20) cr_start
+        WRITE_SHORT (cr_at + 0x1e) (cr_out - cr_start)
+      END
+      DELETE_BYTES cr_fx (cr_total * 0x30)
+    END
+  END
+END
+
+// Prayer and Recitation: on each creature, Recitation's bonus replaces and blocks
+// Prayer's bonus, and Recitation's penalty Prayer's penalty. A bonus and a
+// penalty from opposing casters still combine. Prayer's spells are not changed.
+DEFINE_ACTION_MACRO cbr_cr_prayer_recitation_part
+BEGIN
+  OUTER_SET cr_ntxt = 0
+  OUTER_SPRINT cr_prefix ~SPPR~
+  OUTER_SET cr_base = 1000
+  OUTER_SPRINT cr_symbol ~CLERIC_PRAYER~
+  LAM cbr_cr_resolve
+  OUTER_SPRINT cr_prayer ~%cr_anchor%~
+  ACTION_IF cr_found BEGIN
+    OUTER_SPRINT cr_symbol ~CLERIC_RECITATION~
+    LAM cbr_cr_resolve
+    OUTER_SPRINT cr_recitation ~%cr_anchor%~
+  END
+  ACTION_IF cr_found BEGIN
+    OUTER_SET cr_check = 1
+    OUTER_SPRINT cr_role ~prayer~
+    OUTER_SPRINT cr_anchor ~%cr_prayer%~
+    LAM cbr_cr_payloads
+    OUTER_SPRINT cr_role ~recitation~
+    OUTER_SPRINT cr_anchor ~%cr_recitation%~
+    LAM cbr_cr_payloads
+    // Pair each Recitation payload with Prayer's payloads of the same kind.
+    // Blocking a Prayer payload that casts other spells on its targets would
+    // block those too.
+    OUTER_SPRINT cr_pairs ~~
+    OUTER_SET cr_nr = 0
+    OUTER_FOR (cr_s = 1; cr_s < 3; ++cr_s) BEGIN
+      OUTER_FOR (cr_ri = 0; cr_ri < $cbr_cr_payn(~recitation~ ~%cr_s%~); ++cr_ri) BEGIN
+        OUTER_SPRINT cr_r $cbr_cr_pay(~recitation~ ~%cr_s%~ ~%cr_ri%~)
+        OUTER_SET cr_np = 0
+        OUTER_FOR (cr_pi = 0; cr_pi < $cbr_cr_payn(~prayer~ ~%cr_s%~); ++cr_pi) BEGIN
+          OUTER_SPRINT cr_p $cbr_cr_pay(~prayer~ ~%cr_s%~ ~%cr_pi%~)
+          ACTION_IF (~%cr_p%~ STRING_EQUAL_CASE ~%cr_r%~) BEGIN
+            ACTION_IF (STRING_LENGTH ~%cr_problem%~ = 0) BEGIN
+              OUTER_SPRINT cr_problem ~%cr_r%.spl belongs to both Prayer and Recitation.~
+            END
+          END ELSE ACTION_IF $cbr_cr_casts(~%cr_p%~) BEGIN
+            ACTION_IF (STRING_LENGTH ~%cr_problem%~ = 0) BEGIN
+              OUTER_SPRINT cr_problem ~%cr_p%.spl carries Prayer's bonus or penalty and also casts other spells on its targets, which blocking it would block too.~
+            END
+          END ELSE BEGIN
+            OUTER_SPRINT $cbr_cr_rp(~%cr_r%~ ~%cr_np%~) ~%cr_p%~
+            OUTER_SET cr_np = cr_np + 1
+            ACTION_IF (STRING_LENGTH ~%cr_pairs%~ > 0) BEGIN OUTER_SPRINT cr_pairs ~%cr_pairs%, ~ END
+            OUTER_SPRINT cr_pairs ~%cr_pairs%%cr_r% replaces %cr_p%~
+          END
+        END
+        OUTER_SET $cbr_cr_rpn(~%cr_r%~) = cr_np
+        ACTION_IF (cr_np > 0) BEGIN
+          OUTER_SPRINT $cbr_cr_rlist(~%cr_nr%~) ~%cr_r%~
+          OUTER_SET cr_nr = cr_nr + 1
+        END
+      END
+    END
+    ACTION_IF ((cr_nr = 0) AND (STRING_LENGTH ~%cr_problem%~ = 0)) BEGIN
+      OUTER_SPRINT cr_problem ~no bonus or penalty of Recitation matches one of Prayer.~
+    END
+    ACTION_IF (STRING_LENGTH ~%cr_problem%~ = 0) BEGIN
+      OUTER_FOR (cr_ri = 0; cr_ri < cr_nr; ++cr_ri) BEGIN
+        OUTER_SPRINT cr_r $cbr_cr_rlist(~%cr_ri%~)
+        COPY_EXISTING ~%cr_r%.spl~ ~override~ LPM cbr_cr_recitation_patch BUT_ONLY
+      END
+    END
+    OUTER_SET cr_check = 0
+    ACTION_IF (STRING_LENGTH ~%cr_problem%~ = 0) BEGIN
+      OUTER_FOR (cr_ri = 0; cr_ri < cr_nr; ++cr_ri) BEGIN
+        OUTER_SPRINT cr_r $cbr_cr_rlist(~%cr_ri%~)
+        COPY_EXISTING ~%cr_r%.spl~ ~override~ LPM cbr_cr_recitation_patch BUT_ONLY
+      END
+      OUTER_SPRINT cr_kind ~recitation~
+      OUTER_SPRINT cr_name ~Recitation~
+      OUTER_SPRINT cr_note @3411
+      COPY_EXISTING ~%cr_recitation%.spl~ ~override~ LPM cbr_cr_note_description BUT_ONLY
+      OUTER_SPRINT cr_kind ~prayer~
+      OUTER_SPRINT cr_name ~Prayer~
+      OUTER_SPRINT cr_note @3412
+      COPY_EXISTING ~%cr_prayer%.spl~ ~override~ LPM cbr_cr_note_description BUT_ONLY
+      OUTER_SET cr_teach_scan = 0
+      LAM cbr_cr_item_descriptions
+      PRINT @3403
+    END
+  END
+  LAM cbr_cr_report_skip
+END
+
+DEFINE_ACTION_FUNCTION cbr_install_chris_revisions
+BEGIN
+  OUTER_SET cr_check = 0
+  OUTER_SET cr_record = 0
+  OUTER_SET cr_teach_scan = 0
+  OUTER_SPRINT cr_nl ~x~
+  OUTER_INNER_PATCH_SAVE cr_nl ~%cr_nl%~ BEGIN WRITE_BYTE 0 10 END
+
+  OUTER_SPRINT cr_what ~Aid~
+  OUTER_SPRINT cr_kind ~aid~
+  OUTER_SPRINT cr_symbol ~CLERIC_AID~
+  OUTER_SPRINT cr_prefix ~SPPR~
+  OUTER_SET cr_base = 1000
+  LAM cbr_cr_family_part
+
+  OUTER_SPRINT cr_what ~Luck~
+  OUTER_SPRINT cr_kind ~luck~
+  OUTER_SPRINT cr_symbol ~WIZARD_LUCK~
+  OUTER_SPRINT cr_prefix ~SPWI~
+  OUTER_SET cr_base = 2000
+  LAM cbr_cr_family_part
+
+  OUTER_SPRINT cr_what ~Bless~
+  OUTER_SPRINT cr_kind ~bless~
+  OUTER_SPRINT cr_symbol ~CLERIC_BLESS~
+  OUTER_SPRINT cr_prefix ~SPPR~
+  OUTER_SET cr_base = 1000
+  LAM cbr_cr_family_part
+
+  OUTER_SPRINT cr_what ~Bless for druids~
+  OUTER_SPRINT cr_spell ~Bless~
+  OUTER_SPRINT cr_symbol ~CLERIC_BLESS~
+  OUTER_SPRINT cr_prefix ~SPPR~
+  OUTER_SET cr_base = 1000
+  LAM cbr_cr_druid_part
+
+  OUTER_SPRINT cr_what ~Chaotic Commands~
+  OUTER_SPRINT cr_spell ~Chaotic Commands~
+  OUTER_SPRINT cr_symbol ~CLERIC_CHAOTIC_COMMANDS~
+  OUTER_SPRINT cr_prefix ~SPPR~
+  OUTER_SET cr_base = 1000
+  LAM cbr_cr_druid_part
+
+  OUTER_SPRINT cr_what ~Prayer and Recitation~
+  LAM cbr_cr_prayer_recitation_part
+END

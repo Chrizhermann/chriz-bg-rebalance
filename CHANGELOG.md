@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Add Chris Revisions (340): Christopher's spell balance changes in one
+  component, with or without Spell Revisions.
+  - Aid grants 1d8 hit points +1 per caster level (maximum +10) for one turn
+    per level and no longer gives +1 to attack rolls, damage and saving throws.
+    Casting it again replaces the bonus. Exact copies, such as Bardic Wonders'
+    Troubadour Aid, change with it.
+  - Luck and its exact copies last 15 rounds; the bonuses are unchanged.
+  - Bless lasts 30 seconds + 1 round per caster level (36 to 150 seconds,
+    the maximum from level 20) instead of a fixed duration. Exact copies and
+    SCS's instant prebuff copy change with it. Spell Revisions' druid
+    exclusion is removed, so druids and rangers can cast Bless again.
+  - Chaotic Commands: only Spell Revisions' druid exclusion is removed, so
+    druids can cast it again at spell level 5.
+  - Prayer and Recitation no longer stack: on each creature, Recitation's
+    bonus or penalty replaces Prayer's of the same kind and blocks it while it
+    lasts. Bless and Chant are unchanged.
+  - A part whose spells are missing is skipped; a part that cannot be changed
+    safely is left unchanged with a warning. Descriptions and scrolls say so.
+
 ## v0.8.4 — 2026-10-23
 
 - Bracers of Blinding Strike (220) now keep other mods' changes to the bracers

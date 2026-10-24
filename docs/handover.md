@@ -1,5 +1,37 @@
 # chriz-bg-rebalance — Handover
 
+## October 23–25 — Chris Revisions (340): Aid, Luck, Bless, Chaotic Commands, Prayer and Recitation (unreleased)
+
+Component 340 holds Christopher's spell revisions as parts of one component, at
+his request: Aid hit points only, Luck 90 seconds, Bless 30 seconds + 1 round
+per level (36–150 seconds), Bless and Chaotic Commands for druids (decided
+October 25; rangers share the flag), and Prayer/Recitation not cumulative
+(Bless and Chant keep stacking). The parts were first built as
+components 340, 341 and 350; future revisions join 340 as further parts instead
+of new components. A part without its spells is skipped; one that cannot be
+changed safely is left unchanged with a warning while the others apply. Family
+parts (Aid, Luck, Bless) also change exact copies and the instant prebuff copy
+SCS's own map lists for the spell (only Bless has one: `DWSP101`). Library
+`chriz-bg-rebalance/lib/chris_revisions.tpa`. Decisions, binary evidence and
+design are in `research/2026-10-23-aid-luck-chaotic-commands.md`,
+`research/2026-10-23-prayer-recitation.md` and `research/2026-10-23-bless.md`,
+which build on the October 11 review
+(`research/2026-10-11-general-spell-balance-design.md`).
+
+Verified: `tests/test_chris_revisions.py` (real WeiDU on synthetic games) and the
+release-package test. Scratch installs on copies of the CEBG game's resources
+(with SCS's prebuff map) and of the 2.6.6.0 reference install, each with its
+`dialog.tlk`, changed only the expected files, recognized every description and
+uninstalled cleanly. With the original BIFF files the Prayer/Recitation part was
+skipped. Full regression `python -B -m unittest discover -s tests -t .` on the
+branch merged with v0.8.4 (2026-10-25): 738 tests OK, 26 skipped (private
+captures) with WeiDU 249. Not launched in a game.
+
+Open: in-game check (the 1d8 hit point roll; druids receiving Chaotic Commands
+and Bless at level-up; Prayer and Recitation in both orders and from opposing
+casters; Bless durations at levels 1, 10 and 20); the collection's curation
+entry; tag/release only with Christopher's approval.
+
 ## October 23 — v0.8.4: October audit follow-ups, 220 guard order, 310 immunity windows
 
 Christopher approved the release on 2026-10-23. It contains PR #10 (follow-ups
@@ -599,3 +631,10 @@ session — always `--exclude` them.
 3. **Formal install of comp 100 into the live game** — pending user sign-off; tail-install.
 4. **Umbrella / collection** — see `docs/plans/2026-07-03-umbrella-analysis.md`; decision
    pending user, work deferred until 2xx/3xx mature.
+5. **Chris Revisions as its own Spell Revisions edition** — future goal Christopher set on
+   2026-10-23: "Revisions revised, aber halt von Chris". The changes of component 340 move
+   into his SR fork (`Chrizhermann/chriz-spell-revisions-patch`), built in instead of
+   patched on top, and he keeps refining them there. Until then they stay parts of 340 and
+   are not split into one component per spell. Needs a plan with him first: which SR
+   components carry which revision, how installs without SR keep the same values, and how
+   the collection switches over.
