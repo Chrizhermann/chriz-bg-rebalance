@@ -221,9 +221,61 @@ Update 2026-10-25, Christopher's decisions: poison, disease and repeated EFF get
 regeneration handling (frozen time kept, world time under Haste and Slow), as the September 25
 feasibility plan already intended. Area effects stop with the stop as well: no pulse and no
 lifetime lost. [IESDP op231](https://gibberlings3.github.io/iesdp/opcodes/bgee.htm#op231) says
-the engine already suppresses them during a stop but lets their duration run, so the lifetime
-is the part to correct (not lab-verified). Installing or removing the component in a running
-playthrough is not supported, so component absence needs no lab test.
+the engine already suppresses them during a stop but lets their duration run; the code says
+otherwise (next update). Installing or removing the component in a running playthrough is not
+supported, so component absence needs no lab test.
+
+Update 2026-10-25, the other periodic families and area effects (offline, 2.7.3.0, names from
+EEex's `function_names.db`):
+
+- **One clock for all four families.** Poison, disease, repeated EFF and regeneration workers
+  live in the sprite's periodic list (`+0x1A08`). Its dispatcher (`0x226500`) copies the list
+  counter (`+0x38`) into each worker (`+0x1C`), calls the worker with the caller's elapsed, and
+  raises the counter once per call. A worker pulses when its counter plus a family step is a
+  multiple of 15: regeneration, disease and repeated EFF add 1, poison adds 2. All four seed
+  the remaining duration from `parent.deadline - world` and the phase from
+  `floor((world - parent+0x6C) / 15) % period` (disease through
+  `CPersistantEffect::SetPeriodCounter`, `0x1E87A0`, called only by the disease constructor).
+  `+0x6C` is therefore the time origin of all four, not only of op98, and the correction's
+  Haste/Slow logic applies to each with its family step.
+- **Sites.** After the phase seed, before `CObList::AddTail`: poison `0x1BBB05` (the bytes and
+  registers of regeneration's `0x1BEDD2`: actor rbp, parent rdi, worker rbx), repeated EFF
+  `0x1BFEC8` (actor rsi, parent rdi, worker rbx), disease `0x1B1894` and `0x1B1AC1` (actor
+  rdi, parent rsi, worker rbx). Epilogs reached by every return: regeneration `0x1A5F19` and
+  poison `0x1A5C8A` (`48 83 C4 58 5E 5B`), disease `0x1A5156` (`48 83 C4 68 5E 5B`), repeated
+  EFF `0x1A4A91` (`48 83 C4 68 41 5E 5B`, after its stack-cookie check). A sixth worker,
+  `CPersistantEffectMove` (AIUpdate `0x1A5700`, built at `0x1BD7B1`), has no duration or pulse
+  and is Time-Stop-gated like the others.
+- **Area effects.** `CProjectileArea::AIUpdate` (`0x2284B0`), the 13 other projectile classes'
+  AIUpdate, `CVisualEffect`, `CGameTemporal`, `CGameStatic`, `CGameFireball3d` and
+  `CGameChunk` return at once while `m_nTimeStop` runs, unless the object is the caster.
+  `CProjectileArea` counts its lifetime in triggers (`+0x3C6`) and its trigger delay
+  (`+0x3CE`) inside its own update, after that gate. A cloud therefore keeps its whole
+  remaining lifetime through a stop, which is what Christopher asked for and contradicts
+  IESDP; one lab capture confirms it.
+- **Saving.** `CProjectile::CanSaveGame` (`0x22BA00`) refuses while a projectile is in flight
+  and `CGameTemporal::CanSaveGame` (`0x34BCA0`) while a temporal object is unfinished. The quick
+  save that wrote nothing shortly after a stop fits a leftover object of the stop's spell; a
+  native control confirms it.
+
+Design for the full scope (proposed 2026-10-25), replacing the one-subject prototype:
+
+- Every sprite, party or not. Frozen ticks are counted per actor; at each one, every timed
+  effect with an absolute deadline (and delayed ones with an absolute start) moves one tick
+  later, and `+0x6C` moves for op25, op78, op98 and op272. Groups such as Tempus' Holy Power
+  (op272 upkeep, children, delayed op321 cleanup) stay consistent because all their parts move
+  together.
+- Haste, Slow and pauses: per actor, one delivery per active tick, decided once per dispatcher
+  pass so that every worker of the actor sees the same decision; the counter follows a fixed
+  per-actor offset plus active time; the boundary scan uses the family step; each worker keeps
+  its own first uncounted tick (the 4-byte padding after `+0x28` in the four worker classes,
+  to be verified per class). A worker built after the tick's delivery seeds its phase for the
+  next tick, as an un-hasted rebuild would. Native reseeds at rebuilds stay, so normal speed is
+  exactly native and the per-parent phase table of the prototype is not needed.
+- Bookkeeping moves to Lua behind thin assembly gates (per-actor tables, cleanup on destroyed
+  objects and on load), so the logic is testable on the host; an error disables the correction
+  and leaves the game native.
+- Clouds need nothing beyond the lab confirmation. Save/load behaves as in step 5.
 
 ## Evidence identity and method
 
@@ -453,7 +505,7 @@ effect-instance matching, stacked identical effects and component removal need a
 | Maintenance graphs | `tempus_holy_power.tpa:1253–1279` couples op272 upkeep with same-deadline delayed op321 cleanup; `:2270–2279` uses31-tick op44/97 children for Slow coverage. A second op272 APR bridge is at `:3173–3179`, with one-second child at `:2944–2949`. Freezing only the positive parent can leave children expired or let cleanup remove them. Haste normalization must not blanket-select op272. |
 | Caster / immune actors | Native workers continue for both. Decide whether buff duration and periodic effects should also continue for each category, including gaining/losing immunity during a stop. Lab 2026-10-25: the engine freezes neither a caster nor an op310-immune subject; with the correction selected, both kept world time, buff expiry included. Gaining or losing immunity during a stop is untested. |
 | Slow / disease | Slow decided 2026-10-25 (Christopher): periodic effects run in world time under Slow too; movement and attacks stay slowed. Lab 2026-10-25: corrected, 6 heals instead of 3, at most one tick late, since a slowed actor updates every second tick. Disease is both a periodic family and potentially a timing modifier; untested. |
-| Area spells | Projectiles, area hazards and their lifetimes have separate code. Decide whether creation, lifetime, pulses and hitting frozen targets should each pause. Actor-local success makes no claim about them. IESDP op231: area-effect projectiles are suppressed until the stop ends while their duration runs; projectiles in flight wait (not lab-verified). Decided 2026-10-25 (Christopher): area effects stop with the stop, with no pulse and no lifetime lost. |
+| Area spells | Projectiles, area hazards and their lifetimes have separate code. Decide whether creation, lifetime, pulses and hitting frozen targets should each pause. Actor-local success makes no claim about them. IESDP op231: area-effect projectiles are suppressed until the stop ends while their duration runs; projectiles in flight wait. Decided 2026-10-25 (Christopher): area effects stop with the stop, with no pulse and no lifetime lost. The 2.7.3.0 code already freezes every projectile class, `CProjectileArea`'s trigger count and delay included, so IESDP's running duration does not match it; a lab capture confirms. |
 | Save/load / time compression | Absolute deadlines, parent phase origin, rebuilt workers and side metadata must agree. Do not save raw pointers. `CompressTime` separately calls `HandlePersistantEffects` at `0x350212`, forwarding a larger elapsed argument. Rest/travel/load cannot be treated as ordinary callbacks. Exact serialization coverage and current-save compatibility remain unproved. Lab 2026-10-25: a quick save after a corrected stop kept the shifted deadlines and the regeneration's origin through the reload; the correction's phase state is not saved, and after the load the grid restarted with the subject's list counter. A quick save shortly after a stop wrote nothing once (cause not isolated); saving during a stop is untested. |
 | Consecutive stops | Count each actual frozen tick once, even with back-to-back stops or caster replacement; effects applied midway receive only subsequent compensation. State read at a callback alone can miss a start/end between sparse passes. Observe transition ordering explicitly. Lab 2026-10-25: two stops 16 ticks apart counted each frozen tick once (178); an effect applied mid-stop was compensated only for the frozen ticks after it. Caster replacement is untested. |
 | Removal / refresh | Dispel, cure, explicit source removal, charge depletion, death and refresh remain native operations. Clock suspension must not become removal immunity. Clear/rebind metadata on removal, copy and worker rebuilding; address reuse is not identity. Action322 must still remove effects according to their corrected remaining lifetime. Lab 2026-10-25: op321 removal stayed removal, during a stop and without one, and a refresh during a stop started a full new duration after the stop. Dispel, cure, charge depletion, death and Action322 are untested. |
