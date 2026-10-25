@@ -334,8 +334,9 @@ The engine sessions have four bounded steps:
 Steps 1 to 3 resolved the disputed engine paths, step 4 tested the first actor/effect-scoped
 correction against them, and step 5 the robustness cases. Saving during a stop, time
 compression and rest, area transition, area effects, SR/SCS maintenance graphs, other periodic
-opcodes, party/enemy symmetry and component absence remain explicit later gates. This lab has
-no current-save safety claim.
+opcodes and party/enemy symmetry remain explicit later gates; component absence was dropped on
+2026-10-25 ([decisions](../10-timestop-haste-engine-clocks.md#compatibility-and-unresolved-design-decisions)).
+This lab has no current-save safety claim.
 
 ## Engine smoke test (EEex 1.3.1, 2026-10-20)
 
@@ -969,7 +970,10 @@ Three tries; the third gave the full answer.
 Not covered yet: saving during a stop, time compression and rest, area transition, area
 effects, SR/SCS maintenance graphs, other periodic opcodes (poison, disease), party/enemy
 symmetry, component absence and a clean process restart. The quick save after the stop that
-wrote nothing is unexplained.
+wrote nothing is unexplained. Christopher decided afterwards that poison, disease and repeated
+effects get the regeneration handling, that area effects stop with the stop, and that component
+absence needs no test
+([decisions](../10-timestop-haste-engine-clocks.md#compatibility-and-unresolved-design-decisions)).
 
 ## Host validation
 
