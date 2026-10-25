@@ -217,6 +217,14 @@ prototype is Christopher's decision. Saving during a stop, time compression, are
 maintenance graphs, other periodic opcodes and party/enemy symmetry are open. Details are in
 the [lab README](timestop-lab/README.md#lab-run-of-2026-10-25-step-5).
 
+Update 2026-10-25, Christopher's decisions: poison, disease and repeated EFF get exactly the
+regeneration handling (frozen time kept, world time under Haste and Slow), as the September 25
+feasibility plan already intended. Area effects stop with the stop as well: no pulse and no
+lifetime lost. [IESDP op231](https://gibberlings3.github.io/iesdp/opcodes/bgee.htm#op231) says
+the engine already suppresses them during a stop but lets their duration run, so the lifetime
+is the part to correct (not lab-verified). Installing or removing the component in a running
+playthrough is not supported, so component absence needs no lab test.
+
 ## Evidence identity and method
 
 The current executable inspected was
@@ -439,17 +447,17 @@ effect-instance matching, stacked identical effects and component removal need a
 
 | Boundary | Concrete risk / decision still needed |
 |---|---|
-| Which durations? | Define the final selection of buffs, harmful periodic parents and their supporting markers/cleanup effects. Permanent/equipped effects, delayed activation, summons and item expiration are not interchangeable finite buffs. Begin with explicit test identities, not a heuristic over every effect. |
+| Which durations? | Define the final selection of buffs, harmful periodic parents and their supporting markers/cleanup effects. Permanent/equipped effects, delayed activation, summons and item expiration are not interchangeable finite buffs. Begin with explicit test identities, not a heuristic over every effect. Decided 2026-10-25 (Christopher): every periodic family (poison, disease, repeated EFF) gets the regeneration handling. |
 | SR versus non-SR | Installed SR4.19 `SPWI305/SPWI613` and SCS35.21 `DWSW305/DWSW613` contain op176 movement and op1 APR, **no op16/317** across their reachable effects. SR source `spell_rev/lib/kreso_haste_slow.tph:115–130,189–200` confirms the distinction. Base `DATA/SPELLS.BIF` instead has op16 p2=0/1. Names and shared SCS spell-state markers cannot select the engine correction. |
 | SCS / Time Stop | Installed SPWI909 op328 state180 lasts18s while op231 carries36s. Neither the marker nor an assumed SPL length defines actual stop state. Keep SCS encounter timers/prebuff logic outside scope; source-specific corrections stay with their owner. |
 | Maintenance graphs | `tempus_holy_power.tpa:1253–1279` couples op272 upkeep with same-deadline delayed op321 cleanup; `:2270–2279` uses31-tick op44/97 children for Slow coverage. A second op272 APR bridge is at `:3173–3179`, with one-second child at `:2944–2949`. Freezing only the positive parent can leave children expired or let cleanup remove them. Haste normalization must not blanket-select op272. |
 | Caster / immune actors | Native workers continue for both. Decide whether buff duration and periodic effects should also continue for each category, including gaining/losing immunity during a stop. Lab 2026-10-25: the engine freezes neither a caster nor an op310-immune subject; with the correction selected, both kept world time, buff expiry included. Gaining or losing immunity during a stop is untested. |
 | Slow / disease | Slow decided 2026-10-25 (Christopher): periodic effects run in world time under Slow too; movement and attacks stay slowed. Lab 2026-10-25: corrected, 6 heals instead of 3, at most one tick late, since a slowed actor updates every second tick. Disease is both a periodic family and potentially a timing modifier; untested. |
-| Area spells | Projectiles, area hazards and their lifetimes have separate code. Decide whether creation, lifetime, pulses and hitting frozen targets should each pause. Actor-local success makes no claim about them. |
+| Area spells | Projectiles, area hazards and their lifetimes have separate code. Decide whether creation, lifetime, pulses and hitting frozen targets should each pause. Actor-local success makes no claim about them. IESDP op231: area-effect projectiles are suppressed until the stop ends while their duration runs; projectiles in flight wait (not lab-verified). Decided 2026-10-25 (Christopher): area effects stop with the stop, with no pulse and no lifetime lost. |
 | Save/load / time compression | Absolute deadlines, parent phase origin, rebuilt workers and side metadata must agree. Do not save raw pointers. `CompressTime` separately calls `HandlePersistantEffects` at `0x350212`, forwarding a larger elapsed argument. Rest/travel/load cannot be treated as ordinary callbacks. Exact serialization coverage and current-save compatibility remain unproved. Lab 2026-10-25: a quick save after a corrected stop kept the shifted deadlines and the regeneration's origin through the reload; the correction's phase state is not saved, and after the load the grid restarted with the subject's list counter. A quick save shortly after a stop wrote nothing once (cause not isolated); saving during a stop is untested. |
 | Consecutive stops | Count each actual frozen tick once, even with back-to-back stops or caster replacement; effects applied midway receive only subsequent compensation. State read at a callback alone can miss a start/end between sparse passes. Observe transition ordering explicitly. Lab 2026-10-25: two stops 16 ticks apart counted each frozen tick once (178); an effect applied mid-stop was compensated only for the frozen ticks after it. Caster replacement is untested. |
 | Removal / refresh | Dispel, cure, explicit source removal, charge depletion, death and refresh remain native operations. Clock suspension must not become removal immunity. Clear/rebind metadata on removal, copy and worker rebuilding; address reuse is not identity. Action322 must still remove effects according to their corrected remaining lifetime. Lab 2026-10-25: op321 removal stayed removal, during a stop and without one, and a refresh during a stop started a full new duration after the stop. Dispel, cure, charge depletion, death and Action322 are untested. |
-| Component removal | Adjusted native deadlines and temporary metadata must have a defined removal/load policy. Prefer no new save format, but that is not proof a save remains safe without the component. No active-playthrough hotpatch promise. |
+| Component removal | Adjusted native deadlines and temporary metadata must have a defined removal/load policy. Prefer no new save format, but that is not proof a save remains safe without the component. No active-playthrough hotpatch promise. Decided 2026-10-25 (Christopher): installing or removing the component in a running playthrough is not supported; no lab test. |
 
 Binary anchors for the compatibility reading (all under the read-only game directory):
 
@@ -477,8 +485,8 @@ cases and the rest of steps 4 and 5 are open (see the update above).
 Status 2026-10-25: lab step 5 covered steps 3 and 4 for the fixture: Improved and SR-shaped
 Haste, attacks and movement, two consecutive stops, removal, refresh and application during a
 stop. Of step 5 it covered save/reload after a stop and pauses. Saving during a stop, rest/time
-compression, area transition, process restart, component absence, poison, the maintenance
-fixture and party/enemy symmetry remain.
+compression, area transition, process restart, poison, the maintenance fixture and party/enemy
+symmetry remain; component absence was dropped (see Christopher's decisions above).
 
 Use a disposable BG2:EE **2.7.3.0 / EEex 1.3.1** copy and establish unmodified controls.
 Match its executable to the current fingerprint above, then validate candidate patch
@@ -513,8 +521,8 @@ No area projectile, repeated EFF, damage substitute or buff recreation is needed
    Removed effects must stay removed; newly applied effects get no retroactive credit.
    Rebuild must preserve phase without duplicate native HP effects.
 5. **Before broader scope:** save/reload before/during/after if the disposable engine
-   permits it; test clean process restart, component absence on a safe baseline, pause,
-   rest/time compression and area transition. Then swap regeneration for native poison,
+   permits it; test clean process restart, pause, rest/time compression and area transition
+   (component absence dropped on 2026-10-25). Then swap regeneration for native poison,
    add the parent/child/cleanup maintenance fixture, and test party/enemy symmetry.
 
 Implementation should retain native effect identity and native HP application, with
