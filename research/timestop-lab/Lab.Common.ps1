@@ -13,6 +13,9 @@ function Get-LabConfiguration {
         EEexCommit = 'a6d21abe44e20509f5d0259ccc6c7e7f9d12b285'
         EEexVersion = '1.3.1'
         MarkerName = '.cbr-timestop-lab.json'
+        # The shared lab coordination folder (README "Runtime coordination").
+        CoordinationRoot = Join-Path $env:USERPROFILE '.codex\coordination'
+        GameProcessNames = @('Baldur.exe', 'InfinityLoader.exe', 'icewind.exe')
     }
 }
 
@@ -170,15 +173,152 @@ function Get-LabLoaderConfigurationSha256 {
     finally { $sha.Dispose() }
 }
 
-function Assert-LabNoGameProcess {
-    param([object[]] $Processes)
-    if (-not $PSBoundParameters.ContainsKey('Processes')) {
-        $Processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+function Get-LabRecordField {
+    # A property of a process or JSON record, or $null when it has none.
+    param($Record, [Parameter(Mandatory)][string] $Name)
+    if ($null -eq $Record) { return $null }
+    $property = $Record.PSObject.Properties[$Name]
+    if ($null -eq $property) { $null } else { $property.Value }
+}
+
+function ConvertTo-LabProcessPath {
+    # A process image path as a full Win32 path, or $null when it is missing or not such a path.
+    # CIM reports some images with a \\?\ prefix.
+    param([AllowEmptyString()][string] $Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    $text = $Path -replace '^(?:\\\\\?|\\\?\?)\\UNC\\', '\\' -replace '^(?:\\\\\?|\\\?\?)\\', ''
+    if ($text -notmatch '^(?:[A-Za-z]:\\|\\\\[^\\?.])') { return $null }
+    try { ConvertTo-LabFullPath $text } catch { $null }
+}
+
+function Read-LabSharedText {
+    # Others may keep writing, renaming or deleting the file meanwhile, so this read never blocks
+    # a running game or a lock holder's release by rename.
+    param([Parameter(Mandatory)][string] $Path)
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+        [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+    try { [IO.StreamReader]::new($stream, [Text.UTF8Encoding]::new($false), $true).ReadToEnd() }
+    finally { $stream.Dispose() }
+}
+
+function Get-LabEngineNames {
+    # The values a game folder's engine.lua assigns to engine_name. The engine keeps its profile in
+    # Documents\<engine_name>, or under its stock name without engine.lua. A file that cannot be
+    # read, or assigns anything but a plain string, leaves the profile unknown and throws.
+    param([Parameter(Mandatory)][string] $Folder)
+    try { $text = Read-LabSharedText (Join-Path $Folder 'engine.lua') }
+    catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] { return }
+    foreach ($line in [regex]::Matches($text, '(?m)^[ \t]*engine_name[ \t]*=(?!=)[^\r\n]*')) {
+        $plain = [regex]::Match($line.Value,
+            '^[ \t]*engine_name[ \t]*=[ \t]*(?:"([^"\\\r\n]*)"|''([^''\\\r\n]*)'')[ \t]*;?[ \t]*(?:--.*)?$')
+        if (-not $plain.Success) { throw "engine_name is not a plain string: $($line.Value.Trim())" }
+        if ($plain.Groups[1].Success) { $plain.Groups[1].Value } else { $plain.Groups[2].Value }
     }
-    $running = @($Processes | Where-Object { $_.Name -in @('Baldur.exe', 'InfinityLoader.exe') })
-    if ($running.Count -gt 0) {
-        $names = ($running | ForEach-Object { $_.Name }) -join ', '
-        throw "CBR_LAB GAME_PROCESS_OPEN: $names. Leave other agents' processes alone and retry after their session ends."
+}
+
+function Get-LabProcessReason {
+    # Why one process stops this lab's staging, or $null.
+    param([Parameter(Mandatory)] $Process, [Parameter(Mandatory)] $Config, [switch] $Anywhere)
+    $name = [string] (Get-LabRecordField $Process 'Name')
+    $id = Get-LabRecordField $Process 'ProcessId'
+    $label = if ($null -ne $id) { "$name (pid $id)" } else { $name }
+    $path = ConvertTo-LabProcessPath (Get-LabRecordField $Process 'ExecutablePath')
+    # The game, its loader, WeiDU or anything else from here may hold or read what staging replaces.
+    if ($path -and ((Test-LabPathWithin -Path $path -Root $Config.LabRoot) -or
+            (Test-LabPathWithin -Path $path -Root $Config.ProfileRoot))) {
+        return "CBR_LAB GAME_PROCESS_OPEN: $label runs from this lab: $path"
+    }
+    if ($name -notin $Config.GameProcessNames) { return $null }
+    if ($Anywhere) {
+        $where = if ($path) { $path } else { 'a path that cannot be read' }
+        return "CBR_LAB GAME_PROCESS_OPEN: $label runs from $where; the desktop launch knows its game only as the one game that appears"
+    }
+    if (-not $path) {
+        return "CBR_LAB GAME_PROCESS_UNKNOWN: $label`: its executable path cannot be read, so it may run from this lab"
+    }
+    # A copy of this lab, or this lab reached through another spelling of its path (a junction, a
+    # short name, a substituted drive), names this lab's profile in the engine.lua beside the game.
+    $folder = [IO.Path]::GetDirectoryName($path)
+    $documents = [IO.Path]::GetDirectoryName($Config.ProfileRoot)
+    try {
+        foreach ($engineName in @(Get-LabEngineNames $folder)) {
+            if (Test-LabPathWithin -Path ($documents + '\' + $engineName) -Root $Config.ProfileRoot) {
+                return "CBR_LAB GAME_PROCESS_OPEN: $label from $folder uses this lab's profile (engine_name `"$engineName`")"
+            }
+        }
+    }
+    catch {
+        return "CBR_LAB GAME_PROCESS_UNKNOWN: $label from $folder`: its profile cannot be told ($($_.Exception.Message))"
+    }
+    $null
+}
+
+function Get-LabCoordinationReasons {
+    # bg-game-install.lock reserves the whole PC; bg-lab-slot-<n>.lock records the game folder and
+    # profile of one parallel lab run. Released records are renamed (*.released-*) and do not count.
+    # Without the folder no coordination exists, so nothing is held.
+    param([Parameter(Mandatory)][string] $Root, [Parameter(Mandatory)] $Config)
+    # Folders too: an entry of a lock's name that cannot be read still counts, as in bg_lab_slots.py.
+    try { $files = @([IO.Directory]::GetFileSystemEntries($Root)) }
+    catch [IO.DirectoryNotFoundException] { return }
+    catch { return "CBR_LAB COORDINATION_UNREADABLE: $Root ($($_.Exception.Message))" }
+    foreach ($file in $files) {
+        $name = [IO.Path]::GetFileName($file)
+        if ($name -ieq 'bg-game-install.lock') {
+            # The owner only completes the message; the lock refuses whether it can be read or not.
+            $owner = try { Get-LabRecordField (Read-LabSharedText $file | ConvertFrom-Json) 'owner' } catch { $null }
+            "CBR_LAB EXCLUSIVE_LOCK_HELD: bg-game-install.lock reserves the whole PC (owner: $(if ($owner) { $owner } else { 'not readable' }))"
+            continue
+        }
+        if ($name -notmatch '^bg-lab-slot-\d+\.lock$') { continue }
+        try {
+            $record = Read-LabSharedText $file | ConvertFrom-Json
+            $slotGame = Get-LabRecordField $record 'game'
+            $slotProfile = Get-LabRecordField $record 'profile'
+            if ($slotGame -isnot [string] -or $slotProfile -isnot [string]) { throw 'it names no game folder and profile' }
+            $slotGame = ConvertTo-LabFullPath $slotGame
+            $slotProfile = ConvertTo-LabFullPath $slotProfile
+        }
+        catch [IO.FileNotFoundException] { continue } # released while this check ran
+        catch {
+            "CBR_LAB LAB_SLOT_UNKNOWN: $name cannot be read ($($_.Exception.Message)), so it may hold this lab"
+            continue
+        }
+        $owner = Get-LabRecordField $record 'owner'
+        $who = "owner: $(if ($owner) { $owner } else { 'not readable' })"
+        # A slot holder may start this lab's game at any moment, before any process shows. Game
+        # folders nested either way clash as in bg_lab_slots.py; a profile only when the slot's
+        # game would write into this lab's profile.
+        if ((Test-LabPathWithin -Path $slotGame -Root $Config.LabRoot) -or
+            (Test-LabPathWithin -Path $Config.LabRoot -Root $slotGame)) {
+            "CBR_LAB LAB_SLOT_HELD: $name holds this lab's game folder ($who)"
+        }
+        elseif (Test-LabPathWithin -Path $slotProfile -Root $Config.ProfileRoot) {
+            "CBR_LAB LAB_SLOT_HELD: $name uses this lab's profile ($who)"
+        }
+    }
+}
+
+function Assert-LabNoGameProcess {
+    # Staging and the EEex install write only into this lab and its profile. They refuse while
+    # anything of this lab runs or is starting, or the whole PC is reserved; other labs' games do
+    # not matter. -Anywhere, for the desktop launch, also refuses every other BG game or loader.
+    param([object[]] $Processes, [string] $CoordinationRoot = (Get-LabConfiguration).CoordinationRoot,
+        [switch] $Anywhere)
+    $config = Get-LabConfiguration
+    $reasons = [Collections.Generic.List[string]]::new()
+    if (-not $PSBoundParameters.ContainsKey('Processes')) {
+        try { $Processes = @(Get-CimInstance Win32_Process -ErrorAction Stop) }
+        catch { $reasons.Add("CBR_LAB PROCESS_LIST_UNAVAILABLE: $($_.Exception.Message)") }
+    }
+    foreach ($process in $Processes) {
+        if ($null -eq $process) { continue }
+        $reason = Get-LabProcessReason -Process $process -Config $config -Anywhere:$Anywhere
+        if ($reason) { $reasons.Add($reason) }
+    }
+    foreach ($reason in @(Get-LabCoordinationReasons -Root $CoordinationRoot -Config $config)) { $reasons.Add($reason) }
+    if ($reasons.Count -gt 0) {
+        throw (($reasons -join "`n") + "`nLeave other holders' processes and locks alone and retry after they end.")
     }
 }
 
