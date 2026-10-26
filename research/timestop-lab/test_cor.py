@@ -1138,6 +1138,65 @@ class ScenarioTests(unittest.TestCase):
                                                             witness=witness)
                             self.assertSame(corrected, native, early=early, late=1)
 
+    def slowed_stop(self, family, counter, parity, *, after_its_update):
+        """A slowed creature with one family (several move each other's phase by a pulse, above)
+        and another frozen creature updated after it. The stop begins in a tick in which the slowed
+        creature is updated: before its update, after an active tick it skipped, or after its
+        update. Returns both creatures and the frozen ticks the stop holds for it."""
+        corrected = self.creature(families=(family,), counter=counter, witness="after").ticks(5)
+        native = self.native(families=(family,), counter=counter).ticks(5)
+        corrected.set_speed("slow", parity)
+        native.touch()
+        corrected.ticks(4)
+        native.ticks(4)
+        corrected.apply()
+        native.apply()
+        corrected.ticks(37)
+        native.ticks(37)
+        if (corrected.world + 1) % 2 != parity:
+            corrected.tick()
+            native.tick()
+        if after_its_update:
+            corrected.world += 1
+            corrected.pel()  # its update of that tick runs before the stop begins
+            corrected.stop(89, now=True)
+            corrected.mark()  # the other creature, updated after the caster, is frozen already
+            native.tick()
+            corrected.ticks(88)
+            frozen = 88
+        else:
+            corrected.stop(89)
+            corrected.ticks(89)
+            frozen = 89
+        corrected.finish()
+        native.finish()
+        return corrected, native, frozen
+
+    def test_a_slowed_creature_frozen_in_the_stops_first_tick_keeps_the_tick_it_skipped(self):
+        """The tick before was active and skipped. The native workers ignore every update while
+        frozen, so a pulse on that tick comes with the creature's first update after the stop: two
+        active ticks late, since the first active tick after the stop is one it skips too."""
+        for family in ALL:
+            for counter in range(1675, 1690):
+                for parity in (0, 1):
+                    with self.subTest(family=family, counter=counter, parity=parity):
+                        corrected, native, frozen = self.slowed_stop(family, counter, parity,
+                                                                     after_its_update=False)
+                        self.assertSame(corrected, native, late=2)
+                        self.assertEqual(corrected.cor.ActorState(ACTOR)["frozen"], frozen)
+
+    def test_a_slowed_creature_updated_before_the_caster_counts_the_tick_it_skipped(self):
+        """Its update in the stop's first tick was active and the next tick, frozen, it skips;
+        another creature frozen in the first tick marks the stop's start before that."""
+        for family in ALL:
+            for counter in range(1675, 1690):
+                for parity in (0, 1):
+                    with self.subTest(family=family, counter=counter, parity=parity):
+                        corrected, native, frozen = self.slowed_stop(family, counter, parity,
+                                                                     after_its_update=True)
+                        self.assertSame(corrected, native, late=1)
+                        self.assertEqual(corrected.cor.ActorState(ACTOR)["frozen"], frozen)
+
     def test_native_time_stop_loses_the_frozen_time(self):
         native = self.native(families=ALL).ticks(5)
         reference = self.native(families=ALL).ticks(5)

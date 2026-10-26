@@ -10,16 +10,18 @@
 --     and so does the time origin (+0x6C) of its poison, disease, regeneration and repeated
 --     effects (op25, op78, op98, op272), timed or equipped. A slowed creature counts the ticks it
 --     skipped from its own frozen passes and, where a stop began or ended on one, from the other
---     frozen creatures' marks. A tick in which the creature was updated before the stop began
---     (a hasted creature's first update) stays its own. Time compression during a stop moves
---     them by the compressed span.
+--     frozen creatures' marks, also when the stop began after its update in the same tick. A tick
+--     in which the creature was updated before the stop began (a hasted creature's first update)
+--     stays its own. Time compression during a stop moves them by the compressed span.
 --   Haste, Slow and pauses: each creature's periodic workers (regeneration, poison, disease,
 --     repeated EFF) run once per active tick, world time minus the creature's frozen ticks. The
 --     pulse counter is a fixed per-creature offset plus active time, so at normal speed it is the
 --     native list counter. A slowed creature's sparser updates count down every active tick since
 --     the last one and deliver the pulse that fell in between, but never one from before a new
---     effect existed. A creature not processed for more than MAXGAP ticks (an area left alone)
---     restarts on the native list counter instead of catching up.
+--     effect existed. A frozen update delivers nothing, since the native workers ignore it: the
+--     active ticks a slowed creature skipped before a stop wait for its first update after it.
+--     A creature not processed for more than MAXGAP ticks (an area left alone) restarts on the
+--     native list counter instead of catching up.
 --   Rebuilds keep the native reseed, taken at the active tick a creature without Haste, Slow,
 --     pauses or stops would have rebuilt: a worker built after its creature's delivery in this
 --     tick (a second hasted update, a pause, a frozen tick) seeds and counts down as of the next
@@ -324,16 +326,16 @@ function C.Frozen(sprite)
         return 0
     end
     local d = 1
-    if a.lastPass == world then
-        -- Its own update ran in this tick before the stop began (a hasted creature's first, or
-        -- the tick a pause repeats): the tick was active for it and counts nothing.
-        d = 0
-    elseif a.prevFrozen and a.lastFrozen >= 0 and world - a.lastFrozen <= MAXGAP then
+    if a.prevFrozen and a.lastFrozen >= 0 and world - a.lastFrozen <= MAXGAP then
         -- A slowed creature whose previous pass was frozen too: so were the ticks in between.
         d = world - a.lastFrozen
-    elseif a.lastPass >= 0 and C.stopStart > a.lastPass and world - C.stopStart <= MAXGAP then
-        -- The stop began on a tick it skipped.
-        d = world - C.stopStart + 1
+    elseif a.lastPass >= 0 and world - a.lastPass <= MAXGAP then
+        -- Its first frozen pass: every tick since its last update that the stop held. That is
+        -- none when its own update ran in this tick before the stop began (a hasted creature's
+        -- first, or the tick a pause repeats), and more than this one when the stop began on a
+        -- tick it skipped, or in the tick of its last update but after it (a slowed creature
+        -- updated before the caster).
+        d = world - math.max(a.lastPass, C.stopStart - 1)
     end
     if d > 0 then shiftEffects(sprite, d) end
     a.frozen = a.frozen + d
@@ -378,8 +380,10 @@ function C.Entry(sprite, elapsed)
             a.kappa = mem.r32(sprite + LIST_COUNTER) - T
             stats.compressed = stats.compressed + 1
         end
-    elseif T <= a.lastT then
-        -- A second hasted update, a frozen tick, or the repeated tick after a pause.
+    elseif frozenPass or T <= a.lastT then
+        -- A frozen update, which the native workers ignore (active ticks a slowed creature skipped
+        -- before the stop stay due for its first update after it), a second hasted update, or the
+        -- repeated tick after a pause.
         a.mode = SUPPRESS
     elseif T - a.lastT > MAXGAP then
         -- Not processed for a while: continue from the native list counter.
