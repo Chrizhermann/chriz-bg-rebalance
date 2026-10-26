@@ -2,4 +2,5 @@
 if EEex_Active then
     Infinity_DoFile("CBRTObs")
     Infinity_DoFile("CBRTFix")
+    Infinity_DoFile("CBRTCor")
 end

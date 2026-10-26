@@ -26,6 +26,13 @@ https://gibberlings3.github.io/iesdp/opcodes/bgee.htm#op208 and #op175
   alive and helpless, so every weapon swing at it hits.
 Spell Revisions 4.19 rc5 builds its Haste (SPWI305) from movement rate (op176)
 and attacks per round (op1) without op16; CBRTSRH has that shape.
+Checked on 2026-10-26:
+https://gibberlings3.github.io/iesdp/opcodes/bgee.htm#op25, #op78 and #op272
+  Poison, disease and the repeated EFF type 3 act once every parameter1 seconds,
+  like regeneration type 3: one damage, one damage, one application of the EFF.
+https://gibberlings3.github.io/iesdp/opcodes/bgee.htm#op18, #op17 and #op12
+  Maximum HP type 3 raises maximum HP only; current HP type 0 adds its amount;
+  damage mode 0 with type 0 deals that much crushing damage.
 The lab must measure actual native timing; these are not live-test results.
 """
 
@@ -42,15 +49,15 @@ from typing import NamedTuple
 # Reuse the repository's tested SPL encoder without writing import caches.
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
-from ie_formats import SplAbility, SplEffect, SplFile, make_spl  # noqa: E402
+from ie_formats import EffV2, SplAbility, SplEffect, SplFile, make_spl  # noqa: E402
 
 
 class Effect(NamedTuple):
     opcode: int
     parameter1: int = 0
     parameter2: int = 0
-    duration: int = 0  # Seconds.
-    timing: int = 0  # 0: limited duration, 1: instant/permanent.
+    duration: int = 0  # Seconds; ticks with timing 10.
+    timing: int = 0  # 0: limited, 1: instant/permanent, 4: delayed, 10: limited in ticks.
     resource: str = ""
 
 
@@ -68,6 +75,24 @@ FIXTURES = {
     "CBRTRMB": (Effect(321, 0, 0, 0, 1, "CBRTBUF"),),
     "CBRTRMR": (Effect(321, 0, 0, 0, 1, "CBRTREG"),),
     "CBRTDUM": (Effect(208, 1, 0, 900), Effect(175, 0, 2, 900)),  # Weapon-hit dummy.
+    # Step 6: the other periodic families, each once every 2 seconds like CBRTREG.
+    "CBRTPSN": (Effect(25, 2, 3, 12),),
+    "CBRTDIS": (Effect(78, 2, 3, 12),),
+    "CBRTRPT": (Effect(272, 2, 3, 12, 0, "CBRTRPE"),),
+    # Room for heals and hits on any creature without hurting it: +200 maximum HP, never below
+    # 1 HP; then, applied separately, 60 HP healed.
+    "CBRTVIT": (Effect(18, 200, 3, 0, 1), Effect(208, 1, 0, 0, 1)),
+    "CBRTHEL": (Effect(17, 60, 0, 0, 1),),
+    # A maintained group like Holy Power: an upkeep repeating every second, a timed child and a
+    # delayed cleanup of the whole group.
+    "CBRTHPG": (Effect(272, 1, 3, 20, 0, "CBRTHPE"), Effect(44, 2, 0, 14),
+                Effect(321, 0, 0, 12, 4, "CBRTHPG")),
+}
+
+# EFF V2 resources the repeated effects apply.
+EFFECT_FILES = {
+    "CBRTRPE": Effect(12, 1, 0, 0, 1),  # One crushing damage.
+    "CBRTHPE": Effect(0, 1, 0, 31, 10),  # AC +1 for 31 ticks, past the next pulse.
 }
 
 
@@ -110,6 +135,19 @@ def fixture_bytes() -> dict[str, bytes]:
         payload = dataclasses.replace(spell, header_raw=bytes(header)).to_bytes()
         SplFile.from_bytes(payload)  # Reject structural encoder errors before I/O.
         result[f"{resref}.SPL"] = payload
+    for resref, effect in EFFECT_FILES.items():
+        payload = EffV2(
+            opcode=effect.opcode,
+            target=2,
+            parameter1=effect.parameter1,
+            parameter2=effect.parameter2,
+            timing=effect.timing,
+            duration=effect.duration,
+            resource=effect.resource,
+            flags=2,  # Resistance/dispel: as the spell fixtures.
+        ).to_bytes()
+        EffV2.from_bytes(payload)
+        result[f"{resref}.EFF"] = payload
     return result
 
 

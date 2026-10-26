@@ -11,7 +11,7 @@ import unittest
 
 sys.dont_write_bytecode = True
 import build_fixtures as builder
-from ie_formats import SplFile
+from ie_formats import EffV2, SplFile
 
 
 # (opcode, parameter1, parameter2, duration, timing, resource) per effect, in order.
@@ -28,6 +28,17 @@ EXPECTED = {
     "CBRTRMB.SPL": ((321, 0, 0, 0, 1, "CBRTBUF"),),
     "CBRTRMR.SPL": ((321, 0, 0, 0, 1, "CBRTREG"),),
     "CBRTDUM.SPL": ((208, 1, 0, 900, 0, ""), (175, 0, 2, 900, 0, "")),
+    "CBRTPSN.SPL": ((25, 2, 3, 12, 0, ""),),
+    "CBRTDIS.SPL": ((78, 2, 3, 12, 0, ""),),
+    "CBRTRPT.SPL": ((272, 2, 3, 12, 0, "CBRTRPE"),),
+    "CBRTVIT.SPL": ((18, 200, 3, 0, 1, ""), (208, 1, 0, 0, 1, "")),
+    "CBRTHEL.SPL": ((17, 60, 0, 0, 1, ""),),
+    "CBRTHPG.SPL": ((272, 1, 3, 20, 0, "CBRTHPE"), (44, 2, 0, 14, 0, ""), (321, 0, 0, 12, 4, "CBRTHPG")),
+}
+# (opcode, parameter1, parameter2, duration, timing, resource) of each EFF V2 resource.
+EXPECTED_EFF = {
+    "CBRTRPE.EFF": (12, 1, 0, 0, 1, ""),
+    "CBRTHPE.EFF": (0, 1, 0, 31, 10, ""),
 }
 
 # The captures up to step 4 used these bytes; later fixtures must leave them alone.
@@ -45,9 +56,11 @@ class FixtureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="cbr-fixture-test-") as directory:
             output = Path(directory) / "assets"
             paths = builder.build_fixtures(output)
-            self.assertEqual({p.name for p in paths}, set(EXPECTED))
-            self.assertEqual({p.name for p in output.iterdir()}, set(EXPECTED))
+            self.assertEqual({p.name for p in paths}, set(EXPECTED) | set(EXPECTED_EFF))
+            self.assertEqual({p.name for p in output.iterdir()}, set(EXPECTED) | set(EXPECTED_EFF))
             for path in paths:
+                if path.suffix == ".EFF":
+                    continue
                 with self.subTest(resource=path.name):
                     data = path.read_bytes()
                     expected = EXPECTED[path.name]
@@ -78,6 +91,25 @@ class FixtureTests(unittest.TestCase):
                     for offset in (0x08, 0x0C, 0x50, 0x54):
                         self.assertEqual(struct.unpack_from("<i", data, offset)[0], -1)
 
+    def test_effect_files_are_standalone_eff_v2(self):
+        resources = builder.fixture_bytes()
+        for name, expected in EXPECTED_EFF.items():
+            with self.subTest(resource=name):
+                effect = EffV2.from_bytes(resources[name])
+                self.assertEqual((effect.opcode, effect.parameter1, effect.parameter2, effect.duration,
+                                  effect.timing, effect.resource), expected)
+                self.assertEqual((effect.target, effect.power, effect.probability1, effect.probability2),
+                                 (2, 0, 100, 0))
+                self.assertEqual((effect.save_type, effect.dice_number, effect.dice_size, effect.flags),
+                                 (0, 0, 0, 2))
+
+    def test_repeated_effects_name_lab_effect_files(self):
+        for name, effects in EXPECTED.items():
+            for effect in effects:
+                if effect[0] == 272:
+                    with self.subTest(resource=name):
+                        self.assertIn(f"{effect[5]}.EFF", EXPECTED_EFF)
+
     def test_first_capture_fixtures_keep_their_bytes(self):
         resources = builder.fixture_bytes()
         for name, digest in FIRST_CAPTURE_SHA256.items():
@@ -86,12 +118,15 @@ class FixtureTests(unittest.TestCase):
 
     def test_removal_fixtures_name_lab_fixtures_only(self):
         # op321 with an empty or foreign resource would strip unrelated effects from the subject.
+        # An instant removal of its own spell would remove nothing; only a delayed cleanup (timing
+        # 4) names its own group.
         for name, effects in EXPECTED.items():
             for effect in effects:
                 if effect[0] == 321:
                     with self.subTest(resource=name):
                         self.assertIn(f"{effect[5]}.SPL", EXPECTED)
-                        self.assertNotEqual(f"{effect[5]}.SPL", name)
+                        if effect[4] != 4:
+                            self.assertNotEqual(f"{effect[5]}.SPL", name)
 
     def test_collision_is_refused_before_any_fixture_write(self):
         with tempfile.TemporaryDirectory(prefix="cbr-fixture-test-") as directory:
@@ -122,7 +157,7 @@ class FixtureTests(unittest.TestCase):
             unrelated.write_bytes(b"preserve")
             builder.build_fixtures(output)
             self.assertEqual(unrelated.read_bytes(), b"preserve")
-            self.assertEqual(len(list(output.iterdir())), len(EXPECTED) + 1)
+            self.assertEqual(len(list(output.iterdir())), len(EXPECTED) + len(EXPECTED_EFF) + 1)
 
     def test_relative_and_parent_traversal_paths_are_refused(self):
         with self.assertRaises(ValueError):
