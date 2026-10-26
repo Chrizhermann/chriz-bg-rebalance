@@ -19,8 +19,9 @@ stops with removal or application in them, caster and immune subjects, attacks, 
 save/load ([below](#lab-run-of-2026-10-25-step-5)). On 2026-10-26, step 6 tested
 `CBRTCor.lua`, the correction for every creature, every timed effect and all four periodic
 families, with Haste, Slow, stops, pauses, a maintained group, time compression and save/load
-([below](#lab-run-of-2026-10-26-step-6)). A cloud's lifetime through a stop, area transitions
-and saving during a stop are still open.
+([below](#lab-run-of-2026-10-26-step-6)). Step 7 then let a real cloud run through a stop: it
+froze completely and kept its lifetime ([below](#lab-run-of-2026-10-26-step-7)). Saving during
+a stop, dispel, cure and death in a stop come later; area transitions need no test.
 
 The diagnosis, instruction evidence and open design questions are in
 [`../10-timestop-haste-engine-clocks.md`](../10-timestop-haste-engine-clocks.md).
@@ -222,11 +223,14 @@ clicked with `Infinity_ClickItem`, Christopher's choice on 2026-10-20.
   never claimed out of `override`, so that no later start runs it. Every exchange is logged
   under `<lab>\cbr-timestop-output\rc-log\`.
 - **Requests.** `rc/*.lua` holds the requests. Read-only: `ping`, `state`, `menus`,
-  `status`, `subject`, `nearby`, `creature`. Changing: `watchdog`, `install`, `arm`, `stop`,
-  `export`, `start-soa`, `click`, `pick-character`, `set-name`, `dialog`, `pause`, `queue`,
-  `quit`, `fix` for the [correction prototype](#correction-prototype-cbrtfixlua), `activity`
-  for the [activity recorder](#activity-recorder-and-weapon-hit-dummy) and `save` for the load
-  screen's list. `fix op=status`, `activity op=read` and `save op=list` only read. `save
+  `status`, `subject`, `nearby`, `creature`, `effects`. Changing: `watchdog`, `install`, `arm`,
+  `stop`, `export`, `start-soa`, `click`, `pick-character`, `set-name`, `dialog`, `pause`,
+  `queue`, `quit`, `fix` for the [correction prototype](#correction-prototype-cbrtfixlua),
+  `activity` for the [activity recorder](#activity-recorder-and-weapon-hit-dummy), `save` for the
+  load screen's list, `cor` and `apply` for the
+  [correction for every creature](#correction-for-every-creature-cbrtcorlua) and `cloud` for the
+  [cloud observer](#cloud-observer-cbrtcldlua). `fix op=status`, `activity op=read`, `save
+  op=list`, `cor op=status` and `cloud op=status` only read. `save
   op=select` takes the save's exact folder (`file`) or the start of its name (`prefix`). The
   list shows the name from `slotName`; `sName` is the party leader's name. The engine rotates
   quick saves through `Quick-Save`, `Quick-Save-2` and `Quick-Save-3`, so a prefix can match
@@ -277,7 +281,8 @@ NPCs and the Jailkeep Golem are neutral.
 
 ## Diagnostic controls
 
-`M_CBRTS.lua` loads `CBRTObs.lua` and `CBRTFix.lua` and exposes `CBRTS` and `CBRTF`.
+`M_CBRTS.lua` loads `CBRTObs.lua`, `CBRTFix.lua`, `CBRTCor.lua` and `CBRTCld.lua` and exposes
+`CBRTS`, `CBRTF`, `CBRTC` and `CBRTCL`.
 It does not install hooks. The first engine session must verify the command surface and
 hook integration before measuring any gameplay behavior. The steps below are the
 observer's; the correction prototype's controls are
@@ -1239,11 +1244,124 @@ ticks. All six records decoded with no issue and no mismatch.
 - **Removal and new effects in a stop.** Removal stays removal; an effect applied in a stop gets
   no credit for the frozen time before it.
 
-Not covered by the lab: area effects (a cloud's lifetime through a stop, read from the code only),
+Not covered by the lab: area effects (a cloud's lifetime through a stop, read from the code only;
+[step 7](#lab-run-of-2026-10-26-step-7) tested it later),
 area transitions, saving during a stop, dispel, cure and death, and a stop ending between a hasted
 creature's two updates (host tests only). Christopher, 2026-10-26: area transitions need no test;
 saving during a stop, dispel, cure and death come later; the slowed creature's lost last unit is
 not urgent and goes on the agenda.
+
+## Cloud observer `CBRTCld.lua`
+
+`CBRTCld.lua` follows one area spell, a cloud, for step 7. It patches nothing and changes no
+game state. `Install()` registers a global projectile mutator
+(`EEex_Projectile_RegisterGlobalMutator`), which notes the area projectile the armed creature
+decodes next, and wraps `CBRTC_Entry`, the Lua function the correction's entry gate calls at
+every creature's effect-list tail, frozen or not. Each update of a sampled creature then reads
+the cloud at the offsets its own update uses in the pinned executable, the stop and the sampled
+creatures' hit points. A sample is kept only when something but the world time and the updated
+creature changed, so a running cloud leaves one per tick (its countdown changes) and so does a
+running stop (its counter changes).
+
+| Read | Where | Meaning |
+|---|---|---|
+| Object ID | cloud `+0x48` | resolved once the engine has added the decoded projectile to the area |
+| Explosions left | cloud `+0x3C6` | one less whenever the explosion check returns nonzero; at 0 the cloud is destroyed |
+| Arrival | cloud `+0x3C8` | nonzero once it sits at its target; before that the travel update runs |
+| Interval, countdown | cloud `+0x3CC`, `+0x3CE` | the countdown steps down at each update and reloads from the interval at each check |
+| Stop | game `+0x9690`, `+0x9694` | its counter (op231 takes two off per tick) and its caster |
+| Hit points | each sampled creature | `m_baseStats.m_hitPoints` |
+
+`CProjectileArea::AIUpdate` (`0x2284B0`) and the travel update it falls back to (`0x228650`)
+return at once while a stop runs, unless the object's own ID is the stop's caster, which a
+projectile's never is. `test_cloud.py` checks those instructions and offsets in the pinned
+executable. The gates must run, the correction enabled or observing. An error is counted per
+record and never reaches the gate, which always gets the correction's own result.
+
+The request `cloud` installs, arms (`caster`, the creature whose next area projectile is
+followed, and `ids`, the creatures sampled), casts, stops and exports
+(`cbr-timestop-output/NAME.jsonl`); `status` only reads. `cast` queues
+`ReallyForceSpellPointRES` on the armed caster, for Incendiary Cloud (`SPWI810`) only: its
+projectile `1PINCIND` explodes within 256, with the vertical offset scaled by 4/3 as
+`CGameArea::GetAllInRange` measures. It refuses while a creature that is not sampled stands
+within that reach plus 64, because a scripted bystander hit by the party may turn hostile, and
+while a stop runs or the caster is busy. `decode_cloud.py` decodes a record offline: the cloud's
+arrival, explosions and end, its own updates (each changes its countdown), hit point changes,
+and every change inside a stop (between two samples that both show it running) or at its edges.
+
+## Lab run of 2026-10-26 (step 7)
+
+Step 7 let a real cloud run through a Time Stop. It was one quiet run in a parallel lab slot
+(`bg_lab_slots.py run`) after a `-Refresh` restage while no BG game ran: 939 s, no guard tripped
+(audio peak 0.0, pointer clip unchanged, nothing left in the job), and the slot was released
+when the game exited. At the fresh main menu, `cor op=install` installed the 8 gates, off, and
+`cloud op=install` the cloud observer. Setup was step 6's: P0 and Imoen P1 from the fresh-party
+sequence in AR0602, the party AI off, three neutral `BATIN01` dummies D1 to D3 next to P0, the
+smoke mephit as E, and `CBRTVIT` and `CBRTHEL` for everyone. Before each case P0 and Imoen were
+healed to full (298 and 257 HP).
+
+The cloud was Incendiary Cloud (`SPWI810`), cast at 151 left of P0 and 44 below. Its projectile
+`1PINCIND` explodes 10 times within 256, one explosion check every 76 of its updates. P0 (162)
+and Imoen (132) stood well inside; D1 to D3 (284 to 347) and the caged Jaheira (382) and Minsc
+(454) stood outside. Each case began as in step 6 (`cor op=enable`, or `observe` for the native
+control, a new record and one second of play). Then, still paused, the observer was armed for
+the cloud's caster, sampling P0, Imoen and D1 to D3, and the cloud was cast. The correction's
+recorder followed the same creatures and E.
+
+| Case | Cloud cast by | Mode | Stop |
+|---|---|---|---|
+| `cld_fix` | P0 | corrected | Imoen, 120 of her updates after the cast |
+| `cld_nat` | P0 | native control (`observe`) | as in `cld_fix` |
+| `cld_own` | Imoen | corrected | Imoen herself, 120 of her updates after her cast |
+| `cld_free` | P0 | corrected | none |
+
+| Case | Explosions | Cloud updates | Updates between explosions | Stop ticks | Ticks the cloud skipped | In the stop |
+|---|---|---|---|---|---|---|
+| `cld_fix` | 10 | 685 | 76 | 90 | 90 | countdown 71, 8 explosions left, no hit points changed |
+| `cld_nat` | 10 | 685 | 76 | 90 | 89 | countdown 71, 8 left, no hit points changed |
+| `cld_own` | 10 | 685 | 76 | 90 | 90 | countdown 38, 8 left, no hit points changed |
+| `cld_free` | 10 | 685 | 76 | none | 0 | |
+
+- **Nothing happens inside a stop.** In every sample of each stop the cloud's countdown and
+  explosions left stayed as they were, and no sampled creature's hit points changed: not P0's,
+  frozen, nor Imoen's, the stop's caster's, who stood inside the cloud and kept running.
+- **No lifetime lost.** The cloud made 685 updates from its arrival to its tenth explosion in
+  every case, stop or not, 76 between explosions throughout. The explosion after a stop came 76
+  updates after the one before it, 166 world ticks later (165 in `cld_nat`).
+- **The stop's first tick.** The cloud skipped 90 ticks in `cld_fix` and `cld_own` and 89 in
+  `cld_nat`, where its update in the stop's first tick came before Imoen's: the same rule as for
+  creatures (step 6). The correction's records show it for the creatures here too: P0 and D1
+  frozen 89 ticks, D2, D3 and the mephit 90, Imoen none.
+- **A hit on its way waits as well.** Every explosion hit P0 and Imoen (12 to 38 damage each);
+  the hit reached P0 9 or 10 ticks after its check and Imoen, nearer the centre, 7 or 8. The
+  dummies outside were never hit. In `cld_fix` and `cld_nat` the stop began 5 and 4 ticks after
+  an explosion: those hits arrived 96 to 99 ticks after their check, 3 to 6 ticks after the stop.
+  This fits IESDP's note that projectiles in flight wait.
+- **Who cast it does not matter.** Imoen's own cloud froze like P0's: the gate compares the
+  projectile's own ID with the stop's caster.
+- **The correction leaves clouds alone.** Corrected and native runs agree; the difference of one
+  skipped tick is the update order above.
+- **Decoding.** `decode_cloud.py` decoded the four cloud records and `decode_cor.py` the
+  correction's four records with no issue and no mismatch.
+
+This settles the [IESDP op231](https://gibberlings3.github.io/iesdp/opcodes/bgee.htm#op231)
+note that area effects keep their duration running during a stop: on 2.7.3.0 a cloud neither
+explodes nor counts down while a stop runs, and it keeps its remaining lifetime, as the code
+says. Christopher's rule for area effects (no pulse and no lifetime lost) holds natively, and the
+correction needs nothing for clouds.
+
+Run notes:
+
+- The first setup found Imoen still casting Armor on herself (her own script, while the party AI
+  was still on during the preparation); setup ran again once she had finished.
+- `ReallyForceSpellPointRES` is an instant action (`INSTANT.IDS`). Imoen's cast in `cld_own` ran
+  at once, while the game was still paused, and kept her busy for `apply`'s idle check
+  (`ACTOR_BUSY`); the driver queued her stop once she was idle, still paused and at the same game
+  time. P0's casts released their cloud 34 to 44 ticks after the game ran on; why was not looked
+  into. Every measure above counts from the cloud's own arrival.
+- After `cld_free` Imoen, down to 1 HP (`CBRTVIT` keeps everyone at 1 HP or more), started her
+  low-health interjection. Its dialogue kept the game paused, so the heal step after the case
+  could not run it. The four records were complete; the driver ended the dialogue and quit.
 
 ## Host validation
 
@@ -1336,6 +1454,28 @@ process lists and a fixture coordination folder, never the PC's processes, locks
 scratch mutation check replaced 23 single rules of these checks, one at a time;
 `Test-LabGuards.ps1` failed for each in the group meant to catch it. All 22 guard groups and
 all 233 Python tests passed.
+
+Step 7 on 2026-10-26 brings the total to 261 Python tests: `test_cloud.py` 24 (new),
+`test_cor.py` 81, `test_fix.py` 61, `test_lab_rc.py` 45, `test_decode_trace.py` 17,
+`test_qa_menu.py` 12, `test_observer.py` 11 and `test_fixtures.py` 10. `test_cloud.py` runs
+`CBRTCld.lua` in LuaJIT against stub bindings and `decode_cloud.py` on synthetic records:
+
+- 4 cover `Install`: one wrapper and one mutator, the correction loaded first, the gate's own
+  result while sampling fails, and nothing read while no record runs.
+- 3 follow the projectile: only the armed caster's area projectile, resolved once added and
+  ended once gone, dropped when it never resolves.
+- 3 check the samples (only changes, the cloud fields at their offsets, overflow) and 3 `Arm` and
+  `Export` (preconditions, a record the decoder reads, an escaped error message).
+- 8 decode simulated clouds: frozen through a stop, updated before the caster in the stop's first
+  tick, a heal in a stop, a stop before the arrival, a cloud running in a stop, changes at a
+  stop's edges, an incomplete and an invalid record.
+- 3 check the pinned executable: the cloud update's stop gate and fields in order, the module's
+  offsets, and the 4/3 range scaling the `cast` guard copies.
+
+`test_lab_rc.py` adds 4 for the `cloud` request: forwarding, the cast queue and nearby list, the
+bystander refusal at the reach's edge and the other refusals. A scratch mutation check replaced
+34 single guards or rules in `CBRTCld.lua` and `decode_cloud.py`, one at a time; `test_cloud.py`
+failed for each. After step 7, all 22 guard groups and all 261 Python tests passed.
 
 Fixture and decoder tests use synthetic data; assembly tests use synthetic memory
 and the pinned executable on disk. They do not execute the game or prove the
