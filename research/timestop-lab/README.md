@@ -133,16 +133,54 @@ Before the first quiet run:
 2. Run `python -I lab_quiet_run.py prepare <lab> <profile>`. It makes the profile
    windowed and sets every volume to 0, keeping `Baldur.lua.before-quiet-lab` as a backup.
 
-Install, staging and the preflight refuse while any `Baldur.exe` or `InfinityLoader.exe`
-runs, another agent's lab included. Steps 1 to 5 also ran the game alone: take the exclusive
-`bg-game-install.lock` of the shared lab coordination folder, wait until no BG game runs, then
-run `python -I lab_quiet_run.py run <lab> <profile> <out.json> 600`, and release the lock by
-renaming it only after no process runs from the lab. Step 6 staged while no BG game ran and
-then started the game in a parallel lab slot:
+Staging and the EEex install write only into this lab and its profile, so other agents' labs
+do not stop them (since 2026-10-26; until then any `Baldur.exe` or `InfinityLoader.exe` on the
+PC did). `Stage-Diagnostics.ps1` checks when it starts and again right before it copies,
+`Prepare-Lab.ps1 -Phase Install` right before WeiDU starts. Each refuses, naming every reason
+it finds, while:
+
+- a process runs from this lab's game folder or profile, whatever its name
+  (`GAME_PROCESS_OPEN`). The game, the loader or WeiDU may hold or read the files staging
+  replaces.
+- a `Baldur.exe`, `InfinityLoader.exe` or `icewind.exe` elsewhere uses this lab's profile
+  (`GAME_PROCESS_OPEN`). The engine keeps its profile in `Documents\<engine_name>`, taken from
+  the `engine.lua` beside its executable. So a copy of this lab is refused, and so is this lab
+  reached through another spelling of its path (a junction, a short name, a substituted drive).
+- such a game or loader cannot be placed (`GAME_PROCESS_UNKNOWN`): its executable path cannot
+  be read, for example an elevated game seen from a normal shell, or its `engine.lua` cannot be
+  read or gives `engine_name` anything but a plain string. A missing `engine.lua` means the
+  stock profile. Other programs whose path cannot be read do not count; many system processes
+  never show it.
+- `bg-game-install.lock` exists in the shared coordination folder
+  `%USERPROFILE%\.codex\coordination` (`EXCLUSIVE_LOCK_HELD`): the whole PC is reserved, and
+  its holder may be about to start this lab. Stage before taking that lock, not while holding
+  it.
+- a parallel lab slot `bg-lab-slot-<n>.lock` there names this lab's game folder or a folder
+  nested with it either way, or this lab's profile or a folder inside it (`LAB_SLOT_HELD`): a
+  run of this lab is starting or under way, possibly before any process shows. A slot that
+  cannot be read counts as well (`LAB_SLOT_UNKNOWN`).
+- the process list or the coordination folder cannot be read (`PROCESS_LIST_UNAVAILABLE`,
+  `COORDINATION_UNREADABLE`). Without that folder nothing is reserved. Released records
+  (`*.released-*`) never count.
+
+Staging also refuses while another of this lab's scripts holds the runtime mutex
+`Local\ChrizInfinityEngineLab`. The checks only read: process paths, the `engine.lua` of
+running games, and the lock and slot files, shared so that their holders can still rename
+them. They close nothing. The preflight checks none of this; it only reports how many
+`Baldur.exe` and `InfinityLoader.exe` processes run on the PC. `Invoke-Lab.ps1 -Launch` keeps
+the old rule on top of these checks: it refuses while any BG game or loader runs anywhere,
+because it recognizes its game only as the one game that appears.
+
+Steps 1 to 5 ran the game alone: take the exclusive `bg-game-install.lock` of the shared lab
+coordination folder, wait until no BG game runs, then run
+`python -I lab_quiet_run.py run <lab> <profile> <out.json> 600`, and release the lock by
+renaming it only after no process runs from the lab. Step 6 staged while no BG game ran
+anywhere, as the checks then required, and then started the game in a parallel lab slot:
 `python -I bg_lab_slots.py run <lab> <profile> <out.json> 3600 --owner … --purpose …`. It
 waits only for this lab's own processes, the exclusive lock and streaming software, runs the
-same quiet runner, and releases the slot when the game exits. Either way the run ends at its
-time limit, on a message box, or when the game exits; `<out.json>` records the guards' result.
+same quiet runner, and releases the slot when the game exits. Staging now runs beside other
+agents' labs; stage first, then start the slot run. Either way the run ends at its time limit,
+on a message box, or when the game exits; `<out.json>` records the guards' result.
 
 A failed or uncertain startup is an inspection point, not permission to retry
 repeatedly. A surviving process still blocks the next run.
@@ -1283,6 +1321,19 @@ synthetic memory, with the native worker rules of `periodic_model.py`:
 fixtures' bytes. A scratch mutation check replaced 50 single guards or rules in `CBRTCor.lua`,
 one at a time; `test_cor.py` failed for each. After step 6, all 16 guard groups and all 233
 Python tests passed.
+
+The lab-scoped staging checks of 2026-10-26
+([runtime coordination](#runtime-coordination)) replace the guard group of the old PC-wide
+check with seven. Another lab's game, loader or slot and released records leave staging
+allowed. This lab's game, loader or WeiDU, a process from its profile and a game whose
+`engine.lua` names its profile refuse it, also beside other labs. An unreadable path or
+`engine.lua` refuses it; the desktop launch still refuses every game or loader; the exclusive
+lock refuses both, and one refusal names every reason; a slot naming this lab, or one that
+cannot be read, refuses; so does an unreadable coordination folder. The groups use synthetic
+process lists and a fixture coordination folder, never the PC's processes, locks or slots. A
+scratch mutation check replaced 23 single rules of these checks, one at a time;
+`Test-LabGuards.ps1` failed for each in the group meant to catch it. All 22 guard groups and
+all 233 Python tests passed.
 
 Fixture and decoder tests use synthetic data; assembly tests use synthetic memory
 and the pinned executable on disk. They do not execute the game or prove the

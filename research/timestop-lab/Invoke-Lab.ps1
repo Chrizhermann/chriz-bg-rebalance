@@ -38,7 +38,8 @@ $owned = $false
 try {
     try { $owned = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $owned = $true }
     if (-not $owned) { throw 'Another cooperating lab owns the runtime mutex.' }
-    Assert-LabNoGameProcess
+    # This launcher recognizes its game only as the one game that appears, so it runs alone.
+    Assert-LabNoGameProcess -Anywhere
     $loader = Join-Path $lab 'InfinityLoader.exe'
     # Hidden startup helper; no user desktop/window automation is performed.
     $started = Start-Process -FilePath $loader -WorkingDirectory $lab -WindowStyle Hidden -PassThru
