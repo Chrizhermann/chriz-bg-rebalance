@@ -110,6 +110,7 @@ foreach ($entry in $fixtures.Files.PSObject.Properties) {
 $sources = [ordered]@{
     'override\CBRTObs.lua' = Join-Path $PSScriptRoot 'CBRTObs.lua'
     'override\CBRTFix.lua' = Join-Path $PSScriptRoot 'CBRTFix.lua'
+    'override\CBRTCor.lua' = Join-Path $PSScriptRoot 'CBRTCor.lua'
     'override\M_CBRTS.lua' = Join-Path $PSScriptRoot 'M_CBRTS.lua'
     'override\M_EEexRC.lua' = Join-Path $remote 'eeexremote\M_EEexRC.lua'
     'override\EEexRC.menu' = Join-Path $remote 'eeexremote\EEexRC.menu'

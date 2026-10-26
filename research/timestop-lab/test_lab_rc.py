@@ -94,6 +94,11 @@ class RequestSyntaxTests(unittest.TestCase):
                              "pick-character.lua": ("AMBIGUOUS_CHARACTER", "CHARACTER_NOT_FOUND"),
                              "fix.lua": ("FIX_NOT_LOADED", "UNKNOWN_OP", "PAUSE_FIRST", "NO_SUBJECT",
                                          "NOT_THE_SUBJECT"),
+                             "cor.lua": ("COR_NOT_LOADED", "UNKNOWN_OP", "PAUSE_FIRST", "INVALID_ID",
+                                         "NOT_A_CREATURE", "ARGS.on required", "ARGS.name required"),
+                             "apply.lua": ("PAUSE_FIRST", "TIME_STOP_ACTIVE", "NOT_A_CREATURE", "ACTOR_BUSY",
+                                           "TOO_MANY_STEPS", "INVALID_STEP", "NOT_A_LAB_FIXTURE",
+                                           "INVALID_TARGET", "NO_STEPS"),
                              "quit.lua": ("STOP_FIRST",)}.items():
             text = (REQUESTS / name).read_text(encoding="utf-8")
             for guard in guards:
@@ -569,6 +574,138 @@ class FixRequestTests(unittest.TestCase):
                     ok, error, count = self.fix(arguments, **state)[:3]
                     self.assertEqual((ok, count), (False, 0))
                     self.assertIn(guard, error)
+
+
+@unittest.skipIf(lupa is None, "lupa with LuaJIT 2.1 is not installed")
+class CorRequestTests(unittest.TestCase):
+    """cor.lua against a stub CBRTC: which operation it forwards with what, and what it refuses."""
+
+    def cor(self, arguments, paused=1, loaded=True, party=(10, 11), objects=(10, 11, 77)):
+        runtime = lupa.LuaRuntime(unpack_returned_tuples=True)
+        attempt = runtime.eval("""function(code, paused, loaded, party, objects)
+            local calls = {}
+            EngineGlobals = {g_pBaldurChitin = {m_pEngineWorld = {m_bPaused = paused, m_bHardPaused = 0}}}
+            if loaded then
+                CBRTC = {}
+                for _, op in ipairs({"Install", "Status", "Disable", "Enable", "Observe", "Watch", "Record",
+                                     "ExportRecord"}) do
+                    CBRTC[op] = function(...) calls[#calls + 1] = op; return {op = op, args = {...}} end
+                end
+            end
+            local members, known, slot = {}, {}, 0
+            for id in python.iter(party) do
+                members[slot] = {m_id = id}
+                slot = slot + 1
+            end
+            for id in python.iter(objects) do known[id] = {m_id = id, isSprite = function() return true end} end
+            EEex_Sprite_GetInPortrait = function(slot) return members[slot] end
+            EEex_GameObject_Get = function(id) return known[id] end
+            local ok, result = pcall(assert(loadstring(code, "@cor.lua")))
+            if not ok then return false, tostring(result), #calls end
+            local args = result.args
+            if result.op == "Watch" then args = {table.concat(args[1], " ")} end
+            return true, result.op, #calls, args[1], args[2]
+        end""")
+        code = lab_rc.with_arguments((REQUESTS / "cor.lua").read_text(encoding="utf-8"), arguments)
+        return attempt(code, paused, loaded, list(party), list(objects))
+
+    def test_operations_forward_to_the_module(self):
+        for op, called in (("install", "Install"), ("status", "Status"), ("disable", "Disable")):
+            with self.subTest(op=op):
+                self.assertEqual(self.cor({"op": op}, paused=0)[:3], (True, called, 1))
+        self.assertEqual(self.cor({"op": "record", "on": "1"}, paused=0), (True, "Record", 1, True, False))
+        self.assertEqual(self.cor({"op": "record", "on": "1", "discard": "1"}), (True, "Record", 1, True, True))
+        self.assertEqual(self.cor({"op": "record", "on": "0"}), (True, "Record", 1, False, False))
+        self.assertEqual(self.cor({"op": "enable"}), (True, "Enable", 1, 0, None))
+        self.assertEqual(self.cor({"op": "observe"})[:3], (True, "Observe", 1))
+        self.assertEqual(self.cor({"op": "export", "name": "cor_01"})[:4], (True, "ExportRecord", 1, "cor_01"))
+
+    def test_watch_follows_the_party_and_the_named_creatures(self):
+        self.assertEqual(self.cor({"op": "watch", "ids": " 77 "})[:4], (True, "Watch", 1, "10 11 77"))
+        self.assertEqual(self.cor({"op": "watch"})[:4], (True, "Watch", 1, "10 11"))
+
+    def test_refusals_call_nothing(self):
+        cases = {"COR_NOT_LOADED": ({"op": "status"}, {"loaded": False}),
+                 "UNKNOWN_OP": ({"op": "verify"}, {}),
+                 "ARGS.on required": ({"op": "record", "on": "yes"}, {}),
+                 "PAUSE_FIRST": ({"op": "enable"}, {"paused": 0}),
+                 "ARGS.name required": ({"op": "export"}, {}),
+                 "INVALID_ID": ({"op": "watch", "ids": "77 x"}, {}),
+                 "NOT_A_CREATURE": ({"op": "watch", "ids": "78"}, {})}
+        for guard, (arguments, state) in cases.items():
+            with self.subTest(guard=guard):
+                ok, error, count = self.cor(arguments, **state)[:3]
+                self.assertEqual((ok, count), (False, 0))
+                self.assertIn(guard, error)
+        for op in ("observe", "watch", "export"):
+            with self.subTest(op=op):
+                ok, error, count = self.cor({"op": op, "name": "x"}, paused=0)[:3]
+                self.assertEqual((ok, count), (False, 0))
+                self.assertIn("PAUSE_FIRST", error)
+
+
+@unittest.skipIf(lupa is None, "lupa with LuaJIT 2.1 is not installed")
+class ApplyRequestTests(unittest.TestCase):
+    """apply.lua against stub bindings: the response it queues on which actor, and its refusals."""
+
+    GAME = 0x5000
+
+    def apply(self, actor, steps, paused=1, stop=0, action=0, objects=(10, 11, 77)):
+        runtime = lupa.LuaRuntime(unpack_returned_tuples=True)
+        attempt = runtime.eval("""function(code, paused, stop, game, action, objects)
+            local queued, stored = {}, {}
+            local known = {}
+            for id in python.iter(objects) do
+                known[id] = {m_id = id, _name = "C" .. id, m_curAction = {m_actionID = action},
+                    isSprite = function() return true end,
+                    setStoredScriptingTarget = function(self, key, target) stored[#stored + 1] = key .. "=" .. target.m_id end}
+            end
+            EngineGlobals = {g_pBaldurChitin = {m_pEngineWorld = {m_bPaused = paused, m_bHardPaused = 0},
+                m_pObjectGame = {_ptr = game, m_worldTime = {m_gameTime = 1000}}}}
+            EEex_UDToPtr = function(value) return value._ptr end
+            EEex_Read32 = function(address)
+                assert(address == game + 0x9690, "unexpected read")
+                return stop
+            end
+            EEex_GameObject_Get = function(id) return known[id] end
+            EEex_Sprite_GetName = function(sprite) return sprite._name end
+            EEex_Action_QueueResponseStringOnAIBase = function(response, target)
+                queued[#queued + 1] = target._name .. ": " .. response
+            end
+            local ok, result = pcall(assert(loadstring(code, "@apply.lua")))
+            if not ok then return false, tostring(result), #queued, table.concat(stored, " ") end
+            return true, queued[1], #queued, table.concat(stored, " ")
+        end""")
+        code = lab_rc.with_arguments((REQUESTS / "apply.lua").read_text(encoding="utf-8"),
+                                     {"actor": actor, "steps": steps})
+        return attempt(code, paused, stop, self.GAME, action, list(objects))
+
+    def test_steps_queue_waits_and_applications_on_the_actor(self):
+        self.assertEqual(self.apply("77", "0:CBRTREG:self; 3:CBRTPSN:self"),
+                         (True, 'C77: ApplySpellRES("CBRTREG",Myself)\nSmallWait(3)\nApplySpellRES("CBRTPSN",Myself)',
+                          1, ""))
+        self.assertEqual(self.apply("11", "5:CBRTSTP:self;40:CBRTREG:10"),
+                         (True, 'C11: SmallWait(5)\nApplySpellRES("CBRTSTP",Myself)\nSmallWait(40)\n'
+                                'ApplySpellRES("CBRTREG",EEex_Target("CBRTT10"))', 1, "CBRTT10=10"))
+
+    def test_refusals_queue_nothing(self):
+        cases = {"PAUSE_FIRST": (("77", "0:CBRTREG:self"), {"paused": 0}),
+                 "TIME_STOP_ACTIVE": (("77", "0:CBRTREG:self"), {"stop": 90}),
+                 "NOT_A_CREATURE": (("78", "0:CBRTREG:self"), {}),
+                 "ACTOR_BUSY": (("77", "0:CBRTREG:self"), {"action": 3}),
+                 "INVALID_STEP": (("77", "301:CBRTREG:self"), {}),
+                 "NOT_A_LAB_FIXTURE": (("77", "0:SPWI305:self"), {}),
+                 "INVALID_TARGET": (("77", "0:CBRTREG:78"), {}),
+                 "TOO_MANY_STEPS": (("77", ";".join(["0:CBRTREG:self"] * 13)), {}),
+                 "NO_STEPS": (("77", " ; "), {})}
+        for guard, ((actor, steps), state) in cases.items():
+            with self.subTest(guard=guard):
+                ok, error, count = self.apply(actor, steps, **state)[:3]
+                self.assertEqual((ok, count), (False, 0))
+                self.assertIn(guard, error)
+        for steps in ("0:CBRTREG", "x:CBRTREG:self", "0:cbrtreg:self", "0:CBRTREGXX:self"):
+            with self.subTest(steps=steps):
+                self.assertFalse(self.apply("77", steps)[0])
 
 
 class ExitTests(unittest.TestCase):
