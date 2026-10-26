@@ -10,7 +10,9 @@
 --     and so does the time origin (+0x6C) of its poison, disease, regeneration and repeated
 --     effects (op25, op78, op98, op272), timed or equipped. A slowed creature counts the ticks it
 --     skipped from its own frozen passes and, where a stop began or ended on one, from the other
---     frozen creatures' marks. Time compression during a stop moves them by the compressed span.
+--     frozen creatures' marks. A tick in which the creature was updated before the stop began
+--     (a hasted creature's first update) stays its own. Time compression during a stop moves
+--     them by the compressed span.
 --   Haste, Slow and pauses: each creature's periodic workers (regeneration, poison, disease,
 --     repeated EFF) run once per active tick, world time minus the creature's frozen ticks. The
 --     pulse counter is a fixed per-creature offset plus active time, so at normal speed it is the
@@ -26,7 +28,8 @@
 --   Time compression (rest, travel) passes unchanged, counts as delivered and, like a long gap,
 --     continues on the native list counter.
 -- The bookkeeping is Lua behind thin assembly gates (EEex_GenLuaCall). A Lua error turns every
--- gate off and leaves the game native; per-creature state is not saved and restarts after a load.
+-- gate off and leaves the game native; per-creature state is not saved and restarts after a load,
+-- each creature's clock at its first update (an effect applied before that counts natively).
 -- Lab only: a recorder logs the targets' inputs and decisions for chosen creatures, and Observe()
 -- runs the gates with nothing but that recorder, so native controls use the same measurement.
 if CBRTC then return end
@@ -124,6 +127,13 @@ function C.Reset()
     resetStats()
 end
 
+-- EEex calls this after the engine destroyed a game session (quit, load): object IDs and pointers
+-- start over; the correction itself stays enabled.
+function C.SessionEnded()
+    C.Reset()
+    C.sessions = (C.sessions or 0) + 1
+end
+
 local function actorOf(sprite, world)
     local id = mem.u32(sprite + 0x48)
     local a = actors[sprite]
@@ -153,8 +163,8 @@ local function activeTime(a, world)
     return world - a.frozen
 end
 
--- The first clock of a creature: nothing delivered yet at T, unless T was delivered before a stop
--- that is freezing it now.
+-- The first clock of a creature, started by its first update: nothing delivered yet at T, unless T
+-- was delivered before a stop that is freezing it now.
 local function startClock(a, T, delivered)
     a.lastT = delivered and T or T - 1
     a.nextT = a.lastT + 1
@@ -314,14 +324,18 @@ function C.Frozen(sprite)
         return 0
     end
     local d = 1
-    if a.prevFrozen and a.lastFrozen >= 0 and world - a.lastFrozen <= MAXGAP then
+    if a.lastPass == world then
+        -- Its own update ran in this tick before the stop began (a hasted creature's first, or
+        -- the tick a pause repeats): the tick was active for it and counts nothing.
+        d = 0
+    elseif a.prevFrozen and a.lastFrozen >= 0 and world - a.lastFrozen <= MAXGAP then
         -- A slowed creature whose previous pass was frozen too: so were the ticks in between.
         d = world - a.lastFrozen
     elseif a.lastPass >= 0 and C.stopStart > a.lastPass and world - C.stopStart <= MAXGAP then
         -- The stop began on a tick it skipped.
         d = world - C.stopStart + 1
     end
-    shiftEffects(sprite, d)
+    if d > 0 then shiftEffects(sprite, d) end
     a.frozen = a.frozen + d
     a.lastFrozen = world
     stats.frozen_ticks = stats.frozen_ticks + d
@@ -486,7 +500,7 @@ local function seed(worker, at, origin)
 end
 
 function C.Construct(sprite, parent, worker, family)
-    local world = worldTime()
+    local world, game = worldTime()
     if not world then return 0 end
     -- The site's own class: anything else means the registers are not what the gate assumes.
     if familyOf[mem.ptr(worker)] ~= C.families[family] then
@@ -504,7 +518,6 @@ function C.Construct(sprite, parent, worker, family)
     local a = actorOf(sprite, world)
     catchUp(a, sprite, world)
     local T = activeTime(a, world)
-    if a.lastT == nil then startClock(a, T, a.lastFrozen == world) end
     stats.constructs = stats.constructs + 1
     -- A rebuilt parent keeps its origin, moved only by the frozen ticks counted since; a reused
     -- address with another origin is a new effect. Rebuilds follow events, not a schedule, so
@@ -522,18 +535,30 @@ function C.Construct(sprite, parent, worker, family)
     e.T, e.origin, e.frozen, e.worker, e.phase = T, origin, a.frozen, worker, nil
     a.byWorker[worker] = e
     a.behind[worker] = nil
+    -- The rebuild the end of a stop forces: the creature's latest update was frozen and it is
+    -- not frozen now, also when the stop ended between a hasted creature's two updates of a tick.
+    -- The phase continues where the stop froze it.
+    local carry = phase ~= nil and a.prevFrozen and not frozenNow(sprite, game)
     local first, rule = T, 0
-    if a.lastT >= T then
-        -- Built after this tick's delivery: seed and count down as a rebuild on the next active
-        -- tick would.
+    if a.lastT == nil then
+        -- No update of the creature seen yet (an effect applied while paused right after Enable
+        -- or a load): the native seed and countdown; its first update starts its clock.
+    elseif a.lastT >= T then
+        -- Built after this tick's delivery or frozen update: count down as a rebuild on the next
+        -- active tick would, and seed as it would unless the phase is carried.
         local ahead = a.lastT - T + 1
-        seed(worker, world + ahead, origin)
+        if carry then
+            mem.w16(worker + 0x1A, phase % 65536)
+            rule = 2
+            stats.carried = stats.carried + 1
+        else
+            seed(worker, world + ahead, origin)
+            rule = 1
+            stats.ahead = stats.ahead + 1
+        end
         mem.w32(worker + 0x28, s32(mem.r32(worker + 0x28) - ahead))
         first = a.lastT + 1
-        rule = 1
-        stats.ahead = stats.ahead + 1
-    elseif phase ~= nil and a.prevFrozen and a.lastFrozen ~= world then
-        -- The rebuild the end of a stop forces: the phase continues where the stop froze it.
+    elseif carry then
         mem.w16(worker + 0x1A, phase % 65536)
         rule = 2
         stats.carried = stats.carried + 1
@@ -548,7 +573,7 @@ function C.Construct(sprite, parent, worker, family)
         rule = 3
         stats.behind = stats.behind + 1
     end
-    a.nextT = first
+    if a.lastT ~= nil then a.nextT = first end
     if known then
         a.fresh[worker] = nil
     else
@@ -763,11 +788,7 @@ function C.Install()
         error("Correction install incomplete; restart lab: "..tostring(why))
     end
     C.installed = true
-    -- Object IDs and pointers start over in a new session; the correction itself stays enabled.
-    EEex_GameState_AddDestroyedListener(function()
-        C.Reset()
-        C.sessions = (C.sessions or 0) + 1
-    end)
+    EEex_GameState_AddDestroyedListener(C.SessionEnded)
     return {installed=true, sites=#C.sites, enabled=false}
 end
 
