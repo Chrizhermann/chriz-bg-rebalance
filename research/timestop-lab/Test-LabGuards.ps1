@@ -60,12 +60,6 @@ Check 'Cloud exception is confined to OS Documents ancestry and exact profile' {
 Check 'Actual OS Documents profile ancestry passes read-only metadata verification' {
     Assert-LabNoReparsePath $config.ProfileRoot
 }
-Check 'Either game or loader blocks regardless of path or case' {
-    Must-Reject { Assert-LabNoGameProcess -Processes @([pscustomobject]@{Name='BALDUR.EXE'}) } 'GAME_PROCESS_OPEN'
-    Must-Reject { Assert-LabNoGameProcess -Processes @([pscustomobject]@{Name='InfinityLoader.exe'}) } 'GAME_PROCESS_OPEN'
-    Assert-LabNoGameProcess -Processes @([pscustomobject]@{Name='pwsh.exe'})
-    Assert-LabNoGameProcess -Processes @()
-}
 $valid = [pscustomobject]@{
     SchemaVersion=1; LabId='cbr-timestop-2730'; InstanceId=[guid]::NewGuid().ToString()
     LabRoot=$config.LabRoot; ProfileRoot=$config.ProfileRoot; EngineName=$config.EngineName
@@ -175,6 +169,137 @@ try {
         [IO.File]::WriteAllBytes($launchedPath, $latin1.GetBytes($loaderLaunched))
         if ((Get-LabLoaderConfigurationSha256 $validatedPath) -cne (Get-LabSha256 $validatedPath)) { throw 'Validated loader hash changed.' }
         if ((Get-LabLoaderConfigurationSha256 $launchedPath) -cne (Get-LabSha256 $validatedPath)) { throw 'Launched loader file rejected.' }
+    }
+
+    # Synthetic process lists and a fixture coordination folder: the PC's real processes,
+    # locks and slots are never read here, and no game folder is written.
+    $coordination = Join-Path $fixture 'coordination'
+    $otherLab = Join-Path $fixture 'other-lab'
+    $stockGame = Join-Path $fixture 'stock-game' # no engine.lua: the engine's stock profile
+    $labCopy = Join-Path $fixture 'lab-copy'
+    foreach ($folder in @($coordination, $otherLab, $stockGame, $labCopy)) { $null = [IO.Directory]::CreateDirectory($folder) }
+    [IO.File]::WriteAllText((Join-Path $otherLab 'engine.lua'),
+        "engine_name = `"Other Lab 2730`"`r`nengine_mode = 1 -- 0 = BGEE, 1 = BG2EE, 2 = IWDEE`r`n")
+    [IO.File]::WriteAllText((Join-Path $labCopy 'engine.lua'), "engine_name = `"$($config.EngineName)`"`r`n")
+    $documents = [IO.Path]::GetDirectoryName($config.ProfileRoot)
+    $otherProfile = Join-Path $documents 'Other Lab 2730'
+    function New-LabTestProcess {
+        param([string] $Name, [AllowNull()][object] $Path)
+        [pscustomobject]@{ProcessId=4242; Name=$Name; ExecutablePath=$Path}
+    }
+    function Write-LabTestSlot {
+        param([string] $Name, [string] $Game, [string] $SlotProfile)
+        [IO.File]::WriteAllText((Join-Path $coordination $Name), ([ordered]@{schema='bg-lab-slot-v1'
+            owner='Claude Code: guard test'; game=$Game.Replace('\', '/'); profile=$SlotProfile.Replace('\', '/')} | ConvertTo-Json))
+    }
+    $otherGames = @(
+        (New-LabTestProcess 'Baldur.exe' (Join-Path $otherLab 'Baldur.exe')),
+        (New-LabTestProcess 'InfinityLoader.exe' (Join-Path $otherLab 'InfinityLoader.exe')),
+        (New-LabTestProcess 'icewind.exe' (Join-Path $stockGame 'icewind.exe')),
+        (New-LabTestProcess 'Baldur.exe' ($config.LabRoot + '-other\Baldur.exe')))
+    $ownGame = New-LabTestProcess 'Baldur.exe' (Join-Path $config.LabRoot 'Baldur.exe')
+    Check "Another lab's game, loader or slot leaves staging allowed" {
+        Write-LabTestSlot 'bg-lab-slot-1.lock' $otherLab $otherProfile
+        [IO.File]::WriteAllText((Join-Path $coordination 'bg-game-install.lock.released-20261026T010203Z-0123abcd'), '{}')
+        Write-LabTestSlot 'bg-lab-slot-2.lock.released-20261026T010203Z-4567cdef' $config.LabRoot $config.ProfileRoot
+        $unrelated = @(
+            (New-LabTestProcess 'weidu.exe' (Join-Path $otherLab 'weidu.exe')),
+            (New-LabTestProcess 'conhost.exe' '\\?\C:\WINDOWS\system32\conhost.exe'),
+            # Many system processes never show their path to a normal shell.
+            (New-LabTestProcess 'svchost.exe' $null), (New-LabTestProcess 'setup-other.exe' $null))
+        Assert-LabNoGameProcess -Processes ($otherGames + $unrelated) -CoordinationRoot $coordination
+        Assert-LabNoGameProcess -Processes @() -CoordinationRoot $coordination
+        # Without the shared coordination folder nothing is reserved.
+        Assert-LabNoGameProcess -Processes $otherGames -CoordinationRoot (Join-Path $fixture 'missing\coordination')
+    }
+    Check "This lab's game, loader, installer or profile refuses staging, also beside other labs" {
+        foreach ($process in @($ownGame,
+                (New-LabTestProcess 'BALDUR.EXE' (Join-Path $config.LabRoot 'Baldur.exe').ToUpperInvariant()),
+                (New-LabTestProcess 'InfinityLoader.exe' ('\\?\' + (Join-Path $config.LabRoot 'InfinityLoader.exe'))),
+                (New-LabTestProcess 'icewind.exe' (Join-Path $config.LabRoot 'icewind.exe')),
+                (New-LabTestProcess 'weidu.exe' (Join-Path $config.LabRoot 'weidu.exe')),
+                (New-LabTestProcess 'InfinityLoader.exe' (Join-Path $config.LabRoot 'EEex\loader\InfinityLoader.exe')),
+                (New-LabTestProcess 'helper.exe' (Join-Path $config.ProfileRoot 'helper.exe')),
+                # A copy of this lab, or this lab through another spelling of its path, uses its profile.
+                (New-LabTestProcess 'Baldur.exe' (Join-Path $labCopy 'Baldur.exe')))) {
+            Must-Reject { Assert-LabNoGameProcess -Processes @($process) -CoordinationRoot $coordination } 'GAME_PROCESS_OPEN'
+        }
+        Must-Reject { Assert-LabNoGameProcess -Processes ($otherGames + $ownGame) -CoordinationRoot $coordination } 'GAME_PROCESS_OPEN'
+        foreach ($engine in @("engine_name = 'cbr timestop lab 2730' -- other case",
+                "engine_name = `"$($config.EngineName). `"", "engine_name = `"$($config.EngineName)/nested`"",
+                "engine_name = `"Old name`"`r`nengine_name = `"$($config.EngineName)`"")) {
+            [IO.File]::WriteAllText((Join-Path $labCopy 'engine.lua'), $engine)
+            Must-Reject { Assert-LabNoGameProcess -Processes @(New-LabTestProcess 'InfinityLoader.exe' (Join-Path $labCopy 'InfinityLoader.exe')) -CoordinationRoot $coordination } 'GAME_PROCESS_OPEN'
+        }
+    }
+    Check 'A game or loader whose path or profile cannot be read refuses staging' {
+        foreach ($process in @((New-LabTestProcess 'Baldur.exe' $null), (New-LabTestProcess 'InfinityLoader.exe' ''),
+                (New-LabTestProcess 'ICEWIND.EXE' 'icewind.exe'), (New-LabTestProcess 'Baldur.exe' '\Device\HarddiskVolume3\Lab\Baldur.exe'),
+                [pscustomobject]@{Name='Baldur.exe'})) {
+            Must-Reject { Assert-LabNoGameProcess -Processes @($process) -CoordinationRoot $coordination } 'GAME_PROCESS_UNKNOWN'
+        }
+        $odd = Join-Path $fixture 'odd-engine'
+        $null = [IO.Directory]::CreateDirectory($odd)
+        $oddGame = New-LabTestProcess 'Baldur.exe' (Join-Path $odd 'Baldur.exe')
+        foreach ($engine in @('engine_name = "CBR " .. suffix', 'engine_name = [[CBR TimeStop Lab 2730]]', 'engine_name = "a\"b"')) {
+            [IO.File]::WriteAllText((Join-Path $odd 'engine.lua'), $engine)
+            Must-Reject { Assert-LabNoGameProcess -Processes @($oddGame) -CoordinationRoot $coordination } 'GAME_PROCESS_UNKNOWN'
+        }
+        [IO.File]::WriteAllText((Join-Path $odd 'engine.lua'), 'engine_name = "Odd Lab"')
+        $held = [IO.File]::Open((Join-Path $odd 'engine.lua'), 'Open', 'ReadWrite', 'None')
+        try { Must-Reject { Assert-LabNoGameProcess -Processes @($oddGame) -CoordinationRoot $coordination } 'GAME_PROCESS_UNKNOWN' }
+        finally { $held.Dispose() }
+        Assert-LabNoGameProcess -Processes @($oddGame) -CoordinationRoot $coordination
+        $folderEngine = Join-Path $fixture 'folder-engine'
+        $null = [IO.Directory]::CreateDirectory((Join-Path $folderEngine 'engine.lua'))
+        Must-Reject { Assert-LabNoGameProcess -Processes @(New-LabTestProcess 'icewind.exe' (Join-Path $folderEngine 'icewind.exe')) -CoordinationRoot $coordination } 'GAME_PROCESS_UNKNOWN'
+    }
+    Check 'The desktop launch refuses every game or loader, whatever its path or case' {
+        foreach ($process in @($otherGames + $ownGame + [pscustomobject]@{Name='BALDUR.EXE'} + (New-LabTestProcess 'icewind.exe' $null))) {
+            Must-Reject { Assert-LabNoGameProcess -Processes @($process) -CoordinationRoot $coordination -Anywhere } 'GAME_PROCESS_OPEN'
+        }
+        Must-Reject { Assert-LabNoGameProcess -Processes @(New-LabTestProcess 'weidu.exe' (Join-Path $config.LabRoot 'weidu.exe')) -CoordinationRoot $coordination -Anywhere } 'GAME_PROCESS_OPEN'
+        Assert-LabNoGameProcess -Processes @(New-LabTestProcess 'pwsh.exe' 'C:\Program Files\PowerShell\7\pwsh.exe') -CoordinationRoot $coordination -Anywhere
+        Assert-LabNoGameProcess -Processes @() -CoordinationRoot $coordination -Anywhere
+    }
+    Check 'The exclusive PC reservation refuses staging and launch, with every reason named' {
+        $exclusive = Join-Path $coordination 'bg-game-install.lock'
+        [IO.File]::WriteAllText($exclusive, '{"token":"0123abcd","owner":"Codex: install into another game","max_seconds":600}')
+        Must-Reject { Assert-LabNoGameProcess -Processes @() -CoordinationRoot $coordination } 'EXCLUSIVE_LOCK_HELD'
+        Must-Reject { Assert-LabNoGameProcess -Processes $otherGames -CoordinationRoot $coordination } 'Codex: install into another game'
+        Must-Reject { Assert-LabNoGameProcess -Processes @() -CoordinationRoot $coordination -Anywhere } 'EXCLUSIVE_LOCK_HELD'
+        [IO.File]::WriteAllText($exclusive, 'not a JSON record')
+        Must-Reject { Assert-LabNoGameProcess -Processes @() -CoordinationRoot $coordination } 'EXCLUSIVE_LOCK_HELD'
+        Must-Reject { Assert-LabNoGameProcess -Processes @($ownGame) -CoordinationRoot $coordination } 'GAME_PROCESS_OPEN'
+        Must-Reject { Assert-LabNoGameProcess -Processes @($ownGame) -CoordinationRoot $coordination } 'EXCLUSIVE_LOCK_HELD'
+        Remove-Item -LiteralPath $exclusive
+        $null = [IO.Directory]::CreateDirectory($exclusive)
+        Must-Reject { Assert-LabNoGameProcess -Processes @() -CoordinationRoot $coordination } 'EXCLUSIVE_LOCK_HELD'
+        Remove-Item -LiteralPath $exclusive
+        Assert-LabNoGameProcess -Processes $otherGames -CoordinationRoot $coordination
+    }
+    Check "A lab slot naming this lab's folder or profile refuses staging, an unreadable one too" {
+        foreach ($pair in @(@($config.LabRoot, $config.ProfileRoot), @((Join-Path $config.LabRoot 'nested'), $otherProfile),
+                @([IO.Path]::GetDirectoryName($config.LabRoot), $otherProfile), @($otherLab, $config.ProfileRoot),
+                @($otherLab, (Join-Path $config.ProfileRoot 'nested')))) {
+            Write-LabTestSlot 'bg-lab-slot-3.lock' $pair[0] $pair[1]
+            Must-Reject { Assert-LabNoGameProcess -Processes @() -CoordinationRoot $coordination } 'LAB_SLOT_HELD'
+        }
+        # A profile that only contains this one is not written into by the slot's game.
+        Write-LabTestSlot 'bg-lab-slot-3.lock' $otherLab $documents
+        Assert-LabNoGameProcess -Processes @() -CoordinationRoot $coordination
+        foreach ($text in @('{', '[]', '{"owner":"no folders"}', ('{"game":"eet","profile":"' + $otherProfile.Replace('\', '/') + '"}'))) {
+            [IO.File]::WriteAllText((Join-Path $coordination 'bg-lab-slot-3.lock'), $text)
+            Must-Reject { Assert-LabNoGameProcess -Processes @() -CoordinationRoot $coordination } 'LAB_SLOT_UNKNOWN'
+        }
+        Write-LabTestSlot 'bg-lab-slot-3.lock' $otherLab $otherProfile
+        Assert-LabNoGameProcess -Processes $otherGames -CoordinationRoot $coordination
+    }
+    Check 'An unreadable coordination folder refuses; the default is the shared folder' {
+        $notFolder = Join-Path $fixture 'coordination-file'
+        [IO.File]::WriteAllText($notFolder, '')
+        Must-Reject { Assert-LabNoGameProcess -Processes @() -CoordinationRoot $notFolder } 'COORDINATION_UNREADABLE'
+        if ($config.CoordinationRoot -cne (Join-Path $env:USERPROFILE '.codex\coordination')) { throw 'Not the shared coordination folder.' }
     }
 }
 finally {

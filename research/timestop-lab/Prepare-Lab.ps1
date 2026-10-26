@@ -254,8 +254,9 @@ else {
             foreach ($argument in $arguments) { $start.ArgumentList.Add($argument) }
             $manifest.Phase = 'Installing'
             Save-Manifest
-            # No global mutex is shared with the other repos. This is a fail-closed
-            # snapshot immediately before install, never permission to close them.
+            # WeiDU writes only into this lab. A fail-closed snapshot right before it starts:
+            # nothing of this lab may run or be starting, and the PC must not be reserved.
+            # Other labs' games may run; no process is ever closed.
             try { Assert-LabNoGameProcess }
             catch { $manifest.Phase = 'Copied'; Save-Manifest; throw }
             $process = [Diagnostics.Process]::new()
