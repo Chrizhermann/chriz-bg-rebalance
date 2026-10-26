@@ -1,4 +1,5 @@
-"""Offline validation of the full-scope clock correction (CBRTCor.lua).
+"""Offline validation of the full-scope clock correction: Rebalance's shipped core
+(chriz-bg-rebalance/lua/CBRTC.lua, component 360) under the lab layer CBRTCor.lua.
 
 Never runs the game or reads process memory. The Lua core runs in LuaJIT (lupa) over a synthetic
 process image held in Python. A scenario driver feeds it creatures' ProcessEffectList calls,
@@ -40,6 +41,7 @@ from unicorn import x86_const as x86
 
 
 HERE = Path(__file__).resolve().parent
+CORE = HERE.parent.parent / "chriz-bg-rebalance" / "lua" / "CBRTC.lua"
 EXE = Path(os.environ.get(
     "CBRTS_TEST_EXE",
     r"C:\Program Files (x86)\Steam\steamapps\common\Baldur's Gate II Enhanced Edition\Baldur.exe",
@@ -101,7 +103,9 @@ class Memory:
 
 
 def load_cor(memory=None):
+    """The shipped core, then the lab layer on top of it, as staging puts both into the lab."""
     lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.execute(CORE.read_text(encoding="utf-8"))
     lua.execute((HERE / "CBRTCor.lua").read_text(encoding="utf-8"))
     cor = lua.globals().CBRTC
     if memory is not None:

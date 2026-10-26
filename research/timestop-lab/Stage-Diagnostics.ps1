@@ -110,6 +110,9 @@ foreach ($entry in $fixtures.Files.PSObject.Properties) {
 $sources = [ordered]@{
     'override\CBRTObs.lua' = Join-Path $PSScriptRoot 'CBRTObs.lua'
     'override\CBRTFix.lua' = Join-Path $PSScriptRoot 'CBRTFix.lua'
+    # The shipped correction core (component 360) under the lab layer CBRTCor.lua; never its
+    # autoload M_CBRTC.lua, which only the component installs.
+    'override\CBRTC.lua' = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'chriz-bg-rebalance\lua\CBRTC.lua'
     'override\CBRTCor.lua' = Join-Path $PSScriptRoot 'CBRTCor.lua'
     'override\CBRTCld.lua' = Join-Path $PSScriptRoot 'CBRTCld.lua'
     'override\M_CBRTS.lua' = Join-Path $PSScriptRoot 'M_CBRTS.lua'
