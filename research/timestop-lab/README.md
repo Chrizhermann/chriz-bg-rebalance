@@ -1203,7 +1203,9 @@ ticks. All six records decoded with no issue and no mismatch.
 
 Not covered by the lab: area effects (a cloud's lifetime through a stop, read from the code only),
 area transitions, saving during a stop, dispel, cure and death, and a stop ending between a hasted
-creature's two updates (host tests only).
+creature's two updates (host tests only). Christopher, 2026-10-26: area transitions need no test;
+saving during a stop, dispel, cure and death come later; the slowed creature's lost last unit is
+not urgent and goes on the agenda.
 
 ## Host validation
 
