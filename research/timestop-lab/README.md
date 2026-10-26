@@ -16,8 +16,11 @@ captures followed on 2026-10-23
 ([below](#corrected-captures-fixctl_01-fixstop_01-fixhaste_01-and-fixhaste_02-2026-10-23)).
 On 2026-10-25, step 5 tested the revised correction with the other Haste kinds, Slow, pauses,
 stops with removal or application in them, caster and immune subjects, attacks, movement and
-save/load ([below](#lab-run-of-2026-10-25-step-5)). Area effects, time compression and the other
-later gates are still open.
+save/load ([below](#lab-run-of-2026-10-25-step-5)). On 2026-10-26, step 6 tested
+`CBRTCor.lua`, the correction for every creature, every timed effect and all four periodic
+families, with Haste, Slow, stops, pauses, a maintained group, time compression and save/load
+([below](#lab-run-of-2026-10-26-step-6)). A cloud's lifetime through a stop, area transitions
+and saving during a stop are still open.
 
 The diagnosis, instruction evidence and open design questions are in
 [`../10-timestop-haste-engine-clocks.md`](../10-timestop-haste-engine-clocks.md).
@@ -131,12 +134,15 @@ Before the first quiet run:
    windowed and sets every volume to 0, keeping `Baldur.lua.before-quiet-lab` as a backup.
 
 Install, staging and the preflight refuse while any `Baldur.exe` or `InfinityLoader.exe`
-runs, so this lab runs alone. Take the exclusive `bg-game-install.lock` of the shared lab
-coordination folder, wait until no BG game runs, then run
-`python -I lab_quiet_run.py run <lab> <profile> <out.json> 600`. Parallel lab slots
-(`bg_lab_slots.py`) start nothing while that lock is held. The run ends at its time limit,
-on a message box, or when the game exits; `<out.json>` records the guards' result. Release
-the lock by renaming it only after no process runs from the lab.
+runs, another agent's lab included. Steps 1 to 5 also ran the game alone: take the exclusive
+`bg-game-install.lock` of the shared lab coordination folder, wait until no BG game runs, then
+run `python -I lab_quiet_run.py run <lab> <profile> <out.json> 600`, and release the lock by
+renaming it only after no process runs from the lab. Step 6 staged while no BG game ran and
+then started the game in a parallel lab slot:
+`python -I bg_lab_slots.py run <lab> <profile> <out.json> 3600 --owner … --purpose …`. It
+waits only for this lab's own processes, the exclusive lock and streaming software, runs the
+same quiet runner, and releases the slot when the game exits. Either way the run ends at its
+time limit, on a message box, or when the game exits; `<out.json>` records the guards' result.
 
 A failed or uncertain startup is an inspection point, not permission to retry
 repeatedly. A surviving process still blocks the next run.
@@ -975,6 +981,230 @@ effects get the regeneration handling, that area effects stop with the stop, and
 absence needs no test
 ([decisions](../10-timestop-haste-engine-clocks.md#compatibility-and-unresolved-design-decisions)).
 
+## Correction for every creature `CBRTCor.lua`
+
+`CBRTCor.lua` replaces the one-subject prototype for step 6. It corrects every creature, party
+or not, and every effect with an absolute deadline, a delayed start or a periodic time origin,
+timed or equipped, across all four periodic families: regeneration (op98), poison (op25),
+disease (op78) and repeated EFF (op272). It follows Christopher's rule: in a Time Stop
+everything but the caster and Time-Stop-immune creatures stops, periodic effects included;
+Haste and Slow change actions and movement only, and periodic effects keep world time; at
+normal speed the native pattern stays. `CBRTFix.lua` stays as the record of steps 4 and 5;
+`Install()` refuses a process in which it is installed.
+
+The bookkeeping is Lua. Eight thin assembly gates call it through `EEex_GenLuaCall`; their
+windows were decoded from the pinned executable like the prototype's (whole instructions, no
+relative operand, no branch target past the first byte).
+
+| Gate | Site | What it does |
+|---|---|---|
+| Frozen | `0x3ABA9D`, after the engine marks a frozen noncaster | Once per world tick and creature, before that pass checks for expiry: moves every timed effect with an absolute deadline (`0x1000`) or a delayed start (timings 6, 7, 8) one tick later, and the time origin (`+0x6C`) of op25, op78, op98 and op272, timed or equipped. A slowed creature counts the ticks it skipped from its own previous frozen pass. Its first frozen pass counts every tick since its last update that the stop held: also a skipped tick the stop began on, and, when the stop began in the tick of its last update but after it, the tick that followed. A tick in which its own update ran before the stop began (a hasted creature's first update) counts nothing. |
+| Entry | `0x226513`, the periodic dispatcher's start | Decides once per creature and pass, so every worker of it sees the same decision. One delivery per active tick (world time minus the creature's frozen ticks); a second hasted update, a frozen update and the tick a pause repeats are suppressed. The native workers ignore every frozen update, so active ticks a slowed creature skipped before a stop stay due for its first update after it; after more than 14 ticks without a pass the creature restarts on the native list counter. Time compression (elapsed above 1) passes natively and re-anchors the counter; during a stop it moves a frozen creature's effects by the span. A stop that ended on a tick a slowed creature skipped is caught up from the other frozen creatures' marks. |
+| Dispatch | `0x226543`, after the list counter is copied into the worker | Only the four worker classes reach Lua. The worker's counter becomes the creature's fixed offset plus active time, which at normal speed is the native list counter, and elapsed the active ticks since its last countdown. A suppressed call is a no-op (counter 0, elapsed 0). A slowed creature's gap is scanned for the latest pulse boundary with the family's step (poison 2, the others 1), never before the effect existed and never past its last tick. |
+| Construct (5) | after the phase seed, before `CObList::AddTail`: regeneration `0x1BEDD6`, poison `0x1BBB09`, disease `0x1B1894` and `0x1B1AC1`, repeated EFF `0x1BFEC8` | Keeps the native reseed, taken at the active tick a creature without Haste, Slow, pauses or stops would have rebuilt. A worker built after its creature's delivery in this tick seeds and counts down as of the next active tick (rule 1, "ahead"); one rebuilt after a slowed pass that delivered a pulse, as of the tick after that pulse (rule 3, "behind"). The rebuild that a stop's end forces keeps each worker's phase (rule 2, "carried"). A parent is known by its address and its origin, moved only by the frozen ticks counted since; a new one pulses only after the tick it was applied. |
+
+- **State.** Per creature, keyed by the sprite pointer; another object ID at the same address
+  starts over. Creatures unseen and parents not rebuilt for 9,000 ticks are forgotten.
+- **Fail closed.** A Lua error in a gate clears the shared enabled flag: every gate is off and
+  the game runs natively.
+- **Load.** Nothing of the correction is saved. EEex's destroyed-session listener (quit, load)
+  clears the per-creature state and counts `sessions`; the correction stays enabled, and each
+  creature's clock restarts at its first update. An effect applied before that update counts
+  natively.
+
+Controls, also as the Remote Console request `cor` (`op=install`, `status`, `disable`,
+`record`; while paused `enable`, `observe`, `watch`, `export`):
+
+1. `CBRTC.Install()` at the fresh main menu checks the lab, the image base and timestamp, the
+   four worker vtables and all eight windows, then installs the gates, off.
+2. `CBRTC.Enable(0)` while paused: portrait 0's timed and equipped lists must match the EEex
+   iterator. Then every creature is corrected.
+3. `CBRTC.Observe()` runs the gates with nothing but the recorder, changing no effect or
+   worker, so native controls use the same measurement.
+4. The recorder follows creatures chosen by object ID (`Watch`) and logs frozen passes,
+   dispatcher entries, dispatches and constructions, with the native value next to each
+   corrected one. `Record` starts and stops a record, at most 400,000 events;
+   `ExportRecord(name)` writes `cbr-timestop-output/NAME.jsonl` and refuses an existing file.
+   `decode_cor.py` turns a record into per-creature passes, modes and dispatch checks and
+   per-effect units, intervals, deadline shifts and construction rules; it shares the native
+   worker rules in `periodic_model.py` with the host tests.
+5. `CBRTC.Status()` reports the counters; `CBRTC.Disable()` turns everything off with one
+   aligned store.
+
+Step 6 added fixtures on `CBRTREG`'s schedule (once every 2 seconds for 12 seconds): `CBRTPSN`
+(op25), `CBRTDIS` (op78) and `CBRTRPT` (op272 with `CBRTRPE`, one crushing damage). `CBRTVIT`
+(+200 maximum HP, never below 1 HP) and `CBRTHEL` (60 HP healed) give any creature room for
+heals and damage. `CBRTHPG` is a group like Tempus' Holy Power: an op272 upkeep every second
+that applies `CBRTHPE` (AC +1 for 31 ticks), an op44 child for 14 seconds and an op321 cleanup
+of the whole group delayed by 12 seconds. The request `apply` queues lab fixture applications
+on any creature; `effects` lists effect clocks by object ID.
+
+Remaining limits, all covered by host tests:
+
+- A slowed creature updates every second tick: each family's units land within one tick of an
+  un-slowed creature's. A pulse due on the skipped tick right before a stop comes with its first
+  update after the stop, up to two active ticks late. With several families, a unit of one family
+  on a skipped tick reseeds the others in the same call, so a phase can move by one pulse; the
+  counts stay, except that an effect's last pulse on its last, skipped tick can be lost: it would
+  come with the next update, and that update removes the expired effect first when it runs the
+  full effect pass, as it does right after another family's unit.
+- A slowed creature that is the only frozen one can be one tick off at each end of a stop.
+- An application in a pause during a stop is stamped one tick earlier, as natively.
+- After a load, effects run on the native grid until their own end; the restarted list counter
+  can move their remaining units by a pulse (step 5).
+
+## Lab run of 2026-10-26 (step 6)
+
+Step 6 tested [`CBRTCor.lua`](#correction-for-every-creature-cbrtcorlua) on every creature and
+all four periodic families. It took four runs on a fresh party each; every run found the code of
+the run before it wanting, and each fix came with host tests first:
+
+1. The first run stopped after its two controls: an effect applied while paused right after
+   Enable stretched its creature's first dispatch to two ticks. The clock now starts at the
+   creature's first update.
+2. The second run (18 records) froze a hasted creature 90 ticks in an 89-tick stop: its first
+   update of the stop's first tick ran before the stop began, and the tick was counted again.
+3. The third run (commit `fff6c37`, 18 records) is the one reported below. It found a slowed
+   creature losing a pulse at a stop's start; reading that code turned up a second slowed case.
+4. The fourth run (commit `bbbcc46`, 6 records) aimed stops at that slowed case and confirmed
+   both fixes ([below](#fourth-run-stops-aimed-at-a-slowed-creature)).
+
+- **Run.** Each run was one quiet run in a parallel lab slot (`bg_lab_slots.py run … 3600`) after
+  a `-Refresh` restage while no BG game ran. The third lasted 1,223 s and the fourth 737 s; no
+  guard tripped (audio peak 0.0, pointer clip unchanged, nothing left in the job), and the slot
+  was released when the game exited. At the fresh main menu, `cor op=install` installed the 8
+  gates, off. The protagonist P0 and Imoen P1 came from the
+  [fresh-party sequence](#fresh-test-party-in-the-hidden-game) in AR0602. Setup turned the
+  party AI off, let Imoen create three neutral `BATIN01` dummies D1 to D3 next to P0, took the
+  nearest hostile, a smoke mephit, as E, and gave everyone `CBRTVIT` and `CBRTHEL`.
+- **Cases.** Each case began paused: `cor op=enable` (`observe` for a native control), `watch`
+  for the party, the dummies and E, a new record, then one second of play, so that the
+  correction had seen every creature update before the applications (`fix_fresh` skipped it).
+  P0 got all four families, D1 regeneration and poison, D2 disease and the repeated EFF, and E a
+  regeneration from Imoen; Haste or Slow came first where a case says so. In the stop cases
+  Imoen gave herself a regeneration and stopped time 45 of her updates after the applications,
+  and D3 got op310 immunity (`CBRTTSI`) and a regeneration. Between cases the gates went off,
+  every case effect ran out, and creatures below 90 HP were healed.
+- **Decoding.** `decode_cor.py` decoded all 18 records of the third run with no issue and no
+  mismatch: every worker field the recorder saw agreed with the native worker rules replayed
+  from the record. The correction covered the 39 creatures in the area; the recorder followed 6.
+
+Times are world ticks; +n counts from an effect's application. A unit is one heal, one damage or
+one application of the repeated EFF. The fixtures last 12 seconds on a 2-second schedule: 6
+units, or 5 when the first comes at +30 or later. That is the native pulse grid: the first unit
+waits for the second 15-tick boundary of the creature's own counter after the application, and
+another family's unit just before a pulse rebuilds the list and reseeds the phase (step 3). The
+corrected creature has them where an unhasted, unstopped creature with the same grid and the
+same events has them; the host tests compare exactly that.
+
+### Controls, Haste and Slow
+
+| Case | Event | Units | Correction |
+|---|---|---|---|
+| `nat_ctl` | None; observer only. | 6 each; E 5, the first at +34. | — |
+| `fix_ctl` | None. | 6 each. | 2,016 deliveries; 10 suppressed (the ticks pauses repeat). |
+| `fix_fresh` | Applied right after Enable. | 6 each; every dispatch native. | Clocks started at the first updates. |
+| `nat_hst` | Native Haste on P0, D1 and E. | P0 and D1 11 per family, E 15, 7 to 23 ticks apart; workers ended 10 ticks before the deadline. | — |
+| `fix_hst` | Haste on P0, D1 and E. | 6 each, 30 ticks apart; P0's regeneration, disease and repeated EFF 5 (below). | 1,557 second hasted updates suppressed. |
+| `nat_slw` | Native Slow on P0, D1 and E. | P0 and D1 2 per family, 90 ticks apart; E 3, 60 apart, the last 5 ticks after its deadline. | — |
+| `fix_slw` | Slow on P0, D1 and E. | 6 each, 30 ticks apart; the slowed creatures' first interval 14 or 16 instead of 15. | 776 stretched elapsed values, 105 boundaries found in skipped ticks. |
+
+In `fix_hst`, P0's poison hit at +29; its rebuild reseeded the other three families one tick
+before their pulse, as the rebuild of an unhasted creature in the next tick does, and their first
+unit came at +45.
+
+### Stops
+
+The engine froze P0 and D2 for 89 ticks and D1 and E for 90: those two are updated after Imoen,
+so the stop's first tick froze them already (natively too).
+
+| Case | Event | Units | Effect clocks |
+|---|---|---|---|
+| `nat_stp` | Native stop. | P0 3 or 4 per family, D1 3 and 4, D2 4, E 4; immune D3 6, caster P1 7. | Unchanged; every effect ended at +179. |
+| `fix_stp` | Stop. | 6 for every frozen creature, the interval across the stop 30 plus its frozen ticks (119 or 120); D3 6 and P1 7, as natively. | Deadlines and origins moved by each creature's own frozen ticks; ended at the moved deadline − 1. |
+| `fix_stp_spd` | Stop over hasted P0 and slowed D1. | P0 6 per family, frozen 89: its first update in the stop's first tick was still active. D1 poison 6, regeneration 4 (below). E 5, the first at +37. | As `fix_stp`. |
+| `fix_steps` | 30 of Imoen's updates into the stop, a regeneration onto frozen D2 and `CBRTRMR` on P0. | P0's regeneration 1, before the stop; its workers gone. D2's new regeneration 5, the first 41 active ticks after the stop. D2's disease and repeated EFF 7: the application rebuilt D2's list, and the native reseed added a unit. | The new regeneration's deadline moved by the 59 frozen ticks after its application only. |
+
+**D1's regeneration in `fix_stp_spd`.** Slowed D1 skipped the tick before the stop, an active
+tick that held a 15-tick boundary of its regeneration. D1's next update was its first frozen one,
+and the correction delivered the skipped tick there; the native worker ignores every update while
+frozen, so the boundary was lost, and with it the pulse after the stop (+149). The last pulse was
+lost to the effect's end, as in the fourth run's `tgt_reg` (below): 4 units. The fix lets a frozen
+update deliver nothing and keeps the skipped active ticks due: they come with the first update
+after the stop, one active tick late for D1, two for a slowed creature frozen 89 ticks, whose
+first active tick after the stop is one it skips too. The same reading found a slowed creature
+updated before the caster in the stop's first tick missing the frozen tick it skipped next; it
+now counts every tick since its last update that the stop held. Both are covered by host tests
+at every grid position, and the fourth run confirmed both.
+
+### Group, pauses, time compression, save and load
+
+| Case | Event | Result |
+|---|---|---|
+| `nat_grp` | The Holy-Power-like group on P0 and D1; native stop 45 updates later. | Upkeep, child and delayed cleanup kept their times; 7 upkeep applications on each, the cleanup removing the group 12 s after its application. |
+| `fix_grp` | The same, corrected. | All three parts moved together, by 89 (P0) and 90 (D1): 13 upkeep applications on each before the cleanup. |
+| `fix_pause` | Haste on D1; nine pauses of 1.4 s. | 6 each; E 5, the first at +30. 420 repeated or second hasted updates suppressed. |
+| `fix_cmp` | The families for 4 s, then `DayNight` to the next full hour: 4,824 ticks. | Every creature got one dispatch with the whole span, as natively; the running effects ended in it without another unit. New effects afterwards: 6 each, D1's regeneration 5; the correction continued on the native list counters (39 compressions). |
+| `fix_save` | A corrected stop over P0's four families and D1's two; quick save at once after the caster's op231 ran out. | The first click wrote `000000001-Quick-Save`. P0's effects saved with deadline and origin moved by 89, D1's by 90. |
+| `fix_load` | Reload; the gates stayed on. | `sessions` 1: the destroyed-session listener had cleared the correction's state. The effects came back with the moved deadlines and ended at deadline − 1. Before the save they gave 3 or 4 units, after it 2 or 1: 5 instead of 6, since the load restarted the creatures' list counters and reseeded the workers on a new grid (step 5). Object IDs changed, and kept creatures' resrefs begin with `*`. |
+| `fix_hst_load` | Haste on P0, D1 and E in the loaded game. | 6 each; E 5 and P0 5 per family, the first at +30 or +46. |
+
+### Fourth run: stops aimed at a slowed creature
+
+The fourth run (commit `bbbcc46`) aimed three stops at the case the third run met by chance. In
+`tgt_reg`, `tgt_reg2` and `tgt_psn`, P0 was hasted, D1 and D2 slowed, and D3 immune. While
+paused before the applications, the drive read D1's counter offset from the correction
+(`CBRTC.ActorState`). After Slow at the paused world X, a slowed creature updates at X + 1,
+X + 3, …, and Imoen's stop begins at X + wait (runs 2 and 3). The drive therefore chose an odd
+wait that put a boundary of D1's regeneration (twice) or poison on the tick D1 skips right before
+the stop. The third run's `fix_stp_spd` fits the same rule: its wait of 45 was the aimed one by
+chance, and the second run's needed 49.
+
+| Case | Wait, stop | D1, updated after the caster | D2, updated before the caster |
+|---|---|---|---|
+| `tgt_reg` | 45, began at 33163 as aimed | Skipped 33162, a regeneration boundary, and was frozen at its update in 33163. The pulse after the stop came on time at +149, where the third run lost it. Regeneration 5, poison 6: the last pulse fell on the effect's last tick, which D1 skipped (below). | Updated in 33163 before the stop began; 2 ticks at its first frozen pass, 89 in all (deadlines +89). Disease and repeated EFF 6. |
+| `tgt_reg2` | 55, at 34501 | The same with another grid: regeneration and poison 6, the pulse after the stop on time. | The same; 6 each. |
+| `tgt_psn` | 41, at 33832 | The poison unit due on the skipped tick came with D1's first update after the stop, one active tick late. Regeneration and poison 6. | The same; 6 each. |
+
+D1's last regeneration in `tgt_reg` is the slowed creature's remaining limit, not the stop: its
+pulse on the effect's last tick would have come with D1's next update, but D1's last poison unit
+had just forced a full effect pass, and that update removed the expired effect first: neither
+worker was dispatched in it.
+
+The repeated cases matched the third run: `fix_stp_spd` 6 per family for P0 and D1 (D1's
+regeneration one pulse later across the stop, after a poison unit one tick before its pulse
+reseeded it, as natively) and E 5, its first unit at +31; `fix_stp` 6 for every frozen creature,
+deadlines moved by 89 or 90, D3 6 and Imoen 7; `fix_slw` 6 for the slowed P0, D1 and E, the
+first interval 14 or 16, with 782 stretched elapsed values and 105 boundaries found in skipped
+ticks. All six records decoded with no issue and no mismatch.
+
+### What this shows
+
+- **Every creature and all four families.** Party, dummies and the hostile mephit alike, poison,
+  disease and repeated EFF behave like regeneration: no unit inside a stop, deadlines and
+  origins moved by each creature's own frozen ticks, phases kept across the stop, Haste and Slow
+  on world time.
+- **Normal speed stays native.** Without Haste, Slow, pauses or stops the corrected creatures
+  matched the native ones, and `fix_fresh` was native dispatch by dispatch.
+- **Haste and Slow are normalized.** Hasted creatures fell from 11 to 15 units to 6, slowed ones
+  rose from 2 or 3 to 6, a slowed creature's units at most one tick late (two are possible right
+  after a stop, host tests). D1's regeneration lost its last unit twice to the slowed creature's
+  remaining limit (`fix_stp_spd` in the third run, `tgt_reg`).
+- **Each creature's own stop.** A creature updated after the caster loses the stop's first tick
+  too; one updated before keeps it, a hasted one updated on both sides keeps its first update, and
+  a slowed one updated before counts the skipped tick after it. The correction counted 89 or 90
+  for each, as the engine froze it.
+- **Groups stay together.** Upkeep, child and delayed cleanup of a maintained group moved by the
+  same frozen ticks, so the group kept its shape.
+- **Time compression and loads stay native.** A rest-like jump passes through untouched. A load
+  keeps the moved deadlines and origins; the correction restarts its own state.
+- **Removal and new effects in a stop.** Removal stays removal; an effect applied in a stop gets
+  no credit for the frozen time before it.
+
+Not covered by the lab: area effects (a cloud's lifetime through a stop, read from the code only),
+area transitions, saving during a stop, dispel, cure and death, and a stop ending between a hasted
+creature's two updates (host tests only).
+
 ## Host validation
 
 ```powershell
@@ -1028,6 +1258,31 @@ the activity recorder, the save list (with the rotated quick saves and the leade
 pins the first five fixtures' bytes and keeps the removal fixtures on lab resources. The
 mutation check now has 34 mutants, and `test_fix.py` fails for each. After step 5, all 16
 guard groups and all 145 Python tests passed.
+
+Step 6 on 2026-10-26 brings the total to 233 Python tests: `test_cor.py` 81 (new),
+`test_fix.py` 61, `test_lab_rc.py` 41, `test_decode_trace.py` 17, `test_qa_menu.py` 12,
+`test_observer.py` 11 and `test_fixtures.py` 10. `test_cor.py` runs `CBRTCor.lua` in LuaJIT on
+synthetic memory, with the native worker rules of `periodic_model.py`:
+
+- 18 call the gate targets directly: once per tick and creature, slowed gaps and the boundary
+  scan, the construction rules, parent identity, time compression and the state sweep.
+- 28 scenarios compare a corrected creature, unit by unit in active time, with a native one that
+  is never hasted, slowed, paused or stopped but has the same list counter grid and the same
+  applications. They cover every family at normal speed, Haste, Slow, stops (also beginning or
+  ending between a hasted creature's two updates, and over a slowed creature at every grid
+  position and update order), pauses, applications and removal in a stop, rest, an area left
+  alone, the caster and immune creatures, a maintained group and two creatures side by side.
+- 5 check the recorder, 4 the decoder, and 8 run `Install`, `Enable`, `Observe`,
+  `ExportRecord`, the session listener, `Disable` and `Status` against stub bindings.
+- 6 run the eight assembly gates in Unicorn: registers passed in order and restored, the
+  dispatch result, the off switch, the class filter, fail closed on a Lua error and EEex's stack
+  bookkeeping. 4 emulate the native workers from the pinned executable, and 8 check the eight
+  windows in it as for the prototype.
+
+`test_lab_rc.py` adds the `cor`, `apply` and `effects` requests, `test_fixtures.py` the new
+fixtures' bytes. A scratch mutation check replaced 50 single guards or rules in `CBRTCor.lua`,
+one at a time; `test_cor.py` failed for each. After step 6, all 16 guard groups and all 233
+Python tests passed.
 
 Fixture and decoder tests use synthetic data; assembly tests use synthetic memory
 and the pinned executable on disk. They do not execute the game or prove the
