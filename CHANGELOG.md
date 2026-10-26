@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Add Time Stop and Haste effect clocks (360), an EEex component for BG2:EE /
+  EET 2.7.3.0 (64-bit). In a Time Stop the frozen creatures' spell and item
+  durations, delayed effects, poison, disease, regeneration and repeated
+  effects wait and continue afterwards; the caster and Time-Stop-immune
+  creatures are unchanged. Haste and Slow no longer speed up or slow down
+  regeneration, poison, disease and repeated effects; actions, attacks and
+  movement stay hasted or slowed.
+  - It switches itself on at every game start, with no console, and stays on
+    across loads. Saved games contain nothing of it.
+  - Before its first change it checks EEex, the executable and its eight code
+    locations; on anything unexpected the game stays native and only
+    InfinityLoader's log says why, never the game. The installer refuses
+    every executable but the 2.7.3.0 build Steam and GOG ship.
+  - Install it before a playthrough; adding or removing it during one is not
+    supported. Saving, dispel, cure and death during a stop are not covered
+    yet.
+
 - The package scripts write the `.sha256` files with LF line endings on every
   system, so `sha256sum -c` accepts them. The published files of v0.8.1 to
   v0.8.5 end in CRLF and stay as they are; remove the carriage return before

@@ -1,0 +1,43 @@
+// Time Stop and Haste effect clocks (component 360): research/10-timestop-haste-engine-clocks.md.
+// Ships the correction core CBRTC.lua and its autoload M_CBRTC.lua; no resource, script or saved
+// game changes. On every start the correction checks EEex, the executable and its eight patch
+// windows itself and leaves the game native on anything unexpected, with the reason in the log
+// only. This read-only preflight refuses at install what can never pass that check: an
+// executable other than the 64-bit BG2:EE 2.7.3.0 build (Steam's Baldur.exe and GOG's
+// BaldurII.exe are byte-identical; EET runs the same file).
+DEFINE_ACTION_FUNCTION cbr_tsh_preflight_executable
+  STR_VAR executable_path = ~~
+BEGIN
+  OUTER_SPRINT executable_path EVALUATE_BUFFER ~%executable_path%~
+  OUTER_SET cbr_tsh_build = 0
+  COPY - ~%executable_path%~ ~cbr_tsh_exe_probe~
+    PATCH_IF (SOURCE_SIZE >= 0x40) BEGIN
+      READ_SHORT 0 cbr_tsh_dos_magic
+      READ_LONG 0x3c cbr_tsh_pe
+      PATCH_IF ((cbr_tsh_dos_magic = 0x5a4d) AND (cbr_tsh_pe >= 0x40)
+             AND (cbr_tsh_pe <= SOURCE_SIZE - 12)) BEGIN
+        READ_LONG cbr_tsh_pe cbr_tsh_pe_magic
+        READ_SHORT (cbr_tsh_pe + 4) cbr_tsh_machine
+        READ_LONG (cbr_tsh_pe + 8) cbr_tsh_timestamp
+        // The PE timestamp of BG2:EE 2.7.3.0 x64, the build CBRTC.lua pins.
+        PATCH_IF ((cbr_tsh_pe_magic = 0x4550) AND (cbr_tsh_machine = 0x8664)
+               AND (cbr_tsh_timestamp = 0x6a18d73d)) BEGIN
+          SET cbr_tsh_build = 1
+        END
+      END
+    END
+  ACTION_IF (NOT cbr_tsh_build) BEGIN
+    FAIL @9363
+  END
+END
+
+DEFINE_ACTION_FUNCTION cbr_install_time_stop_haste_clocks
+  STR_VAR
+    source_dir = ~chriz-bg-rebalance/lua~
+    resource_dir = ~override~
+BEGIN
+  OUTER_SPRINT source_dir EVALUATE_BUFFER ~%source_dir%~
+  OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
+  COPY ~%source_dir%/CBRTC.lua~ ~%resource_dir%/CBRTC.lua~
+       ~%source_dir%/M_CBRTC.lua~ ~%resource_dir%/M_CBRTC.lua~
+END
