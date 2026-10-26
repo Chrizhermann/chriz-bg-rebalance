@@ -222,8 +222,8 @@ regeneration handling (frozen time kept, world time under Haste and Slow), as th
 feasibility plan already intended. Area effects stop with the stop as well: no pulse and no
 lifetime lost. [IESDP op231](https://gibberlings3.github.io/iesdp/opcodes/bgee.htm#op231) says
 the engine already suppresses them during a stop but lets their duration run; the code says
-otherwise (next update). Installing or removing the component in a running playthrough is not
-supported, so component absence needs no lab test.
+otherwise (next update), and lab step 7 confirmed the code. Installing or removing the component
+in a running playthrough is not supported, so component absence needs no lab test.
 
 Update 2026-10-25, the other periodic families and area effects (offline, 2.7.3.0, names from
 EEex's `function_names.db`):
@@ -252,7 +252,7 @@ EEex's `function_names.db`):
   `CProjectileArea` counts its lifetime in triggers (`+0x3C6`) and its trigger delay
   (`+0x3CE`) inside its own update, after that gate. A cloud therefore keeps its whole
   remaining lifetime through a stop, which is what Christopher asked for and contradicts
-  IESDP; a lab capture is still open.
+  IESDP; lab step 7 confirmed it (update below).
 - **Saving.** `CProjectile::CanSaveGame` (`0x22BA00`) refuses while a projectile is in flight
   and `CGameTemporal::CanSaveGame` (`0x34BCA0`) while a temporal object is unfinished. The quick
   save that wrote nothing shortly after a stop fits a leftover object of the stop's spell; a
@@ -276,7 +276,8 @@ Design for the full scope (proposed 2026-10-25), replacing the one-subject proto
 - Bookkeeping moves to Lua behind thin assembly gates (per-actor tables, cleanup on destroyed
   objects and on load), so the logic is testable on the host; an error disables the correction
   and leaves the game native.
-- Clouds need nothing beyond the lab confirmation. Save/load behaves as in step 5.
+- Clouds need nothing beyond the lab confirmation, which step 7 gave. Save/load behaves as in
+  step 5.
 
 Update 2026-10-26, lab step 6: [`timestop-lab/CBRTCor.lua`](timestop-lab/README.md#correction-for-every-creature-cbrtcorlua)
 implements this design for every creature. Eight thin gates call Lua: the frozen marker, the
@@ -310,11 +311,24 @@ correction delivered that tick in the frozen update and the native workers ignor
 updates; and a slowed creature updated before the caster missed the frozen tick it skipped next.
 The fourth run timed three stops onto the slowed case and confirmed both slowed fixes. The engine
 also showed that a stop's first tick freezes only the creatures updated after the caster (90
-frozen ticks against 89). Still open: a lab capture of a cloud through a stop, and a stop ending
-between a hasted creature's two updates (host-tested only). Christopher, 2026-10-26: saving
+frozen ticks against 89). Still open: a lab capture of a cloud through a stop (step 7 below), and a
+stop ending between a hasted creature's two updates (host-tested only). Christopher, 2026-10-26: saving
 during a stop, dispel, cure and death come later; area transition needs no test; the slowed
 creature's lost last unit is not urgent and goes on the agenda. Details are in the
 [lab README](timestop-lab/README.md#lab-run-of-2026-10-26-step-6).
+
+Update 2026-10-26, lab step 7: a real Incendiary Cloud (`SPWI810`) ran through a stop, followed
+by [`timestop-lab/CBRTCld.lua`](timestop-lab/README.md#cloud-observer-cbrtcldlua) at every update
+of five sampled creatures. In four cases (P0's cloud corrected and as a native control, Imoen's
+own cloud through her own stop, and a cloud without a stop) the cloud made 685 updates from its
+arrival to its tenth explosion, 76 between explosions, stop or not. Inside each 90-tick stop its
+countdown and explosions left stood still and no sampled creature's hit points changed, the
+caster's inside the cloud included; the cloud skipped the stop's ticks (89 when its update in
+the stop's first tick came before the caster's, the rule creatures follow) and lost no lifetime.
+A hit already on its way when the stop began arrived after it. The code reading above holds and
+IESDP's running area duration does not: Christopher's rule for area effects holds natively, and
+the correction needs nothing for clouds. Details are in the
+[lab README](timestop-lab/README.md#lab-run-of-2026-10-26-step-7).
 
 ## Evidence identity and method
 
@@ -544,7 +558,7 @@ effect-instance matching, stacked identical effects and component removal need a
 | Maintenance graphs | `tempus_holy_power.tpa:1253–1279` couples op272 upkeep with same-deadline delayed op321 cleanup; `:2270–2279` uses31-tick op44/97 children for Slow coverage. A second op272 APR bridge is at `:3173–3179`, with one-second child at `:2944–2949`. Freezing only the positive parent can leave children expired or let cleanup remove them. Haste normalization must not blanket-select op272. Lab 2026-10-26 (step 6): a group of that shape (op272 upkeep every second, op44 child, op321 cleanup delayed 12 s) moved as one through a stop, every part by the creature's own frozen ticks. |
 | Caster / immune actors | Native workers continue for both. Decide whether buff duration and periodic effects should also continue for each category, including gaining/losing immunity during a stop. Lab 2026-10-25: the engine freezes neither a caster nor an op310-immune subject; with the correction selected, both kept world time, buff expiry included. Lab 2026-10-26 (step 6): the same with every creature corrected. Gaining or losing immunity during a stop is untested. |
 | Slow / disease | Slow decided 2026-10-25 (Christopher): periodic effects run in world time under Slow too; movement and attacks stay slowed. Lab 2026-10-25: corrected, 6 heals instead of 3, at most one tick late, since a slowed actor updates every second tick. Lab 2026-10-26 (step 6): all four families on slowed creatures, 6 units instead of 2 or 3; a pulse on the tick a slowed creature skips right before a stop comes up to two active ticks late. With several families an effect's last pulse on its last, skipped tick can be lost; Christopher, 2026-10-26: not urgent, on the agenda. Disease as a periodic family is corrected like regeneration; as a timing modifier it is untested. |
-| Area spells | Projectiles, area hazards and their lifetimes have separate code. Decide whether creation, lifetime, pulses and hitting frozen targets should each pause. Actor-local success makes no claim about them. IESDP op231: area-effect projectiles are suppressed until the stop ends while their duration runs; projectiles in flight wait. Decided 2026-10-25 (Christopher): area effects stop with the stop, with no pulse and no lifetime lost. The 2.7.3.0 code already freezes every projectile class, `CProjectileArea`'s trigger count and delay included, so IESDP's running duration does not match it; a lab capture is still open (step 6 had none). |
+| Area spells | Projectiles, area hazards and their lifetimes have separate code. Decide whether creation, lifetime, pulses and hitting frozen targets should each pause. Actor-local success makes no claim about them. IESDP op231: area-effect projectiles are suppressed until the stop ends while their duration runs; projectiles in flight wait. Decided 2026-10-25 (Christopher): area effects stop with the stop, with no pulse and no lifetime lost. The 2.7.3.0 code already freezes every projectile class, `CProjectileArea`'s trigger count and delay included, so IESDP's running duration does not match it. Lab step 7 (2026-10-26) confirmed it: a real Incendiary Cloud kept its 10 explosions and 685 updates through a 90-tick stop, changed nothing and hit no one inside it, whoever cast it, and a hit already on its way waited out the stop. Nothing to correct. |
 | Save/load / time compression | Absolute deadlines, parent phase origin, rebuilt workers and side metadata must agree. Do not save raw pointers. `CompressTime` separately calls `HandlePersistantEffects` at `0x350212`, forwarding a larger elapsed argument. Rest/travel/load cannot be treated as ordinary callbacks. Exact serialization coverage and current-save compatibility remain unproved. Lab 2026-10-25: a quick save after a corrected stop kept the shifted deadlines and the regeneration's origin through the reload; the correction's phase state is not saved, and after the load the grid restarted with the subject's list counter. A quick save shortly after a stop wrote nothing once (cause not isolated); saving during a stop is untested (later, Christopher 2026-10-26). Lab 2026-10-26 (step 6): `DayNight` to the next full hour (4,824 ticks) passed natively, one dispatch with the whole span per creature; a quick save right after a corrected stop kept every creature's moved deadlines and origins, and the reload cleared the correction's state through EEex's destroyed-session listener (5 units instead of 6 across the load, as the list counters restart). |
 | Consecutive stops | Count each actual frozen tick once, even with back-to-back stops or caster replacement; effects applied midway receive only subsequent compensation. State read at a callback alone can miss a start/end between sparse passes. Observe transition ordering explicitly. Lab 2026-10-25: two stops 16 ticks apart counted each frozen tick once (178); an effect applied mid-stop was compensated only for the frozen ticks after it. Caster replacement is untested. |
 | Removal / refresh | Dispel, cure, explicit source removal, charge depletion, death and refresh remain native operations. Clock suspension must not become removal immunity. Clear/rebind metadata on removal, copy and worker rebuilding; address reuse is not identity. Action322 must still remove effects according to their corrected remaining lifetime. Lab 2026-10-25: op321 removal stayed removal, during a stop and without one, and a refresh during a stop started a full new duration after the stop. Lab 2026-10-26 (step 6): the same with every creature corrected, and a regeneration applied to a frozen creature got no credit for the frozen ticks before it. Dispel, cure, charge depletion, death and Action322 are untested (dispel, cure and death later, Christopher 2026-10-26). |
@@ -583,7 +597,7 @@ Status 2026-10-26: lab step 6 covered the rest of step 5 except saving during a 
 transition and process restart: time compression, poison and the other families, the maintenance
 fixture, and party and enemy creatures alike, with every creature corrected (see the update
 above). Christopher, 2026-10-26: saving during a stop comes later, and area transition needs no
-test.
+test. Lab step 7 then confirmed that a cloud freezes completely in a stop and keeps its lifetime.
 
 Use a disposable BG2:EE **2.7.3.0 / EEex 1.3.1** copy and establish unmodified controls.
 Match its executable to the current fingerprint above, then validate candidate patch
