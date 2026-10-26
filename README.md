@@ -74,6 +74,7 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 330 / 331 | Cross-cutting audits | Potion uniqueness: one dose of each temporary potion type at a time (331: Potions of Genius still stack) | Automated checks and lab install passed; in-game check pending |
 | 332 | Cross-cutting audits | Heroism family: Heroism, Greater Heroism and the Potion of Heroism do not combine | Automated checks and lab install passed; in-game check pending |
 | 340 | Cross-cutting audits | Chris Revisions: Aid hit points only, Luck 90 seconds, Bless 30 seconds + 1 round per level, Bless and Chaotic Commands for druids, Prayer and Recitation not cumulative | Automated checks passed; in-game check pending |
+| 360 | Cross-cutting audits | EEex Time Stop and Haste effect clocks: frozen creatures' effects wait out a Time Stop; Haste and Slow leave periodic effects at the normal rate | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 and in the full CEBG stack with Spell Revisions; gameplay acceptance pending |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
@@ -182,6 +183,68 @@ Bless at their next level-up; this is not yet checked in the game.
 [Aid, Luck and Chaotic Commands](research/2026-10-23-aid-luck-chaotic-commands.md),
 [Prayer and Recitation](research/2026-10-23-prayer-recitation.md),
 [Bless](research/2026-10-23-bless.md).
+
+### Component 360 — Time Stop and Haste effect clocks
+
+Christopher's rule: in a Time Stop everything but the caster and Time-Stop-immune creatures
+stops; Haste and Slow change only actions and movement.
+
+The engine freezes creatures in a Time Stop but lets their effects run on: a frozen creature's
+spells and potions can run out, and its poison or regeneration counts down, while it cannot act.
+Engine Haste also speeds up a creature's regeneration, poison, disease and repeated effects,
+and Slow slows them down, because they advance with the creature's own updates. With 360:
+
+- **Time Stop.** The frozen creatures' effects wait: spell and item durations, delayed effects,
+  poison, disease, regeneration and repeated effects continue after the stop with the time they
+  had left. The caster and Time-Stop-immune creatures keep their normal clocks.
+- **Haste and Slow.** Regeneration, poison, disease and repeated effects pulse at the normal rate
+  on hasted and slowed creatures. Actions, attacks and movement stay hasted or slowed.
+- **Normal speed** stays as it is. Clouds and other area effects already wait out a stop natively
+  and are left alone.
+
+Spell Revisions' Haste and Improved Haste do not use the engine's Haste, so their creatures'
+periodic effects never ran faster and stay as they are; engine Haste from items, potions such as
+Oil of Speed and other mods is corrected. Time Stop is corrected with or without Spell Revisions.
+
+**Requirements.** BG2:EE or EET on game version **2.7.3.0, 64-bit**, and **EEex** (verified with
+1.3.1 and its LuaJIT option), installed before this component; start the game through
+InfinityLoader. Steam's `Baldur.exe` and GOG's `BaldurII.exe` of 2.7.3.0 are the same file; the
+installer reads the executable's header and refuses any other build, such as 2.6.6.0. Beamdog's
+2.7.3.0 build could not be compared: it installs only if it is that same file. Install 360 before
+starting a playthrough; adding or removing it during one is not supported.
+
+**When it does not run.** At every game start, before changing anything, the correction checks
+EEex, the executable (its build, the four effect worker classes and all eight code locations it
+changes) and how EEex sees the effect lists. If anything differs, the game runs natively. Either
+way one line in InfinityLoader's console (and in `InfinityLoader.log` where logging is on) says
+what happened:
+
+```text
+[CBR Time Stop/Haste] on (BG2:EE/EET 2.7.3.0): effects of creatures frozen by Time Stop wait; Haste and Slow leave periodic effects at the normal rate
+[CBR Time Stop/Haste] off, the game stays native: <reason>
+```
+
+There is never a message in the game. Should the correction hit an error while playing, it
+switches itself off until the game restarts, the game continues natively, and the log says why.
+Saved games contain nothing of it: after a load each creature's clocks start fresh, and effects
+that were already running end on time.
+
+**Known limits.** Saving during a Time Stop, and dispel, cure or death during one, are not
+covered yet. Equipping or unequipping items during a stop was not tested in the lab. A slowed
+creature's pulses can come a tick or two late around a stop, and after a load an effect that was
+already running can move its remaining pulses by one.
+The [lab notes](research/timestop-lab/README.md) list the details.
+
+Verified: 31 automated checks (`tests/test_time_stop_haste_clocks.py` runs the correction in
+LuaJIT: start without a console, loads, every refusal and an error while playing;
+`tests/test_time_stop_haste_clocks_installer.py` runs WeiDU on synthetic games). In a plain
+BG2:EE 2.7.3.0 + EEex 1.3.1 lab, installed with WeiDU, it switched itself on at the main menu
+and corrected a Time Stop, Haste, a save and reload and the stop and Haste after it. In the full
+CEBG stack (EET, Recommended preset, Spell Revisions) it switched itself on at start, stayed on
+through loading a save from the main menu and corrected Spell Revisions' Time Stop and Oil of
+Speed. Design and evidence:
+[research note 10](research/10-timestop-haste-engine-clocks.md) and the
+[Time Stop lab](research/timestop-lab/README.md).
 
 ### Component 320 — Damageable combat clouds
 

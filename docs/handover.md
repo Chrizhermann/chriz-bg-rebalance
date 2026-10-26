@@ -1,5 +1,38 @@
 # chriz-bg-rebalance — Handover
 
+## October 26 — Time Stop and Haste effect clocks (360, unreleased)
+
+Component 360 turns the lab's correction for every creature (research/timestop-lab, steps 6 and
+7) into an installable component, at Christopher's request through the collection coordinator.
+It installs `CBRTC.lua` and its autoload `M_CBRTC.lua` and nothing else (no recorder, fixtures or
+console requests). The correction switches itself on at every game start and stays on across
+loads; on an unexpected executable or EEex it leaves the game native and says why in one log
+line, never in the game. Target: BG2:EE/EET 2.7.3.0 64-bit with EEex 1.3.1. Steam's and GOG's
+2.7.3.0 executables are byte-identical; GOG's default branch is still 2.6.6.0, and Beamdog's
+build could not be compared, so the installer accepts only that one PE timestamp. One component
+for both behaviours, as the brief proposed. Number 360 because 350 was briefly used by an
+unreleased Chris Revisions build.
+
+The branch also carries the lab's research commits (steps 1 to 7) onto main. Their first
+commit imports only the Time Stop/Haste paths of the WIP snapshot 8fe619f, not the rest of it.
+
+Verified: `tests/test_time_stop_haste_clocks.py` (21, LuaJIT) and
+`tests/test_time_stop_haste_clocks_installer.py` (10, WeiDU); the lab's 261 Python tests and 22
+guard groups. Labs (README entry and the lab notes): the Time Stop lab with 360 installed by
+WeiDU (start without a console, stop, Haste, save and reload, stop and Haste after it) and the
+full CEBG stack with Spell Revisions (start, a load from the main menu, Spell Revisions' Time
+Stop, Oil of Speed).
+
+Open:
+- Gameplay acceptance by Christopher.
+- Not covered yet (his decision of 2026-10-26): saving during a stop; dispel, cure and death in
+  a stop. Not lab-tested: equipping or unequipping during a stop.
+- Only tested with EEex's LuaJIT option; the core itself needs no LuaJIT.
+- The CEBG pin: the collection coordinator adds 360 to the recipe.
+- Observed in the CEBG lab, not caused by 360 (reproduced without it): Modpack's scroll trial
+  (430) stops a quiet run with an EEex error box at a scripted cast, and Modpack's campaign XP
+  (650) logs errors at each load.
+
 ## October 25 — v0.8.5: Chris Revisions (340)
 
 Christopher asked for this release on 2026-10-25. It contains PR #13 (component

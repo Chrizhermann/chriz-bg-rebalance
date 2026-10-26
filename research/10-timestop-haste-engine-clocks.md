@@ -7,6 +7,13 @@ installation, publication, or upstream contact occurred. Unrelated work was pres
 Upstream work credited here: EEex/InfinityLoader by Bubb; Sword Coast Stratagems by
 DavidW; Spell Revisions by Demivrgvs and the G3 contributors.
 
+**Status 2026-10-26:** this research led to the [Time Stop lab](timestop-lab/README.md) (steps
+1 to 7) and to Rebalance component 360, Time Stop and Haste effect clocks, which ships the
+lab's correction for every creature as `chriz-bg-rebalance/lua/CBRTC.lua`, switched on at
+every game start by `M_CBRTC.lua` (see the
+[README](../README.md#component-360--time-stop-and-haste-effect-clocks)). The sections below
+keep the September analysis as written.
+
 ## Recommendation
 
 **Proceed, when separately authorized, with one engine-hook prototype on the newest
@@ -598,6 +605,14 @@ transition and process restart: time compression, poison and the other families,
 fixture, and party and enemy creatures alike, with every creature corrected (see the update
 above). Christopher, 2026-10-26: saving during a stop comes later, and area transition needs no
 test. Lab step 7 then confirmed that a cloud freezes completely in a stop and keeps its lifetime.
+
+Status 2026-10-26, component 360: the correction of step 6 became Rebalance's core
+`CBRTC.lua`, installed by WeiDU with only its autoload. In the lab game it switched itself on
+at the main menu without a console and corrected a stop, Haste, a save and reload and the stop
+and Haste after it. In the full CEBG stack (EET, Recommended preset) it did the same for Spell
+Revisions' Time Stop and Oil of Speed after loading a save right after the game started, which
+covers a clean process restart before a load. Saving during a stop, dispel, cure and death in
+a stop, and equipping or unequipping during one remain open.
 
 Use a disposable BG2:EE **2.7.3.0 / EEex 1.3.1** copy and establish unmodified controls.
 Match its executable to the current fingerprint above, then validate candidate patch

@@ -20,8 +20,10 @@ save/load ([below](#lab-run-of-2026-10-25-step-5)). On 2026-10-26, step 6 tested
 `CBRTCor.lua`, the correction for every creature, every timed effect and all four periodic
 families, with Haste, Slow, stops, pauses, a maintained group, time compression and save/load
 ([below](#lab-run-of-2026-10-26-step-6)). Step 7 then let a real cloud run through a stop: it
-froze completely and kept its lifetime ([below](#lab-run-of-2026-10-26-step-7)). Saving during
-a stop, dispel, cure and death in a stop come later; area transitions need no test.
+froze completely and kept its lifetime ([below](#lab-run-of-2026-10-26-step-7)). The correction
+then became Rebalance component 360, with `CBRTCor.lua` as the lab layer on top of it
+([below](#component-360-the-shipped-core-2026-10-26)). Saving during a stop, dispel, cure and
+death in a stop come later; area transitions need no test.
 
 The diagnosis, instruction evidence and open design questions are in
 [`../10-timestop-haste-engine-clocks.md`](../10-timestop-haste-engine-clocks.md).
@@ -1033,7 +1035,9 @@ disease (op78) and repeated EFF (op272). It follows Christopher's rule: in a Tim
 everything but the caster and Time-Stop-immune creatures stops, periodic effects included;
 Haste and Slow change actions and movement only, and periodic effects keep world time; at
 normal speed the native pattern stays. `CBRTFix.lua` stays as the record of steps 4 and 5;
-`Install()` refuses a process in which it is installed.
+`Install()` refuses a process in which it is installed. Since component 360 the correction
+itself is the shipped core `CBRTC.lua`, and `CBRTCor.lua` adds the lab's controls and recorder
+([below](#component-360-the-shipped-core-2026-10-26)).
 
 The bookkeeping is Lua. Eight thin assembly gates call it through `EEex_GenLuaCall`; their
 windows were decoded from the pinned executable like the prototype's (whole instructions, no
@@ -1362,6 +1366,71 @@ Run notes:
 - After `cld_free` Imoen, down to 1 HP (`CBRTVIT` keeps everyone at 1 HP or more), started her
   low-health interjection. Its dialogue kept the game paused, so the heal step after the case
   could not run it. The four records were complete; the driver ended the dialogue and quit.
+
+## Component 360: the shipped core (2026-10-26)
+
+Rebalance component 360, Time Stop and Haste effect clocks, ships the correction of step 6 for
+normal games. `chriz-bg-rebalance/lua/CBRTC.lua` holds the bookkeeping, the eight gates,
+`Start()`, `Disable()` and `Status()`. Its autoload `M_CBRTC.lua` calls `Start()` from EEex's
+game-state-initialized listener, before the main menu, with no console. `Start()` checks EEex's
+functions, the image base and timestamp, the four worker vtables, all eight windows and EEex's
+offsets of the effect lists before the first change, then switches the gates on for every
+creature. It never raises: anything unexpected leaves the game native, and one line in the log
+says why, never the game. A Lua error in a gate turns every gate off until the process ends.
+A load keeps the correction on; EEex's destroyed-session listener clears only the per-creature
+state.
+
+`CBRTCor.lua` is now the lab layer on top of the core. It loads `CBRTC.lua` where the component
+did not, and adds the console install at the fresh main menu, `Enable` and `Observe` while
+paused, and the recorder through `CBRTC.SetTrace`. Where the component already started the core,
+`cor op=install` reports `already_installed` and `started`, and the recorder and both modes work
+on the running core. Staging copies `CBRTC.lua` beside `CBRTCor.lua`, never `M_CBRTC.lua`: the
+lab installs by console request unless the component itself is installed.
+
+### This lab with the component installed
+
+WeiDU 25100 installed component 360 from the component branch into this lab (plain 2.7.3.0 with
+EEex 1.3.1), the normal way. One quiet run in a parallel lab slot followed: 629 s, no guard
+tripped, the slot released when the game exited. At the fresh main menu, before any request, the
+correction was on: started by the autoload, installed and enabled, no session ended, no creature
+known yet; `cor op=install` only reported the running core. Setup and cases were step 6's (P0,
+Imoen, the bats D1 to D3, the mephit E), with the recorder following them:
+
+| Case | What ran | Result |
+|---|---|---|
+| `stop` | every family running, Imoen's stop (`CBRTSTP`) 45 of her updates later, D3 Time-Stop-immune | P0, D1, D2 and E frozen 89 or 90 ticks; each family 6 units, deadlines moved by exactly the frozen ticks; Imoen and D3 unchanged |
+| `haste` | P0, D1 and E hasted, every family running | two passes per tick on the hasted, the second suppressed; 6 units per family at the spacing of the unhasted creatures; deadlines unchanged |
+| `save` | a stop over running families, then a quick save and its load | the load ended one session; the correction stayed on |
+| `load` | the rest of the saved effects | ended on their saved deadlines, which included the stop; native constructions only |
+| `haste_load`, `stop_load` | `haste` and `stop` again on the loaded game | as before the load |
+
+`decode_cor.py` decoded all six records with no issue and no mismatch. Afterwards WeiDU
+uninstalled 360. Its `// Recently Uninstalled` note changed `WeiDU.log`, which the lab's
+manifest pins, so the copy from before the install was put back; `-Phase Validate` passed.
+
+### Full CEBG stack with Spell Revisions
+
+A disposable copy of the CEBG lab for EEex 1.3.1 (EET 2.7.3.0, the Recommended preset with
+extras, Spell Revisions, Rebalance v0.8.3) got component 360 from the component branch on top;
+the lab layer, the QA menu, the fixtures and the Remote Console were staged by hand. The copy's
+`InfinityLoader.ini` names a log file. One change concerns another mod: Modpack's scroll trial
+(430) stops a quiet run with an EEex error box at the first scripted cast, also without 360 (a
+control run showed it), so its runtime line in `EEex_Modules.lua` was commented out in this copy.
+Modpack's campaign XP (650) writes errors to the log at each load, also without 360.
+
+At start the log had one line, `on (BG2:EE/EET 2.7.3.0)`, and no error of the correction. A save
+of the stack was loaded from the main menu right after the start; the correction stayed on. The
+save's party member did not pulse any periodic effect at all, also natively (an `observe`
+control), so the cases used three bats D1 to D3 created next to it, with a fourth bat as caster:
+
+| Case | What ran | Result |
+|---|---|---|
+| `stop2` | Spell Revisions' Time Stop (`SPWI909`, opcode 231) cast by the fourth bat; D1 regeneration and poison, D2 disease and repeated EFF, D3 Time-Stop-immune with regeneration | D1, D2 and the party member frozen 263 ticks; each family 6 units, deadlines moved by 263; D3 and the caster unchanged |
+| `haste2` | Oil of Speed (`POTN14`, engine Haste) drunk by D1 and D2, with the families of `stop2`; D3 unhasted with regeneration and poison | two passes per tick on D1 and D2, the second suppressed; 6 units per family at D3's spacing; deadlines unchanged |
+
+`decode_cor.py` decoded both records with no issue and no mismatch. In this stack Spell
+Revisions' Haste and Improved Haste carry no engine Haste (opcode 16), so engine Haste came from
+the potion.
 
 ## Host validation
 
