@@ -664,6 +664,7 @@ class Creature:
             self.cor.Reset()
             self.image.mem.put(GLOBAL, "Q", CHITIN)
         self.world, self.list_counter, self.ident, self.ai = world, counter, ident, 0
+        self.called = None  # the world value of its latest update
         self.duration, self.period, self.families = duration, period, families
         self.speed, self.slow_parity = "normal", 0
         self.stop_from = self.stop_until = None
@@ -759,6 +760,7 @@ class Creature:
         self.sync()
         if elapsed == 1:
             self.ai += 1
+            self.called = self.world
             frozen = self.frozen()
             if self.stop_until is not None and self.world >= self.stop_until:
                 self.stop_from = self.stop_until = None  # the stop's end forces a rebuild
@@ -828,11 +830,17 @@ class Creature:
         self.touch()
 
     def stop(self, length, *, now=False):
-        """Time Stop by another creature, from the next tick or, with now, this tick's later calls."""
+        """Time Stop by another creature, from the next tick or, with now, this tick's later calls.
+        A tick in which the creature was already updated before the stop began stays its own."""
         self.stop_from = self.world if now else self.world + 1
         self.stop_until = self.stop_from + length
         if not self.immune:
-            self.stopped_ticks.update(range(self.stop_from, self.stop_until))
+            first = self.stop_from + 1 if now and self.called == self.world else self.stop_from
+            self.stopped_ticks.update(range(first, self.stop_until))
+
+    def end_stop_now(self):
+        """The stop ends before this tick's later calls (between a hasted creature's two)."""
+        self.stop_until = self.world
 
     def pause(self, during=None):
         """A pause after this tick's calls steps world time back one tick. After unpausing a
@@ -935,6 +943,18 @@ class ScenarioTests(unittest.TestCase):
                 corrected.finish()
                 native.finish()
                 self.assertSame(corrected, native)
+
+    def test_a_paused_application_to_a_creature_not_updated_since_enable_stays_native(self):
+        """Enable and a load forget every creature. An effect applied while paused to one the
+        correction has not seen updated since counts natively: its clock starts at its next update."""
+        corrected = self.creature(families=ALL).ticks(5)
+        native = self.native(families=ALL).ticks(5)
+        corrected.cor.Reset()
+        for creature in (corrected, native):
+            creature.pause(during=lambda creature=creature: creature.apply(outside=True))
+            creature.finish()
+        self.assertEqual(corrected.record(), native.record())
+        self.assertEqual(corrected.cor.stats["stretched"], 0)
 
     def test_haste_runs_every_family_in_world_time(self):
         for start in ("with the effect", "before it"):
@@ -1053,6 +1073,58 @@ class ScenarioTests(unittest.TestCase):
                     corrected.finish()
                     native.finish()
                     self.assertSame(corrected, native)
+
+    def hasted_stop(self, before, *, start_between=False, end_between=False, counter=1675):
+        """A hasted creature with every family, frozen by a stop of 89 ticks `before` ticks after
+        the application; the stop may begin or end between the creature's two updates of a tick."""
+        corrected = self.creature(families=ALL, counter=counter).ticks(5)
+        native = self.native(families=ALL, counter=counter).ticks(5)
+        corrected.set_speed("haste")
+        native.touch()
+        corrected.ticks(2)
+        native.ticks(2)
+        corrected.apply()
+        native.apply()
+        corrected.ticks(before)
+        native.ticks(before)
+        if start_between:
+            corrected.world += 1
+            corrected.pel()  # its first update of the tick runs before the stop begins
+            corrected.stop(89, now=True)
+            corrected.pel()
+            native.tick()
+            corrected.ticks(88)
+        else:
+            corrected.stop(89)
+            corrected.ticks(88)
+        if end_between:
+            corrected.world += 1
+            corrected.pel()  # still frozen
+            corrected.end_stop_now()
+            corrected.pel()
+        corrected.finish()
+        native.finish()
+        return corrected, native
+
+    def test_a_stop_beginning_between_a_hasted_creatures_updates(self):
+        """Its first update of that tick ran before the stop began, so the tick stays its own:
+        the stop freezes it from its second update, and its end keeps every worker's phase."""
+        for counter in range(1675, 1690):
+            for before in (37, 44):
+                with self.subTest(counter=counter, before=before):
+                    corrected, native = self.hasted_stop(before, start_between=True, counter=counter)
+                    self.assertSame(corrected, native)
+                    self.assertEqual(corrected.cor.ActorState(ACTOR)["frozen"], 88)
+
+    def test_a_stop_ending_between_a_hasted_creatures_updates(self):
+        """The rebuild the stop's end forces comes in the tick's second update, after the first
+        one was frozen: it keeps every worker's phase and counts down from the next tick."""
+        for counter in range(1675, 1690):
+            for before in (37, 44):
+                with self.subTest(counter=counter, before=before):
+                    corrected, native = self.hasted_stop(before, end_between=True, counter=counter)
+                    self.assertSame(corrected, native)
+                    self.assertEqual(corrected.cor.ActorState(ACTOR)["frozen"], 89)
 
     def test_time_stop_on_a_slowed_creature(self):
         """Another frozen creature at normal speed shows a slowed one whether the stop began or
@@ -1301,6 +1373,7 @@ class DecoderTests(unittest.TestCase):
         for name, scenario in self.scenarios().items():
             with self.subTest(scenario=name):
                 creature = Creature(self, families=ALL).ticks(5)
+                creature.cor.Reset()  # as Observe() does
                 creature.cor.observe = True
                 self.recorded(creature)
                 scenario(creature)
@@ -1309,6 +1382,7 @@ class DecoderTests(unittest.TestCase):
                 for family in ALL:
                     self.assertEqual(units[family][0], creature.unit_worlds[family], family)
                 self.assertEqual(result["creatures"][0]["dispatch"], {})
+                self.assertEqual({key: value for key, value in creature.cor.stats.items() if value}, {})
                 if name == "time stop":
                     self.assertGreater(result["creatures"][0]["frozen_passes"], 60)
                     self.assertEqual(result["creatures"][0]["frozen_ticks"], 0)
@@ -1673,6 +1747,20 @@ class LabStepTests(unittest.TestCase):
         ok, why = lua.eval("function() return pcall(CBRTC.ExportRecord, 'x') end")()
         self.assertFalse(ok)
         self.assertIn("Pause the lab", why)
+
+    def test_a_session_end_forgets_every_creature_and_keeps_the_gates_on(self):
+        lua = self.runtime(paused=0)
+        lua.execute("""
+            EEex_Write32(BASE, 1)
+            CBRTC.actors[12345] = {id = 1}
+            CBRTC.stopStart, CBRTC.stopLast = 5, 9
+            CBRTC.stats.delivered = 4
+            CBRTC.SessionEnded()
+        """)
+        status = lua.eval("CBRTC.Status()")
+        self.assertEqual((status["actors"], status["sessions"], status["enabled"], status["stats"]["delivered"]),
+                         (0, 1, True, 0))
+        self.assertIsNone(lua.eval("CBRTC.stopLast"))
 
     def test_disable_works_unpaused_and_status_reports_errors_and_stats(self):
         lua = self.runtime(paused=0)
