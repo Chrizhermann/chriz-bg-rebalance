@@ -99,6 +99,9 @@ class RequestSyntaxTests(unittest.TestCase):
                              "apply.lua": ("PAUSE_FIRST", "TIME_STOP_ACTIVE", "NOT_A_CREATURE", "ACTOR_BUSY",
                                            "TOO_MANY_STEPS", "INVALID_STEP", "NOT_A_LAB_FIXTURE",
                                            "INVALID_TARGET", "NO_STEPS"),
+                             "cloud.lua": ("CLOUD_NOT_LOADED", "UNKNOWN_OP", "PAUSE_FIRST", "NOT_A_CREATURE",
+                                           "NOT_A_CLOUD_SPELL", "ARM_FIRST", "TIME_STOP_ACTIVE", "CASTER_BUSY",
+                                           "INVALID_POINT", "INVALID_WAIT", "BYSTANDER_IN_REACH"),
                              "quit.lua": ("STOP_FIRST",)}.items():
             text = (REQUESTS / name).read_text(encoding="utf-8")
             for guard in guards:
@@ -706,6 +709,122 @@ class ApplyRequestTests(unittest.TestCase):
         for steps in ("0:CBRTREG", "x:CBRTREG:self", "0:cbrtreg:self", "0:CBRTREGXX:self"):
             with self.subTest(steps=steps):
                 self.assertFalse(self.apply("77", steps)[0])
+
+
+@unittest.skipIf(lupa is None, "lupa with LuaJIT 2.1 is not installed")
+class CloudRequestTests(unittest.TestCase):
+    """cloud.lua against a stub CBRTCL and stub bindings: what it forwards or queues, and its refusals."""
+
+    GAME = 0x5000
+    # id: x, y, resref; 77 casts, 77 and 10 are sampled.
+    CREATURES = {77: (3741, 2801, "OH1FIGHT"), 10: (3720, 2826, "IMOEN10"), 30: (3898, 2676, "JAHEIR7")}
+
+    def cloud(self, arguments, paused=1, loaded=True, on=True, stop=0, action=0, creatures=None):
+        runtime = lupa.LuaRuntime(unpack_returned_tuples=True)
+        attempt = runtime.eval("""function(code, paused, loaded, on, stop, game, action, creatures)
+            local calls, queued, scans = {}, {}, {}
+            EngineGlobals = {g_pBaldurChitin = {m_pEngineWorld = {m_bPaused = paused, m_bHardPaused = 0},
+                m_pObjectGame = {_ptr = game, m_worldTime = {m_gameTime = 1000}}}}
+            if loaded then
+                CBRTCL = {on = on, caster = 77, watch = {77, 10}}
+                for _, op in ipairs({"Install", "Status", "Stop", "Arm", "Export"}) do
+                    CBRTCL[op] = function(...) calls[#calls + 1] = op; return {op = op, args = {...}} end
+                end
+            end
+            local known, all = {}, {}
+            for id, x, y, resref in python.iter(creatures) do
+                known[id] = {m_id = id, m_pArea = "area", m_pos = {x = x, y = y}, m_curAction = {m_actionID = action},
+                    m_resref = {get = function() return resref end}, isSprite = function() return true end}
+                all[#all + 1] = known[id]
+            end
+            EEex_GameObject_Get = function(id) return known[id] end
+            EEex_UDToPtr = function(value) return value._ptr end
+            EEex_Read32 = function(address)
+                assert(address == game + 0x9690, "unexpected read")
+                return stop
+            end
+            EEex_Area_GetAllOfTypeStringInRange = function(area, x, y, filter, range, los, nonSprites)
+                scans[#scans + 1] = table.concat({area, x, y, filter, range, los, nonSprites}, " ")
+                return all
+            end
+            EEex_Action_QueueResponseStringOnAIBase = function(response, target)
+                queued[#queued + 1] = target.m_id .. ": " .. response
+            end
+            local ok, result = pcall(assert(loadstring(code, "@cloud.lua")))
+            if not ok then return false, tostring(result), #calls + #queued end
+            if result.op then
+                local args = result.args
+                if result.op == "Arm" then args = {args[1], table.concat(args[2], " "), args[3]} end
+                return true, result.op, #calls, args[1], args[2], args[3]
+            end
+            local near = {}
+            for _, entry in ipairs(result.near) do
+                near[#near + 1] = table.concat({entry.id, entry.distance, tostring(entry.sampled),
+                                                tostring(entry.inside)}, ":")
+            end
+            return true, queued[1], #queued, table.concat(near, " "), scans[1], result.reach
+        end""")
+        code = lab_rc.with_arguments((REQUESTS / "cloud.lua").read_text(encoding="utf-8"), arguments)
+        table = [(ident, *values) for ident, values in (creatures or self.CREATURES).items()]
+        return attempt(code, paused, loaded, on, stop, self.GAME, action, table)
+
+    CAST = {"op": "cast", "spell": "SPWI810", "x": "3590", "y": "2845"}
+
+    def test_operations_forward_to_the_module(self):
+        for op, called in (("install", "Install"), ("status", "Status"), ("stop", "Stop")):
+            with self.subTest(op=op):
+                self.assertEqual(self.cloud({"op": op}, paused=0)[:3], (True, called, 1))
+        self.assertEqual(self.cloud({"op": "arm", "caster": "77", "ids": " 77 10 "}),
+                         (True, "Arm", 1, 77, "77 10", False))
+        self.assertEqual(self.cloud({"op": "arm", "caster": "77", "ids": "10", "discard": "1"}),
+                         (True, "Arm", 1, 77, "10", True))
+        self.assertEqual(self.cloud({"op": "export", "name": "k7_x"})[:4], (True, "Export", 1, "k7_x"))
+
+    def test_cast_queues_the_cloud_on_the_armed_caster(self):
+        # Jaheira (30) stands 382 away (vertical offset scaled by 4/3), outside 256 + 64.
+        self.assertEqual(self.cloud(self.CAST),
+                         (True, '77: ReallyForceSpellPointRES("SPWI810",[3590.2845])', 1,
+                          "10:132:true:true 77:162:true:true 30:382:false:false",
+                          "area 3590 2845 [ANYONE] 600 0 0", 256))
+        self.assertEqual(self.cloud(dict(self.CAST, wait="5"))[1],
+                         '77: SmallWait(5)\nReallyForceSpellPointRES("SPWI810",[3590.2845])')
+
+    def test_a_bystander_within_reach_refuses_the_cast(self):
+        base = {77: (3590, 2845, "OH1FIGHT"), 10: (3590 + 300, 2845, "IMOEN10")}  # sampled: never refused
+        for position, refused in (((3590 + 320, 2845), True), ((3590 + 321, 2845), False),
+                                  ((3590, 2845 + 240), True), ((3590, 2845 + 241), False)):
+            with self.subTest(position=position):
+                ok, result, count = self.cloud(self.CAST, creatures={**base, 40: (*position, "X")})[:3]
+                self.assertEqual((ok, count), (not refused, 0 if refused else 1))
+                if refused:
+                    self.assertIn("BYSTANDER_IN_REACH 40", result)
+
+    def test_refusals_queue_nothing(self):
+        cases = {"CLOUD_NOT_LOADED": ({"op": "status"}, {"loaded": False}),
+                 "UNKNOWN_OP": ({"op": "enable"}, {}),
+                 "ARGS.name required": ({"op": "export"}, {}),
+                 "NOT_A_CREATURE": ({"op": "arm", "caster": "78", "ids": "10"}, {}),
+                 "NOT_A_CLOUD_SPELL": (dict(self.CAST, spell="SPWI305"), {}),
+                 "ARM_FIRST": (self.CAST, {"on": False}),
+                 "TIME_STOP_ACTIVE": (self.CAST, {"stop": 90}),
+                 "CASTER_BUSY": (self.CAST, {"action": 3}),
+                 "INVALID_POINT": (dict(self.CAST, x="3590.5"), {}),
+                 "INVALID_WAIT": (dict(self.CAST, wait="301"), {})}
+        for guard, (arguments, state) in cases.items():
+            with self.subTest(guard=guard):
+                ok, error, count = self.cloud(arguments, **state)[:3]
+                self.assertEqual((ok, count), (False, 0))
+                self.assertIn(guard, error)
+        for arguments in ({"op": "arm", "caster": "77", "ids": "10 78"}, dict(self.CAST, x="-1"),
+                          dict(self.CAST, y="40000"), {"op": "cast", "spell": "SPWI810", "x": "1"},
+                          dict(self.CAST, wait="x")):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.cloud(arguments)[0::2], (False, 0))
+        for op in ("arm", "cast", "export"):
+            with self.subTest(op=op):
+                ok, error, count = self.cloud(dict(self.CAST, op=op, caster="77", name="x"), paused=0)[:3]
+                self.assertEqual((ok, count), (False, 0))
+                self.assertIn("PAUSE_FIRST", error)
 
 
 class ExitTests(unittest.TestCase):
