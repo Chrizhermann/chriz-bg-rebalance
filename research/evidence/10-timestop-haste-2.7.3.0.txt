@@ -1,0 +1,457 @@
+Time Stop / Haste offline evidence, current BG2:EE 2.7.3.0, 2026-09-26
+No process opened, no game files or saves changed.
+Input: C:\Program Files (x86)\Steam\steamapps\common\Baldur's Gate II Enhanced Edition\Baldur.exe
+Version: FileVersion and ProductVersion 2.7.3.0; Steam build ID 23534562
+SHA256: b51093a49140b2b8a7c046b4652bb8e535be24ebbc12b1d735e0b94217a14d57
+Bytes: 7202696
+PE machine: 0x8664 ImageBase: 0x140000000 PE timestamp: 0x6a18d73d
+Names: EEex 1.3.0 commit 9e8098ee696ca4b0bc055e7ff74b283704a8c02e
+Path: EEex/loader/v2.7.3.0/bg2ee/function_names.db
+Names file SHA256: 40fef67322ab1ee917efd32fda75032007fa4c441180c2583416441f8e2b4b11
+Decoder: Capstone 5.0.9; PE parser: pefile 2024.8.26; Python 3.11
+Left column RVAs; VA = image base + RVA. Excerpts are not validated hook signatures.
+Current bytes decoded directly. Old symbol-relative positions locate excerpts only; mnemonic sequences cross-checked.
+Full selected functions compared structurally after normalizing RIP data displacement and branch/call destination addresses.
+That comparison is not whole-program equivalence; jump table data excluded from code conclusions.
+Current speed selection constants: {'0x59972e': '03', '0x59972f': '00', '0x59972d': '01'}
+
+### Expiry detection (normalization omitted)
+; interior VA 0x1401cd2b2..0x1401cd2cb; RVA 0x1cd2b2..0x1cd2cb
+001CD2B2  48 8b 05 8f a2 49 00           mov      rax, qword ptr [rip + 0x49a28f]
+001CD2B9  48 8b 88 90 10 00 00           mov      rcx, qword ptr [rax + 0x1090]
+001CD2C0  8b 47 28                       mov      eax, dword ptr [rdi + 0x28]
+001CD2C3  39 81 a0 3f 00 00              cmp      dword ptr [rcx + 0x3fa0], eax
+001CD2C9  73 1b                          jae      0x1401cd2e6 ;
+
+### Expiry decision and m_done write
+; interior VA 0x1401e8460..0x1401e84a1; RVA 0x1e8460..0x1e84a1
+001E8460  8b 43 24                       mov      eax, dword ptr [rbx + 0x24]
+001E8463  3d 00 10 00 00                 cmp      eax, 0x1000
+001E8468  75 37                          jne      0x1401e84a1 ;
+001E846A  48 8b 05 d7 f0 47 00           mov      rax, qword ptr [rip + 0x47f0d7]
+001E8471  48 8b 88 90 10 00 00           mov      rcx, qword ptr [rax + 0x1090]
+001E8478  8b 43 28                       mov      eax, dword ptr [rbx + 0x28]
+001E847B  39 81 a0 3f 00 00              cmp      dword ptr [rcx + 0x3fa0], eax
+001E8481  0f 82 e1 01 00 00              jb       0x1401e8668 ;
+001E8487  c7 83 14 01 00 00 01 00 00 00  mov      dword ptr [rbx + 0x114], 1
+001E8491  b8 01 00 00 00                 mov      eax, 1
+001E8496  48 8b 5c 24 30                 mov      rbx, qword ptr [rsp + 0x30]
+001E849B  48 83 c4 20                    add      rsp, 0x20
+001E849F  5f                             pop      rdi
+001E84A0  c3                             ret
+
+### HandleList invokes ResolveEffect and removes done effects
+; interior VA 0x1401e4fff..0x1401e5053; RVA 0x1e4fff..0x1e5053
+001E4FFF  48 8b 03                       mov      rax, qword ptr [rbx]
+001E5002  49 8b d6                       mov      rdx, r14
+001E5005  48 8b cb                       mov      rcx, rbx
+001E5008  ff 50 18                       call     qword ptr [rax + 0x18]
+001E500B  85 c0                          test     eax, eax
+001E500D  74 05                          je       0x1401e5014 ;
+001E500F  41 8b f7                       mov      esi, r15d
+001E5012  eb 02                          jmp      0x1401e5016 ;
+001E5014  33 f6                          xor      esi, esi
+001E5016  83 bb 18 01 00 00 00           cmp      dword ptr [rbx + 0x118], 0
+001E501D  48 8b 57 40                    mov      rdx, qword ptr [rdi + 0x40]
+001E5021  41 0f 45 ef                    cmovne   ebp, r15d
+001E5025  48 85 d2                       test     rdx, rdx
+001E5028  74 29                          je       0x1401e5053 ;
+001E502A  83 bb 14 01 00 00 00           cmp      dword ptr [rbx + 0x114], 0
+001E5031  74 20                          je       0x1401e5053 ;
+001E5033  48 8b cf                       mov      rcx, rdi
+001E5036  e8 35 29 22 00                 call     0x140407970 ; CObList::RemoveAt
+001E503B  48 8b 03                       mov      rax, qword ptr [rbx]
+001E503E  49 8b d6                       mov      rdx, r14
+001E5041  48 8b cb                       mov      rcx, rbx
+001E5044  ff 50 50                       call     qword ptr [rax + 0x50]
+001E5047  4c 8b 03                       mov      r8, qword ptr [rbx]
+001E504A  41 8b d7                       mov      edx, r15d
+001E504D  48 8b cb                       mov      rcx, rbx
+001E5050  41 ff 10                       call     qword ptr [r8]
+
+### Independent FakeExpireCheck removal route
+; interior VA 0x1401e44fb..0x1401e454a; RVA 0x1e44fb..0x1e454a
+001E44FB  8b 43 24                       mov      eax, dword ptr [rbx + 0x24]
+001E44FE  83 f8 06                       cmp      eax, 6
+001E4501  74 07                          je       0x1401e450a ;
+001E4503  3d 00 10 00 00                 cmp      eax, 0x1000
+001E4508  75 40                          jne      0x1401e454a ;
+001E450A  48 8b 05 37 30 48 00           mov      rax, qword ptr [rip + 0x483037]
+001E4511  48 8b 88 90 10 00 00           mov      rcx, qword ptr [rax + 0x1090]
+001E4518  8b 89 a0 3f 00 00              mov      ecx, dword ptr [rcx + 0x3fa0]
+001E451E  03 ce                          add      ecx, esi
+001E4520  3b 4b 28                       cmp      ecx, dword ptr [rbx + 0x28]
+001E4523  72 25                          jb       0x1401e454a ;
+001E4525  48 8b 57 40                    mov      rdx, qword ptr [rdi + 0x40]
+001E4529  48 8b cf                       mov      rcx, rdi
+001E452C  e8 3f 34 22 00                 call     0x140407970 ; CObList::RemoveAt
+001E4531  48 8b 03                       mov      rax, qword ptr [rbx]
+001E4534  48 8b d5                       mov      rdx, rbp
+001E4537  48 8b cb                       mov      rcx, rbx
+001E453A  ff 50 50                       call     qword ptr [rax + 0x50]
+001E453D  48 8b 03                       mov      rax, qword ptr [rbx]
+001E4540  ba 01 00 00 00                 mov      edx, 1
+001E4545  48 8b cb                       mov      rcx, rbx
+001E4548  ff 10                          call     qword ptr [rax]
+
+### Frozen sprite enters ProcessEffectList; marks state and continues
+; interior VA 0x1403aba67..0x1403abadc; RVA 0x3aba67..0x3abadc
+003ABA67  83 ba 90 96 00 00 00           cmp      dword ptr [rdx + 0x9690], 0
+003ABA6E  4c 89 bc 24 c0 02 00 00        mov      qword ptr [rsp + 0x2c0], r15
+003ABA76  74 33                          je       0x1403abaab ;
+003ABA78  8b 46 48                       mov      eax, dword ptr [rsi + 0x48]
+003ABA7B  39 82 94 96 00 00              cmp      dword ptr [rdx + 0x9694], eax
+003ABA81  74 28                          je       0x1403abaab ;
+003ABA83  83 be a4 4e 00 00 00           cmp      dword ptr [rsi + 0x4ea4], 0
+003ABA8A  b8 f8 13 00 00                 mov      eax, 0x13f8
+003ABA8F  ba a0 20 00 00                 mov      edx, 0x20a0
+003ABA94  0f 44 c2                       cmove    eax, edx
+003ABA97  83 3c 30 00                    cmp      dword ptr [rax + rsi], 0
+003ABA9B  75 0e                          jne      0x1403abaab ;
+003ABA9D  44 89 ae 0c 52 00 00           mov      dword ptr [rsi + 0x520c], r13d
+003ABAA4  48 8b 0d 9d ba 2b 00           mov      rcx, qword ptr [rip + 0x2bba9d]
+003ABAAB  48 8b 81 90 10 00 00           mov      rax, qword ptr [rcx + 0x1090]
+003ABAB2  45 33 e4                       xor      r12d, r12d
+003ABAB5  44 39 a0 90 96 00 00           cmp      dword ptr [rax + 0x9690], r12d
+003ABABC  75 1e                          jne      0x1403abadc ;
+003ABABE  44 39 a6 0c 52 00 00           cmp      dword ptr [rsi + 0x520c], r12d
+003ABAC5  74 15                          je       0x1403abadc ;
+003ABAC7  44 89 a6 0c 52 00 00           mov      dword ptr [rsi + 0x520c], r12d
+003ABACE  44 89 ae a4 4b 00 00           mov      dword ptr [rsi + 0x4ba4], r13d
+003ABAD5  48 8b 0d 6c ba 2b 00           mov      rcx, qword ptr [rip + 0x2bba6c]
+
+### Both ordinary lists checked
+; interior VA 0x1403abf97..0x1403abfb5; RVA 0x3abf97..0x3abfb5
+003ABF97  48 8d 8e 00 4a 00 00           lea      rcx, [rsi + 0x4a00]
+003ABF9E  e8 4d 12 e2 ff                 call     0x1401cd1f0 ; CGameEffectList::CheckEffects
+003ABFA3  85 c0                          test     eax, eax
+003ABFA5  75 39                          jne      0x1403abfe0 ;
+003ABFA7  48 8d 8e b0 49 00 00           lea      rcx, [rsi + 0x49b0]
+003ABFAE  e8 3d 12 e2 ff                 call     0x1401cd1f0 ; CGameEffectList::CheckEffects
+003ABFB3  85 c0                          test     eax, eax
+
+### Both ordinary lists resolved
+; interior VA 0x1403ac568..0x1403ac591; RVA 0x3ac568..0x3ac591
+003AC568  48 8b d6                       mov      rdx, rsi
+003AC56B  48 8d 8e b0 49 00 00           lea      rcx, [rsi + 0x49b0]
+003AC572  e8 19 8a e3 ff                 call     0x1401e4f90 ; CGameEffectList::HandleList
+003AC577  8b 9e fc 49 00 00              mov      ebx, dword ptr [rsi + 0x49fc]
+003AC57D  48 8d 8e 00 4a 00 00           lea      rcx, [rsi + 0x4a00]
+003AC584  8b f8                          mov      edi, eax
+003AC586  48 8b d6                       mov      rdx, rsi
+003AC589  83 e7 01                       and      edi, 1
+003AC58C  e8 ff 89 e3 ff                 call     0x1401e4f90 ; CGameEffectList::HandleList
+
+### Regeneration native Time Stop gate
+; interior VA 0x1401a5ca7..0x1401a5cf0; RVA 0x1a5ca7..0x1a5cf0
+001A5CA7  48 8b 05 9a 18 4c 00           mov      rax, qword ptr [rip + 0x4c189a]
+001A5CAE  48 8b d9                       mov      rbx, rcx
+001A5CB1  45 8b d8                       mov      r11d, r8d
+001A5CB4  48 8b f2                       mov      rsi, rdx
+001A5CB7  48 8b 88 90 10 00 00           mov      rcx, qword ptr [rax + 0x1090]
+001A5CBE  83 b9 90 96 00 00 00           cmp      dword ptr [rcx + 0x9690], 0
+001A5CC5  74 29                          je       0x1401a5cf0 ;
+001A5CC7  8b 42 48                       mov      eax, dword ptr [rdx + 0x48]
+001A5CCA  39 81 94 96 00 00              cmp      dword ptr [rcx + 0x9694], eax
+001A5CD0  74 1e                          je       0x1401a5cf0 ;
+001A5CD2  83 ba a4 4e 00 00 00           cmp      dword ptr [rdx + 0x4ea4], 0
+001A5CD9  b8 f8 13 00 00                 mov      eax, 0x13f8
+001A5CDE  b9 a0 20 00 00                 mov      ecx, 0x20a0
+001A5CE3  0f 44 c1                       cmove    eax, ecx
+001A5CE6  83 3c 10 00                    cmp      dword ptr [rax + rdx], 0
+001A5CEA  0f 84 29 02 00 00              je       0x1401a5f19 ;
+
+### Regeneration counter and remaining duration
+; interior VA 0x1401a5cf0..0x1401a5d28; RVA 0x1a5cf0..0x1a5d28
+001A5CF0  8b 4b 28                       mov      ecx, dword ptr [rbx + 0x28]
+001A5CF3  b8 89 88 88 88                 mov      eax, 0x88888889
+001A5CF8  44 8b 53 1c                    mov      r10d, dword ptr [rbx + 0x1c]
+001A5CFC  44 8b c9                       mov      r9d, ecx
+001A5CFF  41 f7 eb                       imul     r11d
+001A5D02  41 ff c2                       inc      r10d
+001A5D05  4c 89 7c 24 40                 mov      qword ptr [rsp + 0x40], r15
+001A5D0A  44 03 c2                       add      r8d, edx
+001A5D0D  44 89 53 1c                    mov      dword ptr [rbx + 0x1c], r10d
+001A5D11  41 c1 f8 03                    sar      r8d, 3
+001A5D15  45 2b cb                       sub      r9d, r11d
+001A5D18  41 8b c0                       mov      eax, r8d
+001A5D1B  44 89 4b 28                    mov      dword ptr [rbx + 0x28], r9d
+001A5D1F  c1 e8 1f                       shr      eax, 0x1f
+001A5D22  45 33 ff                       xor      r15d, r15d
+001A5D25  44 03 c0                       add      r8d, eax
+
+### Regeneration subsecond decision
+; interior VA 0x1401a5d5a..0x1401a5d80; RVA 0x1a5d5a..0x1a5d80
+001A5D5A  45 85 c0                       test     r8d, r8d
+001A5D5D  75 21                          jne      0x1401a5d80 ;
+001A5D5F  b8 89 88 88 88                 mov      eax, 0x88888889
+001A5D64  41 f7 ea                       imul     r10d
+001A5D67  41 03 d2                       add      edx, r10d
+001A5D6A  c1 fa 03                       sar      edx, 3
+001A5D6D  8b c2                          mov      eax, edx
+001A5D6F  c1 e8 1f                       shr      eax, 0x1f
+001A5D72  03 d0                          add      edx, eax
+001A5D74  6b ca 0f                       imul     ecx, edx, 0xf
+001A5D77  44 3b d1                       cmp      r10d, ecx
+001A5D7A  0f 85 94 01 00 00              jne      0x1401a5f14 ;
+
+### Regeneration period decision
+; interior VA 0x1401a5e10..0x1401a5e3d; RVA 0x1a5e10..0x1a5e3d
+001A5E10  0f bf 53 20                    movsx    edx, word ptr [rbx + 0x20]
+001A5E14  85 d2                          test     edx, edx
+001A5E16  74 67                          je       0x1401a5e7f ;
+001A5E18  83 ea 02                       sub      edx, 2
+001A5E1B  74 20                          je       0x1401a5e3d ;
+001A5E1D  83 fa 01                       cmp      edx, 1
+001A5E20  0f 85 b6 00 00 00              jne      0x1401a5edc ;
+001A5E26  66 ff 43 1a                    inc      word ptr [rbx + 0x1a]
+001A5E2A  0f b7 43 1a                    movzx    eax, word ptr [rbx + 0x1a]
+001A5E2E  66 3b 43 18                    cmp      ax, word ptr [rbx + 0x18]
+001A5E32  0f 8c a4 00 00 00              jl       0x1401a5edc ;
+001A5E38  66 44 89 7b 1a                 mov      word ptr [rbx + 0x1a], r15w
+
+### Regeneration native effect application continues
+; interior VA 0x1401a5e7f..0x1401a5ee2; RVA 0x1a5e7f..0x1a5ee2
+001A5E7F  66 44 39 7b 22                 cmp      word ptr [rbx + 0x22], r15w
+001A5E84  7e 73                          jle      0x1401a5ef9 ;
+001A5E86  b9 58 01 00 00                 mov      ecx, 0x158
+001A5E8B  e8 f8 1b 35 00                 call     0x1404f7a88 ; operator_new
+001A5E90  48 8b f8                       mov      rdi, rax
+001A5E93  48 85 c0                       test     rax, rax
+001A5E96  74 14                          je       0x1401a5eac ;
+001A5E98  48 8b c8                       mov      rcx, rax
+001A5E9B  e8 20 68 fa ff                 call     0x14014c6c0 ; CGameEffect::CGameEffect
+001A5EA0  4c 89 27                       mov      qword ptr [rdi], r12
+001A5EA3  c7 47 10 11 00 00 00           mov      dword ptr [rdi + 0x10], 0x11
+001A5EAA  eb 03                          jmp      0x1401a5eaf ;
+001A5EAC  49 8b ff                       mov      rdi, r15
+001A5EAF  48 c7 47 1c 01 00 00 00        mov      qword ptr [rdi + 0x1c], 1
+001A5EB7  48 8b 06                       mov      rax, qword ptr [rsi]
+001A5EBA  41 b9 01 00 00 00              mov      r9d, 1
+001A5EC0  44 0f b6 05 9b 6f 40 00        movzx    r8d, byte ptr [rip + 0x406f9b]
+001A5EC8  48 8b d7                       mov      rdx, rdi
+001A5ECB  48 8b ce                       mov      rcx, rsi
+001A5ECE  c7 44 24 20 01 00 00 00        mov      dword ptr [rsp + 0x20], 1
+001A5ED6  ff 90 e8 00 00 00              call     qword ptr [rax + 0xe8]
+
+### Regeneration worker duration seeded from parent deadline
+; interior VA 0x1401bed5f..0x1401bed79; RVA 0x1bed5f..0x1bed79
+001BED5F  48 8b 05 e2 87 4a 00           mov      rax, qword ptr [rip + 0x4a87e2]
+001BED66  48 8b 88 90 10 00 00           mov      rcx, qword ptr [rax + 0x1090]
+001BED6D  8b 47 28                       mov      eax, dword ptr [rdi + 0x28]
+001BED70  2b 81 a0 3f 00 00              sub      eax, dword ptr [rcx + 0x3fa0]
+001BED76  89 43 28                       mov      dword ptr [rbx + 0x28], eax
+
+### Regeneration worker phase seeded from parent +6C
+; interior VA 0x1401bed97..0x1401bede5; RVA 0x1bed97..0x1bede5
+001BED97  44 0f b7 43 18                 movzx    r8d, word ptr [rbx + 0x18]
+001BED9C  66 45 85 c0                    test     r8w, r8w
+001BEDA0  74 2d                          je       0x1401bedcf ;
+001BEDA2  48 8b 05 9f 87 4a 00           mov      rax, qword ptr [rip + 0x4a879f]
+001BEDA9  48 8b 88 90 10 00 00           mov      rcx, qword ptr [rax + 0x1090]
+001BEDB0  b8 89 88 88 88                 mov      eax, 0x88888889
+001BEDB5  8b 91 a0 3f 00 00              mov      edx, dword ptr [rcx + 0x3fa0]
+001BEDBB  2b 57 6c                       sub      edx, dword ptr [rdi + 0x6c]
+001BEDBE  f7 e2                          mul      edx
+001BEDC0  41 0f bf c8                    movsx    ecx, r8w
+001BEDC4  8b c2                          mov      eax, edx
+001BEDC6  33 d2                          xor      edx, edx
+001BEDC8  c1 e8 03                       shr      eax, 3
+001BEDCB  f7 f1                          div      ecx
+001BEDCD  eb 03                          jmp      0x1401bedd2 ;
+001BEDCF  0f b7 d6                       movzx    edx, si
+001BEDD2  66 89 53 1a                    mov      word ptr [rbx + 0x1a], dx
+001BEDD6  48 8d 8d 08 1a 00 00           lea      rcx, [rbp + 0x1a08]
+001BEDDD  48 8b d3                       mov      rdx, rbx
+001BEDE0  e8 db 87 24 00                 call     0x1404075c0 ; CObList::AddTail
+
+### Periodic worker dispatch copies shared counter
+; interior VA 0x14022653d..0x140226552; RVA 0x22653d..0x226552
+0022653D  8b 46 38                       mov      eax, dword ptr [rsi + 0x38]
+00226540  45 8b c6                       mov      r8d, r14d
+00226543  89 43 1c                       mov      dword ptr [rbx + 0x1c], eax
+00226546  49 8b d7                       mov      rdx, r15
+00226549  48 8b 03                       mov      rax, qword ptr [rbx]
+0022654C  48 8b cb                       mov      rcx, rbx
+0022654F  ff 50 08                       call     qword ptr [rax + 8]
+
+### Periodic shared counter advances even on skipped worker
+; interior VA 0x140226576..0x14022658b; RVA 0x226576..0x22658b
+00226576  48 8b ef                       mov      rbp, rdi
+00226579  48 85 ff                       test     rdi, rdi
+0022657C  75 b2                          jne      0x140226530 ;
+0022657E  ff 46 38                       inc      dword ptr [rsi + 0x38]
+00226581  48 8b 5c 24 40                 mov      rbx, qword ptr [rsp + 0x40]
+00226586  eb 03                          jmp      0x14022658b ;
+00226588  ff 41 38                       inc      dword ptr [rcx + 0x38]
+
+### ProcessEffectList dispatches periodic list before listener sites
+; interior VA 0x1403adfea..0x1403ae019; RVA 0x3adfea..0x3ae019
+003ADFEA  48 8d 8e 08 1a 00 00           lea      rcx, [rsi + 0x1a08]
+003ADFF1  45 8b c5                       mov      r8d, r13d
+003ADFF4  48 8b d6                       mov      rdx, rsi
+003ADFF7  e8 04 85 e7 ff                 call     0x140226500 ; CPersistantEffectListRegenerated::AIUpdate
+003ADFFC  44 89 be a4 4e 00 00           mov      dword ptr [rsi + 0x4ea4], r15d
+003AE003  83 7d 8c 00                    cmp      dword ptr [rbp - 0x74], 0
+003AE007  48 8b bc 24 00 03 00 00        mov      rdi, qword ptr [rsp + 0x300]
+003AE00F  48 8b 9c 24 f8 02 00 00        mov      rbx, qword ptr [rsp + 0x2f8]
+003AE017  74 11                          je       0x1403ae02a ;
+
+### Haste/Slow state selection first branch
+; interior VA 0x1403accac..0x1403accbc; RVA 0x3accac..0x3accbc
+003ACCAC  8b 8e 20 11 00 00              mov      ecx, dword ptr [rsi + 0x1120]
+003ACCB2  0f b6 46 58                    movzx    eax, byte ptr [rsi + 0x58]
+003ACCB6  0f ba e1 10                    bt       ecx, 0x10
+003ACCBA  73 62                          jae      0x1403acd1e ;
+
+### Slow speed selection
+; interior VA 0x1403acd12..0x1403acd1e; RVA 0x3acd12..0x3acd1e
+003ACD12  0f b6 05 15 ca 1e 00           movzx    eax, byte ptr [rip + 0x1eca15]
+003ACD19  e9 be 00 00 00                 jmp      0x1403acddc ;
+
+### Haste state branch
+; interior VA 0x1403acd1e..0x1403acd30; RVA 0x3acd1e..0x3acd30
+003ACD1E  0f ba e1 0f                    bt       ecx, 0xf
+003ACD22  73 5f                          jae      0x1403acd83 ;
+003ACD24  3a 05 05 ca 1e 00              cmp      al, byte ptr [rip + 0x1eca05]
+003ACD2A  0f 84 af 00 00 00              je       0x1403acddf ;
+
+### Haste speed selection
+; interior VA 0x1403acd7a..0x1403acd89; RVA 0x3acd7a..0x3acd89
+003ACD7A  0f b6 05 ae c9 1e 00           movzx    eax, byte ptr [rip + 0x1ec9ae]
+003ACD81  eb 59                          jmp      0x1403acddc ;
+003ACD83  3a 05 a4 c9 1e 00              cmp      al, byte ptr [rip + 0x1ec9a4]
+
+### Normal speed selection and assignment
+; interior VA 0x1403acdd5..0x1403acddf; RVA 0x3acdd5..0x3acddf
+003ACDD5  0f b6 05 51 c9 1e 00           movzx    eax, byte ptr [rip + 0x1ec951]
+003ACDDC  88 46 58                       mov      byte ptr [rsi + 0x58], al
+
+### Scheduler mask gate
+; interior VA 0x140353165..0x14035318d; RVA 0x353165..0x35318d
+00353165  44 0f b6 51 58                 movzx    r10d, byte ptr [rcx + 0x58]
+0035316A  4c 8b f1                       mov      r14, rcx
+0035316D  44 8b 59 48                    mov      r11d, dword ptr [rcx + 0x48]
+00353171  41 8b c2                       mov      eax, r10d
+00353174  41 8b d3                       mov      edx, r11d
+00353177  c7 81 ec 52 00 00 00 00 00 00  mov      dword ptr [rcx + 0x52ec], 0
+00353181  41 23 c0                       and      eax, r8d
+00353184  41 23 d2                       and      edx, r10d
+00353187  3b c2                          cmp      eax, edx
+00353189  74 16                          je       0x1403531a1 ;
+0035318B  32 c0                          xor      al, al
+
+### Area scheduler dispatch
+; interior VA 0x140179238..0x140179278; RVA 0x179238..0x179278
+00179238  4c 8b 55 d7                    mov      r10, qword ptr [rbp - 0x29]
+0017923C  48 8b 05 1d e3 4e 00           mov      rax, qword ptr [rip + 0x4ee31d]
+00179243  41 0f b6 d4                    movzx    edx, r12b
+00179247  4d 8b 0a                       mov      r9, qword ptr [r10]
+0017924A  49 8b ca                       mov      rcx, r10
+0017924D  44 8b 80 a0 0f 00 00           mov      r8d, dword ptr [rax + 0xfa0]
+00179254  41 ff 91 a0 00 00 00           call     qword ptr [r9 + 0xa0]
+0017925B  84 c0                          test     al, al
+0017925D  74 19                          je       0x140179278 ;
+0017925F  48 8d 55 d7                    lea      rdx, [rbp - 0x29]
+00179263  8b cf                          mov      ecx, edi
+00179265  e8 96 d4 0f 00                 call     0x140276700 ; CGameObjectArray::GetDeny
+0017926A  84 c0                          test     al, al
+0017926C  75 0a                          jne      0x140179278 ;
+0017926E  48 8b 4d d7                    mov      rcx, qword ptr [rbp - 0x29]
+00179272  48 8b 01                       mov      rax, qword ptr [rcx]
+00179275  ff 50 18                       call     qword ptr [rax + 0x18]
+
+### Native SetPeriodCounter
+; CPersistantEffect::SetPeriodCounter VA 0x1401e87a0..0x1401e87e6; RVA 0x1e87a0..0x1e87e6
+001E87A0  4c 8b d1                       mov      r10, rcx
+001E87A3  0f b7 49 18                    movzx    ecx, word ptr [rcx + 0x18]
+001E87A7  66 85 c9                       test     cx, cx
+001E87AA  74 32                          je       0x1401e87de ;
+001E87AC  48 8b 05 95 ed 47 00           mov      rax, qword ptr [rip + 0x47ed95]
+001E87B3  0f bf c9                       movsx    ecx, cx
+001E87B6  4c 8b 80 90 10 00 00           mov      r8, qword ptr [rax + 0x1090]
+001E87BD  b8 89 88 88 88                 mov      eax, 0x88888889
+001E87C2  45 8b 88 a0 3f 00 00           mov      r9d, dword ptr [r8 + 0x3fa0]
+001E87C9  44 2b ca                       sub      r9d, edx
+001E87CC  41 f7 e1                       mul      r9d
+001E87CF  8b c2                          mov      eax, edx
+001E87D1  33 d2                          xor      edx, edx
+001E87D3  c1 e8 03                       shr      eax, 3
+001E87D6  f7 f1                          div      ecx
+001E87D8  66 41 89 52 1a                 mov      word ptr [r10 + 0x1a], dx
+001E87DD  c3                             ret
+001E87DE  33 c0                          xor      eax, eax
+001E87E0  66 41 89 42 1a                 mov      word ptr [r10 + 0x1a], ax
+001E87E5  c3                             ret
+
+### Time Stop counter update separate from effect lists
+; interior VA 0x1402ebb1b..0x1402ebb4a; RVA 0x2ebb1b..0x2ebb4a
+002EBB1B  41 38 bd a4 3f 00 00           cmp      byte ptr [r13 + 0x3fa4], dil
+002EBB22  0f 84 bd 03 00 00              je       0x1402ebee5 ;
+002EBB28  41 8b 85 90 96 00 00           mov      eax, dword ptr [r13 + 0x9690]
+002EBB2F  85 c0                          test     eax, eax
+002EBB31  7e 17                          jle      0x1402ebb4a ;
+002EBB33  83 e8 01                       sub      eax, 1
+002EBB36  41 89 85 90 96 00 00           mov      dword ptr [r13 + 0x9690], eax
+002EBB3D  75 0b                          jne      0x1402ebb4a ;
+002EBB3F  41 c7 85 94 96 00 00 ff ff ff ff mov      dword ptr [r13 + 0x9694], 0xffffffff
+
+### FakeExpireCheck trigger identification
+ExecuteAction switch byte table 0x398990[322] = 107
+Switch dword table 0x3987AC[index] = 0x39857d ; action 322 FakeEffectExpiryCheck(O:Object*,I:Ticks*)
+Message vtable RVA 0x59ABB0; Run slot +0x30 points to 0x212B60.
+
+### ExecuteAction action-id dispatch
+; interior VA 0x1403960b0..0x1403960dd; RVA 0x3960b0..0x3960dd
+003960B0  48 0f bf c8                    movsx    rcx, ax
+003960B4  81 f9 d7 01 00 00              cmp      ecx, 0x1d7
+003960BA  0f 87 9f 26 00 00              ja       0x14039875f ;
+003960C0  4c 8d 05 39 9f c6 ff           lea      r8, [rip - 0x3960c7]
+003960C7  41 0f b6 84 08 90 89 39 00     movzx    eax, byte ptr [r8 + rcx + 0x398990]
+003960D0  41 8b 8c 80 ac 87 39 00        mov      ecx, dword ptr [r8 + rax*4 + 0x3987ac]
+003960D8  49 03 c8                       add      rcx, r8
+003960DB  ff e1                          jmp      rcx
+
+### Action 322 creates FakeExpireCheck message with requested tick offset
+; interior VA 0x14039857d..0x1403985f1; RVA 0x39857d..0x3985f1
+0039857D  0f b6 15 9b 11 20 00           movzx    edx, byte ptr [rip + 0x20119b]
+00398584  48 8b cf                       mov      rcx, rdi
+00398587  e8 64 9f dc ff                 call     0x1401624f0 ; CGameAIBase::GetTargetShareType
+0039858C  48 89 44 24 40                 mov      qword ptr [rsp + 0x40], rax
+00398591  48 85 c0                       test     rax, rax
+00398594  0f 84 c8 db ff ff              je       0x140396162 ;
+0039859A  b9 18 00 00 00                 mov      ecx, 0x18
+0039859F  e8 e4 f4 15 00                 call     0x1404f7a88 ; operator_new
+003985A4  4c 8b c8                       mov      r9, rax
+003985A7  48 85 c0                       test     rax, rax
+003985AA  74 29                          je       0x1403985d5 ;
+003985AC  48 8b 44 24 40                 mov      rax, qword ptr [rsp + 0x40]
+003985B1  8b 97 48 04 00 00              mov      edx, dword ptr [rdi + 0x448]
+003985B7  8b 48 48                       mov      ecx, dword ptr [rax + 0x48]
+003985BA  8b 47 48                       mov      eax, dword ptr [rdi + 0x48]
+003985BD  41 89 41 0c                    mov      dword ptr [r9 + 0xc], eax
+003985C1  48 8d 05 e8 25 20 00           lea      rax, [rip + 0x2025e8]
+003985C8  49 89 01                       mov      qword ptr [r9], rax
+003985CB  41 89 49 08                    mov      dword ptr [r9 + 8], ecx
+003985CF  41 89 51 10                    mov      dword ptr [r9 + 0x10], edx
+003985D3  eb 03                          jmp      0x1403985d8 ;
+003985D5  4d 8b cd                       mov      r9, r13
+003985D8  48 8b 0d 69 ef 2c 00           mov      rcx, qword ptr [rip + 0x2cef69]
+003985DF  45 33 c0                       xor      r8d, r8d
+003985E2  48 81 c1 68 17 00 00           add      rcx, 0x1768
+003985E9  49 8b d1                       mov      rdx, r9
+003985EC  e8 cf c8 e6 ff                 call     0x140204ec0 ; CMessageHandler::AddMessage
+
+### Message runs separate effect removal on timed and equipped lists
+; interior VA 0x140212b89..0x140212bc5; RVA 0x212b89..0x212bc5
+00212B89  48 8b 54 24 30                 mov      rdx, qword ptr [rsp + 0x30]
+00212B8E  44 8b 43 10                    mov      r8d, dword ptr [rbx + 0x10]
+00212B92  48 8d 8a b0 49 00 00           lea      rcx, [rdx + 0x49b0]
+00212B99  e8 22 19 fd ff                 call     0x1401e44c0 ; CGameEffectList::FakeExpireCheck
+00212B9E  48 8b 54 24 30                 mov      rdx, qword ptr [rsp + 0x30]
+00212BA3  44 8b 43 10                    mov      r8d, dword ptr [rbx + 0x10]
+00212BA7  48 8d 8a 00 4a 00 00           lea      rcx, [rdx + 0x4a00]
+00212BAE  e8 0d 19 fd ff                 call     0x1401e44c0 ; CGameEffectList::FakeExpireCheck
+00212BB3  48 8b 4c 24 30                 mov      rcx, qword ptr [rsp + 0x30]
+00212BB8  0f b6 05 01 a4 39 00           movzx    eax, byte ptr [rip + 0x39a401]
+00212BBF  88 81 97 07 00 00              mov      byte ptr [rcx + 0x797], al
