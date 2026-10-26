@@ -252,11 +252,12 @@ EEex's `function_names.db`):
   `CProjectileArea` counts its lifetime in triggers (`+0x3C6`) and its trigger delay
   (`+0x3CE`) inside its own update, after that gate. A cloud therefore keeps its whole
   remaining lifetime through a stop, which is what Christopher asked for and contradicts
-  IESDP; one lab capture confirms it.
+  IESDP; a lab capture is still open.
 - **Saving.** `CProjectile::CanSaveGame` (`0x22BA00`) refuses while a projectile is in flight
   and `CGameTemporal::CanSaveGame` (`0x34BCA0`) while a temporal object is unfinished. The quick
   save that wrote nothing shortly after a stop fits a leftover object of the stop's spell; a
-  native control confirms it.
+  native control is still open. In step 6, a quick save right after the caster's op231 ran out
+  wrote at the first click.
 
 Design for the full scope (proposed 2026-10-25), replacing the one-subject prototype:
 
@@ -276,6 +277,43 @@ Design for the full scope (proposed 2026-10-25), replacing the one-subject proto
   objects and on load), so the logic is testable on the host; an error disables the correction
   and leaves the game native.
 - Clouds need nothing beyond the lab confirmation. Save/load behaves as in step 5.
+
+Update 2026-10-26, lab step 6: [`timestop-lab/CBRTCor.lua`](timestop-lab/README.md#correction-for-every-creature-cbrtcorlua)
+implements this design for every creature. Eight thin gates call Lua: the frozen marker, the
+periodic dispatcher's entry and its per-worker counter copy, and the five constructions
+(regeneration, poison, disease twice, repeated EFF). Per-worker state stays in Lua, so the worker
+padding was not needed. Four lab runs on fresh parties, the third with 18 cases and the fourth
+with stops aimed at a slowed creature:
+
+- **Every creature, all four families.** Party members, three neutral dummies and a hostile
+  smoke mephit alike. In an 89- or 90-tick stop each frozen creature's deadlines and origins moved
+  by its own frozen ticks, and every family gave its 6 units with the phase kept across the stop
+  (natively 3 or 4). The caster and an op310-immune creature kept world time, as natively.
+- **Haste and Slow.** Hasted creatures gave 6 units instead of 11 to 15, slowed ones 6 instead of
+  2 or 3, the slowed ones at most a tick late. With several families, a slowed creature's last
+  unit can be lost when it falls on the effect's last tick and the creature skips that tick.
+- **Normal speed.** Corrected creatures without Haste, Slow, pauses or stops matched the native
+  ones; with the correction enabled right before the applications, every dispatch was native.
+- **Groups.** The Holy-Power-like group (op272 upkeep, op44 child, delayed op321 cleanup) moved
+  as one: all three parts by the same frozen ticks.
+- **Time compression and loads.** `DayNight` to the next full hour (about 4,800 ticks) passed
+  natively: one dispatch with the whole span per creature, no catch-up. A quick save after a
+  corrected stop kept the moved deadlines and origins; the reload cleared the correction's state
+  through EEex's destroyed-session listener, and the effects ran on to their moved deadlines on
+  the native grid the load restarts (5 units instead of 6 across the load).
+
+The runs found four defects, each fixed with host tests first: an effect applied while paused
+right after Enable stretched its creature's first dispatch; a hasted creature updated once
+before the stop began counted that tick as frozen; a slowed creature lost the 15-tick boundary of
+the active tick it skipped right before its first frozen update, and with it a unit, since the
+correction delivered that tick in the frozen update and the native workers ignore frozen
+updates; and a slowed creature updated before the caster missed the frozen tick it skipped next.
+The fourth run timed three stops onto the slowed case and confirmed both slowed fixes. The engine
+also showed that a stop's first tick freezes only the creatures updated after the caster (90
+frozen ticks against 89). Still open: a lab capture of a cloud through a stop, area transition,
+saving during a stop, dispel, cure and death, and a stop ending between a hasted creature's two
+updates (host-tested only). Details are in the
+[lab README](timestop-lab/README.md#lab-run-of-2026-10-26-step-6).
 
 ## Evidence identity and method
 
@@ -499,16 +537,16 @@ effect-instance matching, stacked identical effects and component removal need a
 
 | Boundary | Concrete risk / decision still needed |
 |---|---|
-| Which durations? | Define the final selection of buffs, harmful periodic parents and their supporting markers/cleanup effects. Permanent/equipped effects, delayed activation, summons and item expiration are not interchangeable finite buffs. Begin with explicit test identities, not a heuristic over every effect. Decided 2026-10-25 (Christopher): every periodic family (poison, disease, repeated EFF) gets the regeneration handling. |
+| Which durations? | Define the final selection of buffs, harmful periodic parents and their supporting markers/cleanup effects. Permanent/equipped effects, delayed activation, summons and item expiration are not interchangeable finite buffs. Begin with explicit test identities, not a heuristic over every effect. Decided 2026-10-25 (Christopher): every periodic family (poison, disease, repeated EFF) gets the regeneration handling. Lab 2026-10-26 (step 6): `CBRTCor.lua` moves every effect with an absolute deadline or a delayed start, and the periodic origin of all four families, timed or equipped, on every creature; summon and item lifetimes were not tested. |
 | SR versus non-SR | Installed SR4.19 `SPWI305/SPWI613` and SCS35.21 `DWSW305/DWSW613` contain op176 movement and op1 APR, **no op16/317** across their reachable effects. SR source `spell_rev/lib/kreso_haste_slow.tph:115–130,189–200` confirms the distinction. Base `DATA/SPELLS.BIF` instead has op16 p2=0/1. Names and shared SCS spell-state markers cannot select the engine correction. |
 | SCS / Time Stop | Installed SPWI909 op328 state180 lasts18s while op231 carries36s. Neither the marker nor an assumed SPL length defines actual stop state. Keep SCS encounter timers/prebuff logic outside scope; source-specific corrections stay with their owner. |
-| Maintenance graphs | `tempus_holy_power.tpa:1253–1279` couples op272 upkeep with same-deadline delayed op321 cleanup; `:2270–2279` uses31-tick op44/97 children for Slow coverage. A second op272 APR bridge is at `:3173–3179`, with one-second child at `:2944–2949`. Freezing only the positive parent can leave children expired or let cleanup remove them. Haste normalization must not blanket-select op272. |
-| Caster / immune actors | Native workers continue for both. Decide whether buff duration and periodic effects should also continue for each category, including gaining/losing immunity during a stop. Lab 2026-10-25: the engine freezes neither a caster nor an op310-immune subject; with the correction selected, both kept world time, buff expiry included. Gaining or losing immunity during a stop is untested. |
-| Slow / disease | Slow decided 2026-10-25 (Christopher): periodic effects run in world time under Slow too; movement and attacks stay slowed. Lab 2026-10-25: corrected, 6 heals instead of 3, at most one tick late, since a slowed actor updates every second tick. Disease is both a periodic family and potentially a timing modifier; untested. |
-| Area spells | Projectiles, area hazards and their lifetimes have separate code. Decide whether creation, lifetime, pulses and hitting frozen targets should each pause. Actor-local success makes no claim about them. IESDP op231: area-effect projectiles are suppressed until the stop ends while their duration runs; projectiles in flight wait. Decided 2026-10-25 (Christopher): area effects stop with the stop, with no pulse and no lifetime lost. The 2.7.3.0 code already freezes every projectile class, `CProjectileArea`'s trigger count and delay included, so IESDP's running duration does not match it; a lab capture confirms. |
-| Save/load / time compression | Absolute deadlines, parent phase origin, rebuilt workers and side metadata must agree. Do not save raw pointers. `CompressTime` separately calls `HandlePersistantEffects` at `0x350212`, forwarding a larger elapsed argument. Rest/travel/load cannot be treated as ordinary callbacks. Exact serialization coverage and current-save compatibility remain unproved. Lab 2026-10-25: a quick save after a corrected stop kept the shifted deadlines and the regeneration's origin through the reload; the correction's phase state is not saved, and after the load the grid restarted with the subject's list counter. A quick save shortly after a stop wrote nothing once (cause not isolated); saving during a stop is untested. |
+| Maintenance graphs | `tempus_holy_power.tpa:1253–1279` couples op272 upkeep with same-deadline delayed op321 cleanup; `:2270–2279` uses31-tick op44/97 children for Slow coverage. A second op272 APR bridge is at `:3173–3179`, with one-second child at `:2944–2949`. Freezing only the positive parent can leave children expired or let cleanup remove them. Haste normalization must not blanket-select op272. Lab 2026-10-26 (step 6): a group of that shape (op272 upkeep every second, op44 child, op321 cleanup delayed 12 s) moved as one through a stop, every part by the creature's own frozen ticks. |
+| Caster / immune actors | Native workers continue for both. Decide whether buff duration and periodic effects should also continue for each category, including gaining/losing immunity during a stop. Lab 2026-10-25: the engine freezes neither a caster nor an op310-immune subject; with the correction selected, both kept world time, buff expiry included. Lab 2026-10-26 (step 6): the same with every creature corrected. Gaining or losing immunity during a stop is untested. |
+| Slow / disease | Slow decided 2026-10-25 (Christopher): periodic effects run in world time under Slow too; movement and attacks stay slowed. Lab 2026-10-25: corrected, 6 heals instead of 3, at most one tick late, since a slowed actor updates every second tick. Lab 2026-10-26 (step 6): all four families on slowed creatures, 6 units instead of 2 or 3; a pulse on the tick a slowed creature skips right before a stop comes up to two active ticks late. With several families an effect's last pulse on its last, skipped tick can be lost. Disease as a periodic family is corrected like regeneration; as a timing modifier it is untested. |
+| Area spells | Projectiles, area hazards and their lifetimes have separate code. Decide whether creation, lifetime, pulses and hitting frozen targets should each pause. Actor-local success makes no claim about them. IESDP op231: area-effect projectiles are suppressed until the stop ends while their duration runs; projectiles in flight wait. Decided 2026-10-25 (Christopher): area effects stop with the stop, with no pulse and no lifetime lost. The 2.7.3.0 code already freezes every projectile class, `CProjectileArea`'s trigger count and delay included, so IESDP's running duration does not match it; a lab capture is still open (step 6 had none). |
+| Save/load / time compression | Absolute deadlines, parent phase origin, rebuilt workers and side metadata must agree. Do not save raw pointers. `CompressTime` separately calls `HandlePersistantEffects` at `0x350212`, forwarding a larger elapsed argument. Rest/travel/load cannot be treated as ordinary callbacks. Exact serialization coverage and current-save compatibility remain unproved. Lab 2026-10-25: a quick save after a corrected stop kept the shifted deadlines and the regeneration's origin through the reload; the correction's phase state is not saved, and after the load the grid restarted with the subject's list counter. A quick save shortly after a stop wrote nothing once (cause not isolated); saving during a stop is untested. Lab 2026-10-26 (step 6): `DayNight` to the next full hour (4,824 ticks) passed natively, one dispatch with the whole span per creature; a quick save right after a corrected stop kept every creature's moved deadlines and origins, and the reload cleared the correction's state through EEex's destroyed-session listener (5 units instead of 6 across the load, as the list counters restart). |
 | Consecutive stops | Count each actual frozen tick once, even with back-to-back stops or caster replacement; effects applied midway receive only subsequent compensation. State read at a callback alone can miss a start/end between sparse passes. Observe transition ordering explicitly. Lab 2026-10-25: two stops 16 ticks apart counted each frozen tick once (178); an effect applied mid-stop was compensated only for the frozen ticks after it. Caster replacement is untested. |
-| Removal / refresh | Dispel, cure, explicit source removal, charge depletion, death and refresh remain native operations. Clock suspension must not become removal immunity. Clear/rebind metadata on removal, copy and worker rebuilding; address reuse is not identity. Action322 must still remove effects according to their corrected remaining lifetime. Lab 2026-10-25: op321 removal stayed removal, during a stop and without one, and a refresh during a stop started a full new duration after the stop. Dispel, cure, charge depletion, death and Action322 are untested. |
+| Removal / refresh | Dispel, cure, explicit source removal, charge depletion, death and refresh remain native operations. Clock suspension must not become removal immunity. Clear/rebind metadata on removal, copy and worker rebuilding; address reuse is not identity. Action322 must still remove effects according to their corrected remaining lifetime. Lab 2026-10-25: op321 removal stayed removal, during a stop and without one, and a refresh during a stop started a full new duration after the stop. Lab 2026-10-26 (step 6): the same with every creature corrected, and a regeneration applied to a frozen creature got no credit for the frozen ticks before it. Dispel, cure, charge depletion, death and Action322 are untested. |
 | Component removal | Adjusted native deadlines and temporary metadata must have a defined removal/load policy. Prefer no new save format, but that is not proof a save remains safe without the component. No active-playthrough hotpatch promise. Decided 2026-10-25 (Christopher): installing or removing the component in a running playthrough is not supported; no lab test. |
 
 Binary anchors for the compatibility reading (all under the read-only game directory):
@@ -539,6 +577,11 @@ Haste, attacks and movement, two consecutive stops, removal, refresh and applica
 stop. Of step 5 it covered save/reload after a stop and pauses. Saving during a stop, rest/time
 compression, area transition, process restart, poison, the maintenance fixture and party/enemy
 symmetry remain; component absence was dropped (see Christopher's decisions above).
+
+Status 2026-10-26: lab step 6 covered the rest of step 5 except saving during a stop, area
+transition and process restart: time compression, poison and the other families, the maintenance
+fixture, and party and enemy creatures alike, with every creature corrected (see the update
+above).
 
 Use a disposable BG2:EE **2.7.3.0 / EEex 1.3.1** copy and establish unmodified controls.
 Match its executable to the current fingerprint above, then validate candidate patch
