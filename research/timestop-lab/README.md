@@ -1432,6 +1432,13 @@ control), so the cases used three bats D1 to D3 created next to it, with a fourt
 Revisions' Haste and Improved Haste carry no engine Haste (opcode 16), so engine Haste came from
 the potion.
 
+A second full stack without Spell Revisions was not run (Christopher, 2026-10-27). The
+correction reads no spell or item file: it works on the engine's clocks and checks only the
+executable and EEex, the same with and without Spell Revisions. What Spell Revisions changes
+here is which spells use engine Haste: without it, Haste and Improved Haste do (opcode 16, like
+`CBRTHST` and `CBRTIHS`). That engine Haste was covered in this lab, which has no Spell
+Revisions, in step 5 and in the component run above, and by Oil of Speed in this stack.
+
 ## Host validation
 
 ```powershell

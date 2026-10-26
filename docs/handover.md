@@ -22,6 +22,9 @@ guard groups. Labs (README entry and the lab notes): the Time Stop lab with 360 
 WeiDU (start without a console, stop, Haste, save and reload, stop and Haste after it) and the
 full CEBG stack with Spell Revisions (start, a load from the main menu, Spell Revisions' Time
 Stop, Oil of Speed).
+No second full stack without Spell Revisions (Christopher, 2026-10-27): the correction reads no
+spell files, and the engine Haste that Haste and Improved Haste use without Spell Revisions was
+covered in the Time Stop lab, which has none, and by Oil of Speed in the full stack.
 
 Open:
 - Gameplay acceptance by Christopher.
