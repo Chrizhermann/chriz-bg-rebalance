@@ -1,6 +1,6 @@
 # chriz-bg-rebalance — Handover
 
-## October 27 — v0.8.6: Time Stop and Haste effect clocks (360)
+## October 28 — v0.8.6: Time Stop and Haste effect clocks (360)
 
 Christopher approved this release for CEBG alpha.22 on 2026-10-27. It contains
 PR #18 (component 360, Time Stop and Haste effect clocks; entry below) and PR #17
