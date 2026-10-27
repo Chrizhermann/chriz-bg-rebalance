@@ -5,7 +5,7 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.8.5.** Pierce Magic has a bounded five-round MR
+**Version: v0.8.6.** Pierce Magic has a bounded five-round MR
 reduction; Spellstrike causes 15% spell failure for two rounds.
 Hardiness has a recommended 40% physical-only
 profile, a 30% alternative, and an optional SR damage-resistance add-on.
@@ -19,9 +19,12 @@ time (330/331), and Heroism, Greater Heroism and the Potion of Heroism no longer
 Since v0.8.4, 130, 220, 301, 320 and the Tempus components 400–404 keep other mods' changes
 to what they patch; the bracers no longer stack with Haste cast first; and party physical
 resistance (310) leaves short immunity spells such as Divine Protection at 100%.
-New in v0.8.5: Chris Revisions (340), Christopher's own spell balance changes. Aid grants only
+Since v0.8.5, Chris Revisions (340) holds Christopher's own spell balance changes. Aid grants only
 hit points, Luck lasts 90 seconds, Bless lasts 30 seconds + 1 round per level, Bless and Chaotic
 Commands are open to druids again, and Prayer and Recitation no longer stack.
+New in v0.8.6: Time Stop and Haste effect clocks (360), an EEex component for 64-bit 2.7.3.0. In a
+Time Stop the frozen creatures' durations, poison, regeneration and repeated effects wait, and
+Haste and Slow no longer change how fast those effects run.
 Kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.

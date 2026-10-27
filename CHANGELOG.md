@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.8.6 — 2026-10-28
 
 - Add Time Stop and Haste effect clocks (360), an EEex component for BG2:EE /
   EET 2.7.3.0 (64-bit). In a Time Stop the frozen creatures' spell and item

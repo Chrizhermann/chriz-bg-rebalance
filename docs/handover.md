@@ -1,5 +1,25 @@
 # chriz-bg-rebalance — Handover
 
+## October 28 — v0.8.6: Time Stop and Haste effect clocks (360)
+
+Christopher approved this release for CEBG alpha.22 on 2026-10-27. It contains
+PR #18 (component 360, Time Stop and Haste effect clocks; entry below) and PR #17
+(the package scripts write the `.sha256` files with LF line endings). No other
+component changed. Tag `v0.8.6` and the GitHub release are made from this
+release PR's merge commit, after his OK to merge; if that happens on a later day,
+the changelog and release-note dates move with it.
+
+Verified: full regression 769 tests, OK, 26 skipped (private captures) with
+WeiDU 249. `tools/package_sr_antimagic.py` rebuilds v0.8.5's six published files byte for
+byte from its tag with that tag's scripts. With the current scripts the three
+zips are identical and only the `.sha256` files differ: they end in LF instead
+of CRLF (PR #17). The six v0.8.6 files are built the same way from a clean
+checkout of the new tag.
+
+Open:
+- Gameplay acceptance of 360 by Christopher (entry below).
+- The CEBG pin: the collection coordinator updates it for alpha.22.
+
 ## October 26 — Time Stop and Haste effect clocks (360, unreleased)
 
 Component 360 turns the lab's correction for every creature (research/timestop-lab, steps 6 and
