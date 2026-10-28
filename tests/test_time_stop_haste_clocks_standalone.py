@@ -1,4 +1,4 @@
-"""The standalone Time Stop/Haste package (live-patch/CBR_TIMESTOP) next to BG Rebalance's 360.
+"""The standalone True Time Stop package (live-patch/CBR_TRUE_TIMESTOP) next to BG Rebalance's 360.
 
 Disposable synthetic games only, never an installed playthrough. Every test of
 tests/test_time_stop_haste_clocks_installer.py runs once more with the package extracted over the
@@ -22,22 +22,22 @@ from tests import test_time_stop_haste_clocks_installer as main_installer
 from tests.test_time_stop_haste_clocks_installer import (PACKAGE_EXE, ROOT, SOURCES, TP2, WEIDU,
                                                          ClocksGame, tree)
 
-PACKAGE = ROOT / "live-patch/CBR_TIMESTOP"
-PACKAGE_TP2 = "CBR_TIMESTOP/setup-cbr_timestop.tp2"
-GUARD = "REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~cbr_timestop/setup-cbr_timestop.tp2~ 360) @9366"
+PACKAGE = ROOT / "live-patch/CBR_TRUE_TIMESTOP"
+PACKAGE_TP2 = "CBR_TRUE_TIMESTOP/setup-cbr_true_timestop.tp2"
+GUARD = "REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~cbr_true_timestop/setup-cbr_true_timestop.tp2~ 360) @9366"
 GUARD_TEXT = "is already installed by the other CBR installer"
 VERSION = re.search(r"VERSION ~([^~]+)~", (ROOT / TP2).read_text(encoding="utf-8")).group(1)
-ARCHIVE = f"CBR_TIMESTOP-{VERSION}-windows.zip"
+ARCHIVE = f"CBR_TRUE_TIMESTOP-{VERSION}-windows.zip"
 MEMBERS = {
     "LICENSE": ROOT / "LICENSE",
     "WEIDU-LICENSE.txt": ROOT / "WEIDU-LICENSE.txt",
     PACKAGE_EXE: WEIDU,
-    PACKAGE_TP2: PACKAGE / "setup-cbr_timestop.tp2",
-    "CBR_TIMESTOP/README.md": PACKAGE / "README.md",
-    "CBR_TIMESTOP/languages/english/setup.tra": ROOT / "chriz-bg-rebalance/languages/english/setup.tra",
-    "CBR_TIMESTOP/lib/time_stop_haste_clocks.tpa": ROOT / "chriz-bg-rebalance/lib/time_stop_haste_clocks.tpa",
-    "CBR_TIMESTOP/lua/CBRTC.lua": ROOT / "chriz-bg-rebalance/lua/CBRTC.lua",
-    "CBR_TIMESTOP/lua/M_CBRTC.lua": ROOT / "chriz-bg-rebalance/lua/M_CBRTC.lua",
+    PACKAGE_TP2: PACKAGE / "setup-cbr_true_timestop.tp2",
+    "CBR_TRUE_TIMESTOP/README.md": PACKAGE / "README.md",
+    "CBR_TRUE_TIMESTOP/languages/english/setup.tra": ROOT / "chriz-bg-rebalance/languages/english/setup.tra",
+    "CBR_TRUE_TIMESTOP/lib/time_stop_haste_clocks.tpa": ROOT / "chriz-bg-rebalance/lib/time_stop_haste_clocks.tpa",
+    "CBR_TRUE_TIMESTOP/lua/CBRTC.lua": ROOT / "chriz-bg-rebalance/lua/CBRTC.lua",
+    "CBR_TRUE_TIMESTOP/lua/M_CBRTC.lua": ROOT / "chriz-bg-rebalance/lua/M_CBRTC.lua",
 }
 _built: dict[str, Path] = {}
 
@@ -127,7 +127,7 @@ class PackageTests(unittest.TestCase):
             result = run_packager(output)
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         expected = {f"{name}-{VERSION}-windows.zip" for name in
-                    ("chriz-bg-rebalance", "CBR_SR_HARDINESS", "CBR_SR_ANTIMAGIC", "CBR_TIMESTOP")}
+                    ("chriz-bg-rebalance", "CBR_SR_HARDINESS", "CBR_SR_ANTIMAGIC", "CBR_TRUE_TIMESTOP")}
         self.assertEqual(expected, {path.name for path in first.glob("*.zip")})
         self.assertEqual({name + ".sha256" for name in expected}, {path.name for path in first.glob("*.sha256")})
         for name in expected:
@@ -146,9 +146,9 @@ class PackageTests(unittest.TestCase):
     def test_packager_refuses_mismatched_versions(self) -> None:
         import tools.package_timestop as packager
         root = self.temporary("cbr-timestop-version-")
-        (root / "live-patch/CBR_TIMESTOP").mkdir(parents=True)
+        (root / "live-patch/CBR_TRUE_TIMESTOP").mkdir(parents=True)
         (root / TP2).write_text("VERSION ~v9.9.9~\n", encoding="utf-8")
-        shutil.copy2(PACKAGE / "setup-cbr_timestop.tp2", root / "live-patch/CBR_TIMESTOP/setup-cbr_timestop.tp2")
+        shutil.copy2(PACKAGE / "setup-cbr_true_timestop.tp2", root / "live-patch/CBR_TRUE_TIMESTOP/setup-cbr_true_timestop.tp2")
         original = packager.ROOT
         packager.ROOT = root
         try:
@@ -160,7 +160,7 @@ class PackageTests(unittest.TestCase):
 
     def test_installers_make_the_same_checks(self) -> None:
         main = component((ROOT / TP2).read_text(encoding="utf-8"), 360)
-        package = component((PACKAGE / "setup-cbr_timestop.tp2").read_text(encoding="utf-8"), 360)
+        package = component((PACKAGE / "setup-cbr_true_timestop.tp2").read_text(encoding="utf-8"), 360)
         def predicates(lines: list[str]) -> list[str]:
             return [line for line in lines if line.startswith("REQUIRE_PREDICATE")]
         self.assertEqual(predicates(main)[:3], predicates(package)[:3])
@@ -168,23 +168,23 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(["REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 360) @9366"],
                          predicates(package)[3:])
         self.assertEqual(["LAF cbr_install_time_stop_haste_component END", "PRINT @9365"], main[-2:])
-        self.assertEqual(["LAF cbr_install_time_stop_haste_component STR_VAR source_dir = ~CBR_TIMESTOP/lua~ END",
+        self.assertEqual(["LAF cbr_install_time_stop_haste_component STR_VAR source_dir = ~CBR_TRUE_TIMESTOP/lua~ END",
                           "PRINT @9365"], package[-2:])
         # BEGIN, the three shared predicates, the guard, LAF and PRINT: nothing else in either.
         self.assertEqual(7, len(main))
         self.assertEqual(7, len(package))
 
     def test_weidu_logs_the_package_by_its_folder(self) -> None:
-        # A double-click on Setup-cbr_timestop.exe finds CBR_TIMESTOP/setup-cbr_timestop.tp2.
+        # A double-click on Setup-cbr_true_timestop.exe finds CBR_TRUE_TIMESTOP/setup-cbr_true_timestop.tp2.
         game = self.game(package=_built[ARCHIVE])
         transcript = self.install_package(game)
-        self.assert_installed(transcript, game, r"(?m)^~CBR_TIMESTOP/SETUP-CBR_TIMESTOP\.TP2~ #0 #360\b")
+        self.assert_installed(transcript, game, r"(?m)^~CBR_TRUE_TIMESTOP/SETUP-CBR_TRUE_TIMESTOP\.TP2~ #0 #360\b")
 
     def test_rebalance_refuses_while_the_package_is_installed(self) -> None:
         # Mod managers pass the tp2 path in other forms; WeiDU logs each as given.
-        for form, line in (("auto", r"~CBR_TIMESTOP/SETUP-CBR_TIMESTOP\.TP2~"),
-                           ("backslash", r"~CBR_TIMESTOP\\SETUP-CBR_TIMESTOP\.TP2~"),
-                           ("absolute", r"~[A-Z]:\\.*\\CBR_TIMESTOP\\SETUP-CBR_TIMESTOP\.TP2~")):
+        for form, line in (("auto", r"~CBR_TRUE_TIMESTOP/SETUP-CBR_TRUE_TIMESTOP\.TP2~"),
+                           ("backslash", r"~CBR_TRUE_TIMESTOP\\SETUP-CBR_TRUE_TIMESTOP\.TP2~"),
+                           ("absolute", r"~[A-Z]:\\.*\\CBR_TRUE_TIMESTOP\\SETUP-CBR_TRUE_TIMESTOP\.TP2~")):
             with self.subTest(form=form):
                 game = self.game(package=_built[ARCHIVE])
                 self.add_rebalance(game)
@@ -210,13 +210,13 @@ class PackageTests(unittest.TestCase):
                 transcript = self.rebalance(game, "--force-uninstall-list", tp2)
                 self.assertIn("exit 0", transcript, transcript)
                 self.assertEqual(game.before, tree(game.override))
-                self.assert_installed(self.install_package(game), game, r"(?m)^~CBR_TIMESTOP/SETUP-CBR_TIMESTOP\.TP2~ #0 #360\b")
+                self.assert_installed(self.install_package(game), game, r"(?m)^~CBR_TRUE_TIMESTOP/SETUP-CBR_TRUE_TIMESTOP\.TP2~ #0 #360\b")
 
     def test_package_installs_beside_other_rebalance_components(self) -> None:
         game = self.game(package=_built[ARCHIVE])
         (game.root / "WeiDU.log").write_text("~SETUP-CHRIZ-BG-REBALANCE.TP2~ #0 #340 // Chris Revisions\n"
                                              "~SETUP-CHRIZ-BG-REBALANCE.TP2~ #0 #320 // clouds\n", encoding="utf-8")
-        self.assert_installed(self.install_package(game), game, r"(?m)^~CBR_TIMESTOP/SETUP-CBR_TIMESTOP\.TP2~ #0 #360\b")
+        self.assert_installed(self.install_package(game), game, r"(?m)^~CBR_TRUE_TIMESTOP/SETUP-CBR_TRUE_TIMESTOP\.TP2~ #0 #360\b")
 
     def test_either_uninstall_keeps_the_other_when_both_are_logged(self) -> None:
         # Only an installer without the guard, BG Rebalance up to v0.8.6, can follow the package.
@@ -237,14 +237,14 @@ class PackageTests(unittest.TestCase):
                     transcript = self.rebalance(game, "--force-uninstall-list")
                     self.assertIn("exit 0", transcript, transcript)
                     self.assertEqual(package, in_override(game))
-                    self.assertRegex(game.active_log(), r"(?m)^~CBR_TIMESTOP/SETUP-CBR_TIMESTOP\.TP2~ #0 #360\b")
+                    self.assertRegex(game.active_log(), r"(?m)^~CBR_TRUE_TIMESTOP/SETUP-CBR_TRUE_TIMESTOP\.TP2~ #0 #360\b")
                     self.assertNotRegex(game.active_log(), r"REBALANCE\.TP2~ #0 #360\b")
                 else:
                     transcript = self.run_weidu(game, [str(game.root / PACKAGE_EXE)], "--force-uninstall-list")
                     self.assertIn("exit 0", transcript, transcript)
                     self.assertEqual(marked, in_override(game))
                     self.assertRegex(game.active_log(), r"(?m)^~SETUP-CHRIZ-BG-REBALANCE\.TP2~ #0 #360\b")
-                    self.assertNotRegex(game.active_log(), r"CBR_TIMESTOP\.TP2~ #0 #360\b")
+                    self.assertNotRegex(game.active_log(), r"CBR_TRUE_TIMESTOP\.TP2~ #0 #360\b")
                 self.assertEqual(set(game.before) | set(SOURCES), set(tree(game.override)))
                 for name, payload in game.before.items():
                     self.assertEqual(payload, tree(game.override)[name], name)

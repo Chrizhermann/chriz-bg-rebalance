@@ -21,7 +21,7 @@ from tests.test_tempus_holy_power_installer import ONE_EMPTY_STRING_TLK, _write_
 ROOT = Path(__file__).resolve().parents[1]
 WEIDU = ROOT / "weidu.exe"
 TP2 = "setup-chriz-bg-rebalance.tp2"
-PACKAGE_EXE = "Setup-cbr_timestop.exe"
+PACKAGE_EXE = "Setup-cbr_true_timestop.exe"
 SOURCES = {"CBRTC.LUA": ROOT / "chriz-bg-rebalance/lua/CBRTC.lua",
            "M_CBRTC.LUA": ROOT / "chriz-bg-rebalance/lua/M_CBRTC.lua"}
 STAMP_2730, STAMP_2660 = 0x6A18D73D, 0x609437B3
@@ -115,7 +115,7 @@ class TimeStopHasteClocksInstallerTests(unittest.TestCase):
     def assert_outside_unchanged(self, game: ClocksGame) -> None:
         after = {name: payload for name, payload in tree(game.root).items()
                  if not name.startswith(("OVERRIDE/", "WEIDU_EXTERNAL/")) and name not in
-                 ("WEIDU.LOG", "SETUP-CHRIZ-BG-REBALANCE.DEBUG", "SETUP-CBR_TIMESTOP.DEBUG",
+                 ("WEIDU.LOG", "SETUP-CHRIZ-BG-REBALANCE.DEBUG", "SETUP-CBR_TRUE_TIMESTOP.DEBUG",
                   "WEIDU.CONF")}
         self.assertEqual(after, game.outside)
 

@@ -1633,14 +1633,14 @@ BEGIN @340 DESIGNATED 340 GROUP @1300 LABEL ~cbr_chris_revisions~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9340
 LAF cbr_install_chris_revisions END
 
-// Time Stop and Haste effect clocks: research/10-timestop-haste-engine-clocks.md. The standalone
-// package live-patch/CBR_TIMESTOP installs the same two files with the same checks; each refuses
-// while the other is installed.
+// True Time Stop - fair Haste & Slow: research/10-timestop-haste-engine-clocks.md. The standalone
+// package live-patch/CBR_TRUE_TIMESTOP installs the same two files with the same checks; each
+// refuses while the other is installed.
 BEGIN @360 DESIGNATED 360 GROUP @1300 LABEL ~cbr_time_stop_haste_clocks~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9360
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9361
 // EEex's own 2.7.3.0 marker; earlier versions run another executable.
 REQUIRE_PREDICATE (FILE_EXISTS ~data/PATCH27.BIF~) @9362
-REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~cbr_timestop/setup-cbr_timestop.tp2~ 360) @9366
+REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~cbr_true_timestop/setup-cbr_true_timestop.tp2~ 360) @9366
 LAF cbr_install_time_stop_haste_component END
 PRINT @9365

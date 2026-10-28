@@ -1,4 +1,4 @@
-// Time Stop and Haste effect clocks (component 360): research/10-timestop-haste-engine-clocks.md.
+// True Time Stop - fair Haste & Slow (component 360): research/10-timestop-haste-engine-clocks.md.
 // Ships the correction core CBRTC.lua and its autoload M_CBRTC.lua; no resource, script or saved
 // game changes. On every start the correction checks EEex, the executable and its eight patch
 // windows itself and leaves the game native on anything unexpected, with the reason in the log
@@ -6,7 +6,7 @@
 // executable other than the 64-bit BG2:EE 2.7.3.0 build (Steam's Baldur.exe and GOG's
 // BaldurII.exe are byte-identical; EET runs the same file).
 // Two installers run this library: component 360 of setup-chriz-bg-rebalance.tp2 and the
-// standalone package live-patch/CBR_TIMESTOP. Both call cbr_install_time_stop_haste_component,
+// standalone package live-patch/CBR_TRUE_TIMESTOP. Both call cbr_install_time_stop_haste_component,
 // so they make the same checks and install the same two files under the same names; each keeps
 // its own REQUIRE_PREDICATEs, among them the guard against the other installer.
 DEFINE_ACTION_FUNCTION cbr_tsh_preflight_executable
