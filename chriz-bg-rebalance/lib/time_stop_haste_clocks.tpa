@@ -5,6 +5,10 @@
 // only. This read-only preflight refuses at install what can never pass that check: an
 // executable other than the 64-bit BG2:EE 2.7.3.0 build (Steam's Baldur.exe and GOG's
 // BaldurII.exe are byte-identical; EET runs the same file).
+// Two installers run this library: component 360 of setup-chriz-bg-rebalance.tp2 and the
+// standalone package live-patch/CBR_TIMESTOP. Both call cbr_install_time_stop_haste_component,
+// so they make the same checks and install the same two files under the same names; each keeps
+// its own REQUIRE_PREDICATEs, among them the guard against the other installer.
 DEFINE_ACTION_FUNCTION cbr_tsh_preflight_executable
   STR_VAR executable_path = ~~
 BEGIN
@@ -40,4 +44,21 @@ BEGIN
   OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
   COPY ~%source_dir%/CBRTC.lua~ ~%resource_dir%/CBRTC.lua~
        ~%source_dir%/M_CBRTC.lua~ ~%resource_dir%/M_CBRTC.lua~
+END
+
+// The component after its REQUIRE_PREDICATEs: the executable the loader starts, the read-only
+// preflight, then the two files from source_dir.
+DEFINE_ACTION_FUNCTION cbr_install_time_stop_haste_component
+  STR_VAR source_dir = ~chriz-bg-rebalance/lua~
+BEGIN
+  // Match the loader's canonical game names; do not probe an unrelated executable.
+  ACTION_IF (FILE_EXISTS ~Baldur.exe~) BEGIN
+    OUTER_SPRINT cbr_tsh_executable ~Baldur.exe~
+  END ELSE ACTION_IF (FILE_EXISTS ~BaldurII.exe~) BEGIN
+    OUTER_SPRINT cbr_tsh_executable ~BaldurII.exe~
+  END ELSE BEGIN
+    FAIL @9364
+  END
+  LAF cbr_tsh_preflight_executable STR_VAR executable_path = EVAL ~%cbr_tsh_executable%~ END
+  LAF cbr_install_time_stop_haste_clocks STR_VAR source_dir = EVAL ~%source_dir%~ END
 END

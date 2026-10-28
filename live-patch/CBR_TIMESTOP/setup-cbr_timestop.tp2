@@ -1,0 +1,19 @@
+BACKUP ~weidu_external/backup/cbr_timestop~
+AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
+VERSION ~v0.8.6~
+ALWAYS
+  INCLUDE ~CBR_TIMESTOP/lib/time_stop_haste_clocks.tpa~
+END
+LANGUAGE ~English~ ~english~ ~CBR_TIMESTOP/languages/english/setup.tra~
+
+// BG Rebalance's component 360 on its own, for games without BG Rebalance: the same checks and
+// the same two files under the same names (chriz-bg-rebalance/lib/time_stop_haste_clocks.tpa),
+// so the correction can never load twice. Each installer refuses while the other is installed.
+BEGIN @360 DESIGNATED 360 LABEL ~cbr_time_stop_haste_clocks_standalone~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9360
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9361
+// EEex's own 2.7.3.0 marker; earlier versions run another executable.
+REQUIRE_PREDICATE (FILE_EXISTS ~data/PATCH27.BIF~) @9362
+REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 360) @9366
+LAF cbr_install_time_stop_haste_component STR_VAR source_dir = ~CBR_TIMESTOP/lua~ END
+PRINT @9365

@@ -1633,21 +1633,14 @@ BEGIN @340 DESIGNATED 340 GROUP @1300 LABEL ~cbr_chris_revisions~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9340
 LAF cbr_install_chris_revisions END
 
-// Time Stop and Haste effect clocks: research/10-timestop-haste-engine-clocks.md.
+// Time Stop and Haste effect clocks: research/10-timestop-haste-engine-clocks.md. The standalone
+// package live-patch/CBR_TIMESTOP installs the same two files with the same checks; each refuses
+// while the other is installed.
 BEGIN @360 DESIGNATED 360 GROUP @1300 LABEL ~cbr_time_stop_haste_clocks~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9360
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9361
 // EEex's own 2.7.3.0 marker; earlier versions run another executable.
 REQUIRE_PREDICATE (FILE_EXISTS ~data/PATCH27.BIF~) @9362
-
-// Match the loader's canonical game names; do not probe an unrelated executable.
-ACTION_IF (FILE_EXISTS ~Baldur.exe~) BEGIN
-  OUTER_SPRINT cbr_tsh_executable ~Baldur.exe~
-END ELSE ACTION_IF (FILE_EXISTS ~BaldurII.exe~) BEGIN
-  OUTER_SPRINT cbr_tsh_executable ~BaldurII.exe~
-END ELSE BEGIN
-  FAIL @9364
-END
-LAF cbr_tsh_preflight_executable STR_VAR executable_path = EVAL ~%cbr_tsh_executable%~ END
-LAF cbr_install_time_stop_haste_clocks END
+REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~cbr_timestop/setup-cbr_timestop.tp2~ 360) @9366
+LAF cbr_install_time_stop_haste_component END
 PRINT @9365

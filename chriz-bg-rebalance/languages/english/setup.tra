@@ -306,3 +306,4 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9363 = ~Time Stop and Haste effect clocks supports only the 64-bit BG2:EE 2.7.3.0 executable (Steam and GOG ship the same file); %executable_path% is a different build. Nothing was installed.~
 @9364 = ~Time Stop and Haste effect clocks could not find the game's executable. BG2:EE / EET requires Baldur.exe or BaldurII.exe.~
 @9365 = ~Time Stop and Haste effect clocks installed. It switches itself on whenever the game starts through InfinityLoader; if anything does not match, the game stays unchanged and only the log says why. Install it before starting a playthrough: adding or removing it during one is not supported.~
+@9366 = ~Time Stop and Haste effect clocks is already installed by the other CBR installer (BG Rebalance's component 360 or its standalone package). Use one installer for it, never both.~
