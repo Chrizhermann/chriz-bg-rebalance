@@ -299,7 +299,7 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @3412 = ~Prayer does not stack with Recitation. A creature with Recitation's bonus gains no bonus from Prayer, a creature with Recitation's penalty suffers no penalty from Prayer, and a later Recitation replaces Prayer's bonus or penalty.~
 @3500 = ~%cr_spell%: druids can learn and cast it again.~
 @3501 = ~%cr_spell% is already available to druids; nothing changed.~
-@360 = ~True Time Stop - fair Haste & Slow~
+@360 = ~True Time Stop - fair Haste & Slow: Time Stop also stops the frozen creatures' spell durations, poison and regeneration; Haste and Slow no longer speed up or slow down periodic effects (EEex, BG2:EE / EET 2.7.3.0)~
 @9360 = ~True Time Stop supports BG2:EE / EET only.~
 @9361 = ~True Time Stop requires EEex. Install EEex before this component.~
 @9362 = ~True Time Stop requires game version 2.7.3.0 (data/PATCH27.BIF is missing). Earlier versions are not supported.~
