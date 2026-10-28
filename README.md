@@ -95,7 +95,8 @@ Both preserve protection removal, Spell Shield interception and installed invisi
 targeting. Pierce Shield and Entropy Shield are unchanged. Native
 first-hit/refresh/save-load acceptance remains separate from automated checks.
 
-Build the full mod and separate tail patches with `python tools/package_sr_antimagic.py`.
+Build the full mod, the separate tail patches and the standalone Time Stop and Haste package with
+`python tools/package_timestop.py`.
 For an existing stack, use the [anti-magic tail patch](live-patch/CBR_SR_ANTIMAGIC/README.md)
 after authorization, without reinstalling SR or existing Rebalance components.
 The [collection handover](docs/handovers/2026-10-06-sr-antimagic-collection.md) covers
@@ -248,6 +249,14 @@ through loading a save from the main menu and corrected Spell Revisions' Time St
 Speed. Design and evidence:
 [research note 10](research/10-timestop-haste-engine-clocks.md) and the
 [Time Stop lab](research/timestop-lab/README.md).
+
+**Standalone.** Games without BG Rebalance can use the
+[standalone package](live-patch/CBR_TIMESTOP/README.md), `CBR_TIMESTOP-v<version>-windows.zip`:
+the same correction with the same checks and the same two files, installed by its own
+`Setup-cbr_timestop.exe`. Use one of the two installers; each refuses while the other is
+installed. In its own lab, plain BG2:EE 2.7.3.0 with EEex 1.3.1, the package installed from its
+archive switched the correction on at start, corrected the same cases, and uninstalled back to
+the files from before the install.
 
 ### Component 320 — Damageable combat clouds
 

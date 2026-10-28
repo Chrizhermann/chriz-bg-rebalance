@@ -1,5 +1,37 @@
 # chriz-bg-rebalance — Handover
 
+## October 28 — Standalone Time Stop and Haste package (unreleased)
+
+Christopher asked on 2026-10-28, through the collection coordinator, for 360 on its own, for
+EEex players without CEBG or BG Rebalance, provided it is shown to work standalone with EEex.
+`live-patch/CBR_TIMESTOP` (working name; Christopher may rename it) is that package: its own
+`setup-cbr_timestop.tp2` with 360's checks, installing the same two files under the same names
+(`CBRTC.lua`, `M_CBRTC.lua`). The implementation is shared: both installers call
+`cbr_install_time_stop_haste_component` in `lib/time_stop_haste_clocks.tpa`, and
+`tools/package_timestop.py` assembles the package from the library, the strings and the Lua at
+build time, as the SR packagers do. Each installer refuses while the other is installed
+(@9366); WeiDU logs the package as `~CBR_TIMESTOP/SETUP-CBR_TIMESTOP.TP2~`, and the guard in
+360 matches that and the backslash and absolute forms mod managers write.
+
+Release: `python tools/package_timestop.py` now builds all four packages and their checksums
+(it runs the antimagic packager, which runs the Hardiness one), so the next release carries
+`CBR_TIMESTOP-v<version>-windows.zip` and its `.sha256`. The release sets VERSION in
+`live-patch/CBR_TIMESTOP/setup-cbr_timestop.tp2` with the other installers; the packager
+refuses a mismatch. The package README names no version.
+
+Lab, 2026-10-28: a new disposable lab with plain BG2:EE 2.7.3.0 and EEex 1.3.1
+(`CBR-TimeStop-Standalone-2730`), the package installed from its archive by its own setup. The
+correction was on at start with one log line; stop, Haste, Slow, cloud, walking and attacking,
+and save and reload matched 360's lab run; the uninstall put `override` back. A save made
+without the package worked with it (its running effects waited out a stop), and after the
+uninstall a save made with the package loaded and played natively. WeiDU checked both guards in
+the same lab. EET was not run with the package: same executable, and its detection is covered by
+the installer tests. Details: the lab notes, section "Standalone package `CBR_TIMESTOP`".
+
+Open for Christopher: the names (folder, tp2, `Setup-cbr_timestop.exe`, the zip); the package
+README's section on adding or removing it during a playthrough, next to the installer note
+both installers share (@9365: "adding or removing it during one is not supported").
+
 ## October 28 — v0.8.6: Time Stop and Haste effect clocks (360)
 
 Christopher approved this release for CEBG alpha.22 on 2026-10-27. It contains

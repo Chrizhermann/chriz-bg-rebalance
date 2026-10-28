@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Add a standalone download of Time Stop and Haste effect clocks (360),
+  `CBR_TIMESTOP-v<version>-windows.zip`, for BG2:EE / EET 2.7.3.0 games with
+  EEex and without BG Rebalance. It makes the same checks as 360 and installs
+  the same two files, `CBRTC.lua` and its autoload `M_CBRTC.lua`, with its own
+  `Setup-cbr_timestop.exe`.
+- 360 now refuses to install while the standalone package is installed, and
+  the package refuses while 360 is installed, so the correction is never
+  installed twice.
+
 ## v0.8.6 — 2026-10-28
 
 - Add Time Stop and Haste effect clocks (360), an EEex component for BG2:EE /

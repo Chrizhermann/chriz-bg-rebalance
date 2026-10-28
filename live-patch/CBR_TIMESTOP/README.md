@@ -37,7 +37,7 @@ package:
 2. Extract `CBR_TIMESTOP-v<version>-windows.zip` into the game folder, the one with
    `Baldur.exe` or `BaldurII.exe` and `InfinityLoader.exe`. It contains `Setup-cbr_timestop.exe`
    and the `CBR_TIMESTOP` folder.
-3. Run `Setup-cbr_timestop.exe` and install the component. It appends one entry at the end of
+3. Run `Setup-cbr_timestop.exe` and answer **I** (Install). It appends one entry at the end of
    `WeiDU.log` and keeps its backup apart from other mods.
 4. Start the game through InfinityLoader.
 
@@ -53,13 +53,31 @@ InfinityLoader's console says what happened:
 [CBR Time Stop/Haste] off, the game stays native: <reason>
 ```
 
+To keep the console output in a file, set `LogFile=InfinityLoader.log` in `InfinityLoader.ini`
+(it is blank by default). The line then appears in `InfinityLoader.log` in the game folder,
+after the prefix `INFO: LPRINT:`.
+
 There is never a message in the game. Should the correction hit an error while playing, it
 switches itself off until the game restarts, the game continues natively, and the log says why.
 
 ## Uninstall
 
-Close the game, run `Setup-cbr_timestop.exe` again and choose to uninstall the component. WeiDU
-removes both files.
+Close the game, run `Setup-cbr_timestop.exe` again and answer **U** (Uninstall). WeiDU removes
+both files.
+
+## Adding or removing it during a playthrough
+
+The installer says to install the correction before starting a playthrough: adding or removing
+it during one is not supported. In the lab, one save each way loaded and played:
+
+- A save made before the package was installed, loaded with it: the correction was on, and the
+  effects already running in that save waited out a Time Stop cast right after the load, then
+  ran on with the time they had left.
+- A save made with the package, loaded after uninstalling it: the game ran natively. The saved
+  effects ended at the times stored in the save, which already included the wait of a corrected
+  Time Stop before the save.
+
+Neither save was made during a Time Stop.
 
 ## With BG Rebalance
 
@@ -76,6 +94,16 @@ once, and uninstalling either one leaves the other's files in place.
 - Equipping or unequipping items during a stop was not tested in the lab.
 - A slowed creature's pulses can come a tick or two late around a stop, and after a load an
   effect that was already running can move its remaining pulses by one.
+
+## Tested
+
+In a disposable lab: Steam BG2:EE 2.7.3.0 with EEex 1.3.1 (LuaJIT) and no other mod, played by
+the lab's test tools. The package was installed from its archive as above, and the game started
+three times: before the install, with the package and after the uninstall. With the package,
+Time Stop, Haste, Slow, a cloud through a stop, walking and attacking, and a save with its
+reload behaved as described at the top. Uninstalling put `override` back to the files it had
+before the install. On EET the same two files ran as BG Rebalance's 360 in a fully modded game;
+this installer ran on BG2:EE only.
 
 Design and lab evidence: research note 10 and the Time Stop lab notes in
 [BG Rebalance](https://github.com/Chrizhermann/chriz-bg-rebalance).
