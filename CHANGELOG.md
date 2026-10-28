@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.8.7 — 2026-10-29
 
 - Rename 360 to True Time Stop – fair Haste & Slow (it was Time Stop and Haste
   effect clocks). Its label `cbr_time_stop_haste_clocks` and its two Lua files
