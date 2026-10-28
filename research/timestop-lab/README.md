@@ -1439,17 +1439,122 @@ here is which spells use engine Haste: without it, Haste and Improved Haste do (
 `CBRTHST` and `CBRTIHS`). That engine Haste was covered in this lab, which has no Spell
 Revisions, in step 5 and in the component run above, and by Oil of Speed in this stack.
 
+## Standalone package `CBR_TIMESTOP` (2026-10-28)
+
+`live-patch/CBR_TIMESTOP` installs 360's two files with its own installer, for games without BG
+Rebalance; Christopher wanted it offered provided it is shown to work standalone with EEex. It
+ran in a new disposable lab, `CBR-TimeStop-Standalone-2730`: `Prepare-Lab.ps1` built it from
+Steam BG2:EE 2.7.3.0 with EEex 1.3.1 (components 0, 1 and 8, LuaJIT) and no other mod, and
+`Stage-Diagnostics.ps1` staged the lab layer, the fixtures, the QA menu and the Remote Console.
+The harness ran from a copy of this folder with two changes that are not committed: its identity
+(lab folder, profile and engine name `CBR TimeStop Standalone Lab 2730`, lab ID
+`cbr-timestop-standalone-2730`) and one QA binding, `CBRTSQA_START_LOAD` on `START_SP`'s Load
+Game button, to load a save right after the start. The lab's `InfinityLoader.ini` names a log
+file. The drives reused step 2's fresh party, step 6's setup and cases, the component run's
+cases and step 7's cloud; step 2's `prep` (4.7 s of play) has to come before the setup, since
+Imoen is still busy right after the opening (`CONTROLLER_BUSY`).
+
+The package was built by `tools/package_timestop.py` at commit `020a555`
+(`CBR_TIMESTOP-v0.8.6-windows.zip`, SHA-256
+`a60cda91b8083f358a131d78f1b9b077b041c0144cefcf0e184afced88310893`). It was extracted over the
+lab folder, and `Setup-cbr_timestop.exe` ran without arguments, its questions answered as a
+player would. Each game run was one quiet run through `lab_quiet_run.py run` under the exclusive
+lock (`bg_lab_slots.py exclusive take`), released right after the game exited: 311 s, 904 s and
+150 s for runs A to C, 230 s and 282 s for the two world-rate runs below. No guard tripped (audio
+peak 0.0, pointer clip unchanged, nothing left in the job) and no dialog appeared.
+
+Afterwards the package was renamed `CBR_TRUE_TIMESTOP` and 360 "True Time Stop – fair Haste &
+Slow" (Christopher, 2026-10-28); no new lab run was needed, since the game runs only the two Lua
+files, which did not change, and the real-WeiDU package tests cover the new names, paths and
+guards.
+
+| Step | Result |
+|---|---|
+| Run A, no package | At the fresh main menu the lab layer had loaded `CBRTC.lua` and nothing had started it; no line of the correction in the log. Fresh party, setup (P0, Imoen, the bats D1 to D3, the mephit E), the four families on P0, regeneration and poison on D1, disease and the repeated EFF on D2, 2 s of play, a quick save: save A, the families 133 ticks before their deadline. |
+| Install | WeiDU 24900 added `M_CBRTC.lua`; `CBRTC.lua` kept its bytes (the lab layer stages the same file). `WeiDU.log` got `~CBR_TIMESTOP/SETUP-CBR_TIMESTOP.TP2~ #0 #360`. |
+| Run B, the package installed | Below. |
+| Uninstall | WeiDU removed the package's two files. `override` was back to its files from before the install, except `eeex_remote_ready.json`, which the Remote Console rewrites at each start; the log entry became a `// Recently Uninstalled` note. |
+| Run C, after the uninstall | Below. |
+
+**Run B.** At the fresh main menu, before any request, the package's autoload had started the
+correction: queued, started, installed and enabled, no session ended, no creature known yet;
+`cor op=install` only reported the running core. The log had one line, `on (BG2:EE/EET
+2.7.3.0)`. Save A loaded from the main menu with the correction on: 41 creatures, no error.
+
+| Case | Result |
+|---|---|
+| `a_stop` | Imoen's stop right after the load, over save A's families: P0, D1, D2 and the rest frozen 88 or 89 ticks. The saved deadlines moved by each creature's frozen ticks (P0's from 33328 to 33416), the remaining pulses came 30 ticks apart after the stop, and the workers ended with the moved deadlines. |
+| `stop`, `stop_load` | P0 and E frozen 90 ticks, D1 and D2 89; each family 6 units, deadlines moved by exactly the frozen ticks; Imoen and the immune D3 unchanged. |
+| `haste`, `haste_load` | Two passes per tick on the hasted P0, D1 and E, the second suppressed; 6 units per family on the unhasted grid (in `haste` D1's regeneration 5: its poison unit at +29 reseeded it, as P0's did in step 6's `fix_hst`); deadlines unchanged. |
+| `slow` | The slowed P0, D1 and E were updated every second tick; 6 units per family, the first interval 14 or 16 where a boundary fell on a skipped tick, as in `fix_slw`. |
+| `cloud` | P0's Incendiary Cloud (`SPWI810`) on P0 and Imoen, Imoen's stop 120 of her updates later: 10 explosions 76 active ticks apart, the one across the 90-tick stop 165 world ticks after the last; no explosion and no HP change inside the stop; the cloud ran to its end. |
+| `save`, `load` | A corrected stop over P0's four and D1's two families, then a quick save: save B, its deadlines moved by 90 and 89. The reload kept the correction on, and the effects ended with the moved deadlines. |
+| `act_nrm`, `act_hst`, `act_slw` | P0 walked 192 pixels and attacked the held bat: 21, 11 and 43 ticks of walking; 4 hits (gaps 40, 60, 100), 5 (55, 41, 50, 50) and 2 (80); its regeneration on the unhasted grid (6, 6 and, before the record ended, 5 units). Step 5 had 22 and 11 ticks, 4 and 5 hits. |
+
+`decode_cor.py` and `decode_cloud.py` decoded all 13 records with no issue and no mismatch. During
+`act_slw` the world ran at about half its usual rate, 155 ticks in 19.7 s of the game's clock,
+against 14 to 15 ticks a second in the other cases and in the walk back right after it, with P0
+still slowed. The clocks count world ticks, so this shortened the record, not the spacing.
+
+**World rate.** Two later runs in this lab measured the world rate of these cases, in world ticks
+per second of the game's clock between the run and pause requests, with the same harness copy,
+save B and run B's setup. Run 1 ran natively, with neither the package nor 360 installed: the
+same walk and attack without the correction's requests. Run 2 had the package installed again
+from the same archive and repeated run B's drive with the recorder on, then once with it off.
+
+| 16 s of walking and attacking | Run B, package | Run 1, native | Run 2, package |
+|---|---|---|---|
+| `act_nrm` | 14.5 | 14.9 | 14.9 |
+| `act_slw` | 7.9 | 14.9 | 15.0 |
+| `act_slw`, again | | 15.0 | 15.0 |
+| `act_slw`, recorder off | | | 15.0 |
+| The walks back after them | 15.0 to 15.5 | 14.4 to 15.0 | 15.0 to 15.1 |
+
+The half rate did not repeat, natively or with the package, and no stretch of runs 1 and 2 ran
+below 14.4 ticks a second. Run B had other stretches below 13 ticks a second, none with a slowed
+creature (in `cloud`, `save`, `stop_load` and around `act_nrm`; the slowest, the halt after
+`act_nrm`, had 14 ticks in 2.3 s), and so had run C, natively (inside its stop: 29 ticks in
+6.7 s). In them the game also answered the console late: its clock passed 3.7 s more than
+`act_slw`'s 16 s wait and 3.2 s more than run C's 3.5 s, against 0.8 to 1.3 s in runs 1 and 2.
+So the whole game ran slower then, not only the world. The cause was not found; runs B and C did
+not record the PC's load. In runs 1 and 2 the game used 0.5 to 0.7 of a core while the whole PC
+used 2 to 6.4 of its 16 logical processors. After run 2 the package was uninstalled again, with
+the same result as before: the lab is native.
+
+**Run C.** At the fresh main menu the correction was not running, as in run A. Save B loaded
+from the main menu and played on natively. Its families, 88 ticks left, ended at the deadline
+stored in the save, which held the 90 frozen ticks of `save`'s corrected stop. New families
+followed, and Imoen's stop 45 of her updates later left every deadline where it was: the frozen
+creatures' effects lost the stop's time and ended 12 s after their application, as natively.
+The log had no line of the correction and no Lua error.
+
+**Guards.** Before these runs WeiDU alone checked both guards in this lab. With the package
+installed, BG Rebalance's 360 from this branch was skipped with @9366; with that 360 installed,
+the package was skipped. `override` did not change either time.
+
+**EET** was not run with the package; no EET lab was built for it. EET runs the same executable,
+and the correction checks only the executable and EEex. What differs is the installer's game
+detection (`GAME_IS ~bg2ee eet~`), covered by the synthetic EET game of
+`tests/test_time_stop_haste_clocks_installer.py`, whose tests also run against the package; the
+files and paths it uses are the same, and the full CEBG stack on EET above ran the same two files
+as 360.
+
 ## Host validation
 
 ```powershell
 pwsh -NoProfile -File research/timestop-lab/Test-LabGuards.ps1
-$env:CBRTS_TEST_DEPS = '%USERPROFILE%\AppData\Local\Temp\cbr-timestop-research-20260926\pylibs'
+python -m pip install --no-deps --require-hashes --only-binary=:all: --target <deps folder> -r research/timestop-lab/requirements-native.txt
+$env:CBRTS_TEST_DEPS = '<deps folder>'
 python -B -m unittest discover -s research/timestop-lab -p 'test_*.py' -v
 ```
 
+`<deps folder>` is any folder outside `%TEMP%`: Windows Storage Sense can empty `%TEMP%`, which
+removed the earlier copy. `requirements-native.txt` pins the four native-analysis libraries with
+their SHA-256 hashes.
+
 Python 3.11, `lupa.luajit21`, Capstone 5.0.9, pefile 2024.8.26,
 Keystone 0.9.2 and Unicorn 2.1.4 were used. The extra native-analysis libraries
-are in the temporary dependency directory, not installed into the game.
+are in the dependency folder, not installed into the game.
 For the 1.3.1 pin on 2026-10-20, the same versions were installed with
 `pip install --no-deps --require-hashes --target <dir>` beside lupa 2.8 (LuaJIT 2.1):
 all 14 guard groups and all 32 Python tests passed. With the smoke-test fixes above there

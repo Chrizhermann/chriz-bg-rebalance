@@ -22,9 +22,10 @@ resistance (310) leaves short immunity spells such as Divine Protection at 100%.
 Since v0.8.5, Chris Revisions (340) holds Christopher's own spell balance changes. Aid grants only
 hit points, Luck lasts 90 seconds, Bless lasts 30 seconds + 1 round per level, Bless and Chaotic
 Commands are open to druids again, and Prayer and Recitation no longer stack.
-New in v0.8.6: Time Stop and Haste effect clocks (360), an EEex component for 64-bit 2.7.3.0. In a
-Time Stop the frozen creatures' durations, poison, regeneration and repeated effects wait, and
-Haste and Slow no longer change how fast those effects run.
+New in v0.8.6: True Time Stop – fair Haste & Slow (360; released as Time Stop and Haste effect
+clocks), an EEex component for 64-bit 2.7.3.0. In a Time Stop the frozen creatures' durations,
+poison, regeneration and repeated effects wait, and Haste and Slow no longer change how fast
+those effects run.
 Kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.
@@ -77,7 +78,7 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 330 / 331 | Cross-cutting audits | Potion uniqueness: one dose of each temporary potion type at a time (331: Potions of Genius still stack) | Automated checks and lab install passed; in-game check pending |
 | 332 | Cross-cutting audits | Heroism family: Heroism, Greater Heroism and the Potion of Heroism do not combine | Automated checks and lab install passed; in-game check pending |
 | 340 | Cross-cutting audits | Chris Revisions: Aid hit points only, Luck 90 seconds, Bless 30 seconds + 1 round per level, Bless and Chaotic Commands for druids, Prayer and Recitation not cumulative | Automated checks passed; in-game check pending |
-| 360 | Cross-cutting audits | EEex Time Stop and Haste effect clocks: frozen creatures' effects wait out a Time Stop; Haste and Slow leave periodic effects at the normal rate | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 and in the full CEBG stack with Spell Revisions; gameplay acceptance pending |
+| 360 | Cross-cutting audits | EEex True Time Stop – fair Haste & Slow: frozen creatures' effects wait out a Time Stop; Haste and Slow leave periodic effects at the normal rate | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 and in the full CEBG stack with Spell Revisions; gameplay acceptance pending |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
@@ -95,7 +96,8 @@ Both preserve protection removal, Spell Shield interception and installed invisi
 targeting. Pierce Shield and Entropy Shield are unchanged. Native
 first-hit/refresh/save-load acceptance remains separate from automated checks.
 
-Build the full mod and separate tail patches with `python tools/package_sr_antimagic.py`.
+Build the full mod, the separate tail patches and the standalone True Time Stop package with
+`python tools/package_timestop.py`.
 For an existing stack, use the [anti-magic tail patch](live-patch/CBR_SR_ANTIMAGIC/README.md)
 after authorization, without reinstalling SR or existing Rebalance components.
 The [collection handover](docs/handovers/2026-10-06-sr-antimagic-collection.md) covers
@@ -187,7 +189,7 @@ Bless at their next level-up; this is not yet checked in the game.
 [Prayer and Recitation](research/2026-10-23-prayer-recitation.md),
 [Bless](research/2026-10-23-bless.md).
 
-### Component 360 — Time Stop and Haste effect clocks
+### Component 360 — True Time Stop – fair Haste & Slow
 
 Christopher's rule: in a Time Stop everything but the caster and Time-Stop-immune creatures
 stops; Haste and Slow change only actions and movement.
@@ -248,6 +250,14 @@ through loading a save from the main menu and corrected Spell Revisions' Time St
 Speed. Design and evidence:
 [research note 10](research/10-timestop-haste-engine-clocks.md) and the
 [Time Stop lab](research/timestop-lab/README.md).
+
+**Standalone.** Games without BG Rebalance can use the
+[standalone package](live-patch/CBR_TRUE_TIMESTOP/README.md),
+`CBR_TRUE_TIMESTOP-v<version>-windows.zip`: the same correction with the same checks and the
+same two files, installed by its own `Setup-cbr_true_timestop.exe`. Use one of the two
+installers; each refuses while the other is installed. In its own lab, plain BG2:EE 2.7.3.0
+with EEex 1.3.1, the package installed from its archive switched the correction on at start,
+corrected the same cases, and uninstalled back to the files from before the install.
 
 ### Component 320 — Damageable combat clouds
 
