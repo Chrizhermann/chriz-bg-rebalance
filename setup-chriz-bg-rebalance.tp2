@@ -31,6 +31,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/potion_uniqueness.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/chris_revisions.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/time_stop_haste_clocks.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/class_weapon_access.tpa~
 
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
@@ -1517,6 +1518,28 @@ ACTION_FOR_EACH cbr_f_item IN BLUN14 BLUN30C BLUN30D BLUN30 BEGIN
       STR_VAR save_note = EVAL ~%cbr_f_save_note%~ haste_note = EVAL ~%cbr_f_haste_note%~
     END
   BUT_ONLY
+END
+
+// Druids train and wield axes and short bows, fighter/druids also long
+// bows. Works with and without Artisan's Kitpack permission system.
+BEGIN @410 DESIGNATED 410 GROUP @1400 LABEL ~cbr_druid_weapon_access~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9490
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~WEAPPROF.2DA~) AND (FILE_EXISTS_IN_GAME ~KITLIST.2DA~)) @9491
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~class~ ~DRUID~) > 0) AND (IDS_OF_SYMBOL (~class~ ~FIGHTER_DRUID~) > 0)) @9492
+
+OUTER_SET cbr_cwa_druid_class = IDS_OF_SYMBOL (~class~ ~DRUID~)
+OUTER_SET cbr_cwa_fighter_druid_class = IDS_OF_SYMBOL (~class~ ~FIGHTER_DRUID~)
+OUTER_SPRINT cbr_cwa_axe_word @4101
+OUTER_SPRINT cbr_cwa_short_bow_word @4102
+OUTER_SPRINT cbr_cwa_long_bow_phrase @4103
+LAF cbr_apply_druid_weapon_access
+  INT_VAR
+    druid_class         = cbr_cwa_druid_class
+    fighter_druid_class = cbr_cwa_fighter_druid_class
+  STR_VAR
+    axe_word        = EVAL ~%cbr_cwa_axe_word%~
+    short_bow_word  = EVAL ~%cbr_cwa_short_bow_word%~
+    long_bow_phrase = EVAL ~%cbr_cwa_long_bow_phrase%~
 END
 
 // The provider is independently selectable; it changes no class defaults.
