@@ -1456,12 +1456,17 @@ Imoen is still busy right after the opening (`CONTROLLER_BUSY`).
 
 The package was built by `tools/package_timestop.py` at commit `020a555`
 (`CBR_TIMESTOP-v0.8.6-windows.zip`, SHA-256
-`a60cda91b8083f358a131d78f1b9b077b041c0144cefcf0e184afced88310893`); later commits changed only
-its `README.md`. It was extracted over the lab folder, and `Setup-cbr_timestop.exe` ran without
-arguments, its questions answered as a player would. Each game run was one quiet run through
-`lab_quiet_run.py run` under the exclusive lock (`bg_lab_slots.py exclusive take`), released
-right after the game exited: 311 s, 904 s and 150 s. No guard tripped (audio peak 0.0, pointer
-clip unchanged, nothing left in the job) and no dialog appeared.
+`a60cda91b8083f358a131d78f1b9b077b041c0144cefcf0e184afced88310893`). It was extracted over the
+lab folder, and `Setup-cbr_timestop.exe` ran without arguments, its questions answered as a
+player would. Each game run was one quiet run through `lab_quiet_run.py run` under the exclusive
+lock (`bg_lab_slots.py exclusive take`), released right after the game exited: 311 s, 904 s and
+150 s for runs A to C, 230 s and 282 s for the two world-rate runs below. No guard tripped (audio
+peak 0.0, pointer clip unchanged, nothing left in the job) and no dialog appeared.
+
+Afterwards the package was renamed `CBR_TRUE_TIMESTOP` and 360 "True Time Stop – fair Haste &
+Slow" (Christopher, 2026-10-28); no new lab run was needed, since the game runs only the two Lua
+files, which did not change, and the real-WeiDU package tests cover the new names, paths and
+guards.
 
 | Step | Result |
 |---|---|
@@ -1489,15 +1494,39 @@ correction: queued, started, installed and enabled, no session ended, no creatur
 `decode_cor.py` and `decode_cloud.py` decoded all 13 records with no issue and no mismatch. During
 `act_slw` the world ran at about half its usual rate, 155 ticks in 19.7 s of the game's clock,
 against 14 to 15 ticks a second in the other cases and in the walk back right after it, with P0
-still slowed; the cause was not found. The clocks count world ticks, so this shortened the
-record, not the spacing.
+still slowed. The clocks count world ticks, so this shortened the record, not the spacing.
+
+**World rate.** Two later runs in this lab measured the world rate of these cases, in world ticks
+per second of the game's clock between the run and pause requests, with the same harness copy,
+save B and run B's setup. Run 1 ran natively, with neither the package nor 360 installed: the
+same walk and attack without the correction's requests. Run 2 had the package installed again
+from the same archive and repeated run B's drive with the recorder on, then once with it off.
+
+| 16 s of walking and attacking | Run B, package | Run 1, native | Run 2, package |
+|---|---|---|---|
+| `act_nrm` | 14.5 | 14.9 | 14.9 |
+| `act_slw` | 7.9 | 14.9 | 15.0 |
+| `act_slw`, again | | 15.0 | 15.0 |
+| `act_slw`, recorder off | | | 15.0 |
+| The walks back after them | 15.0 to 15.5 | 14.4 to 15.0 | 15.0 to 15.1 |
+
+The half rate did not repeat, natively or with the package, and no stretch of runs 1 and 2 ran
+below 14.4 ticks a second. Run B had other stretches below 13 ticks a second, none with a slowed
+creature (in `cloud`, `save`, `stop_load` and around `act_nrm`; the slowest, the halt after
+`act_nrm`, had 14 ticks in 2.3 s), and so had run C, natively (inside its stop: 29 ticks in
+6.7 s). In them the game also answered the console late: its clock passed 3.7 s more than
+`act_slw`'s 16 s wait and 3.2 s more than run C's 3.5 s, against 0.8 to 1.3 s in runs 1 and 2.
+So the whole game ran slower then, not only the world. The cause was not found; runs B and C did
+not record the PC's load. In runs 1 and 2 the game used 0.5 to 0.7 of a core while the whole PC
+used 2 to 6.4 of its 16 logical processors. After run 2 the package was uninstalled again, with
+the same result as before: the lab is native.
 
 **Run C.** At the fresh main menu the correction was not running, as in run A. Save B loaded
 from the main menu and played on natively. Its families, 88 ticks left, ended at the deadline
 stored in the save, which held the 90 frozen ticks of `save`'s corrected stop. New families
 followed, and Imoen's stop 45 of her updates later left every deadline where it was: the frozen
-creatures' effects lost the stop's time and ended 12 s after their application, as natively. The log had no line of the
-correction and no Lua error.
+creatures' effects lost the stop's time and ended 12 s after their application, as natively.
+The log had no line of the correction and no Lua error.
 
 **Guards.** Before these runs WeiDU alone checked both guards in this lab. With the package
 installed, BG Rebalance's 360 from this branch was skipped with @9366; with that 360 installed,
@@ -1514,13 +1543,18 @@ as 360.
 
 ```powershell
 pwsh -NoProfile -File research/timestop-lab/Test-LabGuards.ps1
-$env:CBRTS_TEST_DEPS = '%USERPROFILE%\AppData\Local\Temp\cbr-timestop-research-20260926\pylibs'
+python -m pip install --no-deps --require-hashes --only-binary=:all: --target <deps folder> -r research/timestop-lab/requirements-native.txt
+$env:CBRTS_TEST_DEPS = '<deps folder>'
 python -B -m unittest discover -s research/timestop-lab -p 'test_*.py' -v
 ```
 
+`<deps folder>` is any folder outside `%TEMP%`: Windows Storage Sense can empty `%TEMP%`, which
+removed the earlier copy. `requirements-native.txt` pins the four native-analysis libraries with
+their SHA-256 hashes.
+
 Python 3.11, `lupa.luajit21`, Capstone 5.0.9, pefile 2024.8.26,
 Keystone 0.9.2 and Unicorn 2.1.4 were used. The extra native-analysis libraries
-are in the temporary dependency directory, not installed into the game.
+are in the dependency folder, not installed into the game.
 For the 1.3.1 pin on 2026-10-20, the same versions were installed with
 `pip install --no-deps --require-hashes --target <dir>` beside lupa 2.8 (LuaJIT 2.1):
 all 14 guard groups and all 32 Python tests passed. With the smoke-test fixes above there
