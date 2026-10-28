@@ -5,7 +5,7 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.8.6.** Pierce Magic has a bounded five-round MR
+**Version: v0.8.7.** Pierce Magic has a bounded five-round MR
 reduction; Spellstrike causes 15% spell failure for two rounds.
 Hardiness has a recommended 40% physical-only
 profile, a 30% alternative, and an optional SR damage-resistance add-on.
@@ -22,10 +22,13 @@ resistance (310) leaves short immunity spells such as Divine Protection at 100%.
 Since v0.8.5, Chris Revisions (340) holds Christopher's own spell balance changes. Aid grants only
 hit points, Luck lasts 90 seconds, Bless lasts 30 seconds + 1 round per level, Bless and Chaotic
 Commands are open to druids again, and Prayer and Recitation no longer stack.
-New in v0.8.6: True Time Stop – fair Haste & Slow (360; released as Time Stop and Haste effect
-clocks), an EEex component for 64-bit 2.7.3.0. In a Time Stop the frozen creatures' durations,
+Since v0.8.6, True Time Stop – fair Haste & Slow (360; released as Time Stop and Haste effect
+clocks) is an EEex component for 64-bit 2.7.3.0. In a Time Stop the frozen creatures' durations,
 poison, regeneration and repeated effects wait, and Haste and Slow no longer change how fast
 those effects run.
+New in v0.8.7: 360's new name, and a standalone download of it for BG2:EE / EET 2.7.3.0 games
+with EEex and without BG Rebalance, `CBR_TRUE_TIMESTOP-v0.8.7-windows.zip`. Each of the two
+installers refuses while the other is installed.
 Kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.

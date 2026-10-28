@@ -1,5 +1,29 @@
 # chriz-bg-rebalance — Handover
 
+## October 29 — v0.8.7: True Time Stop – fair Haste & Slow, standalone download
+
+Christopher approved this release on 2026-10-28. It contains PR #20: the standalone package
+`CBR_TRUE_TIMESTOP` for games with EEex and without BG Rebalance, and 360's new name, True Time
+Stop – fair Haste & Slow, with its description kept after the name (entry below). 360's
+behaviour is unchanged, and no other component changed. Tag `v0.8.7` and the GitHub release are
+made from this release PR's merge commit, after his OK to merge; if that happens on a later
+day, the changelog date moves with it (the release notes name no date).
+
+Verified: full regression 787 tests, OK, 26 skipped (private captures) with WeiDU 249. A dry
+run from a clean clone of the committed tree builds the eight v0.8.7 files with
+`tools/package_timestop.py`; `sha256sum -c` accepts the four checksum files, and no text file in
+the archives names a local path. v0.8.6's three zips, rebuilt from its tag, match the published
+ones byte for byte. Against them, the full package changes only in `README.md`, `CHANGELOG.md`,
+`setup-chriz-bg-rebalance.tp2` (the version, 360's guard, and 360's install steps, now in the
+library), `lib/time_stop_haste_clocks.tpa` (the shared install function) and `setup.tra` (360's
+strings and @9366); the two SR tails only in their README, installer version and the shared
+`setup.tra`. `CBR_TRUE_TIMESTOP` is new; its setup executable, licenses and both Lua files are
+byte-identical to those of the archive the standalone lab installed.
+
+Open:
+- Gameplay acceptance of 360 by Christopher (entries below).
+- The CEBG pin and 360's title there: the collection coordinator updates them.
+
 ## October 28 — True Time Stop – fair Haste & Slow, standalone package (unreleased)
 
 Christopher asked on 2026-10-28, through the collection coordinator, for 360 on its own, for
@@ -44,6 +68,7 @@ No new lab run followed the rename: the game runs only the two Lua files, which 
 Details: the lab notes, section "Standalone package `CBR_TIMESTOP`". The lab's native-analysis
 test libraries are pinned in `research/timestop-lab/requirements-native.txt`; install them
 outside `%TEMP%`, which Windows Storage Sense can empty.
+
 ## October 28 — v0.8.6: Time Stop and Haste effect clocks (360)
 
 Christopher approved this release for CEBG alpha.22 on 2026-10-27. It contains
