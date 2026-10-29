@@ -1,0 +1,933 @@
+// chriz-bg-rebalance — weapon access for druids and fighter/druids (410).
+//
+// Christopher's rules (2026-10-27):
+//   410  Druids and every druid kit add axes and short bows; fighter/druids
+//        and fighter/druid kits add axes, short bows and long bows. Each new
+//        weapon is capped like the class's existing weapons: the highest cap
+//        its WEAPPROF column gives any single weapon (vanilla: druid 1,
+//        fighter/druid 2). Higher caps another mod already set are kept.
+//
+// Whether a character may wield a weapon follows the installed usability
+// system:
+//   * With Artisan's Kitpack (C0PR#CL.SPL), an item's equipped opcode 319
+//     (power 3) gate checks a permission stat that C0PR#CL grants with opcode
+//     326 records. 410 adds class grants (CLASS = druid, fighter/druid) for
+//     the new weapons. Each grant is cloned from C0PR#CL's own class grants
+//     and inserted after its last weapon-grant record in every ability that
+//     carries them, so a trailing record such as the kit-grant re-application
+//     stays last. Every existing record stays byte-identical. The grants keep
+//     the Kitpack's special value, so its own regeneration from WEAPPROF
+//     reproduces them.
+//   * A weapon without that gate (no Kitpack, or an item created after its
+//     sweep) still carries vanilla restrictions. 410 lifts only the druid and
+//     fighter/druid ones on fighter-usable axes and bows: the class usability
+//     bit and an equipped opcode 319 "not usable by" that class. Weapons
+//     fighters cannot use, and kit, race, alignment and NPC restrictions stay.
+//
+// Descriptions: English class texts get the new weapons as a new
+// string that the text tables point to; the original string stays for
+// anything else that uses it. Other languages and other wording keep their
+// text, and the install log says so.
+//
+// Requires tempus_holy_power.tpa (cbr_validate_spl_v1,
+// cbr_find_or_append_splprot), which the main installer INCLUDEs first.
+
+// ---------------------------------------------------------------------------
+// WEAPPROF.2DA geometry
+// ---------------------------------------------------------------------------
+//
+// The header row carries one token fewer than the data rows (no header cell
+// above the row-label column): reading at (columns - 1) yields header + data,
+// reading at columns yields the data rows only. Header token i is data
+// column i + 1; KITLIST PROFICIENCY is a header-token index (engine
+// semantics), so a kit's data column is PROFICIENCY + 1.
+
+DEFINE_PATCH_FUNCTION cbr_cwa_weapprof_column
+  STR_VAR
+    name = ~~
+  RET
+    data_column
+BEGIN
+  COUNT_2DA_COLS cbr_cwa_cols
+  PATCH_IF (cbr_cwa_cols < 5) BEGIN
+    PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: expected a row-label column plus ID and class columns, found %cbr_cwa_cols% columns.~
+  END
+  SET cbr_cwa_wide_cols = cbr_cwa_cols - 1
+  READ_2DA_ENTRIES_NOW cbr_cwa_wide cbr_cwa_wide_cols
+  PATCH_IF (cbr_cwa_wide < 2) BEGIN
+    PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: no header/data rows.~
+  END
+  SET data_column = "-1"
+  FOR (cbr_cwa_col = 0; cbr_cwa_col < cbr_cwa_wide_cols; ++cbr_cwa_col) BEGIN
+    READ_2DA_ENTRY_FORMER cbr_cwa_wide 0 cbr_cwa_col cbr_cwa_header
+    PATCH_IF (~%cbr_cwa_header%~ STRING_EQUAL_CASE ~%name%~) BEGIN
+      PATCH_IF (data_column >= 0) BEGIN
+        PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: duplicate %name% column.~
+      END
+      SET data_column = cbr_cwa_col + 1
+    END
+  END
+END
+
+// Header name of a data column, or the empty string when out of range.
+DEFINE_PATCH_FUNCTION cbr_cwa_weapprof_header_of
+  INT_VAR
+    data_column = 0
+  RET
+    name
+BEGIN
+  SPRINT name ~~
+  COUNT_2DA_COLS cbr_cwa_cols
+  SET cbr_cwa_wide_cols = cbr_cwa_cols - 1
+  PATCH_IF (data_column >= 1 && data_column <= cbr_cwa_wide_cols) BEGIN
+    READ_2DA_ENTRIES_NOW cbr_cwa_wide cbr_cwa_wide_cols
+    READ_2DA_ENTRY_FORMER cbr_cwa_wide 0 (data_column - 1) name
+  END
+END
+
+// The data row whose ID cell (data column 1) is `proficiency`. Exactly one is
+// required: the engine maps a proficiency to its row by this ID.
+DEFINE_PATCH_FUNCTION cbr_cwa_weapprof_row
+  INT_VAR
+    proficiency = 0
+  RET
+    data_row
+BEGIN
+  COUNT_2DA_COLS cbr_cwa_cols
+  READ_2DA_ENTRIES_NOW cbr_cwa_data cbr_cwa_cols
+  SET data_row = "-1"
+  FOR (cbr_cwa_row = 0; cbr_cwa_row < cbr_cwa_data; ++cbr_cwa_row) BEGIN
+    READ_2DA_ENTRY_FORMER cbr_cwa_data cbr_cwa_row 1 cbr_cwa_id
+    PATCH_IF ((IS_AN_INT ~%cbr_cwa_id%~) && cbr_cwa_id = proficiency) BEGIN
+      PATCH_IF (data_row >= 0) BEGIN
+        PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: proficiency %proficiency% has more than one row.~
+      END
+      SET data_row = cbr_cwa_row
+    END
+  END
+  PATCH_IF (data_row < 0) BEGIN
+    PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: no row for proficiency %proficiency%.~
+  END
+END
+
+// Individual weapon proficiencies (BASTARDSWORD 89 .. SLING 107, CLUB 115).
+// The BG1 composite rows, the fighting styles and the EXTRA rows are not
+// weapons in this sense and are never read or written here.
+DEFINE_PATCH_FUNCTION cbr_cwa_is_weapon_proficiency
+  INT_VAR
+    proficiency = 0
+  RET
+    is_weapon
+BEGIN
+  SET is_weapon = ((proficiency >= 89 && proficiency <= 107) || proficiency = 115)
+END
+
+// The highest cap one column gives any individual weapon; with
+// filter_column, only weapons that column also allows count.
+DEFINE_PATCH_FUNCTION cbr_cwa_column_weapon_cap
+  INT_VAR
+    data_column   = 0
+    filter_column = "-1"
+  RET
+    cap
+BEGIN
+  SET cap = 0
+  COUNT_2DA_COLS cbr_cwa_cols
+  READ_2DA_ENTRIES_NOW cbr_cwa_data cbr_cwa_cols
+  FOR (cbr_cwa_row = 0; cbr_cwa_row < cbr_cwa_data; ++cbr_cwa_row) BEGIN
+    READ_2DA_ENTRY_FORMER cbr_cwa_data cbr_cwa_row 1 cbr_cwa_id
+    SET cbr_cwa_weapon = 0
+    PATCH_IF (IS_AN_INT ~%cbr_cwa_id%~) BEGIN
+      LPF cbr_cwa_is_weapon_proficiency INT_VAR proficiency = cbr_cwa_id RET cbr_cwa_weapon = is_weapon END
+    END
+    PATCH_IF (cbr_cwa_weapon) BEGIN
+      READ_2DA_ENTRY_FORMER cbr_cwa_data cbr_cwa_row data_column cbr_cwa_value
+      PATCH_IF !(IS_AN_INT ~%cbr_cwa_value%~) BEGIN
+        PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: proficiency %cbr_cwa_id% has a non-numeric cell in column %data_column%.~
+      END
+      SET cbr_cwa_counted = 1
+      PATCH_IF (filter_column >= 0) BEGIN
+        READ_2DA_ENTRY_FORMER cbr_cwa_data cbr_cwa_row filter_column cbr_cwa_filter
+        PATCH_IF !(IS_AN_INT ~%cbr_cwa_filter%~) BEGIN
+          PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: proficiency %cbr_cwa_id% has a non-numeric cell in column %filter_column%.~
+        END
+        SET cbr_cwa_counted = (cbr_cwa_filter > 0)
+      END
+      PATCH_IF (cbr_cwa_counted && cbr_cwa_value > cap) BEGIN
+        SET cap = cbr_cwa_value
+      END
+    END
+  END
+END
+
+// Read one cell; with `minimum` >= 0 raise it to at least that value, with
+// `exact` >= 0 set it to exactly that value. verify_only = 1 fails instead of
+// writing. Cells already at their target are never written, so an
+// already-transformed table stays byte-identical.
+DEFINE_PATCH_FUNCTION cbr_cwa_set_cell
+  INT_VAR
+    data_row    = 0
+    data_column = 0
+    minimum     = "-1"
+    exact       = "-1"
+    verify_only = 0
+  RET
+    changed
+BEGIN
+  SET changed = 0
+  COUNT_2DA_COLS cbr_cwa_cols
+  READ_2DA_ENTRY data_row data_column cbr_cwa_cols cbr_cwa_value
+  PATCH_IF !(IS_AN_INT ~%cbr_cwa_value%~) BEGIN
+    PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: non-numeric cell at row %data_row%, column %data_column%.~
+  END
+  SET cbr_cwa_target = cbr_cwa_value
+  PATCH_IF (minimum >= 0 && cbr_cwa_value < minimum) BEGIN
+    SET cbr_cwa_target = minimum
+  END
+  PATCH_IF (exact >= 0) BEGIN
+    SET cbr_cwa_target = exact
+  END
+  PATCH_IF (cbr_cwa_target != cbr_cwa_value) BEGIN
+    PATCH_IF (verify_only) BEGIN
+      PATCH_FAIL ~CBR WEAPPROF.2DA verification failed: row %data_row%, column %data_column% holds %cbr_cwa_value%, expected %cbr_cwa_target%.~
+    END
+    SET_2DA_ENTRY data_row data_column cbr_cwa_cols ~%cbr_cwa_target%~
+    SET changed = 1
+  END
+END
+
+// ---------------------------------------------------------------------------
+// KITLIST.2DA
+// ---------------------------------------------------------------------------
+//
+// Fills cbr_cwa_kit_name/_column/_class for every data row whose PROFICIENCY
+// and CLASS cells are numeric; cbr_cwa_kits is the count. The column holds
+// the WEAPPROF data column (PROFICIENCY + 1). Columns are found by header
+// name, so their order is not assumed.
+DEFINE_ACTION_FUNCTION cbr_cwa_read_kits
+  RET
+    cbr_cwa_kits
+  RET_ARRAY
+    cbr_cwa_kit_name
+    cbr_cwa_kit_column
+    cbr_cwa_kit_class
+BEGIN
+  OUTER_SET cbr_cwa_kits = 0
+  COPY_EXISTING ~KITLIST.2DA~ ~override~
+    COUNT_2DA_COLS cbr_cwa_kl_cols
+    SET cbr_cwa_kl_wide_cols = cbr_cwa_kl_cols - 1
+    READ_2DA_ENTRIES_NOW cbr_cwa_kl_wide cbr_cwa_kl_wide_cols
+    SET cbr_cwa_kl_name_col = "-1"
+    SET cbr_cwa_kl_prof_col = "-1"
+    SET cbr_cwa_kl_class_col = "-1"
+    PATCH_IF (cbr_cwa_kl_wide > 0) BEGIN
+      FOR (cbr_cwa_col = 0; cbr_cwa_col < cbr_cwa_kl_wide_cols; ++cbr_cwa_col) BEGIN
+        READ_2DA_ENTRY_FORMER cbr_cwa_kl_wide 0 cbr_cwa_col cbr_cwa_header
+        PATCH_IF (~%cbr_cwa_header%~ STRING_EQUAL_CASE ~ROWNAME~) BEGIN
+          SET cbr_cwa_kl_name_col = cbr_cwa_col + 1
+        END
+        PATCH_IF (~%cbr_cwa_header%~ STRING_EQUAL_CASE ~PROFICIENCY~) BEGIN
+          SET cbr_cwa_kl_prof_col = cbr_cwa_col + 1
+        END
+        PATCH_IF (~%cbr_cwa_header%~ STRING_EQUAL_CASE ~CLASS~) BEGIN
+          SET cbr_cwa_kl_class_col = cbr_cwa_col + 1
+        END
+      END
+    END
+    PATCH_IF (cbr_cwa_kl_name_col < 0 || cbr_cwa_kl_prof_col < 0 || cbr_cwa_kl_class_col < 0) BEGIN
+      PATCH_FAIL ~CBR KITLIST.2DA validation failed: ROWNAME, PROFICIENCY or CLASS column header is missing.~
+    END
+    READ_2DA_ENTRIES_NOW cbr_cwa_kl cbr_cwa_kl_cols
+    FOR (cbr_cwa_row = 0; cbr_cwa_row < cbr_cwa_kl; ++cbr_cwa_row) BEGIN
+      READ_2DA_ENTRY_FORMER cbr_cwa_kl cbr_cwa_row cbr_cwa_kl_name_col cbr_cwa_name
+      READ_2DA_ENTRY_FORMER cbr_cwa_kl cbr_cwa_row cbr_cwa_kl_prof_col cbr_cwa_prof
+      READ_2DA_ENTRY_FORMER cbr_cwa_kl cbr_cwa_row cbr_cwa_kl_class_col cbr_cwa_class
+      PATCH_IF ((IS_AN_INT ~%cbr_cwa_prof%~) && (IS_AN_INT ~%cbr_cwa_class%~)) BEGIN
+        SPRINT $cbr_cwa_kit_name(~%cbr_cwa_kits%~) ~%cbr_cwa_name%~
+        SET $cbr_cwa_kit_column(~%cbr_cwa_kits%~) = cbr_cwa_prof + 1
+        SET $cbr_cwa_kit_class(~%cbr_cwa_kits%~) = cbr_cwa_class
+        SET cbr_cwa_kits += 1
+      END
+    END
+  BUT_ONLY
+END
+
+// WEAPPROF columns that belong to a base class (or multiclass) rather than to
+// a kit. A kit row may point at one of these to reuse it; changing such a
+// column would change every character of that class.
+DEFINE_PATCH_FUNCTION cbr_cwa_is_class_column_name
+  STR_VAR
+    name = ~~
+  RET
+    is_class
+BEGIN
+  SET is_class = 0
+  PATCH_FOR_EACH cbr_cwa_class_name IN
+      MAGE FIGHTER CLERIC THIEF BARD PALADIN DRUID RANGER FIGHTER_MAGE
+      FIGHTER_CLERIC FIGHTER_THIEF FIGHTER_MAGE_THIEF MAGE_THIEF CLERIC_MAGE
+      CLERIC_THIEF FIGHTER_DRUID FIGHTER_MAGE_CLERIC CLERIC_RANGER MONK SHAMAN
+      SORCERER BEGIN
+    PATCH_IF (~%name%~ STRING_EQUAL_CASE ~%cbr_cwa_class_name%~) BEGIN
+      SET is_class = 1
+    END
+  END
+END
+
+// The WEAPPROF data columns of every kit of `kit_class` that can be changed
+// on its own, deduplicated, as cbr_cwa_owned_column (count cbr_cwa_owned).
+// A column is left out, with a log line, when it is a class column (it
+// follows that class) or when a kit of a class other than
+// allowed_class_a/allowed_class_b uses it too. Expects cbr_cwa_read_kits'
+// arrays in scope.
+DEFINE_ACTION_FUNCTION cbr_cwa_owned_kit_columns
+  INT_VAR
+    kit_class       = 0
+    allowed_class_a = 0
+    allowed_class_b = 0
+    log_component   = 0
+  RET
+    cbr_cwa_owned
+  RET_ARRAY
+    cbr_cwa_owned_column
+BEGIN
+  OUTER_SET cbr_cwa_owned = 0
+  OUTER_FOR (cbr_cwa_k = 0; cbr_cwa_k < cbr_cwa_kits; ++cbr_cwa_k) BEGIN
+    ACTION_IF ($cbr_cwa_kit_class(~%cbr_cwa_k%~) = kit_class) BEGIN
+      OUTER_SET cbr_cwa_column = $cbr_cwa_kit_column(~%cbr_cwa_k%~)
+      OUTER_SPRINT cbr_cwa_kit $cbr_cwa_kit_name(~%cbr_cwa_k%~)
+      COPY_EXISTING ~WEAPPROF.2DA~ ~override~
+        LPF cbr_cwa_weapprof_header_of INT_VAR data_column = cbr_cwa_column RET cbr_cwa_header = name END
+        PATCH_IF (~%cbr_cwa_header%~ STR_EQ ~~) BEGIN
+          PATCH_FAIL ~CBR KITLIST.2DA validation failed: kit %cbr_cwa_kit% points at WEAPPROF column %cbr_cwa_column%, which does not exist.~
+        END
+        LPF cbr_cwa_is_class_column_name STR_VAR name = EVAL ~%cbr_cwa_header%~ RET cbr_cwa_is_class = is_class END
+      BUT_ONLY
+      OUTER_SET cbr_cwa_shared = 0
+      OUTER_FOR (cbr_cwa_j = 0; cbr_cwa_j < cbr_cwa_kits; ++cbr_cwa_j) BEGIN
+        OUTER_SET cbr_cwa_other_class = $cbr_cwa_kit_class(~%cbr_cwa_j%~)
+        ACTION_IF ($cbr_cwa_kit_column(~%cbr_cwa_j%~) = cbr_cwa_column
+                && cbr_cwa_other_class != allowed_class_a
+                && cbr_cwa_other_class != allowed_class_b) BEGIN
+          OUTER_SET cbr_cwa_shared = 1
+        END
+      END
+      OUTER_SET cbr_cwa_seen = 0
+      OUTER_FOR (cbr_cwa_j = 0; cbr_cwa_j < cbr_cwa_owned; ++cbr_cwa_j) BEGIN
+        ACTION_IF ($cbr_cwa_owned_column(~%cbr_cwa_j%~) = cbr_cwa_column) BEGIN
+          OUTER_SET cbr_cwa_seen = 1
+        END
+      END
+      ACTION_IF (cbr_cwa_is_class) BEGIN
+        PRINT ~cbr %log_component%: kit %cbr_cwa_kit% uses the class column %cbr_cwa_header%; it follows that class.~
+      END ELSE ACTION_IF (cbr_cwa_shared) BEGIN
+        PRINT ~cbr %log_component%: kit %cbr_cwa_kit% shares WEAPPROF column %cbr_cwa_header% with a kit of another class; left unchanged.~
+      END ELSE ACTION_IF (!cbr_cwa_seen) BEGIN
+        OUTER_SET $cbr_cwa_owned_column(~%cbr_cwa_owned%~) = cbr_cwa_column
+        OUTER_SET cbr_cwa_owned += 1
+      END
+    END
+  END
+END
+
+// ---------------------------------------------------------------------------
+// SPLPROT.2DA rows the grants test
+// ---------------------------------------------------------------------------
+
+// Every row of the SPLPROT buffer with the given meaning, as " r1 r2 ".
+DEFINE_PATCH_FUNCTION cbr_cwa_splprot_rows
+  INT_VAR
+    stat     = 0
+    value    = 0
+    relation = 0
+  RET
+    rows
+BEGIN
+  SPRINT rows ~ ~
+  COUNT_2DA_COLS cbr_cwa_cols
+  PATCH_IF (cbr_cwa_cols != 4) BEGIN
+    PATCH_FAIL ~CBR SPLPROT.2DA validation failed: expected row label plus STAT VALUE RELATION columns.~
+  END
+  READ_2DA_ENTRIES_NOW cbr_cwa_rows 4
+  FOR (cbr_cwa_row = 0; cbr_cwa_row < cbr_cwa_rows; ++cbr_cwa_row) BEGIN
+    READ_2DA_ENTRY_FORMER cbr_cwa_rows cbr_cwa_row 1 cbr_cwa_stat
+    READ_2DA_ENTRY_FORMER cbr_cwa_rows cbr_cwa_row 2 cbr_cwa_value
+    READ_2DA_ENTRY_FORMER cbr_cwa_rows cbr_cwa_row 3 cbr_cwa_relation
+    PATCH_IF ((IS_AN_INT ~%cbr_cwa_stat%~) && (IS_AN_INT ~%cbr_cwa_value%~) && (IS_AN_INT ~%cbr_cwa_relation%~)) BEGIN
+      PATCH_IF (cbr_cwa_stat = stat && cbr_cwa_value = value && cbr_cwa_relation = relation) BEGIN
+        SPRINT rows ~%rows%%cbr_cwa_row% ~
+      END
+    END
+  END
+END
+
+// "CLASS (0x10D) = parameter 1": the row a new grant uses (the first with
+// that meaning, appended when there is none) and every row with that
+// meaning, so grants another mod wrote against an equivalent row are
+// recognized.
+DEFINE_ACTION_FUNCTION cbr_cwa_grant_rows
+  RET
+    class_row
+    class_rows
+BEGIN
+  COPY_EXISTING ~SPLPROT.2DA~ ~override~
+    LPF cbr_find_or_append_splprot
+      INT_VAR stat = 0x10d value = "-1" relation = 1
+      STR_VAR row_label = ~CBR_CWA_CLASS_EQ~
+      RET class_row = row_index
+    END
+    LPF cbr_cwa_splprot_rows INT_VAR stat = 0x10d value = "-1" relation = 1 RET class_rows = rows END
+  BUT_ONLY
+END
+
+// ---------------------------------------------------------------------------
+// C0PR#CL.SPL permission grants (Artisan's Kitpack)
+// ---------------------------------------------------------------------------
+
+// Insert a copy of the record at `source_index` (or a zeroed record) at
+// absolute effect index `insert_index`, inside header `header_index`'s slice
+// (first <= insert_index <= first + count). Every other header and the
+// casting slice starting at or after the insertion point move by one record.
+DEFINE_PATCH_FUNCTION cbr_cwa_insert_record
+  INT_VAR
+    header_index   = 0
+    ability_offset = 0
+    ability_count  = 0
+    effect_offset  = 0
+    insert_index   = 0
+    source_index   = "-1"
+  RET
+    inserted_offset
+BEGIN
+  SET cbr_cwa_header = ability_offset + (header_index * 0x28)
+  READ_SHORT (cbr_cwa_header + 0x1e) cbr_cwa_count
+  READ_SHORT (cbr_cwa_header + 0x20) cbr_cwa_first
+  PATCH_IF (insert_index < cbr_cwa_first || insert_index > (cbr_cwa_first + cbr_cwa_count)) BEGIN
+    PATCH_FAIL ~CBR C0PR#CL.SPL: insertion index %insert_index% lies outside header %header_index%.~
+  END
+  SET inserted_offset = effect_offset + (insert_index * 0x30)
+  INSERT_BYTES inserted_offset 0x30
+  PATCH_IF (source_index >= 0) BEGIN
+    SET cbr_cwa_source = effect_offset + (source_index * 0x30)
+    PATCH_IF (source_index >= insert_index) BEGIN
+      SET cbr_cwa_source += 0x30
+    END
+    FOR (cbr_cwa_byte = 0; cbr_cwa_byte < 0x30; cbr_cwa_byte += 4) BEGIN
+      READ_LONG (cbr_cwa_source + cbr_cwa_byte) cbr_cwa_value
+      WRITE_LONG (inserted_offset + cbr_cwa_byte) cbr_cwa_value
+    END
+  END
+  WRITE_SHORT (cbr_cwa_header + 0x1e) (cbr_cwa_count + 1)
+  FOR (cbr_cwa_other = 0; cbr_cwa_other < ability_count; ++cbr_cwa_other) BEGIN
+    PATCH_IF (cbr_cwa_other != header_index) BEGIN
+      SET cbr_cwa_other_header = ability_offset + (cbr_cwa_other * 0x28)
+      READ_SHORT (cbr_cwa_other_header + 0x20) cbr_cwa_other_first
+      PATCH_IF (cbr_cwa_other_first >= insert_index) BEGIN
+        WRITE_SHORT (cbr_cwa_other_header + 0x20) (cbr_cwa_other_first + 1)
+      END
+    END
+  END
+  READ_SHORT 0x6e cbr_cwa_casting_first
+  READ_SHORT 0x70 cbr_cwa_casting_count
+  PATCH_IF (cbr_cwa_casting_count > 0 && cbr_cwa_casting_first >= insert_index) BEGIN
+    WRITE_SHORT 0x6e (cbr_cwa_casting_first + 1)
+  END
+END
+
+// Make every ability of C0PR#CL that carries weapon-grant records (opcode 321
+// or 326 aimed at a C0PR#<number> permission spell) also grant `permission`
+// when SPLPROT row `condition_row` holds for `condition_value`. A header that
+// already applies `permission` for that value through any row with the same
+// meaning (`condition_rows`) is left alone, so reruns and grants another mod
+// made are never duplicated. The new record is a copy of the header's last
+// class grant (opcode 326 on a permission spell, parameter 1 > 0, a
+// `class_rows` row), or a plain opcode 326 when the header has none, with
+// parameters and resource replaced (special kept). It goes
+// right after the header's last weapon-grant record. verify_only = 1 counts
+// headers that lack the grant instead of writing.
+DEFINE_PATCH_FUNCTION cbr_cwa_ensure_permission_grant
+  INT_VAR
+    condition_value = 0
+    condition_row   = 0
+    verify_only     = 0
+  STR_VAR
+    condition_rows = ~~
+    class_rows     = ~~
+    permission     = ~~
+  RET
+    inserted
+    missing
+BEGIN
+  SET inserted = 0
+  SET missing = 0
+  SPRINT cbr_cwa_permission ~%permission%~
+  TO_UPPER cbr_cwa_permission
+  LPF cbr_validate_spl_v1
+    STR_VAR resource_name = ~C0PR#CL.SPL~
+    RET
+      cbr_cwa_ab_off = ability_offset
+      cbr_cwa_ab_cnt = ability_count
+      cbr_cwa_fx_off = effect_offset
+  END
+  SET cbr_cwa_carrying = 0
+  FOR (cbr_cwa_h = 0; cbr_cwa_h < cbr_cwa_ab_cnt; ++cbr_cwa_h) BEGIN
+    SET cbr_cwa_header = cbr_cwa_ab_off + (cbr_cwa_h * 0x28)
+    READ_SHORT (cbr_cwa_header + 0x1e) cbr_cwa_count
+    READ_SHORT (cbr_cwa_header + 0x20) cbr_cwa_first
+    SET cbr_cwa_last = "-1"
+    SET cbr_cwa_template = "-1"
+    SET cbr_cwa_present = 0
+    FOR (cbr_cwa_i = cbr_cwa_first; cbr_cwa_i < (cbr_cwa_first + cbr_cwa_count); ++cbr_cwa_i) BEGIN
+      SET cbr_cwa_record = cbr_cwa_fx_off + (cbr_cwa_i * 0x30)
+      READ_SHORT cbr_cwa_record cbr_cwa_opcode
+      READ_LONG (cbr_cwa_record + 0x04) cbr_cwa_p1
+      READ_LONG (cbr_cwa_record + 0x08) cbr_cwa_p2
+      READ_ASCII (cbr_cwa_record + 0x14) cbr_cwa_resource (8) NULL
+      TO_UPPER cbr_cwa_resource
+      // STRING_MATCHES_REGEXP and STRING_CONTAINS_REGEXP are 0 on a match.
+      SET cbr_cwa_weapon_spell = ((~%cbr_cwa_resource%~ STRING_MATCHES_REGEXP ~^C0PR#[0-9]+$~) = 0)
+      SET cbr_cwa_class_test = ((~%class_rows%~ STRING_CONTAINS_REGEXP ~ %cbr_cwa_p2% ~) = 0)
+      SET cbr_cwa_condition_test = ((~%condition_rows%~ STRING_CONTAINS_REGEXP ~ %cbr_cwa_p2% ~) = 0)
+      PATCH_IF (cbr_cwa_weapon_spell && (cbr_cwa_opcode = 321 || cbr_cwa_opcode = 326)) BEGIN
+        SET cbr_cwa_last = cbr_cwa_i
+      END
+      PATCH_IF (cbr_cwa_weapon_spell && cbr_cwa_opcode = 326 && cbr_cwa_p1 > 0 && cbr_cwa_class_test) BEGIN
+        SET cbr_cwa_template = cbr_cwa_i
+      END
+      PATCH_IF (cbr_cwa_opcode = 326 && cbr_cwa_p1 = condition_value && cbr_cwa_condition_test
+             && ~%cbr_cwa_resource%~ STR_EQ ~%cbr_cwa_permission%~) BEGIN
+        SET cbr_cwa_present = 1
+      END
+    END
+    PATCH_IF (cbr_cwa_last >= 0) BEGIN
+      SET cbr_cwa_carrying += 1
+      PATCH_IF (!cbr_cwa_present) BEGIN
+        PATCH_IF (verify_only) BEGIN
+          SET missing += 1
+        END ELSE BEGIN
+          LPF cbr_cwa_insert_record
+            INT_VAR
+              header_index   = cbr_cwa_h
+              ability_offset = cbr_cwa_ab_off
+              ability_count  = cbr_cwa_ab_cnt
+              effect_offset  = cbr_cwa_fx_off
+              insert_index   = cbr_cwa_last + 1
+              source_index   = cbr_cwa_template
+            RET cbr_cwa_new = inserted_offset
+          END
+          PATCH_IF (cbr_cwa_template < 0) BEGIN
+            // Preset target, instant, always applies: the Kitpack's grant shape.
+            WRITE_SHORT cbr_cwa_new 326
+            WRITE_BYTE  (cbr_cwa_new + 0x02) 2
+            WRITE_BYTE  (cbr_cwa_new + 0x12) 100
+          END
+          WRITE_LONG (cbr_cwa_new + 0x04) condition_value
+          WRITE_LONG (cbr_cwa_new + 0x08) condition_row
+          WRITE_ASCIIE (cbr_cwa_new + 0x14) ~%cbr_cwa_permission%~ #8
+          SET inserted += 1
+        END
+      END
+    END
+  END
+  PATCH_IF (cbr_cwa_carrying = 0) BEGIN
+    PATCH_FAIL ~CBR C0PR#CL.SPL has no ability with weapon permission grants; this Artisan's Kitpack layout is not recognized, so no grant was added.~
+  END
+END
+
+// ---------------------------------------------------------------------------
+// Items without the Kitpack gate (component 410)
+// ---------------------------------------------------------------------------
+//
+// Lift the vanilla druid / fighter-druid restriction on one ITM V1 buffer:
+// a fighter-usable axe or short bow loses the druid usability bit and any
+// equipped opcode 319 "not usable by" the druid class; a fighter-usable axe,
+// short bow or long bow loses the fighter/druid bit and any such opcode 319
+// for the fighter/druid class. Items an equipped opcode 319 power 3 gate
+// (Artisan's permission check) governs are left to that gate.
+DEFINE_PATCH_FUNCTION cbr_cwa_lift_druid_item_restrictions
+  INT_VAR
+    druid_class         = 11
+    fighter_druid_class = 16
+  RET
+    lifted
+BEGIN
+  SET lifted = 0
+  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
+    READ_ASCII 0x00 cbr_cwa_signature (8)
+    READ_BYTE 0x31 cbr_cwa_proficiency
+    SET cbr_cwa_druid_type = (cbr_cwa_proficiency = 92 || cbr_cwa_proficiency = 105)
+    SET cbr_cwa_fd_type = (cbr_cwa_druid_type || cbr_cwa_proficiency = 104)
+    READ_LONG 0x1e cbr_cwa_usability
+    PATCH_IF (~%cbr_cwa_signature%~ STR_EQ ~ITM V1  ~ && cbr_cwa_fd_type && (cbr_cwa_usability BAND 0x800) = 0) BEGIN
+      READ_LONG  0x6a cbr_cwa_fx_off
+      READ_SHORT 0x6e cbr_cwa_eq_first
+      READ_SHORT 0x70 cbr_cwa_eq_count
+      PATCH_IF ((cbr_cwa_fx_off + ((cbr_cwa_eq_first + cbr_cwa_eq_count) * 0x30)) > BUFFER_LENGTH) BEGIN
+        PATCH_FAIL ~CBR %SOURCE_FILE%: equipped-effect table is out of bounds.~
+      END
+      SET cbr_cwa_gated = 0
+      SET cbr_cwa_druid_319 = 0
+      SET cbr_cwa_fd_319 = 0
+      FOR (cbr_cwa_e = cbr_cwa_eq_first; cbr_cwa_e < (cbr_cwa_eq_first + cbr_cwa_eq_count); ++cbr_cwa_e) BEGIN
+        SET cbr_cwa_record = cbr_cwa_fx_off + (cbr_cwa_e * 0x30)
+        READ_SHORT cbr_cwa_record cbr_cwa_opcode
+        READ_BYTE  (cbr_cwa_record + 0x03) cbr_cwa_power
+        READ_LONG  (cbr_cwa_record + 0x04) cbr_cwa_p1
+        READ_LONG  (cbr_cwa_record + 0x08) cbr_cwa_p2
+        PATCH_IF (cbr_cwa_opcode = 319) BEGIN
+          PATCH_IF (cbr_cwa_power = 3) BEGIN
+            SET cbr_cwa_gated = 1
+          END
+          PATCH_IF (cbr_cwa_power = 0 && cbr_cwa_p2 = 5 && cbr_cwa_p1 = druid_class) BEGIN
+            SET cbr_cwa_druid_319 += 1
+          END
+          PATCH_IF (cbr_cwa_power = 0 && cbr_cwa_p2 = 5 && cbr_cwa_p1 = fighter_druid_class) BEGIN
+            SET cbr_cwa_fd_319 += 1
+          END
+        END
+      END
+      PATCH_IF (!cbr_cwa_gated) BEGIN
+        SET cbr_cwa_new_usability = cbr_cwa_usability BAND (BNOT 0x1000)
+        PATCH_IF (cbr_cwa_druid_type) BEGIN
+          SET cbr_cwa_new_usability = cbr_cwa_new_usability BAND (BNOT 0x40000000)
+        END
+        PATCH_IF (cbr_cwa_new_usability != cbr_cwa_usability) BEGIN
+          WRITE_LONG 0x1e cbr_cwa_new_usability
+          SET lifted += 1
+        END
+        PATCH_IF (cbr_cwa_druid_type && cbr_cwa_druid_319 > 0) BEGIN
+          LPF DELETE_EFFECT
+            INT_VAR
+              check_headers    = 0
+              match_opcode     = 319
+              match_power      = 0
+              match_parameter1 = druid_class
+              match_parameter2 = 5
+          END
+          SET lifted += 1
+        END
+        PATCH_IF (cbr_cwa_fd_319 > 0) BEGIN
+          LPF DELETE_EFFECT
+            INT_VAR
+              check_headers    = 0
+              match_opcode     = 319
+              match_power      = 0
+              match_parameter1 = fighter_druid_class
+              match_parameter2 = 5
+          END
+          SET lifted += 1
+        END
+      END
+    END
+  END
+END
+
+// ---------------------------------------------------------------------------
+// Descriptions
+// ---------------------------------------------------------------------------
+//
+// kind druid:         "May only use the following weapons: ... ." gains the
+//                     axe and short bow words it lacks.
+// kind fighter_druid: "only those allowed by the Druid's ethos" gains the
+//                     long-bow phrase unless the text names long bows.
+// new_text equals text when the wording is not found or nothing is missing.
+DEFINE_PATCH_FUNCTION cbr_cwa_rewrite_text
+  STR_VAR
+    kind            = ~~
+    text            = ~~
+    axe_word        = ~~
+    short_bow_word  = ~~
+    long_bow_phrase = ~~
+  RET
+    new_text
+BEGIN
+  SPRINT new_text ~%text%~
+  PATCH_IF (~%kind%~ STR_EQ ~druid~) BEGIN
+    SPRINT cbr_cwa_list ~~
+    INNER_PATCH ~%text%~ BEGIN
+      REPLACE_EVALUATE CASE_INSENSITIVE ~May only use the following weapons:\([^.%LNL%%MNL%]*\)\.~ BEGIN
+        SPRINT cbr_cwa_list ~%MATCH1%~
+      END ~%MATCH0%~
+    END
+    PATCH_IF !(~%cbr_cwa_list%~ STR_EQ ~~) BEGIN
+      // STRING_CONTAINS_REGEXP is 0 when the list contains the weapon.
+      SPRINT cbr_cwa_add ~~
+      PATCH_IF (~%cbr_cwa_list%~ STRING_CONTAINS_REGEXP ~[Aa]xe~) BEGIN
+        SPRINT cbr_cwa_add ~, %axe_word%~
+      END
+      PATCH_IF (~%cbr_cwa_list%~ STRING_CONTAINS_REGEXP ~[Ss]hort ?bow~) BEGIN
+        SPRINT cbr_cwa_add ~%cbr_cwa_add%, %short_bow_word%~
+      END
+      PATCH_IF !(~%cbr_cwa_add%~ STR_EQ ~~) BEGIN
+        INNER_PATCH_SAVE new_text ~%text%~ BEGIN
+          REPLACE_TEXTUALLY CASE_INSENSITIVE ~\(May only use the following weapons:[^.%LNL%%MNL%]*\)\.~ ~\1%cbr_cwa_add%.~
+        END
+      END
+    END
+  END
+  PATCH_IF (~%kind%~ STR_EQ ~fighter_druid~) BEGIN
+    PATCH_IF (~%text%~ STRING_CONTAINS_REGEXP ~[Ll]ong ?bow~) BEGIN
+      INNER_PATCH_SAVE new_text ~%text%~ BEGIN
+        REPLACE_TEXTUALLY CASE_INSENSITIVE ~\(only those allowed by the Druid's ethos\)~ ~\1, %long_bow_phrase%~
+      END
+    END
+  END
+END
+
+// Rewrite the description string one text-table cell points at and repoint
+// the cell to the result. The row is found by its row label, the cell by its
+// column header. described counts the cells that now point at a new string.
+DEFINE_ACTION_FUNCTION cbr_cwa_describe
+  STR_VAR
+    table           = ~~
+    row_name        = ~~
+    text_column     = ~~
+    kind            = ~~
+    axe_word        = ~~
+    short_bow_word  = ~~
+    long_bow_phrase = ~~
+  RET
+    described
+BEGIN
+  OUTER_SET described = 0
+  ACTION_IF (FILE_EXISTS_IN_GAME ~%table%~) BEGIN
+    COPY_EXISTING ~%table%~ ~override~
+      COUNT_2DA_COLS cbr_cwa_cols
+      SET cbr_cwa_wide_cols = cbr_cwa_cols - 1
+      READ_2DA_ENTRIES_NOW cbr_cwa_wide cbr_cwa_wide_cols
+      SET cbr_cwa_text_col = "-1"
+      PATCH_IF (cbr_cwa_wide > 0) BEGIN
+        FOR (cbr_cwa_col = 0; cbr_cwa_col < cbr_cwa_wide_cols; ++cbr_cwa_col) BEGIN
+          READ_2DA_ENTRY_FORMER cbr_cwa_wide 0 cbr_cwa_col cbr_cwa_header
+          PATCH_IF (~%cbr_cwa_header%~ STRING_EQUAL_CASE ~%text_column%~) BEGIN
+            SET cbr_cwa_text_col = cbr_cwa_col + 1
+          END
+        END
+      END
+      PATCH_IF (cbr_cwa_text_col > 0) BEGIN
+        READ_2DA_ENTRIES_NOW cbr_cwa_rows cbr_cwa_cols
+        FOR (cbr_cwa_row = 0; cbr_cwa_row < cbr_cwa_rows; ++cbr_cwa_row) BEGIN
+          READ_2DA_ENTRY_FORMER cbr_cwa_rows cbr_cwa_row 0 cbr_cwa_name
+          PATCH_IF (~%cbr_cwa_name%~ STRING_EQUAL_CASE ~%row_name%~) BEGIN
+            READ_2DA_ENTRY_FORMER cbr_cwa_rows cbr_cwa_row cbr_cwa_text_col cbr_cwa_strref
+            PATCH_IF ((IS_AN_INT ~%cbr_cwa_strref%~) && cbr_cwa_strref >= 0) BEGIN
+              GET_STRREF cbr_cwa_strref cbr_cwa_text
+              LPF cbr_cwa_rewrite_text
+                STR_VAR
+                  kind            = EVAL ~%kind%~
+                  text            = EVAL ~%cbr_cwa_text%~
+                  axe_word        = EVAL ~%axe_word%~
+                  short_bow_word  = EVAL ~%short_bow_word%~
+                  long_bow_phrase = EVAL ~%long_bow_phrase%~
+                RET cbr_cwa_new_text = new_text
+              END
+              PATCH_IF !(~%cbr_cwa_new_text%~ STR_EQ ~%cbr_cwa_text%~) BEGIN
+                SET cbr_cwa_new_ref = RESOLVE_STR_REF (~%cbr_cwa_new_text%~)
+                SET_2DA_ENTRY cbr_cwa_row cbr_cwa_text_col cbr_cwa_cols ~%cbr_cwa_new_ref%~
+                SET described += 1
+              END
+            END
+          END
+        END
+      END
+    BUT_ONLY
+  END
+END
+
+// ---------------------------------------------------------------------------
+// Component 410
+// ---------------------------------------------------------------------------
+
+DEFINE_ACTION_FUNCTION cbr_apply_druid_weapon_access
+  INT_VAR
+    druid_class         = 11
+    fighter_druid_class = 16
+  STR_VAR
+    axe_word        = ~axe~
+    short_bow_word  = ~short bow~
+    long_bow_phrase = ~plus long bows~
+BEGIN
+  // WEAPPROF geometry and the two reference caps.
+  COPY_EXISTING ~WEAPPROF.2DA~ ~override~
+    LPF cbr_cwa_weapprof_column STR_VAR name = ~DRUID~ RET cbr_cwa_druid_col = data_column END
+    LPF cbr_cwa_weapprof_column STR_VAR name = ~FIGHTER_DRUID~ RET cbr_cwa_fd_col = data_column END
+    PATCH_IF (cbr_cwa_druid_col < 0 || cbr_cwa_fd_col < 0) BEGIN
+      PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: no DRUID or FIGHTER_DRUID column.~
+    END
+    LPF cbr_cwa_column_weapon_cap INT_VAR data_column = cbr_cwa_druid_col RET cbr_cwa_druid_cap = cap END
+    LPF cbr_cwa_column_weapon_cap INT_VAR data_column = cbr_cwa_fd_col RET cbr_cwa_fd_cap = cap END
+    PATCH_IF (cbr_cwa_druid_cap <= 0 || cbr_cwa_fd_cap <= 0) BEGIN
+      PATCH_FAIL ~CBR 410: the DRUID or FIGHTER_DRUID column allows no weapon, so the new weapons have no cap to follow.~
+    END
+    LPF cbr_cwa_weapprof_row INT_VAR proficiency = 92 RET cbr_cwa_axe_row = data_row END
+    LPF cbr_cwa_weapprof_row INT_VAR proficiency = 105 RET cbr_cwa_sbow_row = data_row END
+    LPF cbr_cwa_weapprof_row INT_VAR proficiency = 104 RET cbr_cwa_lbow_row = data_row END
+  BUT_ONLY
+
+  LAF cbr_cwa_read_kits
+    RET cbr_cwa_kits
+    RET_ARRAY cbr_cwa_kit_name cbr_cwa_kit_column cbr_cwa_kit_class
+  END
+  // A column a druid kit shares with a fighter/druid kit gets the druid
+  // weapons and caps; the fighter/druid extras are left out there, so no
+  // single-class druid gains long bows.
+  LAF cbr_cwa_owned_kit_columns
+    INT_VAR
+      kit_class       = druid_class
+      allowed_class_a = druid_class
+      allowed_class_b = fighter_druid_class
+      log_component   = 410
+    RET cbr_cwa_druid_kits = cbr_cwa_owned
+    RET_ARRAY cbr_cwa_druid_kit_col = cbr_cwa_owned_column
+  END
+  LAF cbr_cwa_owned_kit_columns
+    INT_VAR
+      kit_class       = fighter_druid_class
+      allowed_class_a = fighter_druid_class
+      allowed_class_b = fighter_druid_class
+      log_component   = 410
+    RET cbr_cwa_fd_kits = cbr_cwa_owned
+    RET_ARRAY cbr_cwa_fd_kit_col = cbr_cwa_owned_column
+  END
+
+  // Artisan's permission system: preflight before anything is written.
+  OUTER_SET cbr_cwa_kitpack = FILE_EXISTS_IN_GAME ~C0PR#CL.SPL~
+  ACTION_IF (cbr_cwa_kitpack) BEGIN
+    ACTION_IF !((FILE_EXISTS_IN_GAME ~C0PR#92.SPL~) AND (FILE_EXISTS_IN_GAME ~C0PR#104.SPL~)
+            AND (FILE_EXISTS_IN_GAME ~C0PR#105.SPL~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) BEGIN
+      FAIL ~CBR 410: C0PR#CL.SPL exists, but C0PR#92.SPL, C0PR#104.SPL, C0PR#105.SPL or SPLPROT.2DA is missing. Artisan's Kitpack proficiency system is incomplete.~
+    END
+    // A grant table this code does not recognize fails here, before any write.
+    COPY_EXISTING ~C0PR#CL.SPL~ ~override~
+      LPF cbr_cwa_ensure_permission_grant
+        INT_VAR condition_value = druid_class verify_only = 1
+        STR_VAR permission = ~C0PR#92~
+      END
+    BUT_ONLY
+  END
+
+  // Raise the caps, then verify them from a fresh read.
+  OUTER_SET cbr_cwa_changed = 0
+  OUTER_FOR (cbr_cwa_pass = 0; cbr_cwa_pass < 2; ++cbr_cwa_pass) BEGIN
+    COPY_EXISTING ~WEAPPROF.2DA~ ~override~
+      FOR (cbr_cwa_c = 0; cbr_cwa_c <= cbr_cwa_druid_kits; ++cbr_cwa_c) BEGIN
+        SET cbr_cwa_col = cbr_cwa_druid_col
+        PATCH_IF (cbr_cwa_c > 0) BEGIN
+          SET cbr_cwa_kit_index = cbr_cwa_c - 1
+          SET cbr_cwa_col = $cbr_cwa_druid_kit_col(~%cbr_cwa_kit_index%~)
+        END
+        PATCH_FOR_EACH cbr_cwa_row IN cbr_cwa_axe_row cbr_cwa_sbow_row BEGIN
+          SET cbr_cwa_row_index = EVAL ~%cbr_cwa_row%~
+          LPF cbr_cwa_set_cell
+            INT_VAR data_row = cbr_cwa_row_index data_column = cbr_cwa_col
+                    minimum = cbr_cwa_druid_cap verify_only = cbr_cwa_pass
+            RET cbr_cwa_cell = changed
+          END
+          SET cbr_cwa_changed += cbr_cwa_cell
+        END
+      END
+      FOR (cbr_cwa_c = 0; cbr_cwa_c <= cbr_cwa_fd_kits; ++cbr_cwa_c) BEGIN
+        SET cbr_cwa_col = cbr_cwa_fd_col
+        PATCH_IF (cbr_cwa_c > 0) BEGIN
+          SET cbr_cwa_kit_index = cbr_cwa_c - 1
+          SET cbr_cwa_col = $cbr_cwa_fd_kit_col(~%cbr_cwa_kit_index%~)
+        END
+        PATCH_FOR_EACH cbr_cwa_row IN cbr_cwa_axe_row cbr_cwa_sbow_row cbr_cwa_lbow_row BEGIN
+          SET cbr_cwa_row_index = EVAL ~%cbr_cwa_row%~
+          LPF cbr_cwa_set_cell
+            INT_VAR data_row = cbr_cwa_row_index data_column = cbr_cwa_col
+                    minimum = cbr_cwa_fd_cap verify_only = cbr_cwa_pass
+            RET cbr_cwa_cell = changed
+          END
+          SET cbr_cwa_changed += cbr_cwa_cell
+        END
+      END
+    BUT_ONLY
+  END
+
+  // Artisan's permission grants.
+  OUTER_SET cbr_cwa_grants = 0
+  ACTION_IF (cbr_cwa_kitpack) BEGIN
+    LAF cbr_cwa_grant_rows RET cbr_cwa_class_row = class_row cbr_cwa_class_rows = class_rows END
+    OUTER_FOR (cbr_cwa_pass = 0; cbr_cwa_pass < 2; ++cbr_cwa_pass) BEGIN
+      COPY_EXISTING ~C0PR#CL.SPL~ ~override~
+        SET cbr_cwa_missing = 0
+        PATCH_FOR_EACH cbr_cwa_prof IN 92 105 BEGIN
+          LPF cbr_cwa_ensure_permission_grant
+            INT_VAR
+              condition_value = druid_class
+              condition_row   = cbr_cwa_class_row
+              verify_only     = cbr_cwa_pass
+            STR_VAR
+              condition_rows = EVAL ~%cbr_cwa_class_rows%~
+              class_rows     = EVAL ~%cbr_cwa_class_rows%~
+              permission     = EVAL ~C0PR#%cbr_cwa_prof%~
+            RET cbr_cwa_added = inserted cbr_cwa_absent = missing
+          END
+          SET cbr_cwa_grants += cbr_cwa_added
+          SET cbr_cwa_missing += cbr_cwa_absent
+        END
+        PATCH_FOR_EACH cbr_cwa_prof IN 92 105 104 BEGIN
+          LPF cbr_cwa_ensure_permission_grant
+            INT_VAR
+              condition_value = fighter_druid_class
+              condition_row   = cbr_cwa_class_row
+              verify_only     = cbr_cwa_pass
+            STR_VAR
+              condition_rows = EVAL ~%cbr_cwa_class_rows%~
+              class_rows     = EVAL ~%cbr_cwa_class_rows%~
+              permission     = EVAL ~C0PR#%cbr_cwa_prof%~
+            RET cbr_cwa_added = inserted cbr_cwa_absent = missing
+          END
+          SET cbr_cwa_grants += cbr_cwa_added
+          SET cbr_cwa_missing += cbr_cwa_absent
+        END
+        PATCH_IF (cbr_cwa_missing > 0) BEGIN
+          PATCH_FAIL ~CBR C0PR#CL.SPL verification failed: %cbr_cwa_missing% druid or fighter/druid grants are missing.~
+        END
+      BUT_ONLY
+    END
+  END
+
+  // Weapons without the Kitpack gate.
+  OUTER_SET cbr_cwa_items = 0
+  COPY_EXISTING_REGEXP GLOB ~^.+\.itm$~ ~override~
+    LPF cbr_cwa_lift_druid_item_restrictions
+      INT_VAR druid_class = druid_class fighter_druid_class = fighter_druid_class
+      RET cbr_cwa_item_lifted = lifted
+    END
+    PATCH_IF (cbr_cwa_item_lifted > 0) BEGIN
+      SET cbr_cwa_items += 1
+    END
+  BUT_ONLY
+
+  // EET keeps BG1 and SoD copies of the class texts next to CLASTEXT.
+  OUTER_SET cbr_cwa_described = 0
+  ACTION_FOR_EACH cbr_cwa_table IN BGCLATXT CLASTEXT SODCLTXT BEGIN
+    LAF cbr_cwa_describe
+      STR_VAR
+        table          = EVAL ~%cbr_cwa_table%.2DA~
+        row_name       = ~DRUID~
+        text_column    = ~DESCSTR~
+        kind           = ~druid~
+        axe_word       = EVAL ~%axe_word%~
+        short_bow_word = EVAL ~%short_bow_word%~
+      RET cbr_cwa_done = described
+    END
+    OUTER_SET cbr_cwa_described += cbr_cwa_done
+    LAF cbr_cwa_describe
+      STR_VAR
+        table           = EVAL ~%cbr_cwa_table%.2DA~
+        row_name        = ~FIGHTER_DRUID~
+        text_column     = ~DESCSTR~
+        kind            = ~fighter_druid~
+        long_bow_phrase = EVAL ~%long_bow_phrase%~
+      RET cbr_cwa_done = described
+    END
+    OUTER_SET cbr_cwa_described += cbr_cwa_done
+  END
+  ACTION_IF (cbr_cwa_described = 0) BEGIN
+    PRINT ~cbr 410: no druid or fighter/druid description has the expected English weapon text (or each already names the new weapons); descriptions are unchanged.~
+  END
+
+  PRINT ~cbr 410: WEAPPROF cells raised: %cbr_cwa_changed% (druid cap %cbr_cwa_druid_cap%, fighter/druid cap %cbr_cwa_fd_cap%, %cbr_cwa_druid_kits% druid and %cbr_cwa_fd_kits% fighter/druid kit columns); C0PR#CL grants added: %cbr_cwa_grants%; items without the Kitpack gate opened: %cbr_cwa_items%; description cells updated: %cbr_cwa_described%.~
+END

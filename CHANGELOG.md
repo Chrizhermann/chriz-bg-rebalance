@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Add Druid weapons (410) for BG2:EE and EET: druids and every druid kit may
+  use axes and short bows and become Proficient in them; fighter/druids may
+  also use long bows and specialize in all three. Higher limits set by other
+  mods stay.
+  - With Artisan's Kitpack it adds the class grants to the Kitpack's EEex
+    weapon permissions (`C0PR#CL`); without it, it lifts the druid and
+    fighter/druid restrictions from the matching items.
+  - The English druid and fighter/druid descriptions name the new weapons.
+
 ## v0.8.7 — 2026-10-29
 
 - Rename 360 to True Time Stop – fair Haste & Slow (it was Time Stop and Haste

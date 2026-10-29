@@ -83,6 +83,7 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 340 | Cross-cutting audits | Chris Revisions: Aid hit points only, Luck 90 seconds, Bless 30 seconds + 1 round per level, Bless and Chaotic Commands for druids, Prayer and Recitation not cumulative | Automated checks passed; in-game check pending |
 | 360 | Cross-cutting audits | EEex True Time Stop – fair Haste & Slow: frozen creatures' effects wait out a Time Stop; Haste and Slow leave periodic effects at the normal rate | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 and in the full CEBG stack with Spell Revisions; gameplay acceptance pending |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
+| 410 | Class and kit revisions | Druids: axes and short bows; fighter/druids also long bows (with or without Artisan's Kitpack) | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 with and without Artisan's Kitpack; gameplay acceptance pending |
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
 
@@ -359,6 +360,51 @@ This component is included in v0.7.0 and intended as a CEBG default.
 It has not been installed into a live game. Existing-save hotpatching is a separate
 question: the component neither edits saves nor promises to replace effects already
 stored in them. [Evidence and boundaries](research/15-flail-of-ages.md).
+
+### Component 410 — Druid weapons
+
+Supports **BG2:EE and EET**, with or without **Artisan's Kitpack** and with or without
+Spell Revisions. Christopher's request (2026-10-27): classes and kits that may train a weapon
+should also be able to use it, with as little change as possible; druids and fighter/druids
+get more weapons.
+
+**410** lets druids and every druid kit train axes and short bows to Proficient (one pip)
+and use them; fighter/druids may also train long bows and specialize (two pips) in all three.
+A limit another mod already raised higher stays. Kits are found through KITLIST's class
+column; a kit that uses a class's own WEAPPROF column follows that class, and a kit that
+shares its column with a kit of another class is left unchanged with a line in the log.
+
+- **With Artisan's Kitpack's EEex weapon permissions**, the component adds the class grants
+  for these weapons to `C0PR#CL.SPL`, in every ability, right after the Kitpack's own grants
+  (kit chains and `C0PR#KG` keep running last). Items with the Kitpack's permission check
+  keep it. If `C0PR#CL.SPL` exists but its grant table or the permission spells are not the
+  layout this component knows, it stops before changing anything.
+- **Without the Kitpack**, it removes the druid and fighter/druid restrictions (usability
+  flags and opcode 319 "not usable by" for these two classes) from every axe and short bow a
+  fighter may use, and the fighter/druid restriction from long bows. Other classes'
+  restrictions and every other item stay as they are.
+- The English class descriptions of the druid and the fighter/druid name the new weapons
+  (the BG2, BG1 and SoD text tables where present). Other languages keep their text.
+
+With the Kitpack, characters get the new permissions when `C0PR#CL` runs: when a creature is
+created and at each level-up. A saved game's existing party members get them at their next
+level-up. Install after Artisan's Kitpack (and its "Update EEex-based Weapon Usability
+Changes" tweak, if used) and after every mod that adds druid kits or changes WEAPPROF; a
+later run of that tweak keeps the change, because it rebuilds the class grants from the
+raised WEAPPROF columns. The component uninstalls cleanly.
+
+Verified: 11 automated checks (`tests/test_class_weapon_access.py` runs WeiDU on synthetic
+games: with and without the Kitpack, an incomplete or unknown grant table, higher limits,
+another KITLIST column order, grants on an equivalent SPLPROT row, several `C0PR#CL`
+abilities, other languages, a rerun and uninstall). In BG2:EE 2.7.3.0 + EEex 1.3.1 labs
+installed with WeiDU (Artisan's Kitpack chriz.3 with Spell Revisions and the "Update
+EEex-based Weapon Usability Changes" tweak; chriz.4-rc2 without Spell Revisions, in another
+order; no Kitpack), a druid, a Beastfriend, a Hivemaster and a fighter/druid could equip the
+axe and the short bow, and only the fighter/druid the long bow; mace and long sword stayed
+closed. That held after joining the party, after a level-up and after a save and reload, and
+with the Kitpack also after its helper creature was re-created. The level-up screen offered
+axe and short bow up to one pip to the druids and axe, short bow and long bow up to two pips
+to the fighter/druid. Uninstalling restored every file in `override`.
 
 ### Components 420–421 — Kit-specific bard progression
 

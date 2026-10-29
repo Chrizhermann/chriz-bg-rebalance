@@ -255,6 +255,14 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9464 = ~CBRTMDV.SPL not found — install the Divination toll component (405) first; the text describes its changes.~
 @9465 = ~M_CBRAPR.lua not found — install the EEex specialization APR component (407) first; the text describes its changes.~
 
+@410 = ~Druids may use axes and short bows; fighter/druids also long bows~
+@4101 = ~axe~
+@4102 = ~short bow~
+@4103 = ~plus long bows~
+@9490 = ~This component supports BG2:EE / EET only.~
+@9491 = ~WEAPPROF.2DA or KITLIST.2DA is missing.~
+@9492 = ~CLASS.IDS does not define DRUID and FIGHTER_DRUID.~
+
 @420 = ~EEex: independent kit spell-progression provider (BG2EE / EET / IWDEE)~
 @421 = ~Bard progression: IWD through level 7; Blade and Skald use original progression through level 6~
 @4211 = ~Uses the Icewind Dale bard progression, limited to 7th-level spells; 7th-level spells become available at bard level 21. Existing spell-slot modifiers still apply.~
