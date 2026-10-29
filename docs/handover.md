@@ -1,6 +1,6 @@
 # chriz-bg-rebalance — Handover
 
-## October 27–29 — Druid weapons (410, unreleased)
+## October 27–29 — Druid weapons (410) and Alaghor weapons (411), unreleased
 
 Christopher's request of 2026-10-27, through the collection coordinator: classes and kits that
 may train a weapon should also be able to use it, with as little change as possible, and druids,
@@ -9,16 +9,17 @@ kit get axes and short bows, one pip; fighter/druids also long bows, up to two p
 cleric kits stay as they are. 410 does this in `lib/class_weapon_access.tpa`; the README section
 "Component 410 — Druid weapons" describes it.
 
-Yeslick: for Yeslick NPC's Alaghor of Clangeddin kit Christopher chose the cleric weapons plus
-axes, up to two pips, without the thief weapons, keeping the pips already spent. The labs showed
-that Yeslick, a multiclass fighter/cleric with that kit, trains from WEAPPROF's FIGHTER_CLERIC
-column, not from the kit's column: his level-up screen, and that of a fighter/cleric clone with
-the kit, offered the fighter/cleric list. Changing the kit column does not reach him, and in
-CEBG's default stack that list already has the cleric weapons up to two pips and no thief
-weapon; only the axe is missing, and the kit grant alone let him equip axes he could not train.
-That component (411) waits on the branch `claude/alaghor-weapons-wip` for Christopher's decision:
-axes for every fighter/cleric (their WEAPPROF column and a class grant), axes the kit may use
-but not train, or nothing.
+Yeslick (411): for Yeslick NPC's Alaghor of Clangeddin kit Christopher chose the cleric weapons
+plus axes, up to two pips, without the thief weapons, keeping the pips already spent. The
+2026-10-27 labs showed that Yeslick, a multiclass fighter/cleric with that kit, trains from
+WEAPPROF's FIGHTER_CLERIC column, not from the kit's column: the engine takes a kit's column only
+when the kit's KITLIST class is the character's class
+(`research/2026-10-29-multiclass-kit-proficiency-column.md`). In CEBG's default stack that list
+already has the cleric weapons up to two pips and no thief weapon; only the axe was missing. On
+2026-10-29 Christopher rejected axes for every fighter/cleric and axes Yeslick could wield but
+not train, and asked for what he had decided. 411 (README "Component 411 — Alaghor of Clangeddin
+weapons") therefore adds an EEex hook that makes the engine read the kit's column for
+fighter/clerics with this kit, besides the kit column and the kit's axe grant.
 
 Recipe context: Tweaks Anthology 2420 and 2430 ("Loosen Equipment Restrictions for Cleric /
 Druid Multi- and Dual-Classes") copy the fighter's limits, capped at two pips, into the
@@ -37,15 +38,32 @@ opened 64 items, and uninstalling it restored `override` byte for byte. The lab 
 411, which in the Kitpack labs changed only the Alaghor kit's column and added its kit grant; 410
 differs from that package only by the removed 411 code.
 
+411 verified (2026-10-29): 14 automated installer checks and 8 runtime checks of the hook's Lua
+(README "Component 411 — Alaghor of Clangeddin weapons"). One disposable BG2:EE 2.7.3.0 + EEex
+1.3.1 lab, installed with WeiDU in CEBG's order (Yeslick NPC, Spell Revisions, Artisan's
+Kitpack chriz.4 with the update tweak, 410, 411):
+- The log reported the hook active.
+- Yeslick and two kit clones were offered the axe and the cleric weapons up to two pips, no
+  thief weapon, and unchanged fighting styles.
+- A free pip went into the axe; an old long-sword pip and the long sword stayed.
+- The fighter/cleric control got no axe.
+- The equipping matched after joining, after the Kitpack's helper creature was re-created,
+  after the level-up and after a save and reload.
+- Uninstalling restored `override` and removed the pattern file.
+
 Open:
 - Gameplay acceptance in Christopher's own game (only on a separate request).
+- 411 was not lab-tested on EEex v1.2.0, which Christopher's game runs. Nothing it uses can
+  differ there: its `EEex_Assembly_x86-64.lua` (the conditional-jump helper) is byte-identical
+  to v1.3.1's, its own pattern file uses the same `Operations=ADD` syntax, and 420 runs there
+  with the same pattern loader, label, memory and 2DA calls.
 - Not lab-tested: a save made before the install. With the Kitpack, `C0PR#CL` runs when a
   creature is created and at each level-up, so such party members get the new permissions at
   their next level-up at the latest.
 - Only the English descriptions name the new weapons.
-- CEBG: the coordinator pins and selects 410 and adds the Kitpack's "Update EEex-based Weapon
-  Usability Changes" tweak to the recipe's late Kitpack block (Christopher approved that on
-  2026-10-27).
+- CEBG: the coordinator pins and selects 410 and 411 and adds the Kitpack's "Update EEex-based
+  Weapon Usability Changes" tweak to the recipe's late Kitpack block (Christopher approved that
+  on 2026-10-27).
 
 ## October 29 — v0.8.7: True Time Stop – fair Haste & Slow, standalone download
 
