@@ -84,6 +84,7 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 360 | Cross-cutting audits | EEex True Time Stop – fair Haste & Slow: frozen creatures' effects wait out a Time Stop; Haste and Slow leave periodic effects at the normal rate | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 and in the full CEBG stack with Spell Revisions; gameplay acceptance pending |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 410 | Class and kit revisions | Druids: axes and short bows; fighter/druids also long bows (with or without Artisan's Kitpack) | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 with and without Artisan's Kitpack; gameplay acceptance pending |
+| 411 | Class and kit revisions | Alaghor of Clangeddin (Yeslick): the cleric weapons plus axes, with fighter/cleric limits (Artisan's Kitpack and EEex) | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 in CEBG's stack with Spell Revisions and Artisan's Kitpack; gameplay acceptance pending |
 | 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
 | 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
 
@@ -405,6 +406,69 @@ closed. That held after joining the party, after a level-up and after a save and
 with the Kitpack also after its helper creature was re-created. The level-up screen offered
 axe and short bow up to one pip to the druids and axe, short bow and long bow up to two pips
 to the fighter/druid. Uninstalling restored every file in `override`.
+
+### Component 411 — Alaghor of Clangeddin weapons
+
+Supports **BG2:EE and EET** with **Artisan's Kitpack** (its EEex weapon permissions) and
+**EEex**, with or without Spell Revisions. Christopher's decision (2026-10-27, confirmed
+2026-10-29): Yeslick NPC's Alaghor of Clangeddin kit, Yeslick's kit, trains and uses the
+cleric weapons plus axes, Clangeddin's weapon, up to two pips; the thief weapons its
+WEAPPROF column allowed drop out, and pips already spent stay.
+
+**411** rewrites the kit's own WEAPPROF column: the cleric weapons at the fighter/cleric
+limit (the cleric limit where fighter/clerics have none), the axe at its fighter/cleric
+limit or else the highest fighter/cleric limit of a cleric weapon, every other weapon 0.
+Every other row, the fighting styles among them, takes the fighter/cleric value, so
+Yeslick's styles stay as they are. It adds the kit's axe grant to `C0PR#CL.SPL` and names
+the axes in the kit's English description. It refuses a kit column that is a class column
+or shared with another kit.
+
+The engine takes a kit's own column only when the kit's KITLIST class is the character's
+class, so a fighter/cleric with this cleric kit trains from FIGHTER_CLERIC
+([research note](research/2026-10-29-multiclass-kit-proficiency-column.md)). An EEex hook
+(`M_CBRKP.lua`, its pattern `EEex_scripts/extra_pattern_dbs/CBRKP.db` and the registry
+`CBRKPKIT.2DA`) makes the engine read the kit's column for fighter/clerics with this kit.
+Every other character, and every other use of the kit's class (kit abilities, the class
+name on the record screen), stays native. The installer refuses an executable in which the
+hooked instructions do not occur exactly once; at game start the hook checks them again
+and, if another mod changed them, leaves the game native with one line in the log.
+
+Launched without EEex, Yeslick keeps the fighter/cleric limits. Install after Yeslick NPC,
+Artisan's Kitpack (and its "Update EEex-based Weapon Usability Changes" tweak, if used) and
+every mod that changes WEAPPROF. The component uninstalls cleanly.
+
+Verified: 14 automated checks in `tests/test_class_weapon_access.py`. They run WeiDU on
+synthetic games and cover:
+- the kit column's exact cells, with and without fighter/clerics who train every weapon;
+- a rerun, and another mod's registration kept;
+- an unsupported registry;
+- EEex missing or without the conditional-jump helper;
+- no executable, `BaldurII.exe` and a patched decoy, and executables without exactly one
+  compatible lookup;
+- the kit grant row, a shared column, and 410 and 411 together.
+
+8 more checks in `tests/test_kit_proficiency_runtime.py` run the hook's Lua against a
+simulated EEex: registered and duplicate pairs, changed bytes, a missing label, an empty or
+invalid registry, a failing hook, and no EEex.
+
+On 2026-10-29 a BG2:EE 2.7.3.0 + EEex 1.3.1 lab was installed with WeiDU in CEBG's order:
+Yeslick NPC, Spell Revisions, Artisan's Kitpack chriz.4 with its "Update EEex-based Weapon
+Usability Changes" tweak, then 410 and 411. Results:
+- The game log reported the hook active.
+- At level-up, Yeslick and two fighter/clerics with the kit were offered the axe and the
+  cleric weapons up to two pips, no thief weapon, and their fighting styles unchanged.
+- One of them spent its free pip on the axe. It kept its long-sword pip and its long sword.
+- All three could equip the axe and the mace.
+- A fighter/cleric without the kit was offered no axe and could not equip one.
+- This held after joining the party, after the Kitpack's helper creature was re-created,
+  after the level-up and after a save and reload.
+- Uninstalling restored every file in `override` and removed the pattern file.
+
+Spell Revisions only appends SPLPROT rows, which 411 finds by their content. The automated
+checks run without it.
+
+Not lab-tested: EEex v1.2.0 and 2.6.6.0. The hooked instructions were checked in both
+executables, and EEex v1.2.0's conditional-jump helper is byte-identical to v1.3.1's.
 
 ### Components 420–421 — Kit-specific bard progression
 

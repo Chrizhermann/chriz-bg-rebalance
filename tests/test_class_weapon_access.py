@@ -1,10 +1,13 @@
-"""Druid weapon access (410) on disposable synthetic games.
+"""Druid and Alaghor weapon access (410/411) on disposable synthetic games.
 
 Real WeiDU, public installer. The fixtures model the layouts the components
 must handle: vanilla-shaped WEAPPROF/KITLIST tables plus kits that share or
 reuse columns, Artisan's C0PR#CL grant table (or none), items with and without
-the Kitpack's usability gate, and EET's three class-text tables. They
-establish installer behaviour, not in-game acceptance.
+the Kitpack's usability gate, EET's three class-text tables, and stacks where
+fighter/clerics may train every weapon. 411 also needs EEex and a game
+executable with the kit-proficiency lookup its hook patches; synthetic PE32+
+images stand in for Baldur.exe. They establish installer behaviour, not
+in-game acceptance.
 """
 from __future__ import annotations
 
@@ -16,7 +19,7 @@ import unittest
 from pathlib import Path
 
 from tests.ie_formats import ItmAbility, ItmFile, SplAbility, SplEffect, SplFile, TwoDA, make_spl
-from tests.test_cloud_forms import Game
+from tests.test_cloud_forms import ROOT, Game
 from tests.test_flail_of_ages import strings
 from tests.test_potion_uniqueness import run
 
@@ -49,7 +52,7 @@ STYLES = (111, 112, 113, 114)
 
 DRUID, FIGHTER_DRUID, CLERIC, FIGHTER_CLERIC = 11, 16, 3, 8
 ALAGHOR_KIT = 0x4030
-CLASS_ROW = 2
+CLASS_ROW, KIT_ROW = 2, 3
 SPECIAL = 99999
 
 DRUID_TEXT = (
@@ -74,6 +77,8 @@ TEXTS = [
 ]
 NEW_WEAPONS = "spear, quarterstaff, dart, sling, axe, short bow."
 LONG_BOWS = "allowed by the Druid's ethos, plus long bows."
+BULLET = ("- May use axes, Clangeddin's chosen weapon, alongside the cleric weapons, "
+          "and may specialize in them like a Fighter/Cleric.\n")
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +291,7 @@ class Fixture:
     texts: list = dataclasses.field(default_factory=lambda: list(TEXTS))
     c0prcl: bytes | None = None
     splprot: str = SPLPROT_TEXT
+    eeex: str = "current"  # "current", "old" (no conditional-jump hooks) or "none"
 
     def resources(self):
         resources = {
@@ -307,6 +313,8 @@ class Fixture:
                 "C0PR#CL.SPL": self.c0prcl if self.c0prcl is not None else c0prcl(),
                 **{f"C0PR#{p}.SPL": permission_spell(300 + p) for p in (92, 95, 96, 97, 104, 105)},
             })
+        if self.eeex != "none":
+            resources["M___EEex.lua"] = b"-- fixture bootstrap\n"
         return resources
 
 
@@ -333,12 +341,29 @@ def expected_410_cells(cells, *, druid_owned=DRUID_OWNED, fd_owned=FD_OWNED):
     return expected
 
 
+def expected_411_cells(cells, column="LK_ALAGHOR"):
+    expected = dict(cells)
+    cap = max(cells[("FIGHTER_CLERIC", p)] for p in WEAPONS if cells[("CLERIC", p)] > 0)
+    for proficiency in {p for _, p in cells}:
+        cleric, fc = cells[("CLERIC", proficiency)], cells[("FIGHTER_CLERIC", proficiency)]
+        if proficiency not in WEAPONS:
+            value = fc  # fighting styles and other rows: what Yeslick has without the hook
+        elif cleric > 0:
+            value = fc if fc > 0 else cleric
+        elif proficiency == 92:
+            value = fc if fc > 0 else cap
+        else:
+            value = 0
+        expected[(column, proficiency)] = value
+    return expected
+
+
 def is_weapon_record(effect):
     resource = effect.resource.upper()
     return effect.opcode in (321, 326) and resource.startswith("C0PR#") and resource[5:].isdigit()
 
 
-def expected_grants(effects, grants, *, class_rows=(CLASS_ROW,)):
+def expected_grants(effects, grants, *, class_rows=(CLASS_ROW,), special=None, row_of=None):
     """Independent oracle: each missing grant is a copy of the last class grant,
     inserted right after the last weapon-grant record."""
     effects = list(effects)
@@ -352,6 +377,8 @@ def expected_grants(effects, grants, *, class_rows=(CLASS_ROW,)):
                      and e.parameter1 > 0 and e.parameter2 in class_rows]
         template = templates[-1] if templates else SplEffect(opcode=326, target=2, probability1=100)
         new = dataclasses.replace(template, parameter1=value, parameter2=row, resource=resource, raw=b"")
+        if special is not None:
+            new = dataclasses.replace(new, special=special)
         effects.insert(last + 1, new)
     return effects
 
@@ -368,14 +395,112 @@ def new_fd_text(text):
     return text.replace("allowed by the Druid's ethos.", LONG_BOWS)
 
 
+def new_alaghor_text(text):
+    return text.replace("Advantages:\n\n", "Advantages:\n\n" + BULLET, 1)
+
+
+# ---------------------------------------------------------------------------
+# EEex and the game executable (411)
+# ---------------------------------------------------------------------------
+
+KP_DB = ROOT / "chriz-bg-rebalance/kitprof/CBRKP.db"
+KP_RUNTIME = ROOT / "chriz-bg-rebalance/lua/M_CBRKP.lua"
+ALAGHOR_REGISTRATION = ("CBR_8_16432", ("8", "16432"))  # FIGHTER_CLERIC and LK_ALAGHOR
+
+
+def kit_lookup_pattern():
+    """The EEex pattern 411 installs: its bytes (None for wildcards) and the label offset."""
+    fields = dict(line.split("=", 1) for line in KP_DB.read_text().splitlines()
+                  if "=" in line and not line.startswith(";"))
+    text = fields["Pattern"].strip()
+    pattern = [None if text[i:i + 2] == "??" else int(text[i:i + 2], 16) for i in range(0, len(text), 2)]
+    operation, offset = fields["Operations"].split()
+    assert operation == "ADD"
+    return pattern, int(offset)
+
+
+def kit_lookup_site(fill, *, hooked=False):
+    """The lookup with its varying displacements set from `fill`; `hooked` models
+    another mod that already replaced the JNE and the MOVSX with a jump."""
+    pattern, label = kit_lookup_pattern()
+    site = bytearray((fill + i) & 0xFF if byte is None else byte for i, byte in enumerate(pattern))
+    if hooked:
+        site[label:label + 9] = b"\xE9\x10\x20\x30\x40" + b"\x90" * 4
+    return bytes(site)
+
+
+def kit_lookup_executable(*, text_sites=1, hooked_sites=0, data_sites=0, fill=0x11, magic=0x20B):
+    """A minimal x64 PE image: an executable .text and a read-only .rdata section."""
+    image = bytearray(0x1000)
+    image[0:2] = b"MZ"
+    struct.pack_into("<I", image, 0x3C, 0x80)
+    image[0x80:0x84] = b"PE\0\0"
+    struct.pack_into("<HH", image, 0x84, 0x8664, 2)
+    struct.pack_into("<H", image, 0x94, 0xF0)
+    struct.pack_into("<H", image, 0x98, magic)
+    for index, (name, start, flags) in enumerate(((b".text", 0x400, 0x60000020),
+                                                  (b".rdata", 0xA00, 0x40000040))):
+        entry = 0x80 + 24 + 0xF0 + index * 40
+        image[entry:entry + 8] = name.ljust(8, b"\0")
+        struct.pack_into("<IIII", image, entry + 8, 0x600, start, 0x600, start)
+        struct.pack_into("<I", image, entry + 36, flags)
+    sites = [kit_lookup_site(fill + 0x10 * i) for i in range(text_sites)]
+    sites += [kit_lookup_site(fill, hooked=True) for _ in range(hooked_sites)]
+    for index, site in enumerate(sites):
+        start = 0x440 + index * 0x100
+        image[start:start + len(site)] = site
+    for index in range(data_sites):
+        start = 0xA40 + index * 0x100
+        site = kit_lookup_site(fill)
+        image[start:start + len(site)] = site
+    return bytes(image)
+
+
+EEEX_SCRIPTS = {
+    "current": {
+        "EEex_Assembly_x86-64.lua": (
+            "function EEex_HookAfterRestoreWithLabels(address, restoreDelay, restoreSize, returnDelay, labelPairs, assemblyT)\nend\n\n"
+            "function EEex_HookConditionalJumpOnSuccess(address, restoreSize, assemblyT)\nend\n"),
+        "EEex_Resource.lua": (
+            "function EEex_Resource_Load2DA(resref)\nend\n\n"
+            "function EEex_Resource_Get2DARowTableIterator(array, bIncludeLabel)\nend\n"),
+    },
+}
+EEEX_SCRIPTS["old"] = {
+    **EEEX_SCRIPTS["current"],
+    "EEex_Assembly_x86-64.lua": (
+        "function EEex_HookAfterRestoreWithLabels(address, restoreDelay, restoreSize, returnDelay, labelPairs, assemblyT)\nend\n"),
+}
+
+
+def install_eeex(root, flavour):
+    if flavour == "none":
+        return
+    scripts = root / "EEex_scripts"
+    (scripts / "extra_pattern_dbs").mkdir(parents=True)
+    for name, text in EEEX_SCRIPTS[flavour].items():
+        (scripts / name).write_text(text, encoding="ascii")
+
+
+def pattern_db(game):
+    return game.root / "EEex_scripts/extra_pattern_dbs/CBRKP.db"
+
+
+def registration(values):
+    return tuple(int(value, 0) for value in values)
+
 
 class ClassWeaponAccessTests(unittest.TestCase):
-    def game(self, fixture=None, *, resources=None, texts=None):
+    def game(self, fixture=None, *, resources=None, texts=None, exes=None):
         fixture = fixture or Fixture()
         holder = tempfile.TemporaryDirectory(prefix="cbr-cwa-")
         self.addCleanup(holder.cleanup)
-        return Game(Path(holder.name), fixture.resources() if resources is None else resources,
+        game = Game(Path(holder.name), fixture.resources() if resources is None else resources,
                     public=True, texts=fixture.texts if texts is None else texts)
+        install_eeex(game.root, fixture.eeex)
+        for name, raw in ({"Baldur.exe": kit_lookup_executable()} if exes is None else exes).items():
+            (game.root / name).write_bytes(raw)
+        return game
 
     def install(self, game, *components):
         code, output = run(game, *components)
@@ -560,6 +685,170 @@ class ClassWeaponAccessTests(unittest.TestCase):
         ref = self.table_ref(after["BGCLATXT.2DA"], "DRUID")
         self.assertEqual(texts[4].replace("battleaxe.", "battleaxe, short bow."), new[ref])
 
+    # -- 411 ------------------------------------------------------------------
+
+    def assert_411(self, game, *, row=KIT_ROW, splprot_changed=False):
+        after = game.snapshot()
+        before = game.original
+        self.assertEqual(expected_411_cells(weapprof_cells(before["WEAPPROF.2DA"])),
+                         weapprof_cells(after["WEAPPROF.2DA"]))
+        spell = SplFile.from_bytes(before["C0PR#CL.SPL"])
+        effects = expected_grants(spell.abilities[0].effects, ((ALAGHOR_KIT, row, 92, (row,)),), special=0)
+        wanted = dataclasses.replace(spell, abilities=(dataclasses.replace(spell.abilities[0], effects=tuple(effects)),))
+        self.assertEqual(wanted.to_bytes(), after["C0PR#CL.SPL"])
+        texts = strings(game.tlk)
+        self.assertEqual(game.original_texts, texts[:len(game.original_texts)])
+        ref = self.table_ref(after["KITLIST.2DA"], "LK_ALAGHOR", column="HELP", match_column="ROWNAME")
+        self.assertEqual(new_alaghor_text(game.original_texts[3]), texts[ref])
+        hook = {"CBRKPKIT.2DA", "M_CBRKP.LUA"}
+        changed = {"WEAPPROF.2DA", "C0PR#CL.SPL", "KITLIST.2DA", *hook} | ({"SPLPROT.2DA"} if splprot_changed else set())
+        for name in set(before) - changed:
+            self.assertEqual(before[name], after[name], name)
+        self.assertEqual(set(before) | hook, set(after))
+        self.assert_hook_installed(game, after)
+
+    def assert_hook_installed(self, game, after):
+        """The runtime, its pattern and one FIGHTER_CLERIC/LK_ALAGHOR registration
+        after any registrations other components made."""
+        before = game.original
+        self.assertEqual(KP_RUNTIME.read_bytes(), after["M_CBRKP.LUA"])
+        self.assertEqual(KP_DB.read_bytes(), pattern_db(game).read_bytes())
+        registry = TwoDA.from_text(after["CBRKPKIT.2DA"].decode())
+        self.assertEqual(("CLASS", "KIT"), registry.columns)
+        earlier = TwoDA.from_text(before["CBRKPKIT.2DA"].decode()).rows if "CBRKPKIT.2DA" in before else ()
+        ours = registration(ALAGHOR_REGISTRATION[1])
+        added = () if any(registration(values) == ours for _, values in earlier) else (ALAGHOR_REGISTRATION,)
+        self.assertEqual((*earlier, *added), registry.rows)
+
+    def assert_uninstalled(self, game, *components):
+        code, output = run(game, *components, uninstall=True)
+        self.assertEqual(0, code, output)
+        self.assertEqual(game.original, game.snapshot())
+        self.assertFalse(pattern_db(game).exists())
+
+    def test_411_alaghor_trains_cleric_weapons_and_axes_exact_and_uninstall(self):
+        game = self.game()
+        self.install(game, 411)
+        self.assert_411(game)
+        cells = weapprof_cells(game.snapshot()["WEAPPROF.2DA"])
+        self.assertEqual({p: 2 for p in (*CLERIC_WEAPONS, 92)},
+                         {p: cells[("LK_ALAGHOR", p)] for p in WEAPONS if cells[("LK_ALAGHOR", p)]})
+        # The fighting styles and the other rows: the fighter/cleric limits he has without the hook.
+        self.assertEqual([2, 2, 2, 3, 0], [cells[("LK_ALAGHOR", p)] for p in (*STYLES, 116)])
+        self.assert_uninstalled(game, 411)
+
+    def test_411_fighter_clerics_training_every_weapon_do_not_widen_alaghor(self):
+        values = base_columns()
+        for proficiency in WEAPONS:
+            values["FIGHTER_CLERIC"][proficiency] = 2
+        values["FIGHTER_CLERIC"][113] = 1  # another mod's style limits are followed, not constants
+        values["FIGHTER_CLERIC"][116] = 2
+        game = self.game(Fixture(values=values))
+        self.install(game, 411)
+        self.assert_411(game)
+        cells = weapprof_cells(game.snapshot()["WEAPPROF.2DA"])
+        self.assertEqual(sorted((*CLERIC_WEAPONS, 92)),
+                         sorted(p for p in WEAPONS if cells[("LK_ALAGHOR", p)]))
+        self.assertEqual([2, 2, 1, 3, 2], [cells[("LK_ALAGHOR", p)] for p in (*STYLES, 116)])
+
+    def test_411_rerun_on_its_own_output_changes_nothing(self):
+        first = self.game()
+        self.install(first, 411)
+        installed = first.snapshot()
+        texts = strings(first.tlk)
+        second = self.game(resources=installed, texts=texts)
+        pattern_db(second).write_bytes(pattern_db(first).read_bytes())
+        output = self.install(second, 411)
+        self.assertEqual(second.original, second.snapshot())
+        self.assertEqual(texts, strings(second.tlk))
+        self.assertIn("WEAPPROF cells changed: 0", output)
+
+    def test_411_keeps_other_registrations_and_restores_them_on_uninstall(self):
+        resources = Fixture().resources()
+        resources["CBRKPKIT.2DA"] = b"2DA V1.0\r\n****\r\n          CLASS KIT\r\nOTHER_MOD 14 0x4010\r\n"
+        game = self.game(resources=resources)
+        self.install(game, 411)
+        self.assert_411(game)
+        self.assertEqual(2, len(TwoDA.from_text(game.snapshot()["CBRKPKIT.2DA"].decode()).rows))
+        self.assert_uninstalled(game, 411)
+
+    def test_411_refuses_an_unsupported_registry(self):
+        for name, registry in (
+            ("third column", b"2DA V1.0\n****\n   CLASS KIT TABLE\nOTHER 14 16400 X\n"),
+            ("other columns", b"2DA V1.0\n****\n   KIT CLASS\n"),
+            ("text cell", b"2DA V1.0\n****\n   CLASS KIT\nOTHER FIGHTER 16400\n"),
+        ):
+            with self.subTest(name):
+                resources = Fixture().resources()
+                resources["CBRKPKIT.2DA"] = registry
+                game = self.game(resources=resources)
+                self.failed_unchanged(game, 411, "CBRKPKIT.2DA")
+                self.assertFalse(pattern_db(game).exists())
+
+    def test_411_requires_eeex_and_its_conditional_jump_hooks(self):
+        for flavour in ("none", "old"):
+            with self.subTest(flavour):
+                game = self.game(Fixture(eeex=flavour))
+                self.skipped_unchanged(game, 411)
+                self.assertFalse(pattern_db(game).exists())
+
+    def test_411_without_a_game_executable_fails_unchanged(self):
+        self.failed_unchanged(self.game(exes={}), 411, "could not find the game's executable")
+
+    def test_411_other_displacements_baldurii_and_a_patched_decoy(self):
+        exe = kit_lookup_executable(fill=0xA5, hooked_sites=1)
+        game = self.game(exes={"BaldurII.exe": exe})
+        output = self.install(game, 411)
+        self.assert_411(game)
+        self.assertIn("compatible kit-proficiency lookup found in BaldurII.exe at file offset 1088", output)
+
+    def test_411_refuses_executables_without_exactly_one_compatible_lookup(self):
+        for name, exe, message in (
+            ("missing", kit_lookup_executable(text_sites=0), "found 0"),
+            ("already hooked", kit_lookup_executable(text_sites=0, hooked_sites=1), "found 0"),
+            ("ambiguous", kit_lookup_executable(text_sites=2), "found 2"),
+            ("not code", kit_lookup_executable(text_sites=0, data_sites=1), "outside an executable section"),
+            ("32-bit", kit_lookup_executable(magic=0x10B), "not a supported 64-bit PE image"),
+        ):
+            with self.subTest(name):
+                game = self.game(exes={"Baldur.exe": exe})
+                self.failed_unchanged(game, 411, message)
+                self.assertFalse(pattern_db(game).exists())
+
+    def test_411_appends_a_kit_row_when_splprot_has_none(self):
+        splprot = SPLPROT_TEXT.replace("3_KIT=n 152 -1 1\n", "3_UNUSED 60 1 1\n")
+        game = self.game(Fixture(splprot=splprot))
+        self.install(game, 411)
+        rows = TwoDA.from_text(game.snapshot()["SPLPROT.2DA"].decode()).rows
+        self.assertEqual(("CBR_CWA_KIT_EQ", ("152", "-1", "1")), rows[-1])
+        self.assert_411(game, row=len(rows) - 1, splprot_changed=True)
+
+    def test_411_requires_artisans_permission_system(self):
+        self.skipped_unchanged(self.game(Fixture(kitpack=False)), 411)
+
+    def test_411_skips_without_the_kit(self):
+        resources = Fixture().resources()
+        resources["KIT.IDS"] = b"IDS V1.0\n0x4000 TRUECLASS\n"
+        self.skipped_unchanged(self.game(resources=resources), 411)
+
+    def test_411_refuses_a_shared_column(self):
+        kits = BASE_KITS + (Kit("ALAGHOR_TWIN", CLERIC, "LK_ALAGHOR"),)
+        self.failed_unchanged(self.game(Fixture(kits=kits)), 411, "shares its WEAPPROF column with ALAGHOR_TWIN")
+
+    def test_410_and_411_together_and_reverse_uninstall(self):
+        game = self.game()
+        self.install(game, 410, 411)
+        after = game.snapshot()
+        cells = weapprof_cells(after["WEAPPROF.2DA"])
+        self.assertEqual(expected_411_cells(expected_410_cells(weapprof_cells(game.original["WEAPPROF.2DA"]))),
+                         cells)
+        effects = SplFile.from_bytes(after["C0PR#CL.SPL"]).abilities[0].effects
+        self.assertEqual("C0PR#KG", effects[-1].resource)
+        kit_grants = [e for e in effects if e.parameter1 == ALAGHOR_KIT]
+        self.assertEqual([(326, KIT_ROW, "C0PR#92", 0)],
+                         [(e.opcode, e.parameter2, e.resource, e.special) for e in kit_grants])
+        self.assert_hook_installed(game, after)
+        self.assert_uninstalled(game, 411, 410)
 
 
 # ---------------------------------------------------------------------------

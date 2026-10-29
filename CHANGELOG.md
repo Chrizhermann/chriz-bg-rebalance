@@ -10,6 +10,14 @@
     weapon permissions (`C0PR#CL`); without it, it lifts the druid and
     fighter/druid restrictions from the matching items.
   - The English druid and fighter/druid descriptions name the new weapons.
+- Add Alaghor of Clangeddin weapons (411) for BG2:EE and EET with Artisan's
+  Kitpack and EEex: Yeslick NPC's Alaghor of Clangeddin kit trains and uses the
+  cleric weapons and axes up to the fighter/cleric limits; the thief weapons its
+  column allowed drop out, and pips already spent stay.
+  - The engine reads a fighter/cleric's weapon limits from the fighter/cleric
+    column even with a cleric kit. An EEex hook makes it read the kit's own
+    column for fighter/clerics with this kit; everyone else stays native.
+  - The English kit description names the axes.
 
 ## v0.8.7 — 2026-10-29
 
