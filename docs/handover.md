@@ -1,5 +1,25 @@
 # chriz-bg-rebalance — Handover
 
+## October 29 — v0.8.8: Druid weapons (410) and Alaghor of Clangeddin weapons (411)
+
+Christopher approved this release on 2026-10-29. It contains PR #22 (410) and PR #23 (411),
+merged that day; no other component changed. Tag `v0.8.8` and the GitHub release are made from
+this release PR's merge commit (the release notes name no date).
+
+Verified: full regression 820 tests, OK, 26 skipped (private captures) with WeiDU 249.
+`tools/package_timestop.py` builds the eight v0.8.8 files; built from the worktree and from a
+clean clone of the release commit, they are byte for byte alike. `sha256sum -c` accepts the four
+checksum files, and no text file in the archives names a local path. v0.8.7's eight files,
+rebuilt from its tag, match the published ones byte for byte. Against them, the full package
+changes only in `README.md`, `CHANGELOG.md`, `setup-chriz-bg-rebalance.tp2` (the version, 410
+and 411) and `setup.tra` (their strings), and gains `lib/class_weapon_access.tpa`,
+`lua/M_CBRKP.lua`, `kitprof/CBRKP.db` and `kitprof/CBRKPKIT.2DA`. The three tails change only in
+their installer version, the shared `setup.tra` and, for the two SR tails, their README.
+
+Open:
+- Gameplay acceptance of 410 and 411 by Christopher (entry below).
+- The CEBG pin and the selection of 410 and 411: the collection coordinator.
+
 ## October 27–29 — Druid weapons (410) and Alaghor weapons (411), unreleased
 
 Christopher's request of 2026-10-27, through the collection coordinator: classes and kits that

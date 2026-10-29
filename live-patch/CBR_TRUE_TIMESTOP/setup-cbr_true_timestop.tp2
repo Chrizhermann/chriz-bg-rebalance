@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/cbr_true_timestop~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.8.7~
+VERSION ~v0.8.8~
 ALWAYS
   INCLUDE ~CBR_TRUE_TIMESTOP/lib/time_stop_haste_clocks.tpa~
 END
