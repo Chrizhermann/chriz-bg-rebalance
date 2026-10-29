@@ -1,0 +1,9 @@
+; CRuleTables::GetProficiencyClassIndex, from its entry to the KITLIST
+; PROFICIENCY read (BG2EE/EET 2.7.3.0; the same code in 2.6.6.0). The label
+; is the JNE taken when the kit's KITLIST CLASS differs from the character's
+; class. Only the RIP-relative format string and the sscanf CALL vary; the
+; installer checks that the pattern occurs exactly once.
+[CBR-KitProficiencyColumn]
+Pattern=48895C24085556574883EC200FB6EA488BF9410FBAE00E0F83D6000000418BD881E3FFBFFFFF0F84C70000000FBF894026000083F9077E260FBF87422600003BD87D1B85DB7817488B87302600000FAFCB4883C0384863C9488D0CC8EB07488D8F38260000488B094C8D442450488D15????????E8????????400FB6C539442450756A0FBF9740260000
+Operations=ADD 129
+NoCache=1

@@ -256,12 +256,21 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9465 = ~M_CBRAPR.lua not found — install the EEex specialization APR component (407) first; the text describes its changes.~
 
 @410 = ~Druids may use axes and short bows; fighter/druids also long bows~
+@411 = ~Alaghor of Clangeddin (Yeslick): the cleric weapons plus axes, with fighter/cleric weapon limits (EEex)~
 @4101 = ~axe~
 @4102 = ~short bow~
 @4103 = ~plus long bows~
+@4111 = ~May use axes, Clangeddin's chosen weapon, alongside the cleric weapons, and may specialize in them like a Fighter/Cleric.~
 @9490 = ~This component supports BG2:EE / EET only.~
 @9491 = ~WEAPPROF.2DA or KITLIST.2DA is missing.~
 @9492 = ~CLASS.IDS does not define DRUID and FIGHTER_DRUID.~
+@9493 = ~KIT.IDS does not define LK_ALAGHOR. Install Yeslick NPC's Alaghor of Clangeddin kit before this component.~
+@9494 = ~C0PR#CL.SPL, C0PR#92.SPL or SPLPROT.2DA is missing. This component needs Artisan's Kitpack EEex proficiency system: without it, Alaghor could not be allowed axes without allowing every fighter/cleric.~
+@9495 = ~STATS.IDS does not define KIT, or CLASS.IDS does not define FIGHTER_CLERIC.~
+@9496 = ~Alaghor weapons require EEex: the game reads a fighter/cleric's weapon limits from the fighter/cleric column even with a cleric kit, and an EEex hook makes it read the kit's own column. Install EEex before this component.~
+@9497 = ~Alaghor weapons require EEex's extra-pattern-database loader, its conditional-jump hook helper and its 2DA resource helpers. Install compatible EEex support first.~
+@9498 = ~Alaghor weapons could not find the game's executable (Baldur.exe or BaldurII.exe).~
+@9499 = ~Alaghor weapons installed. Launch through EEex's InfinityLoader: without EEex, Yeslick keeps the fighter/cleric weapon limits.~
 
 @420 = ~EEex: independent kit spell-progression provider (BG2EE / EET / IWDEE)~
 @421 = ~Bard progression: IWD through level 7; Blade and Skald use original progression through level 6~

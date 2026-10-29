@@ -1542,6 +1542,60 @@ LAF cbr_apply_druid_weapon_access
     long_bow_phrase = EVAL ~%cbr_cwa_long_bow_phrase%~
 END
 
+// Yeslick's Alaghor of Clangeddin kit: the cleric weapons plus axes, with
+// fighter/cleric caps. Needs Artisan's permission system to allow axes for
+// the kit alone, and EEex: for a fighter/cleric with this cleric kit the
+// engine reads the FIGHTER_CLERIC limits, and M_CBRKP.lua makes it read the
+// kit's own column (lib/class_weapon_access.tpa).
+BEGIN @411 DESIGNATED 411 GROUP @1400 LABEL ~cbr_alaghor_weapon_access~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9490
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~WEAPPROF.2DA~) AND (FILE_EXISTS_IN_GAME ~KITLIST.2DA~)) @9491
+REQUIRE_PREDICATE (IDS_OF_SYMBOL (~kit~ ~LK_ALAGHOR~) > 0) @9493
+REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~C0PR#CL.SPL~) AND (FILE_EXISTS_IN_GAME ~C0PR#92.SPL~)
+               AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9494
+REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~stats~ ~KIT~) > 0) AND (IDS_OF_SYMBOL (~class~ ~FIGHTER_CLERIC~) > 0)) @9495
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9496
+REQUIRE_PREDICATE ((DIRECTORY_EXISTS ~EEex_scripts/extra_pattern_dbs~)
+  AND (FILE_CONTAINS_EVALUATED (~EEex_scripts/EEex_Assembly_x86-64.lua~ ~^function[ %TAB%]+EEex_HookConditionalJumpOnSuccess[ %TAB%]*(~))
+  AND (FILE_CONTAINS_EVALUATED (~EEex_scripts/EEex_Resource.lua~ ~^function[ %TAB%]+EEex_Resource_Load2DA~))
+  AND (FILE_CONTAINS_EVALUATED (~EEex_scripts/EEex_Resource.lua~ ~^function[ %TAB%]+EEex_Resource_Get2DARowTableIterator~))) @9497
+
+// The executable names EEex's loader starts; the hook site must exist there
+// before anything is changed.
+ACTION_IF (FILE_EXISTS ~Baldur.exe~) BEGIN
+  OUTER_SPRINT cbr_cwa_executable ~Baldur.exe~
+END ELSE ACTION_IF (FILE_EXISTS ~BaldurII.exe~) BEGIN
+  OUTER_SPRINT cbr_cwa_executable ~BaldurII.exe~
+END ELSE BEGIN
+  FAIL @9498
+END
+LAF cbr_cwa_preflight_kit_column_hook STR_VAR executable_path = EVAL ~%cbr_cwa_executable%~ END
+
+OUTER_SET cbr_cwa_alaghor_kit = IDS_OF_SYMBOL (~kit~ ~LK_ALAGHOR~)
+OUTER_SET cbr_cwa_kit_stat = IDS_OF_SYMBOL (~stats~ ~KIT~)
+OUTER_SET cbr_cwa_fighter_cleric_class = IDS_OF_SYMBOL (~class~ ~FIGHTER_CLERIC~)
+LAF cbr_cwa_install_kit_column
+  INT_VAR
+    class_value = cbr_cwa_fighter_cleric_class
+    kit_value   = cbr_cwa_alaghor_kit
+    verify_only = 1
+END
+OUTER_SPRINT cbr_cwa_alaghor_line @4111
+LAF cbr_apply_alaghor_weapon_access
+  INT_VAR
+    kit_value = cbr_cwa_alaghor_kit
+    kit_stat  = cbr_cwa_kit_stat
+  STR_VAR
+    kit_name    = ~LK_ALAGHOR~
+    bullet_line = EVAL ~%cbr_cwa_alaghor_line%~
+END
+LAF cbr_cwa_install_kit_column
+  INT_VAR
+    class_value = cbr_cwa_fighter_cleric_class
+    kit_value   = cbr_cwa_alaghor_kit
+END
+PRINT @9499
+
 // The provider is independently selectable; it changes no class defaults.
 BEGIN @420 DESIGNATED 420 GROUP @1400 LABEL ~cbr_kit_spell_progression_provider~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet iwdee~) @9470
