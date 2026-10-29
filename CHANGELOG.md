@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.8.8 — 2026-10-29
 
 - Add Druid weapons (410) for BG2:EE and EET: druids and every druid kit may
   use axes and short bows and become Proficient in them; fighter/druids may
