@@ -16,6 +16,8 @@
 @202 = ~Hardiness: also grant 20% elemental and magic damage resistance (optional)~
 @210 = ~EEex + SR: Pierce Magic - bounded MR reduction for five rounds~
 @211 = ~SR: Spellstrike - 15% spell failure for two rounds~
+@212 = ~SR: Pierce Magic - texts only: description, scroll, wand and sibling spells (for an installation that already has the five-round MR reduction)~
+@213 = ~SR: Spellstrike - texts only: description, scroll and sibling spells (for an installation that already has the 15% spell failure)~
 @220 = ~Bracers of Blinding Strike: self-only Spell Revisions Improved Haste~
 @9220 = ~This component requires BG2:EE or EET.~
 @9221 = ~This component requires Spell Revisions' main component.~
@@ -67,17 +69,43 @@ Calling upon hidden reserves of strength during times of danger, a warrior can u
 @9203 = ~Hardiness is already supplied by the other CBR installer. Use either the full mod or the standalone tail patch, never both Hardiness installations.~
 @9204 = ~Install this installer's 40% or 30% Hardiness component before the optional extra resistances.~
 
+// Spell descriptions in Spell Revisions' layout: the name, a header block (Level,
+// School, Range, Duration, Casting Time, Area of Effect, Saving Throw), then the
+// effect. The header values are Spell Revisions' own for these two spells (SPWI608:
+// level 6, ability range 30 = Long, casting speed 6; SPWI903: level 9, speed 5).
+// The Note paragraph (@2102) is appended only when the spell can target invisible
+// creatures; the installer keeps that paragraph conditional.
 @2100 = ~Pierce Magic
+Level: 6
+School: Abjuration
+Range: Long
+Duration: Special
+Casting Time: 6
+Area of Effect: 1 creature
+Saving Throw: None
 
-This spell removes one spell protection of 8th level or lower and reduces the target's current Magic Resistance by half for 5 rounds. The reduction is at least 10 and at most 40 percentage points, rounded up to a whole point, and cannot reduce Magic Resistance below zero. It allows no saving throw and bypasses Magic Resistance.
+When this spell is cast upon a target creature there will be two major effects. The first is that it will dispel one spell protection of 8th level or lower from the creature. This will always dispel the highest level of spell protection on the target first. If the target has two or more protections tied for the highest level, the choice will be random. The second effect of the spell is that it reduces the creature's current Magic Resistance by half for 5 rounds. The reduction is at least 10 and at most 40 percentage points, rounded up to a whole point, and cannot reduce Magic Resistance below zero. The target's Magic Resistance, if any, does not affect this spell.
+
+The spell protection spells dispelled by Pierce Magic are: Dispelling Screen, Entropy Shield, Fiendish Warding, Globe of Invulnerability, Greater Spell Deflection, Minor Globe of Invulnerability, Minor Spell Deflection, Non-Detection, Selûne's Blessing, Shield of the Archons, and Spell Deflection.
 
 Only one Pierce Magic reduction can affect a creature at a time. Further successful casts refresh that reduction's duration without increasing or recalculating its amount. It combines with Lower Resistance. Spell Shield can absorb the spell's effects.~
+@2101 = ~Lowers target's Magic Resistance by half (at least 10 and at most 40 points) for 5 rounds and removes one spell protection from target~
+@2102 = ~Note: This spell may be used to remove magical protections even from creatures which could not normally be targeted by spells because they are invisible.~
 @2110 = ~Spellstrike
+Level: 9
+School: Abjuration
+Range: Long
+Duration: Special
+Casting Time: 5
+Area of Effect: 1 creature
+Saving Throw: None
 
-This spell removes all spell protections of 9th level or lower, including Dispelling Screen. It also gives the target a 15% chance of failing to cast arcane or divine spells for 2 rounds. It allows no saving throw and bypasses Magic Resistance.
+When this spell is cast, it will dispel all spell protections on the target. In addition, the affected creature will suffer a 15% chance of failing to cast arcane or divine spells for 2 rounds. Magic Resistance does not affect this spell.
+
+The spell protection spells dispelled by Spellstrike are: Dispelling Screen, Entropy Shield, Fiendish Warding, Globe of Invulnerability, Greater Spell Deflection, Minor Globe of Invulnerability, Minor Spell Deflection, Non-Detection, Selûne's Blessing, Shield of the Archons, Spell Deflection, and Spell Trap.
 
 The spell failure from multiple Spellstrikes does not stack; further successful casts refresh its duration. Spell Shield can absorb the spell's effects.~
-@9210 = ~SR anti-magic adjustments require BG2:EE or EET.~
+@2111 = ~Removes all spell protections from target and gives it a 15% chance of failing to cast arcane or divine spells for 2 rounds~@9210 = ~SR anti-magic adjustments require BG2:EE or EET.~
 @9211 = ~SR anti-magic adjustments require Spell Revisions main component 0.~
 @9212 = ~Pierce Magic's bounded MR calculation and refresh require EEex. Launch through InfinityLoader.~
 @9213 = ~This anti-magic component is already supplied by the other CBR installer. Use one installer for each component.~

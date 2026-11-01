@@ -104,6 +104,13 @@ Both preserve protection removal, Spell Shield interception and installed invisi
 targeting. Pierce Shield and Entropy Shield are unchanged. Native
 first-hit/refresh/save-load acceptance remains separate from automated checks.
 
+Each also writes the spell's description in Spell Revisions' layout (header, intro, list of
+removed protections, mechanic) and brings every text that still shows the old mechanic up to
+date: scrolls that learn or cast the spell, the Pierce Magic charge line of the Wand of Spell
+Striking, and other spells that cast the same payload (Artisan's Kitpack's monk Spellstrike).
+An item with its own text keeps it, and the installer names it. The tail patch's components
+212 and 213 do only this, for an installation that already has the mechanic.
+
 Build the full mod, the separate tail patches and the standalone True Time Stop package with
 `python tools/package_timestop.py`.
 For an existing stack, use the [anti-magic tail patch](live-patch/CBR_SR_ANTIMAGIC/README.md)

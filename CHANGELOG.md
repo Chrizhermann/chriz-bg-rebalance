@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- Describe Pierce Magic (210) and Spellstrike (211) in Spell Revisions' layout. The
+  spell's description now has the header (name, Level, School, Range, Duration, Casting
+  Time, Area of Effect, Saving Throw), the intro, the list of protections it removes and
+  the mechanic that 210 / 211 install (Pierce Magic: MR reduced by half for 5 rounds, at
+  least 10 and at most 40 points; Spellstrike: 15% spell failure for 2 rounds), as every
+  other Spell Revisions spell has; before, they had a short text with no header.
+- Make everything that shows the old mechanic say the new one:
+  - items that learn or cast the spell (Scroll of Pierce Magic, Scroll of Spellstrike) and
+    still show the spell's old description get the new one; an item with its own text keeps
+    it and the installer names it;
+  - items that reach the payload through another spell (the Wand of Spell Striking, through
+    SCS's wand spell) get a private copy of their text with only the Pierce Magic charge
+    line replaced, when that line is recognizable; otherwise they keep their text and the
+    installer names them;
+  - spells that cast the same payload and show the old description (Artisan's Kitpack's
+    monk Spellstrike) show the new one.
+- Add components 212 (Pierce Magic) and 213 (Spellstrike) to the CBR_SR_ANTIMAGIC tail
+  patch: texts only, for an installation that already has the changed mechanic from any
+  source (the main installer, the 210 / 211 tail, a private tail). They refuse a payload
+  without the mechanic. 213 keeps a Spellstrike text that already has the layout and states
+  the 15%, and points scrolls and sibling spells at it.
+
 ## v0.8.8 — 2026-10-29
 
 - Add Druid weapons (410) for BG2:EE and EET: druids and every druid kit may
