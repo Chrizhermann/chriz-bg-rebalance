@@ -19,7 +19,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from tests.ie_formats import SplAbility, SplEffect, SplFile
+from tests.ie_formats import ItmAbility, ItmFile, SplAbility, SplEffect, SplFile
 from tests.test_emotion_hope_courage_installer import _write_key_and_bif
 from tests.test_sr_hardiness import _strings, _tlk, _tree
 
@@ -31,7 +31,44 @@ TAIL = ROOT / "live-patch/CBR_SR_ANTIMAGIC"
 PM, SS = "SPWI643", "SPWI947"
 PM_BODY, SS_BODY = "ZPMBODY", "ZSSBODY"
 PM_SHIELD, SS_SHIELD = "ZPMSHLD", "ZSSSHLD"
-ORIGINAL_STRINGS = ("Synthetic spell", "Shared original description.", "Unrelated text.")
+PM_NAME, SS_NAME = "Synthetic Pierce", "Synthetic Strike"
+# Spell Revisions shares one description strref between a spell, its hidden
+# payload spells and its scroll. OLD_TEXT is long enough to be compared by text.
+OLD_TEXT = ("Shared original description of the synthetic anti-magic spell, as Spell "
+            "Revisions shares it between a spell, its hidden payload spells and its scroll.")
+OWN_TEXT = "House rule: this scroll is described in the owner's own words, not the spell's."
+UNRELATED_TEXT = "Unrelated text."
+PM_OLD_SPECIAL = ("Lowers target's Magic Resistance by 20% for 2  turns and removes one "
+                  "spell protection from target")
+SS_OLD_SPECIAL = "Dispels all specific and combat protections on target"
+BREACH_ENTRY = ("\u2013 Breach\n  Special: Dispels all specific and combat protections on target\n"
+                "  Range: 40 ft.\n  Area of Effect: 1 creature\n\n")
+
+
+def _wand_text(name: str, special: str) -> str:
+    return ("Ironically, these wands are both prized and hated by wizards.\n\nSTATISTICS:\n\n"
+            "Charge abilities:\n" + BREACH_ENTRY + f"\u2013 {name}\n  Special: {special}\n"
+            "  Range: 40 ft.\n  Area of Effect: 1 creature\n\nRequires:\n 9 Intelligence\n\nWeight: 1")
+
+
+ORIGINAL_STRINGS = (
+    "Synthetic spell",                       # 0
+    OLD_TEXT,                                # 1: shared by the spells and scrolls
+    UNRELATED_TEXT,                          # 2
+    OWN_TEXT,                                # 3
+    _wand_text(PM_NAME, PM_OLD_SPECIAL),     # 4: a Pierce Magic wand
+    OLD_TEXT,                                # 5: a copy of 1 under another strref
+    "A wand of unspecified purpose.",        # 6
+    PM_NAME,                                 # 7
+    SS_NAME,                                 # 8
+    _wand_text(SS_NAME, SS_OLD_SPECIAL),     # 9: a Spellstrike wand
+    _wand_text(PM_NAME, "Says nothing about the old rules."),  # 10: unrecognizable line
+)
+PM_SIBLING, SS_SIBLING = "ZPMWNDS", "ZSSWNDS"          # SCS-style wand spells
+PM_SCROLL, SS_SCROLL = "ZPMSCR", "ZSSSCR"
+OWN_SCROLL, COPY_SCROLL = "ZOWNSCR", "ZCOPYSC"
+PM_WAND, SS_WAND, ODD_WAND, ODD2_WAND = "ZPMWAND", "ZSSWAND", "ZODDWND", "ZODD2WN"
+INLINE_ITEM, UNRELATED_ITEM = "ZINLINE", "ZUNREL"
 SYNTHETIC_MR_STAT = 37
 
 
@@ -82,6 +119,29 @@ def _wrapper(body: str, shield: str, *, spellstrike: bool) -> bytes:
                    _effect(139, 2)), level=9 if spellstrike else 6)
 
 
+def _named(spell: bytes, name_strref: int) -> bytes:
+    data = bytearray(spell)
+    struct.pack_into("<I", data, 0x08, name_strref)
+    return bytes(data)
+
+
+def _item(*abilities: tuple[SplEffect, ...], identified: int, unidentified: int = 2) -> bytes:
+    return ItmFile(abilities=tuple(ItmAbility(effects=effects) for effects in abilities),
+                   unidentified_name=0, identified_name=0,
+                   unidentified_description=unidentified, identified_description=identified).to_bytes()
+
+
+def _cast(resource: str, opcode: int = 146) -> SplEffect:
+    return SplEffect(opcode=opcode, target=2, timing=1, resource=resource)
+
+
+def _tra_string(number: int) -> str:
+    text = (ROOT / "chriz-bg-rebalance/languages/english/setup.tra").read_text(encoding="utf-8")
+    match = re.search(rf"(?ms)^@{number}\s*=\s*~(.*?)~", text)
+    assert match, number
+    return match.group(1).replace("\r\n", "\n")
+
+
 def _copy_tail(root: Path) -> str:
     package = root / "CBR_SR_ANTIMAGIC"
     shutil.copytree(TAIL, package)
@@ -100,8 +160,10 @@ def _copy_tail(root: Path) -> str:
 class AntimagicGame:
     def __init__(self, root: Path, *, direct: bool = False, sr_component: int | None = 0,
                  game: str = "bg2ee", tail: bool = False, changed: dict[str, bytes | None] | None = None,
-                 symbols: bool = True, eeex: bool = True, archive: Path | None = None):
+                 symbols: bool = True, eeex: bool = True, archive: Path | None = None,
+                 strings: tuple[str, ...] | None = None):
         root.mkdir()
+        self.strings = strings or ORIGINAL_STRINGS
         self.root, self.direct = root, direct
         self.override = root / "override"
         self.override.mkdir()
@@ -118,7 +180,26 @@ class AntimagicGame:
             "ZLOWER.SPL": _spell((_effect(166, -40, 0, timing=0, duration=120),), level=5),
             "ZPIERCE.SPL": _spell((_effect(230, 9, 1), _effect(221, 9, 7), _effect(221, 9, 23)), level=8),
             "SPWI608.SPL": _payload(False), "SPWI903.SPL": _payload(True),
+            # Sibling spells that reach the payload (SCS's wand spell; share the old text).
+            f"{PM_SIBLING}.SPL": _spell((_effect(146, resource=PM_BODY), _effect(146, resource=PM_SHIELD))),
+            f"{SS_SIBLING}.SPL": _spell((_effect(146, resource=SS_BODY), _effect(146, resource=SS_SHIELD)), level=9),
+            # A scroll teaches and casts the parent; its text is the spell's text.
+            f"{PM_SCROLL}.ITM": _item((_cast(PM),), (_cast(PM, 147),), identified=1),
+            f"{SS_SCROLL}.ITM": _item((_cast(SS),), (_cast(SS, 147),), identified=1),
+            f"{OWN_SCROLL}.ITM": _item((_cast(PM, 147),), identified=3),
+            f"{COPY_SCROLL}.ITM": _item((_cast(PM),), identified=5),
+            # Wands reach the payload through the sibling spell; their text is their own.
+            f"{PM_WAND}.ITM": _item((_cast("ZUNRELS"),), (_cast(PM_SIBLING),), identified=4),
+            f"{SS_WAND}.ITM": _item((_cast(SS_SIBLING),), identified=9),
+            f"{ODD_WAND}.ITM": _item((_cast(PM_SIBLING),), identified=6),
+            f"{ODD2_WAND}.ITM": _item((_cast(PM_SIBLING),), identified=10),
+            # Inline effects of their own are nobody's business here.
+            f"{INLINE_ITEM}.ITM": _item((_effect(166, -20, 0, timing=0, duration=120),), identified=4),
+            f"{UNRELATED_ITEM}.ITM": _item((_effect(12, 1, 0),), identified=2),
+            "ZUNRELS.SPL": _spell((_effect(12, 1, 0),)),
         }
+        self.before[f"{PM}.SPL"] = _named(self.before[f"{PM}.SPL"], 7)
+        self.before[f"{SS}.SPL"] = _named(self.before[f"{SS}.SPL"], 8)
         for name, data in (changed or {}).items():
             if data is None:
                 self.before.pop(name.upper(), None)
@@ -137,15 +218,16 @@ class AntimagicGame:
         # Mix BIFF-only parents/payloads and loose payloads so both publication
         # paths and byte-exact removal/restoration are exercised.
         for name, data in self.before.items():
-            if name in (f"{PM}.SPL", f"{PM_BODY}.SPL"):
-                resources.append((name[:-4], "SPL", data))
+            if name in (f"{PM}.SPL", f"{PM_BODY}.SPL", f"{PM_SCROLL}.ITM", f"{SS_SCROLL}.ITM",
+                        f"{ODD_WAND}.ITM", f"{UNRELATED_ITEM}.ITM"):
+                resources.append((name[:-4], name[-3:], data))
             else:
                 (self.override / name).write_bytes(data)
         self.bif = _write_key_and_bif(root, tuple(resources))
         self.tlk = root / "lang/en_us/dialog.tlk"
         self.tlk.parent.mkdir(parents=True)
-        self.tlk.write_bytes(_tlk(ORIGINAL_STRINGS))
-        (root / "dialog.tlk").write_bytes(_tlk(ORIGINAL_STRINGS))
+        self.tlk.write_bytes(_tlk(self.strings))
+        (root / "dialog.tlk").write_bytes(_tlk(self.strings))
         if sr_component is not None:
             (root / "weidu.log").write_text(
                 f"~SPELL_REV/SETUP-SPELL_REV.TP2~ #0 #{sr_component} // synthetic SR\n", encoding="ascii")
@@ -177,9 +259,17 @@ class AntimagicGame:
                                "--no-exit-pause", "--quick-log"],
                               cwd=self.root, capture_output=True, text=True, timeout=90, check=False)
 
-    def effective(self, resref: str) -> bytes:
-        path = self.override / f"{resref}.SPL"
-        return path.read_bytes() if path.exists() else self.before[f"{resref}.SPL"]
+    def effective(self, resref: str, extension: str = "SPL") -> bytes:
+        path = self.override / f"{resref}.{extension}"
+        return path.read_bytes() if path.exists() else self.before[f"{resref}.{extension}"]
+
+    def strref(self, resref: str, extension: str = "SPL", *, unidentified: bool = False) -> int:
+        data = self.effective(resref, extension)
+        offset = 0x50 if extension == "SPL" or unidentified else 0x54
+        return struct.unpack_from("<i", data, offset)[0]
+
+    def text(self, resref: str, extension: str = "SPL") -> str:
+        return _strings(self.tlk)[self.strref(resref, extension)]
 
     def log(self) -> str:
         path = self.root / "weidu.log"
@@ -254,7 +344,7 @@ class AntimagicInstallerTests(unittest.TestCase):
     def assert_stable(self, game: AntimagicGame):
         for relative, payload in game.stable.items():
             self.assertEqual(payload, (game.root / relative).read_bytes(), relative)
-        self.assertEqual(list(ORIGINAL_STRINGS), _strings(game.tlk)[:len(ORIGINAL_STRINGS)])
+        self.assertEqual(list(game.strings), _strings(game.tlk)[:len(game.strings)])
         for resource in (PM_SHIELD, SS_SHIELD, "ZSHIELD", "ZLOWER", "ZPIERCE", "SPWI608", "SPWI903"):
             self.assertEqual(game.before[f"{resource}.SPL"], game.effective(resource), resource)
         self.assertEqual(game.original_override["SPLPROT.2DA"], (game.override / "SPLPROT.2DA").read_bytes())
@@ -273,7 +363,7 @@ class AntimagicInstallerTests(unittest.TestCase):
         self.assertIn("SKIPPING" if skipped else "NOT INSTALLED DUE TO ERRORS", transcript)
         self.assertNotRegex(game.log(), rf"(?m)#0\s+#{component}\b")
         self.assertEqual(game.original_override, _tree(game.override))
-        self.assertEqual(_tlk(ORIGINAL_STRINGS), game.tlk.read_bytes())
+        self.assertEqual(_tlk(game.strings), game.tlk.read_bytes())
         self.assert_stable(game)
 
     def assert_description_and_wrapper(self, game, parent, *, component):
@@ -532,6 +622,239 @@ class AntimagicInstallerTests(unittest.TestCase):
                     result = game.run(component)
                     self.assertIn("SKIPPING", result.stdout + result.stderr)
                     self.assertEqual(baseline, (_tree(game.override), game.tlk.read_bytes(), game.log()))
+
+    # ---- descriptions: the spell, scrolls, wands and sibling spells -----------------
+
+    def assert_only_description_changed(self, game, resref, extension, *, unidentified: bool = False):
+        """Every byte but the description strref equals the original resource."""
+        original, output = game.before[f"{resref}.{extension}"], game.effective(resref, extension)
+        offset = 0x50 if extension == "SPL" or unidentified else 0x54
+        expected = bytearray(original)
+        expected[offset:offset + 4] = output[offset:offset + 4]
+        self.assertEqual(bytes(expected), output, f"{resref}.{extension} changed beyond its description")
+
+    def assert_untouched(self, game, resref, extension):
+        self.assertEqual(game.before[f"{resref}.{extension}"], game.effective(resref, extension),
+                         f"{resref}.{extension} must not change")
+
+    def test_spell_revisions_layout_of_the_two_texts(self):
+        layout = ("Level:", "School:", "Range:", "Duration:", "Casting Time:", "Area of Effect:", "Saving Throw:")
+        protections = ("Dispelling Screen", "Entropy Shield", "Fiendish Warding", "Globe of Invulnerability",
+                       "Greater Spell Deflection", "Minor Globe of Invulnerability", "Minor Spell Deflection",
+                       "Non-Detection", "Sel\u00fbne's Blessing", "Shield of the Archons", "Spell Deflection")
+        for number, name, level, speed in ((2100, "Pierce Magic", "6", "6"), (2110, "Spellstrike", "9", "5")):
+            with self.subTest(name=name):
+                lines = _tra_string(number).split("\n")
+                self.assertEqual(name, lines[0])
+                for expected, line in zip(layout, lines[1:8]):
+                    self.assertTrue(line.startswith(expected), line)
+                self.assertEqual(f"Level: {level}", lines[1])
+                self.assertEqual("School: Abjuration", lines[2])
+                self.assertEqual("Range: Long", lines[3])
+                self.assertEqual(f"Casting Time: {speed}", lines[5])
+                self.assertEqual("Area of Effect: 1 creature", lines[6])
+                self.assertEqual("Saving Throw: None", lines[7])
+                self.assertEqual("", lines[8])
+                body = "\n".join(lines[9:])
+                self.assertIn(f"The spell protection spells dispelled by {name} are:", body)
+                for protection in protections:
+                    self.assertIn(protection, body)
+                self.assertNotIn("nullified", body)
+                self.assertNotIn("100%", body)
+        pierce, strike = _tra_string(2100), _tra_string(2110)
+        self.assertIn("by half for 5 rounds", pierce)
+        self.assertIn("at least 10 and at most 40 percentage points", pierce)
+        self.assertNotIn("2 rounds", pierce)
+        self.assertNotIn("Spell Trap", pierce)
+        self.assertIn("a 15% chance of failing to cast arcane or divine spells for 2 rounds", strike)
+        self.assertIn("and Spell Trap.", strike)
+        for number in (2101, 2111):
+            self.assertNotIn("\n", _tra_string(number))
+
+    def test_pierce_magic_description_scrolls_wand_and_sibling_spell(self):
+        game = self.make_game()
+        result = game.run(210)
+        self.assert_installed(game, result, 210)
+        new_ref = game.strref(PM)
+        description = _strings(game.tlk)[new_ref]
+        self.assertEqual(_tra_string(2100) + "\n\n" + _tra_string(2102), description)
+        self.assertEqual(7, len(description.split("\n\n")[0].split("\n")) - 1)
+        # Scrolls and spells that show the old description now show the new one.
+        for resource, extension in ((PM_SCROLL, "ITM"), (COPY_SCROLL, "ITM"), (PM_SIBLING, "SPL")):
+            self.assertEqual(new_ref, game.strref(resource, extension), resource)
+            self.assert_only_description_changed(game, resource, extension)
+        # The hidden payload spells keep the shared strref: an already changed
+        # installation finds what is stale through them.
+        for resource in (PM_BODY, PM_SHIELD):
+            self.assertEqual(1, game.strref(resource), resource)
+        # A scroll with its own text keeps it and the installer says so.
+        self.assert_untouched(game, OWN_SCROLL, "ITM")
+        self.assertIn(f"{OWN_SCROLL}.ITM", result.stdout)
+        # The wand: only the Special value of this spell's own entry changes.
+        wand = _strings(game.tlk)[game.strref(PM_WAND, "ITM")]
+        self.assertEqual(_wand_text(PM_NAME, _tra_string(2101)), wand)
+        self.assertIn("Special: Dispels all specific and combat protections on target\n", wand)
+        self.assert_only_description_changed(game, PM_WAND, "ITM")
+        # Wands whose line is not recognizable keep their text; the installer names them.
+        for resource in (ODD_WAND, ODD2_WAND):
+            self.assert_untouched(game, resource, "ITM")
+            self.assertIn(f"{resource}.ITM", result.stdout)
+        # Items with inline effects, unrelated items and Spellstrike's items stay.
+        for resource in (INLINE_ITEM, UNRELATED_ITEM, SS_SCROLL, SS_WAND):
+            self.assert_untouched(game, resource, "ITM")
+        for resource in (SS, SS_SIBLING, "ZUNRELS"):
+            self.assert_untouched(game, resource, "SPL")
+
+    def test_spellstrike_description_scrolls_wand_and_sibling_spell(self):
+        game = self.make_game()
+        result = game.run(211)
+        self.assert_installed(game, result, 211)
+        new_ref = game.strref(SS)
+        self.assertEqual(_tra_string(2110) + "\n\n" + _tra_string(2102), _strings(game.tlk)[new_ref])
+        for resource, extension in ((SS_SCROLL, "ITM"), (SS_SIBLING, "SPL")):
+            self.assertEqual(new_ref, game.strref(resource, extension), resource)
+            self.assert_only_description_changed(game, resource, extension)
+        self.assertEqual(_wand_text(SS_NAME, _tra_string(2111)),
+                         _strings(game.tlk)[game.strref(SS_WAND, "ITM")])
+        self.assert_only_description_changed(game, SS_WAND, "ITM")
+        for resource in (PM_SCROLL, COPY_SCROLL, OWN_SCROLL, PM_WAND, ODD_WAND, INLINE_ITEM, UNRELATED_ITEM):
+            self.assert_untouched(game, resource, "ITM")
+        self.assert_untouched(game, PM_SIBLING, "SPL")
+
+    def test_direct_sr_payload_scroll_follows_the_parent_text(self):
+        game = self.make_game(direct=True)
+        self.assert_installed(game, game.run(210), 210)
+        self.assertEqual(game.strref(PM), game.strref(PM_SCROLL, "ITM"))
+        self.assertNotEqual(1, game.strref(PM_SCROLL, "ITM"))
+        self.assert_untouched(game, OWN_SCROLL, "ITM")
+
+    def test_scroll_text_changed_by_another_mod_is_not_overwritten(self):
+        # The copy under strref 5 was rewritten: it is no longer the old description.
+        strings = list(ORIGINAL_STRINGS)
+        strings[5] = "Another mod rewrote this scroll: it now explains the spell in its own words, at length."
+        game = self.make_game(strings=tuple(strings))
+        result = game.run(210)
+        self.assert_installed(game, result, 210)
+        self.assert_untouched(game, COPY_SCROLL, "ITM")
+        self.assertIn(f"{COPY_SCROLL}.ITM", result.stdout)
+        self.assertEqual(game.strref(PM), game.strref(PM_SCROLL, "ITM"))
+
+    def test_description_install_twice_changes_nothing_and_uninstall_restores_everything(self):
+        game = self.make_game()
+        self.assert_installed(game, game.run(210, 211), 210)
+        after, strings = _tree(game.override), _strings(game.tlk)
+        self.assert_installed(game, game.run(210, 211), 210)
+        self.assertEqual(after, _tree(game.override))
+        self.assertEqual(strings, _strings(game.tlk), "no string is added twice")
+        result = game.run(210, 211, uninstall=True)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(game.original_override, _tree(game.override))
+
+    def test_item_scan_survives_malformed_items_and_spells(self):
+        junk = {f"ZJUNK1.ITM": b"ITM V1  " + b"\x00" * 8, "ZJUNK2.ITM": b"not an item at all",
+                "ZJUNK3.SPL": b"SPL V1  " + b"\x07" * 0x80, "ZJUNK4.SPL": b"short"}
+        game = self.make_game(changed=junk)
+        self.assert_installed(game, game.run(210), 210)
+        for name, data in junk.items():
+            self.assertEqual(data, (game.override / name).read_bytes(), name)
+
+    # ---- texts-only tail components (212, 213) -------------------------------
+
+    def stale(self, game):
+        """Restore the stale item/spell files an old installation left behind."""
+        for resource, extension in ((PM_SCROLL, "ITM"), (SS_SCROLL, "ITM"), (COPY_SCROLL, "ITM"),
+                                    (PM_WAND, "ITM"), (SS_WAND, "ITM"), (PM_SIBLING, "SPL"), (SS_SIBLING, "SPL")):
+            (game.override / f"{resource}.{extension}").write_bytes(game.before[f"{resource}.{extension}"])
+
+    def test_texts_tail_updates_an_installation_that_already_has_the_mechanic(self):
+        game = self.make_game(tail=True)
+        self.assert_installed(game, game.run(210, 211), 210)
+        mechanic = {name: data for name, data in _tree(game.override).items() if name.startswith(("ZPMBODY", "ZSSBODY", "M_CBRPM"))}
+        parents = {PM: game.effective(PM), SS: game.effective(SS)}
+        # What a private tail leaves: the changed mechanic, a short parent text, stale items.
+        for parent, short in ((PM, 2), (SS, 2)):
+            data = bytearray(parents[parent])
+            struct.pack_into("<i", data, 0x50, short)
+            (game.override / f"{parent}.SPL").write_bytes(bytes(data))
+        self.stale(game)
+        result = game.run(212, 213)
+        for component in (212, 213):
+            self.assertRegex(game.log(), rf"(?m)#0\s+#{component}\b")
+        transcript = result.stdout + result.stderr
+        self.assertEqual(0, result.returncode, transcript)
+        self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+        for parent, template in ((PM, 2100), (SS, 2110)):
+            self.assertEqual(_tra_string(template) + "\n\n" + _tra_string(2102), game.text(parent))
+        self.assertEqual(game.strref(PM), game.strref(PM_SCROLL, "ITM"))
+        self.assertEqual(game.strref(PM), game.strref(COPY_SCROLL, "ITM"))
+        self.assertEqual(game.strref(SS), game.strref(SS_SCROLL, "ITM"))
+        self.assertEqual(_wand_text(PM_NAME, _tra_string(2101)), game.text(PM_WAND, "ITM"))
+        self.assertEqual(_wand_text(SS_NAME, _tra_string(2111)), game.text(SS_WAND, "ITM"))
+        # Texts only: the mechanic and the runtime are exactly as they were.
+        for name, data in mechanic.items():
+            self.assertEqual(data, _tree(game.override)[name], name)
+        # Uninstalling the texts component restores the earlier files.
+        undo = game.run(212, 213, uninstall=True)
+        self.assertEqual(0, undo.returncode, undo.stdout + undo.stderr)
+
+    def test_texts_tail_keeps_a_spellstrike_text_that_already_has_the_layout(self):
+        # A private tail wrote this Spellstrike text in Spell Revisions' layout already.
+        private = (SS_NAME + "\nLevel: 9\nSchool: Abjuration\nRange: Long\nDuration: Special\nCasting Time: 5\n"
+                   "Area of Effect: 1 creature\nSaving Throw: None\n\nA private text with a 15% chance of spell failure.")
+        game = self.make_game(tail=True, strings=ORIGINAL_STRINGS + (private,))
+        private_ref = len(ORIGINAL_STRINGS)
+        self.assert_installed(game, game.run(211), 211)
+        data = bytearray(game.effective(SS))
+        struct.pack_into("<i", data, 0x50, private_ref)
+        (game.override / f"{SS}.SPL").write_bytes(bytes(data))
+        self.stale(game)
+        self.assert_installed(game, game.run(213), 213)
+        self.assertEqual(private_ref, game.strref(SS), "the private layout text stays")
+        self.assertEqual(private_ref, game.strref(SS_SCROLL, "ITM"))
+        self.assertEqual(private_ref, game.strref(SS_SIBLING, "SPL"))
+        self.assertEqual(_wand_text(SS_NAME, _tra_string(2111)), game.text(SS_WAND, "ITM"))
+
+    def test_texts_tail_rewrites_a_short_spellstrike_text_that_has_no_header(self):
+        # The text 211 wrote before this release: the name, a blank line, no header.
+        short = (SS_NAME + "\n\nThis spell removes all spell protections of 9th level or lower. It also gives "
+                 "the target a 15% chance of failing to cast arcane or divine spells for 2 rounds.")
+        game = self.make_game(tail=True, strings=ORIGINAL_STRINGS + (short,))
+        self.assert_installed(game, game.run(211), 211)
+        data = bytearray(game.effective(SS))
+        struct.pack_into("<i", data, 0x50, len(ORIGINAL_STRINGS))
+        (game.override / f"{SS}.SPL").write_bytes(bytes(data))
+        self.stale(game)
+        self.assert_installed(game, game.run(213), 213)
+        self.assertEqual(_tra_string(2110) + "\n\n" + _tra_string(2102), game.text(SS))
+        self.assertEqual(game.strref(SS), game.strref(SS_SCROLL, "ITM"))
+        self.assertEqual(game.strref(SS), game.strref(SS_SIBLING, "SPL"))
+
+    def test_texts_tail_refuses_a_payload_without_the_changed_mechanic(self):
+        for component in (212, 213):
+            with self.subTest(component=component):
+                game = self.make_game(tail=True)
+                result = game.run(component)
+                self.assert_rejected(game, result, component)
+                self.assertIn("does not carry the changed mechanic", result.stdout + result.stderr)
+
+    def test_texts_tail_needs_spell_revisions_and_the_dynamic_symbol(self):
+        for component in (212, 213):
+            game = self.make_game(tail=True, sr_component=None)
+            self.assert_rejected(game, game.run(component), component, skipped=True)
+            game = self.make_game(tail=True, symbols=False)
+            result = game.run(component)
+            self.assert_rejected(game, result, component,
+                                 skipped="NOT INSTALLED DUE TO ERRORS" not in result.stdout + result.stderr)
+
+    def test_texts_tail_over_the_main_installers_components(self):
+        # Installed by the main installer (the 0.1.0 situation), refreshed by the tail.
+        game = self.make_game()
+        self.assert_installed(game, game.run(210, 211), 210)
+        before = _tree(game.override)
+        game.setup = _copy_tail(game.root)
+        result = game.run(212, 213)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(before, _tree(game.override), "the texts are already current")
 
 
 if __name__ == "__main__":

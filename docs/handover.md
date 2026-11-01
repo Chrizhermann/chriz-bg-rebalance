@@ -1,5 +1,25 @@
 # chriz-bg-rebalance — Handover
 
+## November 2 — v0.8.9: Pierce Magic and Spellstrike texts (210, 211; tail 212, 213)
+
+Christopher asked for this on 2026-11-02 for CEBG 0.1.1 (stream report: the Pierce Magic
+spellbook text lacked the detailed header and intro; the scroll and wand described other
+mechanics). Diagnosis and decisions: `research/2026-11-02-pierce-magic-spellstrike-texts.md`.
+No mechanic changed; descriptions only. The tag, the GitHub release and the CEBG pin follow
+the usual path after Christopher's merge approval.
+
+- 210 / 211 write the spell text in Spell Revisions' layout and repoint scrolls, the
+  Pierce Magic wand line and sibling spells that show the old mechanic.
+- `live-patch/CBR_SR_ANTIMAGIC` gains texts-only components 212 and 213 for installations
+  that already have the mechanic (main installer, 210 / 211 tail, private tail).
+
+Verified: 833 tests, OK, 26 skipped (private captures) with WeiDU 249. The repository has no CI workflow; the local regression is the check.
+
+Open:
+- Live check of the texts in the game (spellbook, both scrolls, the wand, the monk's Spellstrike).
+- The tail for Christopher's running stream game is prepared and not installed; he decides.
+- The CEBG pin of v0.8.9 and an upgrade path for 0.1.0 games (212 / 213): the collection coordinator.
+
 ## October 29 — v0.8.8: Druid weapons (410) and Alaghor of Clangeddin weapons (411)
 
 Christopher approved this release on 2026-10-29. It contains PR #22 (410) and PR #23 (411),
