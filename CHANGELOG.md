@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.8.9 — 2026-11-02
 
 - Describe Pierce Magic (210) and Spellstrike (211) in Spell Revisions' layout. The
   spell's description now has the header (name, Level, School, Range, Duration, Casting

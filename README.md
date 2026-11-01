@@ -5,7 +5,7 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.8.8.** Pierce Magic has a bounded five-round MR
+**Version: v0.8.9.** Pierce Magic has a bounded five-round MR
 reduction; Spellstrike causes 15% spell failure for two rounds.
 Hardiness has a recommended 40% physical-only
 profile, a 30% alternative, and an optional SR damage-resistance add-on.
@@ -29,9 +29,13 @@ those effects run.
 Since v0.8.7, 360 has its new name and a standalone download for BG2:EE / EET 2.7.3.0 games
 with EEex and without BG Rebalance, `CBR_TRUE_TIMESTOP-v<version>-windows.zip`. Each of the two
 installers refuses while the other is installed.
-New in v0.8.8: Druid weapons (410) lets druids and every druid kit use axes and short bows, and
+Since v0.8.8: Druid weapons (410) lets druids and every druid kit use axes and short bows, and
 fighter/druids also long bows. Alaghor of Clangeddin weapons (411) gives Yeslick NPC's kit the
 cleric weapons plus axes instead of the thief weapons; it needs Artisan's Kitpack and EEex.
+New in v0.8.9: Pierce Magic (210) and Spellstrike (211) describe themselves in Spell Revisions'
+layout, and the scrolls, the Wand of Spell Striking and other spells that show the old mechanic
+now say what the effects do. The anti-magic tail patch gains texts-only components 212 and 213
+for installations that already have the mechanic.
 Kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.
