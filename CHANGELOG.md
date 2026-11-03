@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.8.10 — 2026-11-04
+
+- Flail of the Ages (302) installs on BG2:EE / EET without Spell Revisions when SCS's
+  "Haste and Slow effects cancel" spell tweak is in place. Before, it stopped with "BLUN14.SPL
+  mixes Slow with other effects". The tweak moves each flail's Slow into a helper spell, with
+  its THAC0 penalty, a refresh and a "Haste cancelled by Slow" branch; those now count as part
+  of the Slow. The save still goes on the flail's own delivery, nothing is copied, and damage
+  or other effects in a helper still stop the install with the reason.
+- 302 finds the Haste and Slow secondary types from what the installed spells really carry
+  and remove (Spell Revisions: the spells themselves; SCS: the spells they cast), so the
+  flail's "Slow removes Haste" gets the Slow's save in both layouts.
+- The +5 Flail of the Ages lets Potion of Haste and Haste rings (SPIN572) work as well as the
+  Haste spells, with and without Spell Revisions. Its immunity to such an innate Haste is
+  lifted when that spell, including the spell it casts, is pure Haste. The +5's
+  HASTE_IMMUNITY spell state is removed when a Haste it allows checks that state; every
+  other spell state (Slow, Hold, Web, Entangle immunities) stays.
+- The Slow saving throws are unchanged: vs. Breath at -2 (+3), -4 (both +4) and -6 (+5).
+
 ## v0.8.9 — 2026-11-02
 
 - Describe Pierce Magic (210) and Spellstrike (211) in Spell Revisions' layout. The

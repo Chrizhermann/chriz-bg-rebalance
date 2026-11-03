@@ -1,5 +1,29 @@
 # chriz-bg-rebalance — Handover
 
+## November 4 — v0.8.10: Flail of the Ages without Spell Revisions (302)
+
+Christopher approved this release on 2026-11-04. It contains PR #26. A CEBG install of
+BG2:EE / EET 2.7.3.0 with SCS 35.21 and without Spell Revisions had rolled back at 302
+("BLUN14.SPL mixes Slow with other effects"). Diagnosis, provenance and limits:
+`research/15-flail-of-ages.md`, section "SCS without SR". The design is unchanged. The tag, the
+GitHub release and the CEBG pin follow the usual path after Christopher's merge approval.
+
+- SCS's Slow helpers (THAC0 penalty, Slow-type refresh, "Haste cancelled by Slow" branch) count
+  as part of the Slow; the save stays on the flail's own delivery, nothing is cloned.
+- Haste/Slow secondary types come from what the installed spells carry and remove (SR 20/21,
+  SCS 24/25).
+- The +5 lets Potion of Haste and Haste rings (SPIN572) work with and without SR: innate Haste is
+  judged through the spells it casts, and HASTE_IMMUNITY goes when a Haste it allows checks it.
+
+Verified: 840 tests, OK, 24 skipped (private dragon captures) with WeiDU 249. Dry runs on copies of the
+captured CEBG no-SR resources, of SR reference data and of vanilla KEY/BIF data. The repository
+has no CI workflow; the local regression is the check.
+
+Open:
+- Live check in the game (save on hit, Haste removal, +5 with Haste, Improved Haste, Potion of
+  Haste and a Haste ring), with and without SR.
+- The CEBG pin of v0.8.10: the collection coordinator.
+
 ## November 2 — v0.8.9: Pierce Magic and Spellstrike texts (210, 211; tail 212, 213)
 
 Christopher asked for this on 2026-11-02 for CEBG 0.1.1 (stream report: the Pierce Magic
