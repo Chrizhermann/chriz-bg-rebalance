@@ -134,9 +134,11 @@ class FlailHasteTests(unittest.TestCase):
         return bytes(data)
 
     def put_slow(self, game, secondary):
-        # SR's Slow carries its k1#Slow secondary type; Haste spells cancel it.
+        # SR's Slow carries its k1#Slow secondary type and removes k1#Haste;
+        # Haste spells cancel it in turn (SR 4.19 reference shape).
         self.put(game, "SPELL.IDS", b"2355 WIZARD_HASTE\n2677 WIZARD_IMPROVED_HASTE\n2312 WIZARD_SLOW\n")
         slow = bytearray(make_spl((SplAbility(1, 1, 0, (
+            SplEffect(opcode=221, target=2, parameter1=9, parameter2=20),
             SplEffect(opcode=40, target=2, duration=30),
         )),)).to_bytes())
         slow[0x27] = secondary
