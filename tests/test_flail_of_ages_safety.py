@@ -127,7 +127,9 @@ class FlailSafetyTests(unittest.TestCase):
             "FXSLOW.EFF": EffV2(opcode=40, target=2, duration=23, special=7),
             "FXMSG.EFF": EffV2(opcode=139, target=2, parameter1=14000, timing=9),
             "FXHASTE.EFF": EffV2(opcode=221, target=2, parameter1=9, parameter2=20, duration=23),
-            "FXOTHER.EFF": EffV2(opcode=221, target=2, parameter1=9, parameter2=21, duration=23),
+            # 21 is the fixture's k1#Slow (removed by Haste), so a genuinely
+            # unrelated type is used: SR's next row, k1#Petrify.
+            "FXOTHER.EFF": EffV2(opcode=221, target=2, parameter1=9, parameter2=22, duration=23),
         }
         for name, effect in resources.items():
             self.put(game, name, effect.to_bytes())

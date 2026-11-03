@@ -96,15 +96,25 @@ class Game:
             (self.override / name).write_bytes(data)
         # Canonical Haste is deliberately relocated; the +5 immunity must follow IDS.
         native = make_spl((SplAbility(1, 1, 0, (SplEffect(opcode=16, target=1),)),)).to_bytes()
+        # SR 4.19 shape (reference install): Haste carries k1#Haste and removes
+        # k1#Slow; Slow's payload carries k1#Slow and removes k1#Haste. Rows
+        # 20/21 are SR-shaped MSECTYPE.2DA allocations, not IDS symbols.
         revised = make_spl((SplAbility(1, 1, 0, (SplEffect(opcode=176, target=1, parameter1=6),
+                                                       SplEffect(opcode=221, target=2, parameter1=9, parameter2=21),
                                                        SplEffect(opcode=1, target=1, parameter1=1))),)).to_bytes()
         revised = bytearray(revised)
-        revised[0x27] = 20  # Actual SR-shaped MSECTYPE.2DA row, not an IDS symbol.
+        revised[0x27] = 20
         revised = bytes(revised)
+        sr_slow = bytearray(make_spl((SplAbility(1, 1, 0, (
+            SplEffect(opcode=221, target=2, parameter1=9, parameter2=20),
+            SplEffect(opcode=40, target=2, duration=60))),)).to_bytes())
+        sr_slow[0x27] = 21
         neutral = make_spl((SplAbility(1, 1, 0, (SplEffect(opcode=101, target=1, parameter2=40),)),)).to_bytes()
+        spells = b"2355 WIZARD_HASTE\n2677 WIZARD_IMPROVED_HASTE\n" + (b"2312 WIZARD_SLOW\n" if sr else b"")
         self.bif = _write_key_and_bif(root, (
             ("OH6000", "ARE", b"BG2EE marker"),
-            ("SPELL", "IDS", b"2355 WIZARD_HASTE\n2677 WIZARD_IMPROVED_HASTE\n"),
+            ("SPELL", "IDS", spells),
+            *((("SPWI312", "SPL", bytes(sr_slow)),) if sr else ()),
             ("STATS", "IDS", b"1 DUMMY\n"),
             ("SPLSTATE", "IDS", b"1 DUMMY\n"),
             ("ALT385", "SPL", native), ("SPWI355", "SPL", revised if sr else native),
