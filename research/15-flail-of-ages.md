@@ -86,6 +86,20 @@ tweaks", the only SCS spell-tweak component in that WeiDU.log). Its source
    protection. A HASTE_IMMUNITY state that the installed Haste spells do not
    check is kept, with a log line. Every other opcode 328 (SLOW, HOLD, WEB,
    ENTANGLE immunities) is kept.
+4. **Innate Haste (SPIN572).** SPIN572 is the innate "Haste" behind the Potion
+   of Haste and Haste rings. The +5 is immune to it (op206). In SCS's layout
+   SPIN572 has no op16 of its own: op324 HASTE_IMMUNITY self-check, op146
+   SPIN572A, op221 removing type 25. SPIN572A (type 24) holds the Haste: op324
+   self-check, op221 removing 24, op326 → `dw_neg40` paired with an op318 self-block
+   under STATE_SLOWED, op16 48 s, op93 fatigue. The Haste-identity check now
+   follows opcode 146 (bounded, each resource once, each its own owner) and
+   judges the payloads as one Haste. It accepts the same companions as above:
+   typed op221, own-resource guards, and a feedback-only op326 paired with a
+   same-condition self-block. Anything foreign still keeps the immunity with the
+   existing message. A missing or unreadable linked payload keeps it too, with
+   its own message. SPIN572's HASTE_IMMUNITY check is the state already derived
+   from the wizard Haste spells, so removing the +5's op328 also lets SPIN572
+   through.
 
 The save still goes only on the item's parent delivery (op146 and the Slow-
 removes-Haste op221 in its window); helper bytes and resrefs are unchanged and
@@ -103,21 +117,28 @@ sharing a roll per application.
   blockers, unchanged helper bytes, reapplication and exact uninstall, mixed
   helpers (damage, inner save, outlasting penalty, AoE projectile, non-feedback
   cancel branch), an unconfirmed spell state, an unchecked HASTE_IMMUNITY, and a
-  direct Slow with its penalty and refresh.
+  direct Slow with its penalty and refresh. SPIN572/SPIN572A are part of the
+  fixture (the +5's op206 SPIN572 is removed); variants with damage in SPIN572A
+  and with SPIN572A missing keep the immunity and say why.
 - The SR fixtures now model SR 4.19's mutual cancellation (Haste removes k1#Slow,
   Slow removes k1#Haste), as the reference SR install has it. An SR version
   whose Slow does not remove Haste leaves an on-hit Haste removal unsaved, with
   the existing diagnostic.
-- Real inputs: the component ran once on copies of the captured override files
-  in a disposable game. The four items gained the save on op146 and op221 p2=24
-  only (-2/-4/-4/-6). BLUN30 lost exactly the HASTE_IMMUNITY op328, op101 and
-  op337 p2=16, op169 and op240 p2=38 and op267 14023 (53 → 47 equipped effects,
-  others in order). Uninstall restored every file byte for byte. On copies of the
-  SR reference spells and items the result equals the existing SR contract.
-- Not covered: SCS's SPIN572 here casts SPIN572A, which was not captured. The +5's
-  immunity to SPIN572 is kept (the Haste-identity check does not follow opcode
-  146), and SPIN572 is not the wizard Haste. No live-game, combat or save-game
-  result is claimed. No game was changed.
+- Real inputs: the component ran on copies of the captured override files
+  (SPIN572A included) in a disposable game. The four items gained the save on
+  op146 and op221 p2=24 only (-2/-4/-4/-6). BLUN30 lost exactly the
+  HASTE_IMMUNITY op328, op206 SPIN572, op101 and op337 p2=16, op169 and op240
+  p2=38 and op267 14023 (53 → 46 equipped effects, others in order). Uninstall
+  restored every file byte for byte. On copies of the SR reference spells and
+  items the result equals the existing SR contract.
+- Pre-existing SR limit, unchanged (reference SR 4.19 data, read only): SR's
+  SPIN572 is a direct op16 Haste (type 20, op221 removing 21, op93) with an
+  op324 self-check under SPLSTATE=n for HASTE_IMMUNITY. 302 lifts the +5's op206
+  SPIN572 there, but the +5 also sets HASTE_IMMUNITY (op328 mode 1). That state is
+  kept, with a log line, because SR's wizard Haste and Improved Haste do not check
+  it. So in SR the +5 still blocks potion/ring Haste through SPIN572's own check.
+  The wizard spells work.
+- No live-game, combat or save-game result is claimed. No game was changed.
 
 ## Compatibility repair — 2026-10-08 (unreleased)
 

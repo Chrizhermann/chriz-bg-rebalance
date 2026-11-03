@@ -397,39 +397,79 @@ END
 // removal of Slow or an earlier Haste by secondary type (SR), and guards
 // against stacking the same resource. Vanilla and SR innate Haste spells carry
 // them. Anything else, such as damage, keeps the flail's immunity.
-DEFINE_PATCH_FUNCTION cbr_foa_native_haste
-  STR_VAR owner = ~~ haste_types = ~|~ slow_types = ~|~
-  RET is_haste has_haste foreign_op
+// A spell cast by opcode 146 is part of the same Haste and is judged as a
+// whole with it (SCS's SPIN572 casts its op16 payload SPIN572A); each resource
+// is its own owner for self-guards and SCS's paired "Slow cancelled by Haste"
+// feedback branch. A missing, malformed or too-deep payload is unknown and
+// counts as foreign (opcode 146). Traversal is bounded; each resource once.
+DEFINE_ACTION_FUNCTION cbr_foa_native_haste
+  INT_VAR depth = 0
+  STR_VAR source = ~~ seen = ~|~ haste_types = ~|~ slow_types = ~|~
+  RET is_haste has_haste foreign_op seen
 BEGIN
-  SET has_haste = 0 SET foreign_op = (0 - 1)
-  PATCH_IF BUFFER_LENGTH >= 0x72 BEGIN
-    READ_ASCII 0 signature (8)
-    PATCH_IF ~%signature%~ STRING_EQUAL ~SPL V1  ~ BEGIN
-      LPF cbr_foa_layout INT_VAR stride = 0x28 RET ab na fx eq_first eq_count END
-      FOR (a = (0 - 1); a < na; ++a) BEGIN
-        SET n = eq_count SET first = eq_first
-        PATCH_IF a >= 0 BEGIN
-          READ_SHORT (ab + a * 0x28 + 0x1e) n READ_SHORT (ab + a * 0x28 + 0x20) first
-        END
-        FOR (i = 0; i < n; ++i) BEGIN
-          SET at = fx + (first + i) * 0x30
-          READ_SHORT at op READ_LONG (at + 4) p1 READ_LONG (at + 8) p2
-          READ_ASCII (at + 0x14) res (8) NULL
-          SET typed = 0
-          PATCH_IF op = 221 AND p2 > 0 BEGIN
-            LPF cbr_foa_in_set STR_VAR set = EVAL ~%haste_types%%slow_types%~ item = EVAL ~%p2%~ RET typed = found END
+  OUTER_SET has_haste = 0 OUTER_SET foreign_op = (0 - 1)
+  ACTION_TO_UPPER source
+  ACTION_IF (~%seen%~ STRING_CONTAINS_REGEXP ~|%source%|~) != 0 BEGIN
+    OUTER_SPRINT seen ~%seen%%source%|~
+    OUTER_SET foreign_op = 146
+    ACTION_IF depth < 32 AND FILE_EXISTS_IN_GAME ~%source%.SPL~ BEGIN
+      COPY_EXISTING ~%source%.SPL~ ~~
+        PATCH_IF BUFFER_LENGTH >= 0x72 BEGIN
+          READ_ASCII 0 signature (8)
+          PATCH_IF ~%signature%~ STRING_EQUAL ~SPL V1  ~ BEGIN
+            SET foreign_op = (0 - 1)
+            LPF cbr_foa_layout INT_VAR stride = 0x28 RET ab na fx eq_first eq_count END
+            FOR (a = (0 - 1); a < na; ++a) BEGIN
+              SET n = eq_count SET first = eq_first
+              PATCH_IF a >= 0 BEGIN
+                READ_SHORT (ab + a * 0x28 + 0x1e) n READ_SHORT (ab + a * 0x28 + 0x20) first
+              END
+              SPRINT self_blocks ~|~
+              FOR (i = 0; i < n; ++i) BEGIN
+                SET at = fx + (first + i) * 0x30
+                READ_SHORT at op READ_LONG (at + 4) p1 READ_LONG (at + 8) p2 READ_ASCII (at + 0x14) res (8) NULL
+                PATCH_IF (op = 318 OR op = 324) AND (~%res%~ STRING_EQUAL_CASE ~%source%~) BEGIN
+                  SPRINT self_blocks ~%self_blocks%%p1%:%p2%|~
+                END
+              END
+              FOR (i = 0; i < n; ++i) BEGIN
+                SET at = fx + (first + i) * 0x30
+                READ_SHORT at op READ_LONG (at + 4) p1 READ_LONG (at + 8) p2
+                READ_ASCII (at + 0x14) res (8) NULL
+                SET allowed = (op = 50 OR op = 61 OR op = 139 OR op = 141 OR op = 142
+                  OR op = 174 OR op = 215 OR op = 93
+                  OR ((op = 206 OR op = 318 OR op = 321 OR op = 324) AND (~%res%~ STRING_EQUAL_CASE ~%source%~)))
+                PATCH_IF op = 221 AND p2 > 0 BEGIN
+                  LPF cbr_foa_in_set STR_VAR set = EVAL ~%haste_types%%slow_types%~ item = EVAL ~%p2%~ RET allowed = found END
+                END
+                PATCH_IF op = 326 BEGIN
+                  LPF cbr_foa_in_set STR_VAR set = EVAL ~%self_blocks%~ item = EVAL ~%p1%:%p2%~ RET paired = found END
+                  PATCH_IF paired BEGIN
+                    INNER_ACTION BEGIN
+                      LAF cbr_foa_feedback_only STR_VAR source = EVAL ~%res%~ RET allowed = feedback END
+                    END
+                  END
+                END
+                PATCH_IF op = 16 BEGIN SET has_haste = 1 END
+                ELSE PATCH_IF op = 146 AND NOT (~%res%~ STRING_EQUAL ~~) BEGIN
+                  INNER_ACTION BEGIN
+                    LAF cbr_foa_native_haste INT_VAR depth = depth + 1
+                      STR_VAR source = EVAL ~%res%~ seen = EVAL ~%seen%~
+                        haste_types = EVAL ~%haste_types%~ slow_types = EVAL ~%slow_types%~
+                      RET child_haste = has_haste child_foreign = foreign_op seen END
+                  END
+                  SET has_haste = (has_haste OR child_haste)
+                  PATCH_IF foreign_op < 0 BEGIN SET foreign_op = child_foreign END
+                END
+                ELSE PATCH_IF NOT allowed AND foreign_op < 0 BEGIN SET foreign_op = op END
+              END
+            END
           END
-          PATCH_IF op = 16 BEGIN SET has_haste = 1 END
-          ELSE PATCH_IF NOT (op = 50 OR op = 61 OR op = 139 OR op = 141 OR op = 142
-            OR op = 174 OR op = 215 OR op = 93 OR typed
-            OR ((op = 206 OR op = 318 OR op = 321 OR op = 324) AND (~%res%~ STRING_EQUAL_CASE ~%owner%~))) BEGIN
-            PATCH_IF foreign_op < 0 BEGIN SET foreign_op = op END
-          END
         END
-      END
+      BUT_ONLY
     END
   END
-  SET is_haste = (has_haste AND (foreign_op < 0))
+  OUTER_SET is_haste = (has_haste AND (foreign_op < 0))
 END
 
 // haste_splstates: spell states the installed Haste and Improved Haste check
@@ -530,14 +570,16 @@ BEGIN
             OR ((NOT (~%improved_haste_resref%~ STRING_EQUAL ~~)) AND (~%res%~ STRING_EQUAL_CASE ~%improved_haste_resref%~))) BEGIN
             SET remove = 1
           END ELSE PATCH_IF FILE_EXISTS_IN_GAME ~%res%.spl~ BEGIN
-            INNER_PATCH_FILE ~%res%.spl~ BEGIN
-              LPF cbr_foa_native_haste
-                STR_VAR owner = EVAL ~%res%~ haste_types = EVAL ~%haste_types%~ slow_types = EVAL ~%slow_types%~
+            INNER_ACTION BEGIN
+              LAF cbr_foa_native_haste
+                STR_VAR source = EVAL ~%res%~ haste_types = EVAL ~%haste_types%~ slow_types = EVAL ~%slow_types%~
                 RET is_haste has_haste foreign_op END
             END
             PATCH_IF is_haste BEGIN SET remove = 1 END
             ELSE PATCH_IF has_haste BEGIN
               PATCH_PRINT ~Flail of Ages: %SOURCE_RES% keeps its immunity to %res%. That spell combines Haste with another effect (opcode %foreign_op%), and removing the immunity would expose the wielder to that effect too.~
+            END ELSE PATCH_IF foreign_op = 146 BEGIN
+              PATCH_PRINT ~Flail of Ages: %SOURCE_RES% keeps its immunity to %res%. That spell casts a spell that is missing or cannot be read, so whether it is Haste is unknown.~
             END
           END
         END

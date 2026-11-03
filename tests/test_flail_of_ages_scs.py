@@ -114,6 +114,7 @@ def equipped(name):
     states = tuple(fx(328, target=1, parameter2=state, timing=2, resist_dispel=2, special=1)
                    for state in (139, 138, 133, 132, 131))
     return common + states + (
+        fx(206, target=1, parameter1=-1, parameter2=16, timing=2, resist_dispel=2, resource="SPIN572"),
         fx(267, target=1, parameter1=14023, parameter2=16, timing=2, resist_dispel=2),
         fx(267, target=1, parameter1=14000, parameter2=40, timing=2, resist_dispel=2),
         fx(240, target=1, parameter2=41, timing=2, resist_dispel=2),
@@ -137,7 +138,21 @@ def haste_blocker(effect):
         (effect.opcode in (101, 337) and effect.parameter2 == 16)
         or (effect.opcode in (169, 240) and effect.parameter2 == 38)
         or (effect.opcode == 267 and effect.parameter1 == 14023)
+        or (effect.opcode == 206 and effect.resource == "SPIN572")
         or (effect.opcode == 328 and effect.special == 1 and effect.parameter2 == 138))
+
+
+def innate_haste_payload(*extra):
+    """SCS's SPIN572A (Potion of Haste, Haste rings): the innate Haste's op16 payload."""
+    return spl(SplAbility(1, 1, 1, (
+        fx(324, parameter1=138, parameter2=110, duration=1, resource="SPIN572A"),
+        fx(221, parameter1=10, parameter2=24, timing=1),
+        fx(326, parameter1=0x10000, parameter2=138, timing=1, resource="DW_NEG40"),
+        fx(318, parameter1=0x10000, parameter2=138, duration=1, resource="SPIN572A"),
+        *extra,
+        fx(16, power=3, duration=48),
+        fx(93, power=3, parameter1=4, timing=4, duration=48),
+    )), sectype=24)
 
 
 def saved(effect, penalty):
@@ -166,6 +181,12 @@ class FlailScsTests(unittest.TestCase):
             "SPLPROT.2DA": splprot(), "MSECTYPE.2DA": msectype(),
             "DW_NEG16.SPL": spl(SplAbility(0, 0, 0, (fx(139, parameter1=310313, timing=1),))),
             "DW_NEG40.SPL": spl(SplAbility(0, 0, 0, (fx(139, parameter1=310314, timing=1),))),
+            "SPIN572.SPL": spl(SplAbility(1, 1, 1, (
+                fx(324, parameter1=138, parameter2=110, resource="SPIN572"),
+                fx(146, power=3, parameter2=1, timing=1, resource="SPIN572A"),
+                fx(221, power=3, parameter1=10, parameter2=25, timing=1),
+            ))),
+            "SPIN572A.SPL": innate_haste_payload(),
             "SPWI305.SPL": haste_shell("SPWI305", "SPWI305A"),
             "SPWI305A.SPL": haste_payload("SPWI305A"),
             "SPWI613.SPL": haste_shell("SPWI613", "SPWI613A",
@@ -279,6 +300,27 @@ class FlailScsTests(unittest.TestCase):
             self.put(game, "DW_NEG16.SPL", spl(SplAbility(0, 0, 0, (
                 fx(139, parameter1=310313, timing=1), fx(12, parameter1=5, timing=1)))))
             self.assert_rollback(game, "BLUN14.SPL mixes Slow")
+
+    def test_innate_haste_payload_with_another_effect_keeps_its_immunity(self):
+        cases = {
+            "damage": (innate_haste_payload(fx(12, parameter1=3, parameter2=65536, timing=1)),
+                       r"(?i)BLUN30 keeps its immunity to SPIN572\. .*\(opcode 12\)"),
+            "missing": (None, r"(?i)BLUN30 keeps its immunity to SPIN572\. .*missing or cannot be read"),
+        }
+        for label, (payload, diagnostic) in cases.items():
+            with self.subTest(case=label):
+                game = self.scs_game()
+                if payload is None:
+                    (game.override / "SPIN572A.SPL").unlink()
+                    del game.original["SPIN572A.SPL"]
+                else:
+                    self.put(game, "SPIN572A.SPL", payload)
+                output = self.install(game)
+                self.assertRegex(output, diagnostic)
+                before = ItmFile.from_bytes(game.original["BLUN30.ITM"]).global_effects
+                after = read_itm(game.override / "BLUN30.ITM").global_effects
+                kept = tuple(e for e in before if not haste_blocker(e) or e.opcode == 206)
+                self.assertEqual([e.to_bytes() for e in kept], [e.to_bytes() for e in after])
 
     def test_haste_check_on_an_unconfirmed_spell_state_rolls_back(self):
         game = self.scs_game()
