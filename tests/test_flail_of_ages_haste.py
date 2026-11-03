@@ -10,6 +10,7 @@ import dataclasses
 import unittest
 
 from tests import test_flail_of_ages as baseline
+from tests import test_flail_of_ages_scs as scs
 from tests.ie_formats import EffV2, SplAbility, SplEffect, make_spl, read_itm
 
 
@@ -196,6 +197,54 @@ class FlailHasteTests(unittest.TestCase):
         self.assertNotIn("SPIN572", self.blun30_immunities(game))
         self.assert_effect_contract(game)
         self.assert_sources_unchanged(game, "SPIN572.SPL", "SPWI312.SPL", "SPELL.IDS")
+
+    def test_sr_innate_haste_check_on_haste_immunity_lifts_the_spell_state_too(self):
+        # SR 4.19 reference shape: SPIN572 (Potion of Haste, Haste rings) is a
+        # direct op16 Haste that refuses itself under HASTE_IMMUNITY, which the
+        # +5 sets; SR's wizard Haste spells do not check that state.
+        cases = {
+            "pure": dict(damage=False, wizard_checks=False, innate_lifted=True, state_lifted=True),
+            "damage": dict(damage=True, wizard_checks=False, innate_lifted=False, state_lifted=False),
+            "damage_wizard_checks": dict(damage=True, wizard_checks=True, innate_lifted=False, state_lifted=True),
+        }
+        for label, case in cases.items():
+            with self.subTest(case=label):
+                game = self.game("sr")
+                self.add_immunities(game, "SPIN572")
+                path = game.override / "BLUN30.ITM"
+                old = read_itm(path)
+                states = tuple(SplEffect(opcode=328, target=1, parameter2=state, timing=2, special=1)
+                               for state in (138, 139))
+                self.put(game, path.name, dataclasses.replace(
+                    old, global_effects=(*old.global_effects, *states)).to_bytes())
+                self.put_slow(game, secondary=21)
+                self.put(game, "SPLPROT.2DA", scs.splprot())
+                self.put(game, "SPLSTATE.IDS", scs.SPLSTATES.encode("ascii"))
+                guard = SplEffect(opcode=324, target=2, parameter1=138, parameter2=110, resource="SPIN572")
+                extra = (SplEffect(opcode=12, target=2, parameter1=4, parameter2=65536, timing=1),) if case["damage"] else ()
+                self.put(game, "SPIN572.SPL", self.native_haste(
+                    guard, SplEffect(opcode=221, target=2, parameter1=9, parameter2=21),
+                    SplEffect(opcode=93, target=2, parameter1=4, timing=4, duration=48), *extra, secondary=20))
+                if case["wizard_checks"]:
+                    wizard = bytearray(make_spl((SplAbility(1, 1, 0, (
+                        dataclasses.replace(guard, resource="SPWI355"),
+                        SplEffect(opcode=176, target=1, parameter1=6),
+                        SplEffect(opcode=221, target=2, parameter1=9, parameter2=21),
+                    )),)).to_bytes())
+                    wizard[0x27] = 20
+                    self.put(game, "SPWI355.SPL", bytes(wizard))
+                process, output = game.run()
+                self.assertEqual(0, process.returncode, output)
+                self.assertIn("SUCCESSFULLY INSTALLED", output)
+                after = read_itm(path).global_effects
+                self.assertEqual(not case["innate_lifted"], "SPIN572" in self.blun30_immunities(game))
+                self.assertEqual(not case["state_lifted"], 138 in [e.parameter2 for e in after if e.opcode == 328])
+                self.assertIn(139, [e.parameter2 for e in after if e.opcode == 328])
+                if not case["state_lifted"]:
+                    self.assertIn("keeps spell state HASTE_IMMUNITY (138)", output)
+                if not case["innate_lifted"]:
+                    self.assertRegex(output, r"(?i)BLUN30 keeps its immunity to spin572\. .*\(opcode 12\)")
+                self.assert_sources_unchanged(game, "SPIN572.SPL", "SPWI312.SPL", "SPELL.IDS")
 
     def test_haste_with_an_unrelated_removal_keeps_immunity_and_says_why(self):
         game = self.game("sr")

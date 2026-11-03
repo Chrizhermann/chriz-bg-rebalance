@@ -97,9 +97,20 @@ tweaks", the only SCS spell-tweak component in that WeiDU.log). Its source
    typed op221, own-resource guards, and a feedback-only op326 paired with a
    same-condition self-block. Anything foreign still keeps the immunity with the
    existing message. A missing or unreadable linked payload keeps it too, with
-   its own message. SPIN572's HASTE_IMMUNITY check is the state already derived
-   from the wizard Haste spells, so removing the +5's op328 also lets SPIN572
-   through.
+   its own message.
+5. **Spell states of every Haste the +5 lets through.** Before anything is
+   removed, the +5's op328 decision collects the spell states that the wizard
+   Haste and Improved Haste refuse themselves under. It also collects those of
+   each op206 target judged pure Haste (own op318/op324 `SPLSTATE=n` guards,
+   payloads included). Same HASTE_IMMUNITY confirmation and same failure for an
+   unconfirmed state as in 3. An innate Haste that mixes in another effect keeps
+   its op206 and does not contribute its states; the op328 then stays unless
+   another allowed Haste checks it. In SCS the state (138) is already checked by
+   the wizard spells. In SR 4.19 only SPIN572 checks it: SR's SPIN572 is a direct
+   op16 Haste (type 20, op221 removing 21, op93) with an op324 HASTE_IMMUNITY
+   self-check. Before this change the +5 lifted op206 SPIN572 but kept
+   HASTE_IMMUNITY there, so Potion of Haste and Haste rings stayed blocked on SR.
+   Fixed: SR now drops HASTE_IMMUNITY as well.
 
 The save still goes only on the item's parent delivery (op146 and the Slow-
 removes-Haste op221 in its window); helper bytes and resrefs are unchanged and
@@ -129,15 +140,17 @@ sharing a roll per application.
   op146 and op221 p2=24 only (-2/-4/-4/-6). BLUN30 lost exactly the
   HASTE_IMMUNITY op328, op206 SPIN572, op101 and op337 p2=16, op169 and op240
   p2=38 and op267 14023 (53 → 46 equipped effects, others in order). Uninstall
-  restored every file byte for byte. On copies of the SR reference spells and
-  items the result equals the existing SR contract.
-- Pre-existing SR limit, unchanged (reference SR 4.19 data, read only): SR's
-  SPIN572 is a direct op16 Haste (type 20, op221 removing 21, op93) with an
-  op324 self-check under SPLSTATE=n for HASTE_IMMUNITY. 302 lifts the +5's op206
-  SPIN572 there, but the +5 also sets HASTE_IMMUNITY (op328 mode 1). That state is
-  kept, with a log line, because SR's wizard Haste and Improved Haste do not check
-  it. So in SR the +5 still blocks potion/ring Haste through SPIN572's own check.
-  The wizard spells work.
+  restored every file byte for byte.
+- SR reference copies (SR 4.19, read only): the on-hit result equals the
+  existing SR contract. BLUN30 goes 53 → 46 and loses the HASTE_IMMUNITY op328,
+  op206 SPIN572, op267 14023, op240 and op169 p2=38, op337 and op101 p2=16.
+  Before item 5 HASTE_IMMUNITY was kept there (53 → 47).
+- Vanilla (base KEY/BIF extracts of the same game, read only): BLUN30 has no
+  op328, and SPIN572 is a bare op16 + op93 without a state check. Item 5 adds
+  nothing there.
+- `tests/test_flail_of_ages_haste.py` covers the SR case: a pure SPIN572 with the
+  check lifts both; with damage it keeps both; with damage plus a wizard Haste
+  that checks the state, the op206 stays and the op328 goes.
 - No live-game, combat or save-game result is claimed. No game was changed.
 
 ## Compatibility repair — 2026-10-08 (unreleased)

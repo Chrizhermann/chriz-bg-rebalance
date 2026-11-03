@@ -329,16 +329,17 @@ class FlailScsTests(unittest.TestCase):
 
     def test_haste_immunity_that_haste_does_not_check_is_kept(self):
         game = self.scs_game()
-        # Without the SPLSTATE=n self-checks in shells and payloads, the spell
-        # state does not block Haste; it is kept and the log says why.
-        for name in ("SPWI305", "SPWI305A", "SPWI613", "SPWI613A"):
+        # Without the SPLSTATE=n self-checks in the wizard and innate Hastes
+        # (shells and payloads), the state blocks no Haste the +5 allows; it is
+        # kept and the log says why.
+        for name in ("SPWI305", "SPWI305A", "SPWI613", "SPWI613A", "SPIN572", "SPIN572A"):
             spell = SplFile.from_bytes(game.original[name + ".SPL"])
             ability = spell.abilities[0]
             kept = tuple(e for e in ability.effects if e.opcode != 324)
             self.put(game, name + ".SPL", dataclasses.replace(
                 spell, abilities=(dataclasses.replace(ability, effects=kept),)).to_bytes())
         output = self.install(game)
-        self.assertIn("keeps spell state HASTE_IMMUNITY (138)", output)
+        self.assertIn("keeps spell state HASTE_IMMUNITY (138): no Haste it allows checks it", output)
         plus5 = read_itm(game.override / "BLUN30.ITM").global_effects
         self.assertIn(138, [e.parameter2 for e in plus5 if e.opcode == 328])
 

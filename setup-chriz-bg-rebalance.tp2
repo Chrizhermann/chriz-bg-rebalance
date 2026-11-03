@@ -1484,22 +1484,9 @@ LAF cbr_foa_set_intersection STR_VAR left = EVAL ~%cbr_f_slow_penalties%~ right 
   RET cbr_f_slow_penalties = result END
 // Spell states the installed Haste spells check to refuse themselves (SCS:
 // HASTE_IMMUNITY on every Haste and payload). Only their own resources count.
-OUTER_SPRINT cbr_f_haste_splstates ~|~
-OUTER_SPRINT cbr_f_haste_seen ~%cbr_f_h_seen%%cbr_f_i_seen%~
-OUTER_PATCH ~%cbr_f_h_checks%%cbr_f_i_checks%~ BEGIN
-  REPLACE_EVALUATE ~|\([^|:]+\):\(-?[0-9]+\):\(-?[0-9]+\)~ BEGIN
-    LPF cbr_foa_in_set STR_VAR set = EVAL ~%cbr_f_haste_seen%~ item = EVAL ~%MATCH1%~ RET cbr_f_own = found END
-    PATCH_IF cbr_f_own BEGIN
-      INNER_ACTION BEGIN
-        LAF cbr_foa_splprot_splstate INT_VAR row = MATCH2 param1 = MATCH3 RET cbr_f_state = splstate END
-      END
-      LPF cbr_foa_in_set STR_VAR set = EVAL ~%cbr_f_haste_splstates%~ item = EVAL ~%cbr_f_state%~ RET cbr_f_listed = found END
-      PATCH_IF cbr_f_state >= 0 AND NOT cbr_f_listed BEGIN
-        SPRINT cbr_f_haste_splstates ~%cbr_f_haste_splstates%%cbr_f_state%|~
-      END
-    END
-  END ~|%MATCH1%~
-END
+LAF cbr_foa_checked_splstates
+  STR_VAR checks = EVAL ~%cbr_f_h_checks%%cbr_f_i_checks%~ owners = EVAL ~%cbr_f_h_seen%%cbr_f_i_seen%~
+  RET cbr_f_haste_splstates = states END
 OUTER_SET cbr_f_haste_immunity = IDS_OF_SYMBOL (~splstate~ ~HASTE_IMMUNITY~)
 PRINT ~Flail of Ages: Haste types %cbr_f_haste_types%, Slow types %cbr_f_slow_types%, Slow penalties %cbr_f_slow_penalties%, Haste checks spell states %cbr_f_haste_splstates%.~
 // A secondary-type label is not proof that Haste uses movement opcode 176.

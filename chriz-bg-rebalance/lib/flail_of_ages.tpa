@@ -157,6 +157,27 @@ BEGIN
   END
 END
 
+// Spell states a Haste refuses itself under: its opcode 318/324 conditions
+// (~|RESREF:SPLPROT row:parameter 1|~) on its own resources (owners), resolved
+// through SPLPROT.2DA. Adds new states to the given set.
+DEFINE_ACTION_FUNCTION cbr_foa_checked_splstates
+  STR_VAR checks = ~|~ owners = ~|~ states = ~|~
+  RET states
+BEGIN
+  OUTER_PATCH ~%checks%~ BEGIN
+    REPLACE_EVALUATE ~|\([^|:]+\):\(-?[0-9]+\):\(-?[0-9]+\)~ BEGIN
+      LPF cbr_foa_in_set STR_VAR set = EVAL ~%owners%~ item = EVAL ~%MATCH1%~ RET own = found END
+      PATCH_IF own BEGIN
+        INNER_ACTION BEGIN
+          LAF cbr_foa_splprot_splstate INT_VAR row = MATCH2 param1 = MATCH3 RET state = splstate END
+        END
+        LPF cbr_foa_in_set STR_VAR set = EVAL ~%states%~ item = EVAL ~%state%~ RET listed = found END
+        PATCH_IF state >= 0 AND NOT listed BEGIN SPRINT states ~%states%%state%|~ END
+      END
+    END ~|%MATCH1%~
+  END
+END
+
 // A feedback branch only displays something on the struck creature: strings,
 // lighting, glow, icons, sounds and visuals. Opcode 326 applies the payload to
 // its own target; projectile 0 means None (IESDP), so 0 and 1 stay on the one
@@ -402,12 +423,14 @@ END
 // is its own owner for self-guards and SCS's paired "Slow cancelled by Haste"
 // feedback branch. A missing, malformed or too-deep payload is unknown and
 // counts as foreign (opcode 146). Traversal is bounded; each resource once.
+// checks: its opcode 318/324 conditions on its own resources, as
+// ~|RESREF:SPLPROT row:parameter 1|~ (see cbr_foa_checked_splstates).
 DEFINE_ACTION_FUNCTION cbr_foa_native_haste
   INT_VAR depth = 0
   STR_VAR source = ~~ seen = ~|~ haste_types = ~|~ slow_types = ~|~
-  RET is_haste has_haste foreign_op seen
+  RET is_haste has_haste foreign_op seen checks
 BEGIN
-  OUTER_SET has_haste = 0 OUTER_SET foreign_op = (0 - 1)
+  OUTER_SET has_haste = 0 OUTER_SET foreign_op = (0 - 1) OUTER_SPRINT checks ~|~
   ACTION_TO_UPPER source
   ACTION_IF (~%seen%~ STRING_CONTAINS_REGEXP ~|%source%|~) != 0 BEGIN
     OUTER_SPRINT seen ~%seen%%source%|~
@@ -430,6 +453,7 @@ BEGIN
                 READ_SHORT at op READ_LONG (at + 4) p1 READ_LONG (at + 8) p2 READ_ASCII (at + 0x14) res (8) NULL
                 PATCH_IF (op = 318 OR op = 324) AND (~%res%~ STRING_EQUAL_CASE ~%source%~) BEGIN
                   SPRINT self_blocks ~%self_blocks%%p1%:%p2%|~
+                  SPRINT checks ~%checks%%source%:%p2%:%p1%|~
                 END
               END
               FOR (i = 0; i < n; ++i) BEGIN
@@ -456,8 +480,9 @@ BEGIN
                     LAF cbr_foa_native_haste INT_VAR depth = depth + 1
                       STR_VAR source = EVAL ~%res%~ seen = EVAL ~%seen%~
                         haste_types = EVAL ~%haste_types%~ slow_types = EVAL ~%slow_types%~
-                      RET child_haste = has_haste child_foreign = foreign_op seen END
+                      RET child_haste = has_haste child_foreign = foreign_op seen child_checks = checks END
                   END
+                  SPRINT checks ~%checks%%child_checks%~
                   SET has_haste = (has_haste OR child_haste)
                   PATCH_IF foreign_op < 0 BEGIN SET foreign_op = child_foreign END
                 END
@@ -534,6 +559,28 @@ BEGIN
   END
 
   PATCH_IF allow_haste BEGIN
+    // Before anything is removed: the spell states every Haste this item will
+    // let through refuses itself under. That is the wizard Haste and Improved
+    // Haste (haste_splstates) and each pure innate Haste whose op206 immunity is
+    // lifted below (SPIN572: Potion of Haste, Haste rings). Keeping such a state
+    // would leave that Haste blocked after its immunity is gone.
+    SPRINT unblocked_states ~%haste_splstates%~
+    FOR (i = 0; i < eq_count; ++i) BEGIN
+      SET at = fx + (eq_first + i) * 0x30
+      READ_SHORT at op READ_BYTE (at + 2) target READ_ASCII (at + 0x14) res (8) NULL
+      PATCH_IF op = 206 AND target = 1 AND NOT (~%res%~ STRING_EQUAL ~~) AND FILE_EXISTS_IN_GAME ~%res%.spl~ BEGIN
+        INNER_ACTION BEGIN
+          LAF cbr_foa_native_haste
+            STR_VAR source = EVAL ~%res%~ haste_types = EVAL ~%haste_types%~ slow_types = EVAL ~%slow_types%~
+            RET innate_haste = is_haste innate_checks = checks innate_seen = seen END
+          ACTION_IF innate_haste BEGIN
+            LAF cbr_foa_checked_splstates
+              STR_VAR checks = EVAL ~%innate_checks%~ owners = EVAL ~%innate_seen%~ states = EVAL ~%unblocked_states%~
+              RET unblocked_states = states END
+          END
+        END
+      END
+    END
     FOR (i = eq_count - 1; i >= 0; --i) BEGIN
       SET idx = eq_first + i
       SET at = fx + idx * 0x30
@@ -557,12 +604,12 @@ BEGIN
         // Mode 1 sets a SPLSTATE.IDS state; mode 0 the IWD list 0..7 (IESDP).
         READ_LONG (at + 0x2c) special
         PATCH_IF op = 328 AND special = 1 BEGIN
-          LPF cbr_foa_in_set STR_VAR set = EVAL ~%haste_splstates%~ item = EVAL ~%p2%~ RET checked = found END
+          LPF cbr_foa_in_set STR_VAR set = EVAL ~%unblocked_states%~ item = EVAL ~%p2%~ RET checked = found END
           PATCH_IF checked AND p2 = haste_immunity_state BEGIN SET remove = 1 END
           ELSE PATCH_IF checked BEGIN
-            PATCH_FAIL ~Flail of Ages: %SOURCE_RES% sets spell state %p2%, which the installed Haste or Improved Haste checks to refuse itself, but SPLSTATE.IDS does not name it HASTE_IMMUNITY. Removing it could also remove another protection, so Haste cannot be allowed safely.~
+            PATCH_FAIL ~Flail of Ages: %SOURCE_RES% sets spell state %p2%, which a Haste it allows (Haste, Improved Haste or an innate Haste) checks to refuse itself, but SPLSTATE.IDS does not name it HASTE_IMMUNITY. Removing it could also remove another protection, so Haste cannot be allowed safely.~
           END ELSE PATCH_IF p2 = haste_immunity_state BEGIN
-            PATCH_PRINT ~Flail of Ages: %SOURCE_RES% keeps spell state HASTE_IMMUNITY (%p2%): the installed Haste and Improved Haste do not check it, so it does not block them.~
+            PATCH_PRINT ~Flail of Ages: %SOURCE_RES% keeps spell state HASTE_IMMUNITY (%p2%): no Haste it allows checks it, so it does not block them.~
           END
         END
         PATCH_IF op = 206 BEGIN
