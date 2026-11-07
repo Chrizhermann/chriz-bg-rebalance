@@ -68,6 +68,44 @@ class SetupOverwriteTests(unittest.TestCase):
                 self.install(game, 100)
                 self.assertEqual(after.to_bytes(), game.snapshot()["SPWI007.SPL"])
 
+    def test_telekinetic_insertion_preserves_casting_effects_after_ability_records(self):
+        casting = (SplEffect(opcode=146, target=1, parameter1=1, resource="CASTHOOK"),
+                   SplEffect(opcode=321, target=1, resource="CASTONLY"))
+        abilities = (
+            SplAbility(required_level=1, target=2, projectile=1,
+                       effects=(SplEffect(opcode=139, parameter1=23),)),
+            SplAbility(required_level=20, target=2, projectile=1,
+                       effects=(SplEffect(opcode=174, resource="VISUAL"),)),
+        )
+        spell = SplFile(abilities=abilities, casting_effects=casting)
+        raw = bytearray(spell.to_bytes())
+        effect_offset = struct.unpack_from("<I", raw, 0x6a)[0]
+        ability_offset = struct.unpack_from("<I", raw, 0x64)[0]
+        # Same valid spell, but both ability slices precede the casting slice.
+        effects = raw[effect_offset:]
+        raw[effect_offset:] = effects[96:] + effects[:96]
+        struct.pack_into("<H", raw, 0x6e, 2)
+        for index in range(2):
+            struct.pack_into("<H", raw, ability_offset + 40 * index + 0x20, index)
+        game = self.game({"SPELL.IDS": b"2007 WIZARD_TELEKINETIC_STORM\n",
+                          "SPWI007.SPL": bytes(raw)})
+        self.install(game, 100)
+        result = game.snapshot()["SPWI007.SPL"]
+        after = SplFile.from_bytes(result)
+        self.assertEqual([fx.to_bytes() for fx in casting],
+                         [fx.to_bytes() for fx in after.casting_effects])
+        for before, ability, dice in zip(abilities, after.abilities, (16, 20)):
+            self.assertEqual([fx.to_bytes() for fx in before.effects],
+                             [fx.to_bytes() for fx in ability.effects if fx.opcode != 12])
+            damage, = [fx for fx in ability.effects if fx.opcode == 12]
+            self.assertEqual((dice, 6), (damage.dice_number, damage.dice_size))
+            self.assertEqual(0x1000001, damage.save_type)
+            self.assertEqual(256, damage.special)
+        # Apply to the already patched bytes, not WeiDU's restored backup.
+        again = self.game({"SPELL.IDS": b"2007 WIZARD_TELEKINETIC_STORM\n", "SPWI007.SPL": result})
+        self.install(again, 100)
+        self.assertEqual(result, again.snapshot()["SPWI007.SPL"])
+
     def test_absent_or_unreadable_telekinetic_is_local(self):
         for data in (None, b"truncated"):
             resources = {"SPELL.IDS": b"2820 WIZARD_TELEKINETIC_STORM\n"}

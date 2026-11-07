@@ -213,8 +213,16 @@ BEGIN
       OUTER_SPRINT $cbr_rdy_urgent_key(~%urgent_count%~) ~%cbr_rdy_urgent_symbol%~
       OUTER_SPRINT $cbr_rdy_urgent_resref(~%urgent_count%~) ~%cbr_rdy_resref%~
       OUTER_SET $cbr_rdy_urgent_number(~%urgent_count%~) = cbr_rdy_number
-      // SR's Improved Mantle slot is MoP, outside the weapon-protection ladder.
-      OUTER_SET $cbr_rdy_urgent_genuine(~%urgent_count%~) = NOT (~%cbr_rdy_urgent_symbol%~ STR_EQ ~WIZARD_IMPROVED_MANTLE~)
+      // This slot is MoP under SR but remains a weapon protection in the
+      // base game / SCS. Classify that capability, not the symbol's spelling.
+      OUTER_SET cbr_rdy_genuine = 1
+      ACTION_IF ~%cbr_rdy_urgent_symbol%~ STR_EQ ~WIZARD_IMPROVED_MANTLE~ BEGIN
+        LAF cbr_scs_wp_classify_file
+          STR_VAR resource_path = EVAL ~%resource_dir%/%cbr_rdy_resref%.SPL~
+            resource_name = EVAL ~%cbr_rdy_resref%.SPL~
+          RET cbr_rdy_genuine = is_weapon_protection END
+      END
+      OUTER_SET $cbr_rdy_urgent_genuine(~%urgent_count%~) = cbr_rdy_genuine
       OUTER_SET urgent_count += 1
     END
   END

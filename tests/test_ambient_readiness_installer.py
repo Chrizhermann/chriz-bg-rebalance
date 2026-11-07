@@ -143,7 +143,7 @@ def _build_fixture(
     unsupported: str | None = None,
     duplicate_override: bool = False,
     duplicate_required_symbol: bool = False,
-    future_improved_mantle: bool = False,
+    genuine_improved_mantle: bool = False,
     project_image_number: int = PROJECT_IMAGE[1],
     missing_project_image_symbol: bool = False,
     missing_project_image_resource: bool = False,
@@ -215,7 +215,7 @@ def _build_fixture(
         write_spl(
             root / f"{resref}.SPL",
             _urgent_spell(
-                genuine=(True if symbol == "WIZARD_IMPROVED_MANTLE" and future_improved_mantle else genuine)
+                genuine=(True if symbol == "WIZARD_IMPROVED_MANTLE" and genuine_improved_mantle else genuine)
             ),
         )
 
@@ -568,15 +568,29 @@ class AmbientReadinessManifestTests(unittest.TestCase):
         self._run_success(fixture)
         self.assertEqual("SPWI612", self._read_with_lua(fixture, "m.urgent_candidates[4].resref"))
 
-    def test_edited_mop_slot_does_not_change_the_decided_urgent_ladder(self) -> None:
-        fixture = self._fixture(future_improved_mantle=True)
-        self._run_success(fixture)
-        self.assertEqual(
-            self._read_with_lua(
-                fixture, "m.urgent_candidates[2].genuine_weapon_immunity"
-            ),
-            "0",
-        )
+    def test_genuine_improved_mantle_is_an_urgent_candidate(self) -> None:
+        for scs_hooks in (False, True):
+            with self.subTest(scs_hooks=scs_hooks):
+                fixture = self._fixture(genuine_improved_mantle=True)
+                if scs_hooks:
+                    spell = _urgent_spell(genuine=True)
+                    ability = dataclasses.replace(spell.abilities[0], effects=(
+                        SplEffect(opcode=139, parameter1=71),
+                        dataclasses.replace(spell.abilities[0].effects[0], duration=36, parameter1=4),
+                        SplEffect(opcode=328, parameter2=64),
+                    ))
+                    write_spl(fixture.root / "SPWI808.SPL", dataclasses.replace(
+                        spell, abilities=(ability,),
+                        casting_effects=(SplEffect(opcode=146, target=1, resource="DW#BLHDA"),),
+                    ))
+                original = (fixture.root / "SPWI808.SPL").read_bytes()
+                self._run_success(fixture)
+                self.assertEqual("1", self._read_with_lua(
+                    fixture, "m.urgent_candidates[2].genuine_weapon_immunity"))
+                self.assertEqual(original, (fixture.root / "SPWI808.SPL").read_bytes())
+                first = fixture.output.read_bytes()
+                self._run_success(fixture)
+                self.assertEqual(first, fixture.output.read_bytes())
 
     def test_missing_extra_effects_and_empty_abilities_keep_manifest_identical(self):
         fixture = self._fixture()
@@ -724,13 +738,27 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
         self._install(game)
         self._runtime(game)
 
-    def test_public_edited_mop_slot_keeps_decided_urgent_ladder(self) -> None:
-        game = self._game(future_improved_mantle=True)
-        self._install(game)
-        source = self._runtime(game)
-        self.assertEqual(
-            self._urgent_genuine(source, "WIZARD_IMPROVED_MANTLE"), 0
-        )
+    def test_public_genuine_improved_mantle_is_selected_with_or_without_scs(self) -> None:
+        for scs_installed in (False, True):
+            with self.subTest(scs_installed=scs_installed):
+                game = self._game(genuine_improved_mantle=True, scs_installed=scs_installed)
+                self._install(game)
+                source = self._runtime(game)
+                self.assertEqual(1, self._urgent_genuine(source, "WIZARD_IMPROVED_MANTLE"))
+                lua = _find_lua()
+                if lua is None:
+                    self.skipTest("no Lua interpreter found")
+                process = subprocess.run(
+                    [lua, str(ROOT / "tests/lua/ambient_readiness_sim.lua"),
+                     str(game.override / "M_CBRRDY.lua"), "urgent_candidates"],
+                    capture_output=True, text=True, timeout=30, check=False,
+                )
+                self.assertEqual(0, process.returncode, process.stdout + process.stderr)
+                seen = dict(line.split("\t", 1) for line in process.stdout.splitlines() if "\t" in line)
+                self.assertEqual("spwi907", seen["all_available"])
+                self.assertEqual("spwi808", seen["without_absolute"])
+                # This scenario still has Improved Mantle memorized alongside PFMW.
+                self.assertEqual("spwi808", seen["pfmw_fallback"])
 
     def test_missing_optional_ambient_candidate_still_installs(self) -> None:
         game = self._game(missing_symbol="WIZARD_ARMOR")

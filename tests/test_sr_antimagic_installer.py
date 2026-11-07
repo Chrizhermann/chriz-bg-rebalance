@@ -1,6 +1,7 @@
 """Public SR antimagic installers on disposable games, never a live install.
 
-Resources and TLKs are synthetic; dynamic parent slots and child names ensure
+Resources and TLKs are synthetic except the captured SR shield helpers;
+dynamic parent slots and child names ensure
 the installer discovers the effective payload instead of assuming SR suffixes.
 Uninstall exercises only this module's isolated fixtures. No engine claim follows.
 """
@@ -65,9 +66,9 @@ ORIGINAL_STRINGS = (
     _wand_text(PM_NAME, "Says nothing about the old rules."),  # 10: unrecognizable line
 )
 PM_SIBLING, SS_SIBLING = "ZPMWNDS", "ZSSWNDS"          # SCS-style wand spells
-PM_SCROLL, SS_SCROLL = "ZPMSCR", "ZSSSCR"
+PM_SCROLL, SS_SCROLL = "SCRL7L", "SCRL9M"
 OWN_SCROLL, COPY_SCROLL = "ZOWNSCR", "ZCOPYSC"
-PM_WAND, SS_WAND, ODD_WAND, ODD2_WAND = "ZPMWAND", "ZSSWAND", "ZODDWND", "ZODD2WN"
+PM_WAND, SS_WAND, ODD_WAND, ODD2_WAND = "WAND18", "ZSSWAND", "ZODDWND", "ZODD2WN"
 INLINE_ITEM, UNRELATED_ITEM = "ZINLINE", "ZUNREL"
 SYNTHETIC_MR_STAT = 37
 
@@ -174,8 +175,8 @@ class AntimagicGame:
             f"{PM}.SPL": _payload(False) if direct else _wrapper(PM_BODY, PM_SHIELD, spellstrike=False),
             f"{SS}.SPL": _payload(True) if direct else _wrapper(SS_BODY, SS_SHIELD, spellstrike=True),
             f"{PM_BODY}.SPL": _payload(False), f"{SS_BODY}.SPL": _payload(True),
-            f"{PM_SHIELD}.SPL": _spell((_effect(221, 9, 19),)),
-            f"{SS_SHIELD}.SPL": _spell((_effect(221, 9, 19),)),
+            f"{PM_SHIELD}.SPL": (ROOT / "tests/fixtures/sr_antimagic/SPWI608C.SPL").read_bytes(),
+            f"{SS_SHIELD}.SPL": (ROOT / "tests/fixtures/sr_antimagic/SPWI903C.SPL").read_bytes(),
             "ZSHIELD.SPL": _spell((_effect(206, resource=PM_BODY), _effect(206, resource=SS_BODY))),
             "ZLOWER.SPL": _spell((_effect(166, -40, 0, timing=0, duration=120),), level=5),
             "ZPIERCE.SPL": _spell((_effect(230, 9, 1), _effect(221, 9, 7), _effect(221, 9, 23)), level=8),
@@ -649,7 +650,7 @@ class AntimagicInstallerTests(unittest.TestCase):
         offset = 0x50 if extension == "SPL" or unidentified else 0x54
         expected = bytearray(original)
         expected[offset:offset + 4] = output[offset:offset + 4]
-        if extension == "ITM" and resref in (PM_SCROLL, SS_SCROLL, COPY_SCROLL, OWN_SCROLL):
+        if extension == "ITM" and resref in (PM_SCROLL, SS_SCROLL):
             expected[0x50:0x54] = output[0x50:0x54]
         self.assertEqual(bytes(expected), output, f"{resref}.{extension} changed beyond its description")
 
@@ -699,25 +700,25 @@ class AntimagicInstallerTests(unittest.TestCase):
         description = _strings(game.tlk)[new_ref]
         self.assertEqual(_tra_string(2100) + "\n\n" + _tra_string(2102), description)
         self.assertEqual(7, len(description.split("\n\n")[0].split("\n")) - 1)
-        # Scrolls and spells that show the old description now show the new one.
-        for resource, extension in ((PM_SCROLL, "ITM"), (COPY_SCROLL, "ITM"), (PM_SIBLING, "SPL")):
+        # The owned scroll and linked spell receive complete descriptions.
+        for resource, extension in ((PM_SCROLL, "ITM"), (PM_SIBLING, "SPL")):
             self.assertEqual(new_ref, game.strref(resource, extension), resource)
             self.assert_only_description_changed(game, resource, extension)
-        # The hidden payload spells keep the shared strref: an already changed
-        # installation finds what is stale through them.
+        # Hidden helpers keep their original descriptions, including the real
+        # SR shield helper's captured strref.
         for resource in (PM_BODY, PM_SHIELD):
-            self.assertEqual(1, game.strref(resource), resource)
-        self.assertEqual(new_ref, game.strref(OWN_SCROLL, "ITM"))
-        self.assert_only_description_changed(game, OWN_SCROLL, "ITM")
+            before_ref = struct.unpack_from("<i", game.before[f"{resource}.SPL"], 0x50)[0]
+            self.assertEqual(before_ref, game.strref(resource), resource)
+        for resource in (OWN_SCROLL, COPY_SCROLL):
+            self.assert_untouched(game, resource, "ITM")
         # The wand: only the Special value of this spell's own entry changes.
         wand = _strings(game.tlk)[game.strref(PM_WAND, "ITM")]
         self.assertEqual(_wand_text(PM_NAME, _tra_string(2101)), wand)
         self.assertIn("Special: Dispels all specific and combat protections on target\n", wand)
         self.assert_only_description_changed(game, PM_WAND, "ITM")
-        # Changed text does not gate a full description replacement.
+        # Other callers own their text even when they invoke the same spell.
         for resource in (ODD_WAND, ODD2_WAND):
-            self.assertEqual(wand, game.text(resource, "ITM"))
-            self.assert_only_description_changed(game, resource, "ITM")
+            self.assert_untouched(game, resource, "ITM")
         # Items with inline effects, unrelated items and Spellstrike's items stay.
         for resource in (INLINE_ITEM, UNRELATED_ITEM, SS_SCROLL, SS_WAND):
             self.assert_untouched(game, resource, "ITM")
@@ -733,9 +734,7 @@ class AntimagicInstallerTests(unittest.TestCase):
         for resource, extension in ((SS_SCROLL, "ITM"), (SS_SIBLING, "SPL")):
             self.assertEqual(new_ref, game.strref(resource, extension), resource)
             self.assert_only_description_changed(game, resource, extension)
-        self.assertEqual(_wand_text(SS_NAME, _tra_string(2111)),
-                         _strings(game.tlk)[game.strref(SS_WAND, "ITM")])
-        self.assert_only_description_changed(game, SS_WAND, "ITM")
+        self.assert_untouched(game, SS_WAND, "ITM")
         for resource in (PM_SCROLL, COPY_SCROLL, OWN_SCROLL, PM_WAND, ODD_WAND, INLINE_ITEM, UNRELATED_ITEM):
             self.assert_untouched(game, resource, "ITM")
         self.assert_untouched(game, PM_SIBLING, "SPL")
@@ -745,18 +744,64 @@ class AntimagicInstallerTests(unittest.TestCase):
         self.assert_installed(game, game.run(210), 210)
         self.assertEqual(game.strref(PM), game.strref(PM_SCROLL, "ITM"))
         self.assertNotEqual(1, game.strref(PM_SCROLL, "ITM"))
-        self.assertEqual(game.strref(PM), game.strref(OWN_SCROLL, "ITM"))
+        self.assert_untouched(game, OWN_SCROLL, "ITM")
 
     def test_scroll_text_changed_by_another_mod_is_overwritten(self):
-        # The copy under strref 5 was rewritten: it is no longer the old description.
+        # Our stock scroll gets our text regardless of its previous wording.
         strings = list(ORIGINAL_STRINGS)
         strings[5] = "Another mod rewrote this scroll: it now explains the spell in its own words, at length."
-        game = self.make_game(strings=tuple(strings))
+        game = self.make_game(strings=tuple(strings), changed={
+            f"{PM_SCROLL}.ITM": _item((_cast(PM),), identified=5, unidentified=3),
+        })
         result = game.run(210)
         self.assert_installed(game, result, 210)
-        self.assertEqual(game.strref(PM), game.strref(COPY_SCROLL, "ITM"))
-        self.assert_only_description_changed(game, COPY_SCROLL, "ITM")
+        self.assert_untouched(game, COPY_SCROLL, "ITM")
+        self.assert_only_description_changed(game, PM_SCROLL, "ITM")
         self.assertEqual(game.strref(PM), game.strref(PM_SCROLL, "ITM"))
+
+    def test_owned_wand_refreshes_either_antimagic_charge_without_an_old_text_gate(self):
+        for tail in (False, True):
+            for component, parent, sibling, name, template in (
+                (210, PM, PM_SIBLING, PM_NAME, 2101),
+                (211, SS, SS_SIBLING, SS_NAME, 2111),
+            ):
+                for call in (parent, sibling):
+                    with self.subTest(tail=tail, component=component, call=call):
+                        game = self.make_game(tail=tail, changed={
+                            f"{PM_WAND}.ITM": _item((_cast("ZUNRELS"),), (_cast(call),),
+                                                   identified=3, unidentified=6),
+                        })
+                        self.assert_installed(game, game.run(component), component)
+                        self.assertEqual(_wand_text(name, _tra_string(template)), game.text(PM_WAND, "ITM"))
+                        self.assertEqual(6, game.strref(PM_WAND, "ITM", unidentified=True))
+                        self.assert_only_description_changed(game, PM_WAND, "ITM")
+
+    def test_other_staff_and_wand_keep_both_descriptions_and_other_abilities(self):
+        for tail in (False, True):
+            with self.subTest(tail=tail):
+                strings = ORIGINAL_STRINGS + (
+                    "Staff of Many Uses: grants healing and fires a magic bolt.",
+                    "An unexamined staff with three buttons.",
+                    "Single-charge wand: invokes an anti-magic spell. No other charges.",
+                    "An unexamined wand.",
+                )
+                staff = _item((_cast(PM),), (_cast(SS),), (_effect(17, 20),),
+                              identified=11, unidentified=12)
+                wand = _item((_cast(PM_SIBLING),), (_cast(SS_SIBLING),),
+                             identified=13, unidentified=14)
+                game = self.make_game(tail=tail, strings=strings,
+                                      changed={"ZSTAFF.ITM": staff, "ZNEWAND.ITM": wand})
+                self.assert_installed(game, game.run(210, 211), 210)
+                self.assert_pierce_magic_payload(game)
+                self.assert_spellstrike_payload(game)
+                for item in ("ZSTAFF", "ZNEWAND"):
+                    self.assert_untouched(game, item, "ITM")
+                    self.assertNotIn("Breach", game.text(item, "ITM"))
+                self.assert_installed(game, game.run(210, 211), 211)
+                if tail:
+                    self.assert_installed(game, game.run(212, 213), 212)
+                for item in ("ZSTAFF", "ZNEWAND"):
+                    self.assert_untouched(game, item, "ITM")
 
     def test_description_install_twice_changes_nothing_and_uninstall_restores_everything(self):
         game = self.make_game()
@@ -805,10 +850,10 @@ class AntimagicInstallerTests(unittest.TestCase):
         for parent, template in ((PM, 2100), (SS, 2110)):
             self.assertEqual(_tra_string(template) + "\n\n" + _tra_string(2102), game.text(parent))
         self.assertEqual(game.strref(PM), game.strref(PM_SCROLL, "ITM"))
-        self.assertEqual(game.strref(PM), game.strref(COPY_SCROLL, "ITM"))
+        self.assert_untouched(game, COPY_SCROLL, "ITM")
         self.assertEqual(game.strref(SS), game.strref(SS_SCROLL, "ITM"))
         self.assertEqual(_wand_text(PM_NAME, _tra_string(2101)), game.text(PM_WAND, "ITM"))
-        self.assertEqual(_wand_text(SS_NAME, _tra_string(2111)), game.text(SS_WAND, "ITM"))
+        self.assert_untouched(game, SS_WAND, "ITM")
         # Texts only: the mechanic and the runtime are exactly as they were.
         for name, data in mechanic.items():
             self.assertEqual(data, _tree(game.override)[name], name)
@@ -831,7 +876,7 @@ class AntimagicInstallerTests(unittest.TestCase):
         self.assertEqual(_tra_string(2110) + "\n\n" + _tra_string(2102), game.text(SS))
         self.assertEqual(game.strref(SS), game.strref(SS_SCROLL, "ITM"))
         self.assertEqual(game.strref(SS), game.strref(SS_SIBLING, "SPL"))
-        self.assertEqual(_wand_text(SS_NAME, _tra_string(2111)), game.text(SS_WAND, "ITM"))
+        self.assert_untouched(game, SS_WAND, "ITM")
 
     def test_texts_tail_rewrites_a_short_spellstrike_text_that_has_no_header(self):
         # The text 211 wrote before this release: the name, a blank line, no header.

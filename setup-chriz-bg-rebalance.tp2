@@ -172,7 +172,9 @@ ACTION_IF FILE_EXISTS_IN_GAME ~%cbr_tks_res%.spl~ BEGIN
 // into the savetype dword of every save-for-half op12 effect, in all scaled ability headers.
 COPY_EXISTING ~%cbr_tks_res%.spl~ ~override~
   LPF cbr_em_validate_spl RET readable ext_off = ability_offset ext_cnt = ability_count fx_off = effect_offset END
-  PATCH_IF readable AND ext_cnt = 0 BEGIN
+  // ADD_SPELL_EFFECT does not move the casting index when inserting before
+  // that slice. Give each ability its own slice after the casting effects.
+  PATCH_IF readable BEGIN
     LPF cbr_em_prepare_spl END
   END
   LPF cbr_em_validate_spl RET readable ext_off = ability_offset ext_cnt = ability_count fx_off = effect_offset END

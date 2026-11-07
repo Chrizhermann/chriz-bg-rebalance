@@ -159,8 +159,8 @@ BEGIN
                     FOR (am_at = 0; am_at < BUFFER_LENGTH; am_at += 48) BEGIN
                       READ_SHORT am_at am_op READ_LONG (am_at + 8) am_mode
                       READ_ASCII (am_at + 20) am_res (8) NULL TO_UPPER am_res
-                      PATCH_IF am_op = 221 AND am_mode = 19 BEGIN SET am_shield = 1 END
-                      PATCH_IF (component = 210 AND (am_op = 166 OR am_op = 230
+                      PATCH_IF am_op = 230 AND am_mode = 19 BEGIN SET am_shield = 1 END
+                      PATCH_IF (component = 210 AND (am_op = 166 OR (am_op = 230 AND am_mode = 1)
                         OR (am_op = 402 AND ~%am_res%~ STRING_EQUAL_CASE ~CBRPM~)))
                         OR (component = 211 AND (am_op = 60 OR (am_op = 221 AND am_mode = 1))) BEGIN
                         SET am_mechanic = 1
@@ -241,10 +241,10 @@ BEGIN
   ACTION_IF am_available AND ~%EE_LANGUAGE%~ STRING_EQUAL_CASE ~en_us~ BEGIN
     ACTION_IF component = 210 BEGIN
       OUTER_SPRINT am_text @2100 OUTER_SPRINT am_wand_special @2101
-      OUTER_SPRINT am_name ~Pierce Magic~
+      OUTER_SPRINT am_name ~Pierce Magic~ OUTER_SPRINT am_scroll ~SCRL7L~
     END ELSE BEGIN
       OUTER_SPRINT am_text @2110 OUTER_SPRINT am_wand_special @2111
-      OUTER_SPRINT am_name ~Spellstrike~
+      OUTER_SPRINT am_name ~Spellstrike~ OUTER_SPRINT am_scroll ~SCRL9M~
     END
     OUTER_SPRINT am_note @2102
     COPY_EXISTING ~%am_parent%.spl~ ~override~
@@ -289,10 +289,17 @@ Weight: 1~
         END
     BUT_ONLY IF_EXISTS
     COPY_EXISTING_REGEXP GLOB ~^.+\.itm$~ ~override~
-        LPM cbr_am_item_links
-        PATCH_IF ai_direct BEGIN
-          WRITE_LONG 0x54 am_new_ref WRITE_LONG 0x50 am_new_ref
-        END ELSE PATCH_IF ai_indirect BEGIN WRITE_LONG 0x54 am_wand_ref END
+        // We own complete text only for these stock scrolls and WAND18.
+        // Other items can expose more abilities; their descriptions remain
+        // theirs while the invoked spell receives our mechanical changes.
+        PATCH_IF BUFFER_LENGTH >= 0x72 BEGIN
+          PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~%am_scroll%~ BEGIN
+            WRITE_LONG 0x54 am_new_ref WRITE_LONG 0x50 am_new_ref
+          END ELSE PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~WAND18~ BEGIN
+            LPM cbr_am_item_links
+            PATCH_IF ai_direct OR ai_indirect BEGIN WRITE_LONG 0x54 am_wand_ref END
+          END
+        END
     BUT_ONLY IF_EXISTS
   END ELSE ACTION_IF am_available BEGIN
     PRINT ~CBR anti-magic: no translation for this language; retaining descriptions.~
