@@ -171,6 +171,7 @@ class SyntheticHardinessGame:
         self.tlk.parent.mkdir(parents=True)
         self.tlk.write_bytes(_tlk(ORIGINAL_STRINGS))
         (root / "dialog.tlk").write_bytes(_tlk(ORIGINAL_STRINGS))
+        (root / "weidu.log").write_text("", encoding="ascii")
         if sr_component is not None:
             (root / "weidu.log").write_text(
                 f"~SPELL_REV/SETUP-SPELL_REV.TP2~ #0 #{sr_component} // Synthetic SR\n", encoding="ascii")
@@ -435,13 +436,16 @@ class HardinessInstallerTests(HardinessTestCase):
                 self.assertEqual({"SPCL907.SPL", "SPWISH12.SPL", "UNRELATE.SPL"}, set(_tree(game.override)))
 
     def test_physical_choices_install_without_sr(self):
-        for sr_component in (None, 0):
-            for component in (200, 201):
-                with self.subTest(sr_component=sr_component, component=component):
-                    game = self.make_game(sr_component=sr_component)
-                    self.assert_installed(game, game.run(component), component)
-                    self.assert_spell(game.before["SPCL907.SPL"], (game.override / "SPCL907.SPL").read_bytes(),
-                                      40 if component == 200 else 30, 0, description_changed=True)
+        for tail in (False, True):
+            for sr_component in (None, 0):
+                for component in (200, 201):
+                    with self.subTest(tail=tail, sr_component=sr_component, component=component):
+                        game = self.make_game(tail=tail, sr_component=sr_component)
+                        result = game.run(component)
+                        self.assert_installed(game, result, component)
+                        self.assertNotIn("WARNING", result.stdout + result.stderr)
+                        self.assert_spell(game.before["SPCL907.SPL"], (game.override / "SPCL907.SPL").read_bytes(),
+                                          40 if component == 200 else 30, 0, description_changed=True)
 
     def test_non_bg2_game_is_a_noop(self):
         game = self.make_game(game="bgee")
@@ -455,11 +459,17 @@ class HardinessInstallerTests(HardinessTestCase):
         game = self.make_game(game="eet")
         self.assert_installed(game, game.run(200), 200)
 
-    def test_missing_wish_does_not_block_hardiness(self):
-        game = self.make_game(missing="SPWISH12")
-        self.assert_installed(game, game.run(200), 200)
-        self.assert_spell(game.before["SPCL907.SPL"], (game.override / "SPCL907.SPL").read_bytes(),
-                          40, 0, description_changed=True)
+    def test_each_missing_target_leaves_the_other_independent(self):
+        for tail in (False, True):
+            for missing, present in (("SPWISH12", "SPCL907"), ("SPCL907", "SPWISH12")):
+                with self.subTest(tail=tail, missing=missing):
+                    game = self.make_game(tail=tail, sr_component=None, missing=missing)
+                    result = game.run(200, 202)
+                    self.assert_installed(game, result, 202)
+                    self.assertNotIn("WARNING", result.stdout + result.stderr)
+                    self.assert_spell(game.before[present + ".SPL"], (game.override / (present + ".SPL")).read_bytes(),
+                                      40, 20, description_changed=True)
+                    self.assertFalse((game.override / (missing + ".SPL")).exists())
 
     def test_missing_resistance_in_second_spell_is_restored(self):
         malformed = _mutate_effects(_spell(wish=True), lambda effects: [fx for fx in effects if fx.opcode != 89])

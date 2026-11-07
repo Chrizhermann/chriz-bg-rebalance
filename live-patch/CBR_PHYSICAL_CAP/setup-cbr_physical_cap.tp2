@@ -3,70 +3,14 @@ AUTHOR ~ChrizFader~
 VERSION ~private-oct20-immunity-windows~
 
 ALWAYS
-  // This adapter owns its marker and runtime. Keep the allocator here so a
-  // shared library's content preflight cannot block a tail update.
+  INCLUDE ~CBR_PHYSICAL_CAP/lib/physical_resistance.tpa~
   DEFINE_ACTION_FUNCTION cbr_cap_write_runtime BEGIN
-    ACTION_IF (NOT FILE_EXISTS ~override/SPLSTATE.IDS~) BEGIN
-      ACTION_IF (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) BEGIN
-        COPY_EXISTING ~SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
-      END ELSE BEGIN
-        COPY ~CBR_PHYSICAL_CAP/lua/M_CBRRES.lua~ ~override/SPLSTATE.IDS~
-          DELETE_BYTES 0 BUFFER_LENGTH
-          INSERT_BYTES 0 (STRING_LENGTH ~IDS V1.0%WNL%~)
-          WRITE_ASCIIE 0 ~IDS V1.0%WNL%~
-      END
+    ACTION_IF NOT FILE_EXISTS ~override/SPLSTATE.IDS~ AND FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~ BEGIN
+      COPY_EXISTING ~SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
     END
-    OUTER_SET cbr_cap_state = (0 - 1)
-    COPY ~override/SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
-      FOR (i = 0; i < 256; ++i) BEGIN SET $cbr_cap_used(~%i%~) = 0 END
-      READ_ASCII 0 cbr_cap_ids (BUFFER_LENGTH)
-      INNER_PATCH ~%cbr_cap_ids%~ BEGIN
-        REPLACE_EVALUATE CASE_INSENSITIVE
-          ~^[ %TAB%]*\([^ %TAB%%WNL%%MNL%%LNL%]+\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
-        BEGIN
-          PATCH_IF (IS_AN_INT ~%MATCH1%~) BEGIN
-            SET value = MATCH1
-            PATCH_IF (value >= 0 && value < 256) BEGIN
-              PATCH_IF (~%MATCH2%~ STRING_EQUAL_CASE ~CBR_PHYSICAL_SOFTCAP~) BEGIN
-                SET cbr_cap_state = value
-              END ELSE BEGIN SET $cbr_cap_used(~%value%~) = 1 END
-            END
-          END
-        END ~~
-      END
-      FOR (i = 255; i >= 0 && cbr_cap_state < 0; --i) BEGIN
-        PATCH_IF ($cbr_cap_used(~%i%~) = 0) BEGIN SET cbr_cap_state = i END
-      END
-      // The native marker is one byte. A full table still receives our owned
-      // preferred symbol; foreign aliases are not grounds to reject it.
-      PATCH_IF (cbr_cap_state < 0) BEGIN SET cbr_cap_state = 255 END
-      SET written = 0
-      REPLACE_EVALUATE CASE_INSENSITIVE
-        ~^[ %TAB%]*[^ %TAB%%WNL%%MNL%%LNL%]+[ %TAB%]+CBR_PHYSICAL_SOFTCAP\b~
-      BEGIN
-        SPRINT replacement ~~
-        PATCH_IF (written = 0) BEGIN
-          SPRINT replacement ~%cbr_cap_state% CBR_PHYSICAL_SOFTCAP~
-          SET written = 1
-        END
-      END ~%replacement%~
-      PATCH_IF (written = 0) BEGIN
-        SPRINT prefix ~~
-        PATCH_IF (BUFFER_LENGTH > 0) BEGIN
-          READ_BYTE (BUFFER_LENGTH - 1) last
-          PATCH_IF (last != 10 && last != 13) BEGIN SPRINT prefix ~%WNL%~ END
-        END
-        SPRINT row ~%prefix%%cbr_cap_state% CBR_PHYSICAL_SOFTCAP%WNL%~
-        SET end = BUFFER_LENGTH
-        INSERT_BYTES end (STRING_LENGTH ~%row%~)
-        WRITE_ASCIIE end ~%row%~
-      END
-    BUT_ONLY
-    CLEAR_IDS_MAP
-    COPY ~CBR_PHYSICAL_CAP/lua/M_CBRRES.lua~ ~override/M_CBRRES.lua~
-      REPLACE_TEXTUALLY ~%CBR_RES_CAP%~ ~90~
-      REPLACE_TEXTUALLY ~%CBR_RES_STATE%~ ~%cbr_cap_state%~
-    BUT_ONLY
+    LAF cbr_apply_physical_resistance
+      STR_VAR template_file = ~CBR_PHYSICAL_CAP/lua/M_CBRRES.lua~
+    END
   END
 END
 

@@ -189,10 +189,9 @@ LAF cbr_install_potion_uniqueness INT_VAR potions=1 heroism=1 END
         before = game.snapshot(); self.library(game, name='repeat')
         self.assertEqual(before, game.snapshot())
 
-    def test_missing_malformed_and_saturated_marker_tables_are_repaired(self):
+    def test_missing_and_malformed_marker_tables_are_repaired(self):
         variants=[{}, {'SPLSTATE.IDS':b'IDS V1.0\nbad CBR_POTION_POTN09\n999 CBR_POTION_POTN09\n',
-                        'SPLPROT.2DA':b'2DA V1.0\n0\n RELATION STAT VALUE EXTRA\nCBR_SPLSTATE_ACTIVE bad bad bad x\n'},
-                  {'SPLSTATE.IDS':('IDS V1.0\n'+''.join(f'{i} FOREIGN_{i}\n' for i in range(256))).encode()}]
+                        'SPLPROT.2DA':b'2DA V1.0\n0\n RELATION STAT VALUE EXTRA\nCBR_SPLSTATE_ACTIVE bad bad bad x\n'}]
         for tables in variants:
             resources=synthetic(bardic=False);resources.pop('SPLSTATE.IDS');resources.pop('SPLPROT.2DA');resources.update(tables)
             game=self.game(resources);self.library(game)
@@ -201,6 +200,76 @@ LAF cbr_install_potion_uniqueness INT_VAR potions=1 heroism=1 END
             self.assertTrue(all(0<=v<=255 for v in values));self.assertEqual(len(values),len(set(values)))
             self.assertIn('274 -1 1',(game.override/'SPLPROT.2DA').read_text())
             before=game.snapshot();self.library(game,name='repeat');self.assertEqual(before,game.snapshot())
+
+    def test_exhaustion_omits_only_unavailable_families_and_keeps_refresh(self):
+        for free in (0, 1):
+            with self.subTest(free=free):
+                resources = synthetic()
+                resources["POTN09.ITM"] = item(fx(324, 1, 138, 110, res="POTN09"), *HEROISM)
+                full = "IDS V1.0\n" + "".join(f"{i} FOREIGN_{i}\n" for i in range(256-free))
+                resources["SPLSTATE.IDS"] = full.encode()
+                game = self.game(resources)
+                output = self.library(game)
+                states = self.states(game)
+                owned = {k:v for k,v in states.items() if k.startswith("CBR_POTION_") or k == "CBR_HEROISM_FAMILY"}
+                self.assertEqual(free, len(owned))
+                self.assertEqual(set(range(256-free, 256)), set(owned.values()))
+                for i in range(256-free):
+                    self.assertEqual(i, states[f"FOREIGN_{i}"])
+                logs = [line for line in output.splitlines() if "no unused SPLSTATE slot for" in line]
+                self.assertGreater(len(logs), 1)
+                self.assertEqual(len(logs), len(set(logs)))
+                self.assertNotIn("WARNING", output)
+                self.assertTrue(any(e.opcode == 321 for e in effects_of(game.snapshot()["POTN60.ITM"])))
+                if not free:
+                    self.assertEqual(full.encode(), (game.override / "SPLSTATE.IDS").read_bytes())
+                    for name in ("POTN09.ITM", "DW#PTN09.ITM", "POTN45.ITM", "C0BW202.SPL", "C0BW502.SPL"):
+                        self.assertEqual(resources[name], game.snapshot()[name], name)
+                before = game.snapshot()
+                self.library(game, name="repeat")
+                self.assertEqual(before, game.snapshot())
+
+    def test_exhaustion_retires_stale_family_controls(self):
+        game = self.game(synthetic())
+        self.library(game)
+        old = {k:v for k,v in self.states(game).items() if k.startswith("CBR_POTION_") or k == "CBR_HEROISM_FAMILY"}
+        full = "IDS V1.0\n" + "".join(f"{i} FOREIGN_{i}\n" for i in range(256))
+        full += "".join(f"{v} {k}\n" for k,v in old.items())
+        path = game.override / "POTN09.ITM"
+        itm = ItmFile.from_bytes(path.read_bytes())
+        ability = itm.abilities[0]
+        # Orphan markers still need retiring when the owning guard is missing.
+        effects = tuple(e for e in ability.effects if e.opcode != 324)
+        path.write_bytes(dataclasses.replace(itm, abilities=(dataclasses.replace(ability, effects=effects),)).to_bytes())
+        (game.override / "SPLSTATE.IDS").write_text(full, newline="\n")
+        self.library(game, name="exhausted")
+        self.assertEqual(full.encode(), (game.override / "SPLSTATE.IDS").read_bytes())
+        for name in ("POTN09.ITM", "DW#PTN09.ITM", "POTN45.ITM", "C0BW202.SPL", "C0BW502.SPL"):
+            effects = effects_of(game.snapshot()[name])
+            self.assertFalse(any((e.opcode == 324 and e.parameter1 in old.values()) or
+                                 (e.opcode == 328 and e.parameter2 in old.values()) for e in effects), name)
+            expected_payload = [e for e in effects_of(synthetic()[name]) if e.opcode not in (321, 324, 328)]
+            self.assertEqual(expected_payload, [e for e in effects if e.opcode not in (321, 324, 328)], name)
+        before = game.snapshot()
+        self.library(game, name="exhausted_repeat")
+        self.assertEqual(before, game.snapshot())
+
+    def test_foreign_alias_reallocates_only_its_family(self):
+        game = self.game(synthetic())
+        self.library(game)
+        old = self.states(game)
+        prior = old["CBR_POTION_POTN09"]
+        path = game.override / "SPLSTATE.IDS"
+        path.write_bytes(path.read_bytes() + f"{prior} FOREIGN_ALIAS\n".encode())
+        self.library(game, name="reallocated")
+        states = self.states(game)
+        self.assertNotEqual(prior, states["CBR_POTION_POTN09"])
+        self.assertEqual(prior, states["FOREIGN_ALIAS"])
+        self.assertEqual(old["CBR_HEROISM_FAMILY"], states["CBR_HEROISM_FAMILY"])
+        effects = effects_of(game.snapshot()["POTN09.ITM"])
+        self.assertEqual({states["CBR_POTION_POTN09"], states["CBR_HEROISM_FAMILY"]},
+                         {e.parameter1 for e in effects if e.opcode == 324})
+        self.assertFalse(any(e.opcode == 328 and e.parameter2 == prior for e in effects))
 
     def test_deep_links_cycles_and_instant_payloads_continue(self):
         resources=synthetic(bardic=False)

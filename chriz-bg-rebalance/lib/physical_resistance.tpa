@@ -9,6 +9,7 @@ DEFINE_ACTION_FUNCTION cbr_apply_physical_resistance
   STR_VAR
     resource_dir = ~override~
     template_file = ~chriz-bg-rebalance/lua/M_CBRRES.lua~
+  RET installed
 BEGIN
   OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
   OUTER_SPRINT template_file EVALUATE_BUFFER ~%template_file%~
@@ -38,7 +39,7 @@ BEGIN
         END
       END ~~
     END
-    // Reading allocated numbers chooses an address; it never vetoes our symbol.
+    // A state must be unused by every other feature, including foreign aliases.
     SET cbr_res_state = (0 - 1)
     PATCH_IF own_value >= 0 BEGIN
       PATCH_IF NOT $cbr_res_used(~%own_value%~) BEGIN SET cbr_res_state = own_value END
@@ -46,32 +47,42 @@ BEGIN
     FOR (i = 255; i >= 0 AND cbr_res_state < 0; --i) BEGIN
       PATCH_IF NOT $cbr_res_used(~%i%~) BEGIN SET cbr_res_state = i END
     END
-    // If every engine bit is named, our decided marker owns the preferred bit.
-    PATCH_IF cbr_res_state < 0 BEGIN SET cbr_res_state = 255 END
-    SET written = 0
-    REPLACE_EVALUATE CASE_INSENSITIVE
-      ~^[ %TAB%]*[^ %TAB%%WNL%%MNL%%LNL%]+[ %TAB%]+CBR_PHYSICAL_SOFTCAP\b[^%WNL%%MNL%%LNL%]*~
-    BEGIN
-      SPRINT row ~~
+    PATCH_IF cbr_res_state >= 0 BEGIN
+      SET written = 0
+      REPLACE_EVALUATE CASE_INSENSITIVE
+        ~^[ %TAB%]*[^ %TAB%%WNL%%MNL%%LNL%]+[ %TAB%]+CBR_PHYSICAL_SOFTCAP\b[^%WNL%%MNL%%LNL%]*~
+      BEGIN
+        SPRINT row ~~
+        PATCH_IF NOT written BEGIN
+          SPRINT row ~%cbr_res_state% CBR_PHYSICAL_SOFTCAP~
+          SET written = 1
+        END
+      END ~%row%~
       PATCH_IF NOT written BEGIN
-        SPRINT row ~%cbr_res_state% CBR_PHYSICAL_SOFTCAP~
-        SET written = 1
+        SPRINT row ~%cbr_res_state% CBR_PHYSICAL_SOFTCAP%LNL%~
+        PATCH_IF BUFFER_LENGTH > 0 BEGIN
+          READ_BYTE (BUFFER_LENGTH - 1) last
+          PATCH_IF last != 10 AND last != 13 BEGIN SPRINT row ~%LNL%%row%~ END
+        END
+        SET at = BUFFER_LENGTH
+        INSERT_BYTES at (STRING_LENGTH ~%row%~)
+        WRITE_ASCIIE at ~%row%~
       END
-    END ~%row%~
-    PATCH_IF NOT written BEGIN
-      SPRINT row ~%cbr_res_state% CBR_PHYSICAL_SOFTCAP%LNL%~
-      PATCH_IF BUFFER_LENGTH > 0 BEGIN
-        READ_BYTE (BUFFER_LENGTH - 1) last
-        PATCH_IF last != 10 AND last != 13 BEGIN SPRINT row ~%LNL%%row%~ END
-      END
-      SET at = BUFFER_LENGTH
-      INSERT_BYTES at (STRING_LENGTH ~%row%~)
-      WRITE_ASCIIE at ~%row%~
     END
   BUT_ONLY
   CLEAR_IDS_MAP
 
-  COPY ~%template_file%~ ~%resource_dir%/M_CBRRES.lua~
-    REPLACE_TEXTUALLY ~%CBR_RES_CAP%~ ~%cap%~
-    REPLACE_TEXTUALLY ~%CBR_RES_STATE%~ ~%cbr_res_state%~
+  OUTER_SET installed = cbr_res_state >= 0
+  ACTION_IF installed BEGIN
+    COPY ~%template_file%~ ~%resource_dir%/M_CBRRES.lua~
+      REPLACE_TEXTUALLY ~%CBR_RES_CAP%~ ~%cap%~
+      REPLACE_TEXTUALLY ~%CBR_RES_STATE%~ ~%cbr_res_state%~
+  END ELSE BEGIN
+    // Replace a stale listener too; a foreign state is never an available marker.
+    <<<<<<<< cbr_physical_unavailable
+-- Party physical resistance is unavailable: no unused spell state.
+>>>>>>>>
+    COPY ~cbr_physical_unavailable~ ~%resource_dir%/M_CBRRES.lua~
+    PRINT ~CBR: no unused SPLSTATE slot; only party physical resistance is omitted.~
+  END
 END

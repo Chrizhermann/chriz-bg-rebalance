@@ -88,6 +88,7 @@ class CompletionGame:
         self.temporary = temporary
         self.root = Path(temporary.name) / "game"
         self.root.mkdir()
+        (self.root / "WeiDU.log").write_text("", encoding="ascii")
         self.override = self.root / "override"
         self.override.mkdir()
 
@@ -342,14 +343,26 @@ class TempusCompletionInstallerTests(unittest.TestCase):
         )
         self._uninstall_restores_override(game, 405)
 
-    def test_component_405_fails_without_divination_spells(self) -> None:
+    def test_component_405_without_divination_writes_inert_toll_and_clab(self) -> None:
         game = self._game(
             override_schools=(("SPPR104", 2), ("SPPR205", 6)), biff_schools=()
         )
         process = game.run("--force-install-list", 405)
         transcript = game.transcript(process)
-        self.assertIn("NOT INSTALLED", transcript, transcript)
-        self.assertEqual(game.pre_override, _raw_file_tree(game.override))
+        self.assertEqual(0, process.returncode, transcript)
+        self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+        self.assertNotIn("WARNING", transcript.upper())
+        self.assertEqual(1, transcript.count("no addressable Divination spells"))
+        toll = read_spl(game.override / "CBRTMDV.spl")
+        self.assertEqual([321], [effect.opcode for effect in toll.abilities[0].effects])
+        self.assertEqual("CBRTMDV", toll.abilities[0].effects[0].resource)
+        table = read_2da(game.override / "OHTEMPUS.2DA")
+        self.assertTrue(all(table.cell("CBR_DIVTOLL", str(level)) == "AP_CBRTMDV" for level in range(1, 51)))
+        for name, payload in game.pre_override.items():
+            if name.upper() != "OHTEMPUS.2DA":
+                self.assertEqual(payload, (game.override / name).read_bytes(), name)
+        self.assertEqual([""], _read_tlk_strings(game.lang_tlk))
+        self._uninstall_restores_override(game, 405)
 
     def test_component_407_ships_stamped_listener_then_uninstalls(self) -> None:
         game = self._game()

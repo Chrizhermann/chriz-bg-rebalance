@@ -9,7 +9,6 @@ LANGUAGE ~English~ ~english~ ~CBR_SR_ANTIMAGIC/languages/english/setup.tra~
 
 BEGIN @210 DESIGNATED 210 LABEL ~cbr_sr_pierce_magic_tail~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9210
-REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 0) @9211
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9212
 REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 210) @9213
 LAF cbr_install_sr_antimagic INT_VAR component = 210
@@ -17,7 +16,6 @@ LAF cbr_install_sr_antimagic INT_VAR component = 210
 
 BEGIN @211 DESIGNATED 211 LABEL ~cbr_sr_spellstrike_tail~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9210
-REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 0) @9211
 REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 211) @9213
 LAF cbr_install_sr_antimagic INT_VAR component = 211 END
 
@@ -26,10 +24,8 @@ LAF cbr_install_sr_antimagic INT_VAR component = 211 END
 // but descriptions changes: the spell's, scrolls', wands' and sibling spells'.
 BEGIN @212 DESIGNATED 212 LABEL ~cbr_sr_pierce_magic_texts_tail~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9210
-REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 0) @9211
 LAF cbr_refresh_sr_antimagic_texts INT_VAR component = 210 END
 
 BEGIN @213 DESIGNATED 213 LABEL ~cbr_sr_spellstrike_texts_tail~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9210
-REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 0) @9211
 LAF cbr_refresh_sr_antimagic_texts INT_VAR component = 211 END

@@ -199,8 +199,8 @@ class PhysicalResistanceInstallerTests(unittest.TestCase):
     def test_unsupported_game_rejects_before_writes(self) -> None:
         self.assert_rejected(self.game(bg2ee=False), "BG2")
 
-    def test_missing_spell_state_table_rejects_before_writes(self) -> None:
-        self.assert_rejected(self.game(states=None), "SPLSTATE")
+    def test_missing_spell_state_table_is_created(self) -> None:
+        self.assert_success(self.game(states=None), 255)
 
     def test_shared_private_marker_moves_to_a_free_bit(self) -> None:
         states = f"IDS V1.0\n0 NORMAL\n230 {SYMBOL}\n230 OTHER_MOD\n"
@@ -214,9 +214,28 @@ class PhysicalResistanceInstallerTests(unittest.TestCase):
         states = f"IDS V1.0\n0 NORMAL\n256 {SYMBOL}\n"
         self.assert_success(self.game(states=states), 255)
 
-    def test_fully_named_spell_state_space_still_writes_the_marker(self) -> None:
+    def test_exhaustion_omits_only_listener_and_preserves_all_foreign_states(self) -> None:
         states = "IDS V1.0\n" + "".join(f"{i} OTHER_{i}\n" for i in range(256))
-        self.assert_success(self.game(states=states), 255)
+        for stale in (False, True):
+            with self.subTest(stale=stale):
+                source = states + (f"255 {SYMBOL}\n" if stale else "")
+                game = self.game(states=source, override_states=True)
+                if stale:
+                    (game.override / "M_CBRRES.lua").write_text("error('stale listener')", encoding="ascii")
+                process = game.install()
+                transcript = process.stdout + process.stderr
+                self.assertEqual(0, process.returncode, transcript)
+                self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+                self.assertNotIn("WARNING", transcript.upper())
+                self.assertEqual(1, transcript.count("no unused SPLSTATE slot"))
+                self.assertNotIn("Party physical resistance installed:", transcript)
+                self.assertEqual(source.encode("ascii"), (game.override / "SPLSTATE.IDS").read_bytes())
+                shipped = (game.override / "M_CBRRES.lua").read_text(encoding="ascii")
+                self.assertNotIn("AddListsResolvedListener", shipped)
+                self.assertNotIn("stale listener", shipped)
+                for name, payload in game.before.items():
+                    self.assertEqual(payload, tree(game.override)[name], name)
+                self.assert_stable(game)
 
     def test_non_numeric_or_empty_table_does_not_veto_the_marker(self) -> None:
         for states in ("", "IDS V1.0\njunk OTHER_MOD\n", f"IDS V1.0\njunk {SYMBOL}\n"):

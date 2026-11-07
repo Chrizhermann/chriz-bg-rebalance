@@ -195,10 +195,10 @@ class Game:
     def __init__(self, root, resources, *, public=False, texts=TEXTS, language="en_us"):
         self.root = root
         self.public = public
-        (root / "WeiDU.log").write_text("", encoding="utf-8")
         self.language = language
         self.override = root / "override"
         self.override.mkdir(parents=True)
+        (root / "WeiDU.log").write_text("", encoding="utf-8")
         if public:
             shutil.copy2(ROOT / "setup-chriz-bg-rebalance.tp2", root)
             shutil.copytree(ROOT / "chriz-bg-rebalance", root / "chriz-bg-rebalance")

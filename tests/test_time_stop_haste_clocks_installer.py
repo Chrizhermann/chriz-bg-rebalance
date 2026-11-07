@@ -148,6 +148,9 @@ class TimeStopHasteClocksInstallerTests(unittest.TestCase):
     def test_installs_only_the_correction_and_its_autoload(self) -> None:
         self.assert_installed(self.game())
 
+    def test_supported_executable_does_not_require_patch_archive(self) -> None:
+        self.assert_installed(self.game(patch27=False))
+
     def test_eet(self) -> None:
         self.assert_installed(self.game(eet=True))
 

@@ -147,10 +147,10 @@ class LiveAdapterTests(unittest.TestCase):
         variants = (
             (None, 255),
             ('IDS V1.0\n', 255),
-            ('IDS V1.0\n230 CBR_PHYSICAL_SOFTCAP\n230 OTHER\n', 230),
-            ('IDS V1.0\n230 CBR_PHYSICAL_SOFTCAP\n231 CBR_PHYSICAL_SOFTCAP\n', 231),
+            ('IDS V1.0\n230 CBR_PHYSICAL_SOFTCAP\n230 OTHER\n', 255),
+            ('IDS V1.0\n230 CBR_PHYSICAL_SOFTCAP\n231 CBR_PHYSICAL_SOFTCAP\n', 230),
             ('IDS V1.0\n999 CBR_PHYSICAL_SOFTCAP\n', 255),
-            ('IDS V1.0\n' + ''.join(f'{i} OTHER_{i}\n' for i in range(256)), 255),
+            ('IDS V1.0\n' + ''.join(f'{i} OTHER_{i}\n' for i in range(256)), None),
         )
         for states, marker in variants:
             with self.subTest(states=states):
@@ -158,7 +158,13 @@ class LiveAdapterTests(unittest.TestCase):
                     game = ResistanceGame(Path(temporary) / 'game', states=states)
                     stage(game.root)
                     self.assert_installed(install(game, '0'))
-                    self.assertEqual(game.marker_rows(), [(marker, 'CBR_PHYSICAL_SOFTCAP')])
+                    if marker is None:
+                        self.assertEqual(states.encode('ascii'), (game.override / 'SPLSTATE.IDS').read_bytes())
+                        self.assertNotIn('AddListsResolvedListener', (game.override / 'M_CBRRES.lua').read_text())
+                    else:
+                        self.assertEqual(game.marker_rows(), [(marker, 'CBR_PHYSICAL_SOFTCAP')])
+                        if states and '230 OTHER' in states:
+                            self.assertIn('230 OTHER', (game.override / 'SPLSTATE.IDS').read_text())
                     before = tree(game.override)
                     self.assert_installed(install(game, '1'))
                     self.assertEqual(tree(game.override), before)

@@ -2,8 +2,9 @@
 
 Current source follows [We overwrite](../../AGENTS.md#we-overwrite): SR is optional
 and changed effects do not veto the owned resistance profile. The older v0.8.10
-archive described below has additional SR requirements; the separate setup
-template's footprint gates still need integration before publishing this update.
+archive described below has additional SR requirements. The current standalone
+setup applies each available Hardiness target independently, without an SR
+footprint gate. This source update has not been released or live tested.
 
 This new, standalone WeiDU mod appends its own entry after the current install.
 It does not reinstall Spell Revisions or any previously installed component.

@@ -3,7 +3,7 @@
 Current source follows [We overwrite](../../AGENTS.md#we-overwrite): Spell Revisions
 is not a feature requirement, and changed payloads or descriptions do not veto an
 owned write. The release instructions below describe the older v0.8.10 archive;
-its separate setup template still has SR footprint gates pending integration.
+the current standalone setup resolves available targets without SR footprint gates.
 Do not infer that the source policy update has been released or live accepted.
 
 Source version **v0.8.10** (210 and 211 are unchanged since v0.8.1 except for their texts in v0.8.9;

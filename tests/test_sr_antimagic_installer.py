@@ -228,6 +228,7 @@ class AntimagicGame:
         self.tlk.parent.mkdir(parents=True)
         self.tlk.write_bytes(_tlk(self.strings))
         (root / "dialog.tlk").write_bytes(_tlk(self.strings))
+        (root / "weidu.log").write_text("", encoding="ascii")
         if sr_component is not None:
             (root / "weidu.log").write_text(
                 f"~SPELL_REV/SETUP-SPELL_REV.TP2~ #0 #{sr_component} // synthetic SR\n", encoding="ascii")
@@ -531,11 +532,18 @@ class AntimagicInstallerTests(unittest.TestCase):
         self.assertEqual(game.before[f"{SS_BODY}.SPL"], game.effective(SS_BODY))
 
     def test_antimagic_choices_install_without_sr(self):
-        for sr_component in (None, 65):
-            for component in (210, 211):
-                with self.subTest(sr_component=sr_component, component=component):
-                    game = self.make_game(sr_component=sr_component)
-                    self.assert_installed(game, game.run(component), component)
+        for tail in (False, True):
+            for sr_component in (None, 65):
+                for component in (210, 211):
+                    with self.subTest(tail=tail, sr_component=sr_component, component=component):
+                        game = self.make_game(tail=tail, sr_component=sr_component)
+                        result = game.run(component)
+                        self.assert_installed(game, result, component)
+                        self.assertNotIn("WARNING", result.stdout + result.stderr)
+                        if component == 210:
+                            self.assert_pierce_magic_payload(game)
+                        else:
+                            self.assert_spellstrike_payload(game)
 
     def test_bgee_is_rejected(self):
         for component in (210, 211):
@@ -847,10 +855,14 @@ class AntimagicInstallerTests(unittest.TestCase):
                 self.assert_installed(game, game.run(component), component)
                 self.assertEqual(game.before[f"{body}.SPL"], game.effective(body))
 
-    def test_texts_tail_external_sr_gate_and_absent_symbol(self):
+    def test_texts_tail_without_sr_and_absent_symbol(self):
         for component in (212, 213):
             game = self.make_game(tail=True, sr_component=None)
-            self.assert_rejected(game, game.run(component), component, skipped=True)
+            result = game.run(component)
+            self.assert_installed(game, result, component)
+            self.assertNotIn("WARNING", result.stdout + result.stderr)
+            parent, template = (PM, 2100) if component == 212 else (SS, 2110)
+            self.assertEqual(_tra_string(template) + "\n\n" + _tra_string(2102), game.text(parent))
             game = self.make_game(tail=True, symbols=False)
             self.assert_installed(game, game.run(component), component)
             self.assertEqual(game.original_override, _tree(game.override))

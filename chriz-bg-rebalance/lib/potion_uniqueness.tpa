@@ -375,66 +375,86 @@ BEGIN
       SPRINT ability $pu_ability(~%pu_a%~) SPRINT input $pu_slice(~%pu_a%~) SPRINT result ~~
       INNER_PATCH ~%ability%~ BEGIN READ_BYTE 0xc ability_target END
       PATCH_IF NOT item_mode OR ability_target=5 OR ability_target=7 BEGIN
-        SPRINT before ~~ SPRINT payload ~~ SPRINT always ~~ SET paths=0 SET ab_dur=0 SET ab_rs=1 SET ab_pw=0 SET leading=1
-        INNER_PATCH ~%input%~ BEGIN
-          SET fx_base=0 SET fx_n=BUFFER_LENGTH/0x30
-          FOR (pu_i=0;pu_i<fx_n;++pu_i) BEGIN
-            LPM cbr_pu_read_effect READ_ASCII at record (0x30) SET owned=0
-            PATCH_IF pu_mode=1 BEGIN
-              PATCH_IF op=324 AND ~%res%~ STR_EQ ~%pu_own%~ BEGIN
-                SET owned=1
-                PATCH_IF p1!=kf_state AND VARIABLE_IS_SET $cbr_pu_state_used(~%p1%~) BEGIN SET owned=0 END
+        PATCH_IF pu_mode=2 BEGIN
+          // No state is available. Retire this family's published state even
+          // if its guard was removed, while preserving native wards and peers.
+          INNER_PATCH_SAVE result ~%input%~ BEGIN
+            FOR (at=BUFFER_LENGTH - 0x30;at>=0;at -= 0x30) BEGIN
+              READ_SHORT at op READ_LONG (at+4) p1 READ_LONG (at+8) p2 READ_ASCII (at+0x14) res (8) NULL
+              SET remove=0
+              PATCH_IF op=324 AND ~%res%~ STRING_EQUAL_CASE ~%pu_own%~ AND p1>=0 AND p1<=255 BEGIN
+                SET remove=$cbr_pu_prior_states(~%p1%~)
               END
-              PATCH_IF op=328 AND p2=kf_state BEGIN SET owned=1 END
-            END ELSE PATCH_IF op=321 BEGIN
-              PHP_EACH cbr_pu_refs AS candidate => ignored BEGIN PATCH_IF ~%res%~ STRING_EQUAL_CASE ~%candidate%~ BEGIN SET owned=1 END END
-            END
-            // Our stacking rule replaces lasting native wards. Instant checks
-            // such as Oil of Speed's haste-immunity gate remain independent.
-            PATCH_IF is_ctrl AND du>0 AND (op=206 OR op=318 OR op=324) BEGIN SET owned=1 END
-            PATCH_IF NOT owned BEGIN
-              PATCH_IF is_game BEGIN
-                PATCH_IF tg>0 AND tg<10 BEGIN SET paths=paths BOR (1 BLSL tg) END
-                PATCH_IF is_timed BEGIN PATCH_IF du>ab_dur BEGIN SET ab_dur=du END SET ab_rs=rs SET ab_pw=pw END
-              END
-              PATCH_IF pu_mode=1 AND is_game AND NOT is_timed AND NOT is_link BEGIN SPRINT always ~%always%%record%~ END
-              ELSE PATCH_IF pu_mode=0 AND leading AND is_ctrl BEGIN SPRINT before ~%before%%record%~ END ELSE BEGIN SPRINT payload ~%payload%%record%~ END
-              PATCH_IF NOT is_ctrl AND NOT is_cos BEGIN SET leading=0 END
+              PATCH_IF op=328 AND p2>=0 AND p2<=255 BEGIN SET remove=$cbr_pu_prior_states(~%p2%~) END
+              PATCH_IF remove BEGIN DELETE_BYTES at 0x30 END
             END
           END
-        END
-        PATCH_IF pu_mode=1 BEGIN
-          PATCH_IF item_mode BEGIN SET ab_dur=kf_dur SET ab_rs=kf_rs SET ab_pw=kf_pw END
-          PATCH_IF ab_dur<=0 BEGIN SET ab_dur=600 END
-          PATCH_IF paths=0 BEGIN SET paths=(item_mode ? 2 : 4) END
-          SET last_target=1 SPRINT result ~%always%~
-          FOR (tg=1;tg<10;++tg) BEGIN
-            PATCH_IF (paths BAND (1 BLSL tg))!=0 BEGIN
-              INNER_PATCH_SAVE record ~................................................~ BEGIN
-                FOR (j=0;j<0x30;++j) BEGIN WRITE_BYTE j 0 END
-                WRITE_SHORT 0 324 WRITE_BYTE 2 tg WRITE_BYTE 3 ab_pw WRITE_LONG 4 kf_state WRITE_LONG 8 kf_row
-                WRITE_BYTE 0xd 2 WRITE_BYTE 0x12 100 WRITE_ASCIIE 0x14 ~%pu_own%~ #8
-              END
-              SPRINT result ~%result%%record%~ SET last_target=tg
-            END
-          END
-          SPRINT result ~%result%%payload%~
-          INNER_PATCH_SAVE record ~................................................~ BEGIN
-            FOR (j=0;j<0x30;++j) BEGIN WRITE_BYTE j 0 END
-            WRITE_SHORT 0 328 WRITE_BYTE 2 last_target WRITE_BYTE 3 ab_pw WRITE_LONG 8 kf_state
-            WRITE_LONG 0xe ab_dur WRITE_BYTE 0xd (2 BOR (ab_rs BAND 1)) WRITE_BYTE 0x12 100 WRITE_LONG 0x2c 1
-          END
-          SPRINT result ~%result%%record%~
         END ELSE BEGIN
-          SPRINT result ~%before%~
-          PHP_EACH cbr_pu_refs AS candidate => ignored BEGIN
+          SPRINT before ~~ SPRINT payload ~~ SPRINT always ~~ SET paths=0 SET ab_dur=0 SET ab_rs=1 SET ab_pw=0 SET leading=1
+          INNER_PATCH ~%input%~ BEGIN
+            SET fx_base=0 SET fx_n=BUFFER_LENGTH/0x30
+            FOR (pu_i=0;pu_i<fx_n;++pu_i) BEGIN
+              LPM cbr_pu_read_effect READ_ASCII at record (0x30) SET owned=0
+              PATCH_IF pu_mode=1 BEGIN
+                PATCH_IF op=324 AND ~%res%~ STR_EQ ~%pu_own%~ BEGIN
+                  SET owned=1
+                  PATCH_IF p1>=0 AND p1<=255 BEGIN
+                    PATCH_IF p1!=kf_state AND $cbr_pu_state_used(~%p1%~) AND NOT $cbr_pu_prior_states(~%p1%~) BEGIN SET owned=0 END
+                  END
+                END
+                PATCH_IF op=328 AND p2>=0 AND p2<=255 BEGIN
+                  PATCH_IF p2=kf_state OR $cbr_pu_prior_states(~%p2%~) BEGIN SET owned=1 END
+                END
+              END ELSE PATCH_IF op=321 BEGIN
+                PHP_EACH cbr_pu_refs AS candidate => ignored BEGIN PATCH_IF ~%res%~ STRING_EQUAL_CASE ~%candidate%~ BEGIN SET owned=1 END END
+              END
+              // Our stacking rule replaces lasting native wards. Instant checks
+              // such as Oil of Speed's haste-immunity gate remain independent.
+              PATCH_IF is_ctrl AND du>0 AND (op=206 OR op=318 OR op=324) BEGIN SET owned=1 END
+              PATCH_IF NOT owned BEGIN
+                PATCH_IF is_game BEGIN
+                  PATCH_IF tg>0 AND tg<10 BEGIN SET paths=paths BOR (1 BLSL tg) END
+                  PATCH_IF is_timed BEGIN PATCH_IF du>ab_dur BEGIN SET ab_dur=du END SET ab_rs=rs SET ab_pw=pw END
+                END
+                PATCH_IF pu_mode=1 AND is_game AND NOT is_timed AND NOT is_link BEGIN SPRINT always ~%always%%record%~ END
+                ELSE PATCH_IF pu_mode=0 AND leading AND is_ctrl BEGIN SPRINT before ~%before%%record%~ END ELSE BEGIN SPRINT payload ~%payload%%record%~ END
+                PATCH_IF NOT is_ctrl AND NOT is_cos BEGIN SET leading=0 END
+              END
+            END
+          END
+          PATCH_IF pu_mode=1 BEGIN
+            PATCH_IF item_mode BEGIN SET ab_dur=kf_dur SET ab_rs=kf_rs SET ab_pw=kf_pw END
+            PATCH_IF ab_dur<=0 BEGIN SET ab_dur=600 END
+            PATCH_IF paths=0 BEGIN SET paths=(item_mode ? 2 : 4) END
+            SET last_target=1 SPRINT result ~%always%~
+            FOR (tg=1;tg<10;++tg) BEGIN
+              PATCH_IF (paths BAND (1 BLSL tg))!=0 BEGIN
+                INNER_PATCH_SAVE record ~................................................~ BEGIN
+                  FOR (j=0;j<0x30;++j) BEGIN WRITE_BYTE j 0 END
+                  WRITE_SHORT 0 324 WRITE_BYTE 2 tg WRITE_BYTE 3 ab_pw WRITE_LONG 4 kf_state WRITE_LONG 8 kf_row
+                  WRITE_BYTE 0xd 2 WRITE_BYTE 0x12 100 WRITE_ASCIIE 0x14 ~%pu_own%~ #8
+                END
+                SPRINT result ~%result%%record%~ SET last_target=tg
+              END
+            END
+            SPRINT result ~%result%%payload%~
             INNER_PATCH_SAVE record ~................................................~ BEGIN
               FOR (j=0;j<0x30;++j) BEGIN WRITE_BYTE j 0 END
-              WRITE_SHORT 0 321 WRITE_BYTE 2 1 WRITE_LONG 8 2 WRITE_BYTE 0xc 1 WRITE_BYTE 0xd 2 WRITE_BYTE 0x12 100 WRITE_ASCIIE 0x14 ~%candidate%~ #8
+              WRITE_SHORT 0 328 WRITE_BYTE 2 last_target WRITE_BYTE 3 ab_pw WRITE_LONG 8 kf_state
+              WRITE_LONG 0xe ab_dur WRITE_BYTE 0xd (2 BOR (ab_rs BAND 1)) WRITE_BYTE 0x12 100 WRITE_LONG 0x2c 1
             END
             SPRINT result ~%result%%record%~
+          END ELSE BEGIN
+            SPRINT result ~%before%~
+            PHP_EACH cbr_pu_refs AS candidate => ignored BEGIN
+              INNER_PATCH_SAVE record ~................................................~ BEGIN
+                FOR (j=0;j<0x30;++j) BEGIN WRITE_BYTE j 0 END
+                WRITE_SHORT 0 321 WRITE_BYTE 2 1 WRITE_LONG 8 2 WRITE_BYTE 0xc 1 WRITE_BYTE 0xd 2 WRITE_BYTE 0x12 100 WRITE_ASCIIE 0x14 ~%candidate%~ #8
+              END
+              SPRINT result ~%result%%record%~
+            END
+            SPRINT result ~%result%%payload%~
           END
-          SPRINT result ~%result%%payload%~
         END
       END ELSE BEGIN SPRINT result ~%input%~ END
       SET count=STRING_LENGTH ~%result%~/0x30
@@ -452,7 +472,7 @@ END
 
 DEFINE_PATCH_MACRO cbr_pu_patch_keep_first
 BEGIN
-  SET pu_mode=1 LPM cbr_pu_rebuild
+  SET pu_mode=(kf_state>=0 ? 1 : 2) LPM cbr_pu_rebuild
 END
 
 
@@ -476,7 +496,12 @@ BEGIN
   COPY ~override/SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
     FOR (i = 0; i < 256; ++i) BEGIN SET $cbr_pu_used(~%i%~) = 0 END
     SET own_value = (0 - 1)
-    PATCH_CLEAR_ARRAY cbr_pu_state_used
+    // CLEAR_ARRAY removes the key list, but leaves its scalar values defined.
+    // Reset the bits themselves so a previous family's IDs cannot leak here.
+    FOR (i=0;i<256;++i) BEGIN
+      SET $cbr_pu_state_used(~%i%~)=0
+      SET $cbr_pu_prior_states(~%i%~)=0
+    END
     READ_ASCII 0 contents (BUFFER_LENGTH)
     INNER_PATCH ~%contents%~ BEGIN
       REPLACE_EVALUATE
@@ -487,24 +512,23 @@ BEGIN
           PATCH_IF (~%MATCH2%~ STRING_MATCHES_REGEXP ~CBR_POTION_.*\|CBR_HEROISM_FAMILY~)=0 AND value>=0 AND value<=255 BEGIN SET $cbr_pu_state_used(~%value%~)=1 END
           PATCH_IF value >= 0 AND value <= 255 BEGIN
             PATCH_IF ~%MATCH2%~ STRING_EQUAL_CASE ~%kf_symbol%~ BEGIN
+              SET $cbr_pu_prior_states(~%value%~)=1
               PATCH_IF own_value < 0 BEGIN SET own_value = value END
             END ELSE BEGIN SET $cbr_pu_used(~%value%~) = 1 END
           END
         END
       END ~~
     END
-    // Reading allocated numbers chooses an address; it never vetoes our symbol.
+    // The marker must be unused by every other family or foreign feature.
     SET kf_state = (0 - 1)
     PATCH_IF own_value >= 0 BEGIN
-      SET kf_state = own_value
+      PATCH_IF NOT $cbr_pu_used(~%own_value%~) BEGIN SET kf_state = own_value END
     END
     FOR (i = 240; i >= 0 AND kf_state < 0; --i) BEGIN
       PATCH_IF NOT $cbr_pu_used(~%i%~) BEGIN SET kf_state = i END
     END
-    // If every engine bit is named, our decided marker owns the preferred bit.
     FOR (i=255;i>240 AND kf_state<0;--i) BEGIN PATCH_IF NOT $cbr_pu_used(~%i%~) BEGIN SET kf_state=i END END
-    FOR (i=240;i>=0 AND kf_state<0;--i) BEGIN PATCH_IF NOT VARIABLE_IS_SET $cbr_pu_state_used(~%i%~) BEGIN SET kf_state=i END END
-    PATCH_IF kf_state<0 BEGIN SET kf_state=240 END
+    PATCH_IF kf_state >= 0 BEGIN
     SET $cbr_pu_state_used(~%kf_state%~)=1
     SET written = 0
     REPLACE_EVALUATE CASE_INSENSITIVE
@@ -526,28 +550,34 @@ BEGIN
       INSERT_BYTES at (STRING_LENGTH ~%row%~)
       WRITE_ASCIIE at ~%row%~
     END
+    END
   BUT_ONLY
   CLEAR_IDS_MAP
 
-  ACTION_IF NOT FILE_EXISTS_IN_GAME ~SPLPROT.2DA~ BEGIN COPY ~cbr_pu_empty_prot~ ~override/SPLPROT.2DA~ END
-  COPY_EXISTING ~SPLPROT.2DA~ ~override~
-    LPF cbr_pu_named_column STR_VAR name=~STAT~ required=~VALUE RELATION~ RET sc=data_column END
-    LPF cbr_pu_named_column STR_VAR name=~VALUE~ RET vc=data_column END
-    LPF cbr_pu_named_column STR_VAR name=~RELATION~ RET rc=data_column END
-    LPF cbr_pu_table_read RET cbr_t_cols cbr_t_rows cbr_t_default RET_ARRAY cbr_t_head cbr_t_cell END
-    SET kf_row=(0 - 1)
-    SPRINT result ~2DA V1.0%WNL%0%WNL% STAT VALUE RELATION%WNL%~
-    FOR (r=0;r<cbr_t_rows;++r) BEGIN
-      SPRINT label $cbr_t_cell(~%r%~ ~0~) SPRINT stat $cbr_t_cell(~%r%~ ~%sc%~) SPRINT value $cbr_t_cell(~%r%~ ~%vc%~) SPRINT relation $cbr_t_cell(~%r%~ ~%rc%~)
-      PATCH_IF ~%label%~ STRING_EQUAL_CASE ~CBR_SPLSTATE_ACTIVE~ BEGIN SPRINT stat ~274~ SPRINT value ~-1~ SPRINT relation ~1~ SET kf_row=r END
-      PATCH_IF IS_AN_INT ~%stat%~ AND IS_AN_INT ~%value%~ AND IS_AN_INT ~%relation%~ BEGIN PATCH_IF stat=274 AND value=(0 - 1) AND relation=1 AND kf_row<0 BEGIN SET kf_row=r END END
-      SPRINT result ~%result%%label% %stat% %value% %relation%%WNL%~
-    END
-    PATCH_IF kf_row<0 BEGIN SET kf_row=cbr_t_rows SPRINT result ~%result%CBR_SPLSTATE_ACTIVE 274 -1 1%WNL%~ END
-    PATCH_IF sc!=1 OR vc!=2 OR rc!=3 OR cbr_t_cols!=4 OR kf_row>=cbr_t_rows OR (INDEX_BUFFER (CASE_INSENSITIVE ~CBR_SPLSTATE_ACTIVE~))>=0 BEGIN
-      DELETE_BYTES 0 BUFFER_LENGTH INSERT_BYTES 0 (STRING_LENGTH ~%result%~) WRITE_ASCIIE 0 ~%result%~
-    END
-    BUT_ONLY
+  OUTER_SET kf_row = (0 - 1)
+  ACTION_IF kf_state >= 0 BEGIN
+    ACTION_IF NOT FILE_EXISTS_IN_GAME ~SPLPROT.2DA~ BEGIN COPY ~cbr_pu_empty_prot~ ~override/SPLPROT.2DA~ END
+    COPY_EXISTING ~SPLPROT.2DA~ ~override~
+      LPF cbr_pu_named_column STR_VAR name=~STAT~ required=~VALUE RELATION~ RET sc=data_column END
+      LPF cbr_pu_named_column STR_VAR name=~VALUE~ RET vc=data_column END
+      LPF cbr_pu_named_column STR_VAR name=~RELATION~ RET rc=data_column END
+      LPF cbr_pu_table_read RET cbr_t_cols cbr_t_rows cbr_t_default RET_ARRAY cbr_t_head cbr_t_cell END
+      SET kf_row=(0 - 1)
+      SPRINT result ~2DA V1.0%WNL%0%WNL% STAT VALUE RELATION%WNL%~
+      FOR (r=0;r<cbr_t_rows;++r) BEGIN
+        SPRINT label $cbr_t_cell(~%r%~ ~0~) SPRINT stat $cbr_t_cell(~%r%~ ~%sc%~) SPRINT value $cbr_t_cell(~%r%~ ~%vc%~) SPRINT relation $cbr_t_cell(~%r%~ ~%rc%~)
+        PATCH_IF ~%label%~ STRING_EQUAL_CASE ~CBR_SPLSTATE_ACTIVE~ BEGIN SPRINT stat ~274~ SPRINT value ~-1~ SPRINT relation ~1~ SET kf_row=r END
+        PATCH_IF IS_AN_INT ~%stat%~ AND IS_AN_INT ~%value%~ AND IS_AN_INT ~%relation%~ BEGIN PATCH_IF stat=274 AND value=(0 - 1) AND relation=1 AND kf_row<0 BEGIN SET kf_row=r END END
+        SPRINT result ~%result%%label% %stat% %value% %relation%%WNL%~
+      END
+      PATCH_IF kf_row<0 BEGIN SET kf_row=cbr_t_rows SPRINT result ~%result%CBR_SPLSTATE_ACTIVE 274 -1 1%WNL%~ END
+      PATCH_IF sc!=1 OR vc!=2 OR rc!=3 OR cbr_t_cols!=4 OR kf_row>=cbr_t_rows OR (INDEX_BUFFER (CASE_INSENSITIVE ~CBR_SPLSTATE_ACTIVE~))>=0 BEGIN
+        DELETE_BYTES 0 BUFFER_LENGTH INSERT_BYTES 0 (STRING_LENGTH ~%result%~) WRITE_ASCIIE 0 ~%result%~
+      END
+      BUT_ONLY
+  END ELSE BEGIN
+    PRINT ~CBR: no unused SPLSTATE slot for %kf_symbol%; only this stacking rule is omitted.~
+  END
 END
 
 
@@ -873,7 +903,7 @@ BEGIN
               LPM cbr_pu_patch_keep_first
             BUT_ONLY
           END
-          OUTER_SET pu_count_keep = pu_count_keep + 1
+          ACTION_IF kf_state>=0 BEGIN OUTER_SET pu_count_keep = pu_count_keep + 1 END
       END ELSE BEGIN
         ACTION_PHP_EACH cbr_pu_potion AS pu_p => pu_one BEGIN
           ACTION_IF $cbr_pu_type(~%pu_p%~)=pu_j BEGIN
@@ -911,7 +941,7 @@ BEGIN
             COPY_EXISTING ~%pu_p%.itm~ ~override~
               LPM cbr_pu_patch_keep_first
             BUT_ONLY
-            OUTER_SET pu_count_family = pu_count_family + 1
+            ACTION_IF kf_state>=0 BEGIN OUTER_SET pu_count_family = pu_count_family + 1 END
           END
         END
       END
@@ -922,29 +952,31 @@ BEGIN
     ACTION_PHP_EACH cbr_pu_family_spell AS pu_r => pu_one BEGIN
       OUTER_SPRINT pu_own ~%pu_r%~
       COPY_EXISTING ~%pu_r%.spl~ ~override~ LPM cbr_pu_patch_keep_first BUT_ONLY
-      OUTER_SET pu_count_family += 1
+      ACTION_IF kf_state>=0 BEGIN OUTER_SET pu_count_family += 1 END
     END
     OUTER_SET item_mode = 1
     OUTER_SET follow_links = 1
 
-    OUTER_SPRINT pu_old_text ~This spell and Heroism are non-cumulative with each other, and the more recently applied spell will remove the effects of the other.~
-    OUTER_SPRINT pu_new_text @3310
-    OUTER_SET item_mode=0
-    ACTION_PHP_EACH cbr_pu_family_spell AS pu_r => pu_one BEGIN
-      OUTER_SPRINT pu_description_kind ~heroism~
-      ACTION_IF (~%pu_r%~ STR_EQ ~C0BW502~) OR (~%pu_r%~ STR_EQ ~C0GA502~) BEGIN OUTER_SPRINT pu_description_kind ~greater~ END
-      COPY_EXISTING ~%pu_r%.spl~ ~override~
-        LPM cbr_pu_fix_description
-      BUT_ONLY
+    ACTION_IF kf_state>=0 BEGIN
+      OUTER_SPRINT pu_old_text ~This spell and Heroism are non-cumulative with each other, and the more recently applied spell will remove the effects of the other.~
+      OUTER_SPRINT pu_new_text @3310
+      OUTER_SET item_mode=0
+      ACTION_PHP_EACH cbr_pu_family_spell AS pu_r => pu_one BEGIN
+        OUTER_SPRINT pu_description_kind ~heroism~
+        ACTION_IF (~%pu_r%~ STR_EQ ~C0BW502~) OR (~%pu_r%~ STR_EQ ~C0GA502~) BEGIN OUTER_SPRINT pu_description_kind ~greater~ END
+        COPY_EXISTING ~%pu_r%.spl~ ~override~
+          LPM cbr_pu_fix_description
+        BUT_ONLY
+      END
+      OUTER_SET item_mode=1
+      ACTION_PHP_EACH cbr_pu_scroll AS pu_r => pu_one BEGIN
+        OUTER_SPRINT pu_description_kind ~heroism~
+        ACTION_IF (~%pu_one%~ STR_EQ ~C0BW502~) OR (~%pu_one%~ STR_EQ ~C0GA502~) BEGIN OUTER_SPRINT pu_description_kind ~greater~ END
+        COPY_EXISTING ~%pu_r%.itm~ ~override~
+          LPM cbr_pu_fix_description
+        BUT_ONLY
+      END
+      PRINT @3307
     END
-    OUTER_SET item_mode=1
-    ACTION_PHP_EACH cbr_pu_scroll AS pu_r => pu_one BEGIN
-      OUTER_SPRINT pu_description_kind ~heroism~
-      ACTION_IF (~%pu_one%~ STR_EQ ~C0BW502~) OR (~%pu_one%~ STR_EQ ~C0GA502~) BEGIN OUTER_SPRINT pu_description_kind ~greater~ END
-      COPY_EXISTING ~%pu_r%.itm~ ~override~
-        LPM cbr_pu_fix_description
-      BUT_ONLY
-    END
-    PRINT @3307
   END
 END

@@ -1535,8 +1535,8 @@ BEGIN @310 DESIGNATED 310 GROUP @1300 LABEL ~cbr_party_physical_resistance_90~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9315
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9316
 LAF cbr_setup_ids STR_VAR file = ~SPLSTATE.IDS~ END
-LAF cbr_apply_physical_resistance END
-PRINT @9318
+LAF cbr_apply_physical_resistance RET cbr_res_installed = installed END
+ACTION_IF cbr_res_installed BEGIN PRINT @9318 END
 
 BEGIN @130 DESIGNATED 130 GROUP @1100 LABEL ~cbr_eet_elemental_arrows~
 REQUIRE_PREDICATE (GAME_IS ~eet~) @9140

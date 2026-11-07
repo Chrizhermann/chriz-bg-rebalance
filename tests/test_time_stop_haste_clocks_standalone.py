@@ -170,9 +170,8 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(["LAF cbr_install_time_stop_haste_component END", "PRINT @9365"], main[-2:])
         self.assertEqual(["LAF cbr_install_time_stop_haste_component STR_VAR source_dir = ~CBR_TRUE_TIMESTOP/lua~ END",
                           "PRINT @9365"], package[-2:])
-        # The separate package still has its legacy archive predicate; its
-        # migration is recorded in WE-OVERWRITE-LEDGER.md outside this slice.
         self.assertEqual(6, len(main))
+        self.assertEqual(6, len(package))
 
     def test_weidu_logs_the_package_by_its_folder(self) -> None:
         # A double-click on Setup-cbr_true_timestop.exe finds CBR_TRUE_TIMESTOP/setup-cbr_true_timestop.tp2.
