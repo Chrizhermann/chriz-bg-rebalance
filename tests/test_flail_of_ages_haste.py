@@ -70,7 +70,7 @@ class FlailHasteTests(unittest.TestCase):
         self.put(game, "NOTHASTE.SPL", spell + orphan)
         self.assert_noncanonical_immunity_preserved(game)
 
-    def test_noncanonical_mixed_damage_and_haste_spell_keeps_immunity(self):
+    def test_noncanonical_mixed_haste_is_allowed_without_editing_the_spell(self):
         game = self.game("vanilla")
         damage = SplEffect(
             opcode=12, target=2, parameter1=23, parameter2=65536,
@@ -80,11 +80,11 @@ class FlailHasteTests(unittest.TestCase):
         self.put(game, "NOTHASTE.SPL", make_spl((
             SplAbility(1, 1, 0, (damage, haste)),
         )).to_bytes())
-        # Removing this immunity would expose its wearer to foreign damage,
-        # not merely make the flail's Free Action compatible with Haste.
-        self.assert_noncanonical_immunity_preserved(game)
+        self.assert_installed(game)
+        self.assertNotIn("NOTHASTE", self.blun30_immunities(game))
+        self.assert_sources_unchanged(game, "NOTHASTE.SPL")
 
-    def test_nested_canonical_haste_movement_conflict_diagnoses_and_rolls_back(self):
+    def test_nested_canonical_haste_movement_blocker_is_removed(self):
         game = self.game("vanilla")
         self.add_movement_immunity(game)
         movement = EffV2(opcode=176, target=2, parameter1=6, duration=60)
@@ -99,18 +99,10 @@ class FlailHasteTests(unittest.TestCase):
         # SPELL.IDS in Game relocates WIZARD_HASTE to this resource. Neither
         # canonical Haste nor Improved Haste contains a direct opcode 176.
         self.put(game, "SPWI355.SPL", canonical.to_bytes())
-        expected = {p.name.upper(): p.read_bytes() for p in game.override.iterdir() if p.is_file()}
-        process, output = game.run()
-        self.assertNotEqual(0, process.returncode, output)
-        self.assertIn("movement-rate immunity blocks revised Haste", output)
-        self.assertIn("NOT INSTALLED DUE TO ERRORS", output)
-        self.assertNotIn("SUCCESSFULLY INSTALLED", output)
-        self.assertEqual(expected, {
-            p.name.upper(): p.read_bytes() for p in game.override.iterdir() if p.is_file()
-        })
-        # WeiDU may retain newly allocated, now-unused strings after rollback;
-        # every pre-existing string and item reference must remain intact.
-        self.assertEqual(game.texts, baseline.strings(game.lang_tlk)[:len(game.texts)])
+        self.assert_installed(game)
+        effects = read_itm(game.override / "BLUN30.ITM").global_effects
+        self.assertFalse(any(e.opcode == 101 and e.parameter2 == 176 for e in effects))
+        self.assertTrue(any(e.opcode == 101 and e.parameter2 == 40 for e in effects))
         self.assert_sources_unchanged(game, "SPWI355.SPL", "FHMID.SPL", "FHMOVE.EFF")
 
     def test_native_haste_secondary_type_does_not_imply_movement_conflict(self):
@@ -204,8 +196,8 @@ class FlailHasteTests(unittest.TestCase):
         # +5 sets; SR's wizard Haste spells do not check that state.
         cases = {
             "pure": dict(damage=False, wizard_checks=False, innate_lifted=True, state_lifted=True),
-            "damage": dict(damage=True, wizard_checks=False, innate_lifted=False, state_lifted=False),
-            "damage_wizard_checks": dict(damage=True, wizard_checks=True, innate_lifted=False, state_lifted=True),
+            "damage": dict(damage=True, wizard_checks=False, innate_lifted=True, state_lifted=True),
+            "damage_wizard_checks": dict(damage=True, wizard_checks=True, innate_lifted=True, state_lifted=True),
         }
         for label, case in cases.items():
             with self.subTest(case=label):
@@ -240,13 +232,9 @@ class FlailHasteTests(unittest.TestCase):
                 self.assertEqual(not case["innate_lifted"], "SPIN572" in self.blun30_immunities(game))
                 self.assertEqual(not case["state_lifted"], 138 in [e.parameter2 for e in after if e.opcode == 328])
                 self.assertIn(139, [e.parameter2 for e in after if e.opcode == 328])
-                if not case["state_lifted"]:
-                    self.assertIn("keeps spell state HASTE_IMMUNITY (138)", output)
-                if not case["innate_lifted"]:
-                    self.assertRegex(output, r"(?i)BLUN30 keeps its immunity to spin572\. .*\(opcode 12\)")
                 self.assert_sources_unchanged(game, "SPIN572.SPL", "SPWI312.SPL", "SPELL.IDS")
 
-    def test_haste_with_an_unrelated_removal_keeps_immunity_and_says_why(self):
+    def test_haste_with_other_effects_is_allowed(self):
         game = self.game("sr")
         self.add_immunities(game, "SPIN572")
         self.put_slow(game, secondary=21)
@@ -261,10 +249,9 @@ class FlailHasteTests(unittest.TestCase):
         process, output = game.run()
         self.assertEqual(0, process.returncode, output)
         self.assertIn("SUCCESSFULLY INSTALLED", output)
-        self.assertRegex(output, r"(?i)BLUN30 keeps its immunity to spin572\. .*\(opcode 221\)")
         after = read_itm(game.override / "BLUN30.ITM")
-        self.assertEqual(expected, tuple(effect.to_bytes() for effect in after.global_effects
-                                         if effect.opcode == 206 and effect.resource == "SPIN572"))
+        self.assertFalse(any(effect.opcode == 206 and effect.resource == "SPIN572"
+                             for effect in after.global_effects))
         self.assert_sources_unchanged(game, "SPIN572.SPL", "SPWI312.SPL", "SPELL.IDS")
 
     def test_real_troll_rider_chain_is_left_unchanged(self):
@@ -284,7 +271,7 @@ class FlailHasteTests(unittest.TestCase):
         self.assert_effect_contract(game)
         self.assert_sources_unchanged(game, "DWTROLAC.EFF", "DWTROLAC.SPL")
 
-    def test_unknown_haste_type_removal_on_hit_is_reported_and_left_unsaved(self):
+    def test_unrelated_secondary_type_removal_stays_outside_slow_ownership(self):
         game = self.game("vanilla")  # canonical Haste here has no secondary type
         path = game.override / "BLUN14.ITM"
         old = read_itm(path)
@@ -294,7 +281,7 @@ class FlailHasteTests(unittest.TestCase):
         process, output = game.run()
         self.assertEqual(0, process.returncode, output)
         self.assertIn("SUCCESSFULLY INSTALLED", output)
-        self.assertIn("BLUN14 removes secondary type 20 on hit", output)
+        self.assertNotIn("WARNING", output.upper())
         effects = read_itm(path).abilities[0].effects
         self.assertIn(removal.to_bytes(), tuple(effect.to_bytes() for effect in effects))
 

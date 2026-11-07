@@ -49,86 +49,85 @@ END
 ~
   OUTER_PATCH_SAVE family ~%cbr_wb_source%~ BEGIN
     COMPILE_BAF_TO_BCS
-    READ_ASCII 0 cbr_wb_start (3)
-    READ_ASCII (BUFFER_LENGTH - 3) cbr_wb_end (3)
-    PATCH_IF !(~%cbr_wb_start%~ STR_EQ ~SC%LNL%~)
-          || !(~%cbr_wb_end%~ STR_EQ ~SC%LNL%~) BEGIN
-      PATCH_FAIL ~CBR wing-buffet compiler returned a noncanonical BCS wrapper.~
-    END
     DELETE_BYTES (BUFFER_LENGTH - 3) 3
     DELETE_BYTES 0 3
   END
 END
 
+
+// Offsets and current actor/script names are addresses, not compatibility tests.
 DEFINE_PATCH_FUNCTION cbr_wb_validate_cre
   INT_VAR script_offset = 0
   STR_VAR expected_script = ~~ expected_dv = ~~ creature = ~~
-  RET verified_dv
+  RET verified_dv assigned_script readable
 BEGIN
-  PATCH_IF BUFFER_LENGTH < 0x2d4 BEGIN
-    PATCH_FAIL ~CBR wing-buffet creature %creature% is truncated.~
-  END
-  READ_ASCII 0 cbr_wb_cre_signature (8)
-  READ_ASCII 0x280 verified_dv (32) NULL
-  READ_ASCII script_offset cbr_wb_assigned_script (8) NULL
-  SPRINT cbr_wb_compare_dv ~%verified_dv%~
-  SPRINT cbr_wb_compare_expected ~%expected_dv%~
-  SPRINT cbr_wb_compare_script ~%cbr_wb_assigned_script%~
-  TO_LOWER cbr_wb_compare_dv
-  TO_LOWER cbr_wb_compare_expected
-  TO_LOWER cbr_wb_compare_script
-  PATCH_IF !(~%cbr_wb_cre_signature%~ STR_EQ ~CRE V1.0~)
-        || !(~%cbr_wb_compare_dv%~ STR_EQ ~%cbr_wb_compare_expected%~)
-        || !(~%cbr_wb_compare_script%~ STR_EQ ~%expected_script%~) BEGIN
-    PATCH_FAIL ~CBR wing-buffet identity/script preflight failed for %creature%; expected %expected_dv% using %expected_script%.~
-  END
+  SET readable = BUFFER_LENGTH >= 0x2d4
+  SPRINT verified_dv ~%expected_dv%~ SPRINT assigned_script ~%expected_script%~
+  PATCH_IF readable BEGIN
+    READ_ASCII 0x280 verified_dv (32) NULL
+    READ_ASCII script_offset assigned_script (8) NULL
+    PATCH_IF ~%verified_dv%~ STR_EQ ~~ BEGIN
+      SPRINT verified_dv ~%expected_dv%~ WRITE_ASCIIE 0x280 ~%verified_dv%~ #32
+    END
+    PATCH_IF ~%assigned_script%~ STR_EQ ~~ BEGIN
+      SPRINT assigned_script ~%expected_script%~ WRITE_ASCIIE script_offset ~%assigned_script%~ #8
+    END
+  END ELSE BEGIN PATCH_PRINT ~CBR wing-buffet: %creature% has unreadable CRE bounds; only this creature is unchanged.~ END
 END
 
 DEFINE_PATCH_FUNCTION cbr_wb_transform_bcs
   INT_VAR apply = 0
-  STR_VAR original_family = ~~ gated_family = ~~ script = ~~
+  STR_VAR original_family = ~~ gated_family = ~~ script = ~~ actor = ~~ expected_actor = ~~
   RET changed
 BEGIN
   SET changed = 0
-  SPRINT original_family EVALUATE_BUFFER ~%original_family%~
   SPRINT gated_family EVALUATE_BUFFER ~%gated_family%~
-  PATCH_IF BUFFER_LENGTH < 6 BEGIN
-    PATCH_FAIL ~CBR wing-buffet script %script% is truncated.~
+  SET readable = BUFFER_LENGTH >= 6
+  PATCH_IF readable BEGIN
+    READ_ASCII 0 header (3) READ_ASCII (BUFFER_LENGTH - 3) footer (3)
+    SET readable = (~%header%~ STR_EQ ~SC%LNL%~) AND (~%footer%~ STR_EQ ~SC%LNL%~)
   END
-  READ_ASCII 0 cbr_wb_header (3)
-  READ_ASCII (BUFFER_LENGTH - 3) cbr_wb_footer (3)
-  PATCH_IF !(~%cbr_wb_header%~ STR_EQ ~SC%LNL%~)
-        || !(~%cbr_wb_footer%~ STR_EQ ~SC%LNL%~) BEGIN
-    PATCH_FAIL ~CBR wing-buffet script %script% has a noncanonical wrapper.~
-  END
-
-  // Exact compiled templates are built with the install's final symbolic IDS.
-  // Buffet occurs three times in triggers and three times in timer actions.
-  // This rejects foreign variants, mixed timers, duplicate and partial patches.
-  COUNT_REGEXP_INSTANCES ~Buffet~ cbr_wb_mentions
-  COUNT_REGEXP_INSTANCES ~%original_family%~ cbr_wb_original_count
-  SPRINT cbr_wb_patched_family ~%gated_family%%original_family%~
-  COUNT_REGEXP_INSTANCES ~%cbr_wb_patched_family%~ cbr_wb_patched_count
-  PATCH_IF cbr_wb_original_count != 1 BEGIN
-    PATCH_FAIL ~CBR wing-buffet requires exactly one recognized SCS block pair in %script%.~
-  END
-  PATCH_IF cbr_wb_patched_count = 1 && cbr_wb_mentions = 12 BEGIN
-    // Already our exact actor-gated pair followed by the untouched SCS pair.
-  END ELSE PATCH_IF cbr_wb_patched_count = 0 && cbr_wb_mentions = 6 BEGIN
-    SET changed = 1
-    PATCH_IF apply BEGIN
-      SET cbr_wb_insert = INDEX_BUFFER (~%original_family%~)
-      INSERT_BYTES cbr_wb_insert (STRING_LENGTH ~%gated_family%~)
-      WRITE_ASCIIE cbr_wb_insert ~%gated_family%~
-      COUNT_REGEXP_INSTANCES ~%cbr_wb_patched_family%~ cbr_wb_result_count
-      PATCH_IF cbr_wb_result_count != 1 BEGIN
-        PATCH_FAIL ~CBR wing-buffet exact output verification failed in %script%.~
+  PATCH_IF readable BEGIN
+    READ_ASCII 0 previous (BUFFER_LENGTH)
+    SPRINT result ~SC%LNL%~ SET cursor = 3 SET inserted = 0
+    WHILE cursor < BUFFER_LENGTH - 3 AND readable BEGIN
+      SET finish = INDEX_BUFFER (CASE_SENSITIVE EXACT_MATCH ~RS%LNL%CR%LNL%~ cursor)
+      PATCH_IF finish < 0 BEGIN SET readable = 0 END ELSE BEGIN
+        SET finish += 6 READ_ASCII cursor block (finish - cursor)
+        SET buffet = 0 SET owned = 0
+        INNER_PATCH ~%block%~ BEGIN
+          SET buffet = INDEX_BUFFER (CASE_INSENSITIVE ~LOCALSBuffet~) >= 0
+          // Earlier releases marked their actor-scoped pair with Name.
+          SET owned = buffet AND INDEX_BUFFER (~TR%LNL%16549 ~) >= 0
+            AND (INDEX_BUFFER (CASE_INSENSITIVE EXACT_MATCH ~"%actor%"~) >= 0
+              OR INDEX_BUFFER (CASE_INSENSITIVE EXACT_MATCH ~"%expected_actor%"~) >= 0)
+        END
+        PATCH_IF buffet AND NOT inserted BEGIN SPRINT result ~%result%%gated_family%~ SET inserted = 1 END
+        PATCH_IF NOT owned BEGIN SPRINT result ~%result%%block%~ END
+        SET cursor = finish
       END
     END
-  END ELSE BEGIN
-    PATCH_FAIL ~CBR wing-buffet found an unknown or partial timer shape in %script%.~
+    PATCH_IF readable BEGIN
+      PATCH_IF NOT inserted BEGIN SPRINT result ~SC%LNL%%gated_family%%result%~
+        INNER_PATCH_SAVE result ~%result%~ BEGIN
+          // Remove the old wrapper's opening SC after the new blocks.
+          DELETE_BYTES (3 + STRING_LENGTH ~%gated_family%~) 3
+        END
+      END
+      SPRINT result ~%result%SC%LNL%~
+      SET changed = NOT (~%previous%~ STR_EQ ~%result%~)
+      PATCH_IF apply BEGIN
+        DELETE_BYTES 0 BUFFER_LENGTH INSERT_BYTES 0 (STRING_LENGTH ~%result%~) WRITE_ASCIIE 0 ~%result%~
+      END
+    END
   END
+  PATCH_IF NOT readable BEGIN PATCH_PRINT ~CBR wing-buffet: %script% has unreadable BCS bounds; only this script is unchanged.~ END
 END
+
+<<<<<<<< cbr_wb_empty
+SC
+SC
+>>>>>>>>
 
 DEFINE_ACTION_FUNCTION cbr_apply_dragon_wing_buffet
   INT_VAR game_mode = 1
@@ -140,93 +139,42 @@ BEGIN
     FAIL ~CBR wing-buffet fixture mode requires resource_dir.~
   END
   OUTER_SET changed_scripts = 0
-  LAF cbr_wb_build_family RET cbr_wb_original = family END
-
-  // Both modes run a complete read-only preflight over every target first.
-  // The game path uses BUT_ONLY, so neither CRE nor unchanged BCS is materialized.
-  OUTER_FOR (cbr_wb_pass = 0; cbr_wb_pass < 2; ++cbr_wb_pass) BEGIN
-    ACTION_FOR_EACH cbr_wb_cre IN firkra02 shadra01 dragblac gorsal fsdragon BEGIN
-      ACTION_MATCH ~%cbr_wb_cre%~ WITH
-        firkra02 BEGIN
-          OUTER_SPRINT cbr_wb_script ~dragred~
-          OUTER_SPRINT cbr_wb_dv ~firkra02~
-          OUTER_SET cbr_wb_slot = 0x250
-        END
-        shadra01 BEGIN
-          OUTER_SPRINT cbr_wb_script ~shadra01~
-          OUTER_SPRINT cbr_wb_dv ~ShaDra01~
-          OUTER_SET cbr_wb_slot = 0x248
-        END
-        dragblac BEGIN
-          OUTER_SPRINT cbr_wb_script ~dragblac~
-          OUTER_SPRINT cbr_wb_dv ~Dragblac~
-          OUTER_SET cbr_wb_slot = 0x250
-        END
-        gorsal BEGIN
-          OUTER_SPRINT cbr_wb_script ~gorsal~
-          OUTER_SPRINT cbr_wb_dv ~GorSal~
-          OUTER_SET cbr_wb_slot = 0x268
-        END
-        fsdragon BEGIN
-          OUTER_SPRINT cbr_wb_script ~draggree~
-          OUTER_SPRINT cbr_wb_dv ~FSdragon~
-          OUTER_SET cbr_wb_slot = 0x250
-        END
-        DEFAULT
-          FAIL ~CBR wing-buffet internal roster is invalid.~
-      END
-
+  ACTION_DEFINE_ASSOCIATIVE_ARRAY roster BEGIN
+    ~firkra02~ => ~dragred firkra02 0x250~
+    ~shadra01~ => ~shadra01 ShaDra01 0x248~
+    ~dragblac~ => ~dragblac Dragblac 0x250~
+    ~gorsal~ => ~gorsal GorSal 0x268~
+    ~fsdragon~ => ~draggree FSdragon 0x250~
+  END
+  ACTION_PHP_EACH roster AS creature => entry BEGIN
+    OUTER_INNER_PATCH ~%entry%~ BEGIN
+      READ_2DA_ENTRY 0 0 3 expected_script READ_2DA_ENTRY 0 1 3 expected_dv READ_2DA_ENTRY 0 2 3 script_offset
+    END
+    OUTER_SET readable = 0
+    ACTION_IF game_mode AND FILE_EXISTS_IN_GAME ~%creature%.CRE~ BEGIN
+      COPY_EXISTING ~%creature%.CRE~ ~override~
+        LPF cbr_wb_validate_cre INT_VAR script_offset STR_VAR expected_script expected_dv creature RET verified_dv assigned_script readable END
+        BUT_ONLY
+    END ELSE ACTION_IF NOT game_mode AND FILE_EXISTS ~%resource_dir%/%creature%.cre~ BEGIN
+      COPY ~%resource_dir%/%creature%.cre~ ~%resource_dir%/%creature%.cre~
+        LPF cbr_wb_validate_cre INT_VAR script_offset STR_VAR expected_script expected_dv creature RET verified_dv assigned_script readable END
+        BUT_ONLY
+    END ELSE BEGIN PRINT ~CBR wing-buffet: optional creature %creature% is absent; continuing with the remaining dragons.~ END
+    ACTION_IF readable BEGIN
+      LAF cbr_wb_build_family INT_VAR cooldown = 18 STR_VAR death_variable = EVAL ~%verified_dv%~ RET gated_family = family END
       ACTION_IF game_mode BEGIN
-        ACTION_IF !FILE_EXISTS_IN_GAME ~%cbr_wb_cre%.cre~
-               || !FILE_EXISTS_IN_GAME ~%cbr_wb_script%.bcs~ BEGIN
-          FAIL ~CBR wing-buffet requires the selected creature %cbr_wb_cre% and its SCS script %cbr_wb_script%.~
-        END
-        COPY_EXISTING ~%cbr_wb_cre%.cre~ ~override~
-          LPF cbr_wb_validate_cre
-            INT_VAR script_offset = cbr_wb_slot
-            STR_VAR expected_script = EVAL ~%cbr_wb_script%~ expected_dv = EVAL ~%cbr_wb_dv%~ creature = EVAL ~%cbr_wb_cre%~
-            RET cbr_wb_verified_dv = verified_dv
-          END
-        BUT_ONLY
+        ACTION_IF NOT FILE_EXISTS_IN_GAME ~%assigned_script%.BCS~ BEGIN COPY ~cbr_wb_empty~ ~override/%assigned_script%.BCS~ END
+        COPY_EXISTING ~%assigned_script%.BCS~ ~override~
+          LPF cbr_wb_transform_bcs INT_VAR apply = 1 STR_VAR gated_family script = EVAL ~%assigned_script%~ actor = EVAL ~%verified_dv%~ expected_actor = EVAL ~%expected_dv%~ RET changed END
+          BUT_ONLY
       END ELSE BEGIN
-        ACTION_IF !FILE_EXISTS ~%resource_dir%/%cbr_wb_cre%.cre~
-               || !FILE_EXISTS ~%resource_dir%/%cbr_wb_script%.bcs~ BEGIN
-          FAIL ~CBR wing-buffet requires the selected creature %cbr_wb_cre% and its SCS script %cbr_wb_script%.~
-        END
-        COPY ~%resource_dir%/%cbr_wb_cre%.cre~ ~%resource_dir%/%cbr_wb_cre%.cre~
-          LPF cbr_wb_validate_cre
-            INT_VAR script_offset = cbr_wb_slot
-            STR_VAR expected_script = EVAL ~%cbr_wb_script%~ expected_dv = EVAL ~%cbr_wb_dv%~ creature = EVAL ~%cbr_wb_cre%~
-            RET cbr_wb_verified_dv = verified_dv
-          END
-        BUT_ONLY
+        ACTION_IF NOT FILE_EXISTS ~%resource_dir%/%assigned_script%.bcs~ BEGIN COPY ~cbr_wb_empty~ ~%resource_dir%/%assigned_script%.bcs~ END
+        COPY ~%resource_dir%/%assigned_script%.bcs~ ~%resource_dir%/%assigned_script%.bcs~
+          LPF cbr_wb_transform_bcs INT_VAR apply = 1 STR_VAR gated_family script = EVAL ~%assigned_script%~ actor = EVAL ~%verified_dv%~ expected_actor = EVAL ~%expected_dv%~ RET changed END
+          BUT_ONLY
       END
-      LAF cbr_wb_build_family
-        INT_VAR cooldown = 18
-        STR_VAR death_variable = EVAL ~%cbr_wb_verified_dv%~
-        RET cbr_wb_gated = family
-      END
-      ACTION_IF game_mode BEGIN
-        COPY_EXISTING ~%cbr_wb_script%.bcs~ ~override~
-          LPF cbr_wb_transform_bcs
-            INT_VAR apply = cbr_wb_pass
-            STR_VAR original_family = EVAL ~%cbr_wb_original%~ gated_family = EVAL ~%cbr_wb_gated%~ script = EVAL ~%cbr_wb_script%~
-            RET cbr_wb_changed = changed
-          END
-        BUT_ONLY
-      END ELSE BEGIN
-        COPY ~%resource_dir%/%cbr_wb_script%.bcs~ ~%resource_dir%/%cbr_wb_script%.bcs~
-          LPF cbr_wb_transform_bcs
-            INT_VAR apply = cbr_wb_pass
-            STR_VAR original_family = EVAL ~%cbr_wb_original%~ gated_family = EVAL ~%cbr_wb_gated%~ script = EVAL ~%cbr_wb_script%~
-            RET cbr_wb_changed = changed
-          END
-        BUT_ONLY
-      END
-      ACTION_IF cbr_wb_pass BEGIN
-        OUTER_SET changed_scripts += cbr_wb_changed
-      END
+      OUTER_SET changed_scripts += changed
     END
   END
-  PRINT ~CBR wing-buffet: %changed_scripts% scripts updated; five selected dragons use 18-second cooldowns, other actors retain their SCS paths.~
+  PRINT ~CBR wing-buffet: %changed_scripts% scripts updated with actor-scoped 18-second cooldowns.~
 END

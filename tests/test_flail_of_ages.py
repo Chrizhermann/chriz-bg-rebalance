@@ -15,6 +15,8 @@ from tests.test_tempus_holy_power_installer import RESOURCE_TYPE, _write_key_and
 
 ROOT = Path(__file__).resolve().parents[1]
 WEIDU = ROOT / "weidu.exe"
+TEMP_ROOT = ROOT / "work/slice-c/tmp"
+TEMP_ROOT.mkdir(parents=True, exist_ok=True)
 CAPTURES = ROOT / "research/originals/flail-ages"
 TIERS = {"BLUN14": 2, "BLUN30C": 4, "BLUN30D": 4, "BLUN30": 6}
 RESOURCE_TYPE["ITM"] = 1005
@@ -72,6 +74,7 @@ def item(plus5: bool, sr: bool) -> bytes:
 class Game:
     def __init__(self, root: Path, variant="sr", captures=False):
         self.root = root
+        (root / "WeiDU.log").write_text("", encoding="ascii")
         self.override = root / "override"
         self.override.mkdir(parents=True)
         shutil.copy2(ROOT / "setup-chriz-bg-rebalance.tp2", root)
@@ -116,6 +119,8 @@ class Game:
             ("SPELL", "IDS", spells),
             *((("SPWI312", "SPL", bytes(sr_slow)),) if sr else ()),
             ("STATS", "IDS", b"1 DUMMY\n"),
+            ("KIT", "IDS", b"1 DUMMY\n"),
+            ("CLASS", "IDS", b"1 DUMMY\n"),
             ("SPLSTATE", "IDS", b"1 DUMMY\n"),
             ("ALT385", "SPL", native), ("SPWI355", "SPL", revised if sr else native),
             ("SPWI677", "SPL", revised if sr else native), ("NOTHASTE", "SPL", neutral),
@@ -132,14 +137,14 @@ class Game:
     def run(self, uninstall=False):
         process = subprocess.run([str(WEIDU), "setup-chriz-bg-rebalance.tp2",
             "--force-uninstall-list" if uninstall else "--force-install-list", "302",
-            "--language", "0", "--use-lang", "en_us", "--no-exit-pause", "--quick-log"],
+            "--language", "0", "--use-lang", getattr(self, "language", "en_us"), "--no-exit-pause", "--quick-log"],
             cwd=self.root, capture_output=True, text=True, timeout=40)
         return process, process.stdout + process.stderr
 
 
 class FlailTests(unittest.TestCase):
     def game(self, variant="sr", captures=False):
-        temporary = tempfile.TemporaryDirectory(prefix="cbr-flail-")
+        temporary = tempfile.TemporaryDirectory(prefix="cbr-flail-", dir=TEMP_ROOT)
         self.addCleanup(temporary.cleanup)
         return Game(Path(temporary.name), variant, captures)
 
@@ -147,6 +152,8 @@ class FlailTests(unittest.TestCase):
         p, output = g.run()
         self.assertEqual(0, p.returncode, output)
         self.assertIn("SUCCESSFULLY INSTALLED", output)
+        self.assertNotIn("WARNING", output.upper())
+        self.assertNotIn("ERROR", output.upper())
         return {p.name.upper(): p.read_bytes() for p in g.override.iterdir() if p.is_file()}
 
     def assert_effect_contract(self, g):
@@ -179,9 +186,8 @@ class FlailTests(unittest.TestCase):
             text = strings(g.lang_tlk)[after.identified_description]
             self.assertEqual(1, text.count(f"(Save vs. Breath at -{penalty} negates)"))
             self.assertNotIn("No Save", text)
-            original_text = g.texts[before.identified_description]
-            unowned_lines = lambda value: [line for line in value.splitlines() if not re.search(r"slow|free action", line, re.I)]
-            self.assertEqual(unowned_lines(original_text), unowned_lines(text))
+            self.assertIn("This flail has been in the care of Lord de'Arnise", text)
+            self.assertIn("Proficiency Type: Flail/", text)
             if name == "BLUN30": self.assertIn("Free Action (allows Haste and Improved Haste)", text)
         self.assertEqual(g.texts, strings(g.lang_tlk)[:len(g.texts)])
         self.assertEqual(g.original["BLUN14A.ITM"], (g.override / "BLUN14A.ITM").read_bytes())
@@ -244,16 +250,15 @@ class FlailTests(unittest.TestCase):
                          [e.to_bytes() for e in after.abilities[0].effects if e.opcode == 221])
         self.assertEqual((2, -2), next((e.save_type, e.save_bonus) for e in after.abilities[0].effects if e.opcode == 40))
 
-    def test_multiple_slow_description_lines_keep_lore_and_add_override_note(self):
+    def test_multiple_slow_description_lines_are_replaced_by_complete_text(self):
         g = self.game()
-        g.texts[-1] += "\nA second Slow effect from an unreviewed overhaul."
+        g.texts[-1] = "Unreviewed lore. A second Slow effect. No Save."
         g.lang_tlk.write_bytes(tlk(g.texts))
         self.assert_installed(g)
-        updated = strings(g.lang_tlk)[read_itm(g.override / "BLUN30.ITM").identified_description]
-        self.assertIn("A second Slow effect from an unreviewed overhaul.", updated)
-        self.assertIn("(Save vs. Breath at -6 negates)", updated)
-        self.assertNotIn("No Save", updated)
-        self.assertEqual(g.texts, strings(g.lang_tlk)[:len(g.texts)])
+        text = strings(g.lang_tlk)[read_itm(g.override / "BLUN30.ITM").identified_description]
+        self.assertNotIn("Unreviewed", text)
+        self.assertEqual(1, text.count("Save vs. Breath at -6 negates"))
+        self.assertIn("5% bonus to Magic Resistance", text)
 
     def test_uninstall_restores_every_override_byte(self):
         g = self.game()
@@ -280,16 +285,15 @@ class FlailTests(unittest.TestCase):
         self.assertEqual(expected, {p.name.upper(): p.read_bytes() for p in g.override.iterdir() if p.is_file()})
         self.assertEqual(expected_tlk, g.lang_tlk.read_bytes())
 
-    def test_unknown_movement_blocker_fails_and_rolls_back(self):
+    def test_movement_blocker_is_removed_and_other_immunities_survive(self):
         g = self.game()
         p = g.override / "BLUN30.ITM"
         old = read_itm(p)
         p.write_bytes(dataclasses.replace(old, global_effects=old.global_effects + (SplEffect(opcode=101, target=1, parameter2=176),)).to_bytes())
-        expected = {p.name.upper(): p.read_bytes() for p in g.override.iterdir() if p.is_file()}
-        _, output = g.run()
-        self.assertIn("movement-rate immunity blocks revised Haste", output)
-        self.assertIn("NOT INSTALLED DUE TO ERRORS", output)
-        self.assertEqual(expected, {p.name.upper(): p.read_bytes() for p in g.override.iterdir() if p.is_file()})
+        self.assert_installed(g)
+        effects = read_itm(p).global_effects
+        self.assertFalse(any(e.opcode == 101 and e.parameter2 == 176 for e in effects))
+        self.assertTrue(any(e.opcode == 101 and e.parameter2 == 40 for e in effects))
 
     def test_missing_target_skips_before_writing(self):
         g = self.game()

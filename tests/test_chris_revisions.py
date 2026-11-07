@@ -12,6 +12,7 @@ phrases the installer rewrites.
 """
 from __future__ import annotations
 
+import json
 import dataclasses
 import functools
 import struct
@@ -78,6 +79,12 @@ DEFAULT_IDS = {"SPPR201.SPL": "1201 CLERIC_AID", "SPWI209.SPL": "2209 WIZARD_LUC
                "SPPR101.SPL": "1101 CLERIC_BLESS", "SPPR508.SPL": "1508 CLERIC_CHAOTIC_COMMANDS",
                "SPPR327.SPL": "1327 CLERIC_PRAYER", "SPPR422.SPL": "1422 CLERIC_RECITATION"}
 
+
+GOLDEN = json.loads((Path(__file__).parent / "fixtures/chris_revisions_descriptions.json").read_text(encoding="utf8"))
+SR_AID_NEW = NATIVE_AID_NEW = GOLDEN["aid"]
+SR_LUCK_NEW = NATIVE_LUCK_NEW = GOLDEN["luck"]
+SR_BLESS_NEW = NATIVE_BLESS_NEW = GOLDEN["bless"]
+PRAYER_NEW, RECITATION_NEW = GOLDEN["prayer"], GOLDEN["recitation"]
 
 def fx(op, p1=0, p2=0, *, tg=2, pw=2, tm=0, rd=3, du=0, res="", **kwargs):
     return SplEffect(opcode=op, target=tg, power=pw, parameter1=p1, parameter2=p2, timing=tm,
@@ -343,8 +350,9 @@ class Fixture(unittest.TestCase):
     def install(self, game, warnings=False):
         code, output = run(game, 340)
         # WeiDU exits with 3 after an installation with warnings.
-        self.assertEqual(3 if warnings else 0, code, output)
-        self.assertIn("INSTALLED WITH WARNINGS" if warnings else "SUCCESSFULLY INSTALLED", output)
+        self.assertEqual(0, code, output)
+        self.assertIn("SUCCESSFULLY INSTALLED", output)
+        self.assertNotIn("INSTALLED WITH WARNINGS", output)
         return output
 
     def left_unchanged(self, game, message, *names):
@@ -383,6 +391,53 @@ class Fixture(unittest.TestCase):
 
 
 class CombinedTests(Fixture):
+    def test_empty_slices_ignore_unused_effect_addresses(self):
+        resources = {}
+        for name, count in (("SPPR201.SPL", 1), ("SPWI209.SPL", 1), ("SPPR101.SPL", 0)):
+            raw = bytearray(spell([SplAbility(1, 1, 1, ())] * count))
+            struct.pack_into('<H', raw, 0x6e, 0xffff)
+            ab = struct.unpack_from('<I', raw, 0x64)[0]
+            if count:
+                struct.pack_into('<H', raw, ab + 0x20, 0xffff)
+            else:
+                struct.pack_into('<I', raw, 0x64, 0xffffff)
+            resources[name] = bytes(raw)
+        game = self.game(resources); self.install(game)
+        for name, opcode in (("SPPR201.SPL", 18), ("SPWI209.SPL", 133), ("SPPR101.SPL", 130)):
+            result = SplFile.from_bytes(game.snapshot()[name])
+            self.assertEqual((), result.casting_effects)
+            self.assertTrue(result.abilities)
+            self.assertTrue(all(any(e.opcode == opcode for e in a.effects) for a in result.abilities))
+        self.repeat(game)
+
+    def test_empty_abilities_and_damaged_peer_do_not_veto_changes(self):
+        game=self.game({"SPPR201.SPL":spell([]),"SPWI209.SPL":b"broken", "SPPR101.SPL":spell([],level=1)})
+        self.install(game)
+        after=game.snapshot()
+        self.assertEqual(b"broken",after["SPWI209.SPL"])
+        self.assertEqual(1,len(SplFile.from_bytes(after["SPPR201.SPL"]).abilities))
+        self.assertEqual(20,len(SplFile.from_bytes(after["SPPR101.SPL"]).abilities))
+        self.repeat(game)
+
+    def test_other_game_language_keeps_descriptions(self):
+        game=self.game({"SPPR201.SPL":sr_aid(desc=GERMAN_REF)})
+        target=game.root/'lang/de_de/dialog.tlk';target.parent.mkdir();target.write_bytes(game.tlk.read_bytes())
+        result=subprocess.run([str(WEIDU),'setup-chriz-bg-rebalance.tp2','--force-install-list','340','--language','0','--use-lang','de_de','--no-exit-pause','--quick-log'],cwd=game.root,capture_output=True,text=True,timeout=60)
+        self.assertEqual(0,result.returncode,result.stdout+result.stderr)
+        self.assertEqual(GERMAN_REF,struct.unpack_from('<i',game.snapshot()['SPPR201.SPL'],0x50)[0])
+        self.assertIn('existing text retained',result.stdout)
+
+    def test_reversed_tables_and_trailer_are_addressed(self):
+        blob=native_aid();ab=struct.unpack_from('<I',blob,0x64)[0];fxoff=struct.unpack_from('<I',blob,0x6a)[0]
+        raw=bytearray(blob[:0x72]+blob[fxoff:]+blob[ab:fxoff]+b'TAIL')
+        struct.pack_into('<I',raw,0x64,0x72+len(blob)-fxoff);struct.pack_into('<I',raw,0x6a,0x72)
+        game=self.game({"SPPR201.SPL":bytes(raw)});self.install(game)
+        out=game.snapshot()['SPPR201.SPL'];self.assertTrue(out.endswith(b'TAIL'))
+        for ability in SplFile.from_bytes(out[:-4]).abilities:
+            hp=next(e for e in ability.effects if e.opcode==18)
+            self.assertEqual(60*caster_level(ability.required_level),hp.duration)
+        self.repeat(game)
+
     def all_parts(self):
         return self.game({
             "SPPR201.SPL": sr_aid(),
@@ -411,25 +466,28 @@ class CombinedTests(Fixture):
         self.install(game)
         self.uninstall(game)
 
-    def test_a_part_that_cannot_be_changed_safely_leaves_the_others_applied(self):
+    def test_duplicate_aid_does_not_block_any_part(self):
         abilities = [sr_aid_ability(level) for level in SR_LEVELS]
         abilities[-1] = sr_aid_ability(20, fx(129, 1, du=1200))
         game = self.game({"SPPR201.SPL": sr_aid(abilities=abilities), "SPWI209.SPL": luck(),
                           "SPPR508.SPL": chaotic_commands(0x80000020)})
-        self.left_unchanged(game, "Chris Revisions: Aid left unchanged: SPPR201.spl (ability for level 20) "
-                            "does not have exactly one Aid payload", "SPPR201.SPL")
-        self.assertEqual({"SPWI209.SPL", "SPPR508.SPL"}, self.changed(game))
+        self.install(game)
+        self.assertEqual({"SPPR201.SPL", "SPWI209.SPL", "SPPR508.SPL"}, self.changed(game))
+        effects=effects_by_level(game.snapshot()["SPPR201.SPL"])[20]
+        self.assertFalse(any(e.opcode==129 for e in effects))
+        self.assertEqual(1,sum(e.opcode==18 for e in effects))
+
 
     def test_parts_without_their_spell_are_skipped(self):
         game = self.game({"SPELL.IDS": b"IDS V1.0\n2209 WIZARD_LUCK\n1327 CLERIC_PRAYER\n",
                           "SPPR201.SPL": sr_aid(), "SPWI209.SPL": luck(), "SPPR101.SPL": sr_bless(),
                           **prayer_recitation()})
         output = self.install(game)
-        self.assertIn("Aid skipped; SPELL.IDS has no CLERIC_AID entry", output)
-        self.assertIn("Bless skipped; SPELL.IDS has no CLERIC_BLESS entry", output)
-        self.assertIn("Bless for druids skipped; SPELL.IDS has no CLERIC_BLESS entry", output)
-        self.assertIn("Chaotic Commands skipped; SPELL.IDS has no CLERIC_CHAOTIC_COMMANDS entry", output)
-        self.assertIn("Prayer and Recitation skipped; SPELL.IDS has no CLERIC_RECITATION entry", output)
+        self.assertIn("optional CLERIC_AID target is absent", output)
+        self.assertIn("optional CLERIC_BLESS target is absent", output)
+        self.assertIn("optional CLERIC_BLESS target is absent", output)
+        self.assertIn("optional CLERIC_CHAOTIC_COMMANDS target is absent", output)
+        self.assertIn("optional CLERIC_RECITATION target is absent", output)
         self.assertEqual({"SPWI209.SPL"}, self.changed(game))
 
 
@@ -511,24 +569,24 @@ class AidTests(Fixture):
             d = 60 * caster_level(level)
             self.assertEqual((refresh("SPPR222"), hit_points(effects[1], level),
                               dataclasses.replace(effects[2], duration=d)), ability.effects)
-        self.assertEqual(7, len(result.all_effects()))
+        self.assertEqual(7, len(result.casting_effects) + sum(len(a.effects) for a in result.abilities))
 
-    def test_ambiguous_payload_is_left_unchanged(self):
-        abilities = [sr_aid_ability(level) for level in SR_LEVELS]
-        abilities[-1] = sr_aid_ability(20, fx(129, 1, du=1200))
-        game = self.game({"SPPR201.SPL": sr_aid(abilities=abilities), "C0TRBS2.SPL": sr_aid(spell_type=1)})
-        # The copy is not an exact copy any more, so only SPPR201 is the family.
-        self.left_unchanged(game, "does not have exactly one Aid payload", "SPPR201.SPL", "C0TRBS2.SPL")
-        self.assertEqual(set(), self.changed(game))
-        self.assertEqual(game.original_tlk, game.tlk.read_bytes())
+    def test_changed_aid_copy_and_missing_payload_are_rebuilt(self):
+        abilities=[sr_aid_ability(20,fx(129,9,du=1),fx(18,99,du=1))]
+        game=self.game({"SPPR201.SPL":sr_aid(abilities=abilities),"C0TRBS2.SPL":spell([SplAbility(4,1,1,())])})
+        self.install(game)
+        for name in ("SPPR201.SPL","C0TRBS2.SPL"):
+            for ability in SplFile.from_bytes(game.snapshot()[name]).abilities:
+                hp=[e for e in ability.effects if e.opcode==18]
+                self.assertEqual(1,len(hp));self.assertEqual((1,8),(hp[0].dice_number,hp[0].dice_size))
+                self.assertEqual(60*caster_level(ability.required_level),hp[0].duration)
+        self.repeat(game)
 
-    def test_unrecognized_description_warns_and_keeps_the_text(self):
-        game = self.game({"SPPR201.SPL": sr_aid(desc=GERMAN_REF)})
-        output = self.install(game, warnings=True)
-        self.assertIn("SPPR201.spl has different or untranslated text", output)
-        after = game.snapshot()["SPPR201.SPL"]
-        self.assertEqual(GERMAN_REF, struct.unpack_from("<i", after, 0x50)[0])
-        self.assertEqual(expected_sr_aid(20, ("SPPR201",)), effects_by_level(after)[20])
+
+    def test_changed_description_receives_complete_aid_text(self):
+        game=self.game({'SPPR201.SPL':sr_aid(desc=GERMAN_REF)})
+        self.install(game)
+        self.assertEqual(GOLDEN['aid'],description(game,game.snapshot()['SPPR201.SPL']))
 
 
 class LuckTests(Fixture):
@@ -541,6 +599,7 @@ class LuckTests(Fixture):
             "SCRL99.ITM": item(fx(147, tg=1, tm=1, res="SPWI999"), description=NATIVE_LUCK_REF),
             "BOW99.ITM": item(fx(146, 10, 1, tg=1, tm=1, res="SPWI209"), category=15),
         })
+        scs_prebuff_map(game, ("WIZARD_LUCK_PREBUFF", "C0LUCK"))
         output = self.install(game)
         after = game.snapshot()
         self.assertEqual({"SPWI209.SPL", "C0LUCK.SPL", "SCRL93.ITM"}, self.changed(game))
@@ -573,13 +632,13 @@ class LuckTests(Fixture):
         self.install(game)
         self.repeat(game)
 
-    def test_conflicting_or_missing_luck_bonus_is_left_unchanged(self):
-        conflict = self.game({"SPWI209.SPL": spell([SplAbility(1, 1, 48, (
-            *luck_effects("SPWI209", 300), fx(133, 1, du=60)))], spell_type=1)})
-        self.left_unchanged(conflict, "Luck bonuses with different durations", "SPWI209.SPL")
-        missing = self.game({"SPWI209.SPL": spell([SplAbility(1, 1, 48, (fx(33, 1, du=300),))],
-                                                  spell_type=1)})
-        self.left_unchanged(missing, "has no timed Luck bonus", "SPWI209.SPL")
+    def test_conflicting_or_missing_luck_bonus_gets_90_seconds(self):
+        for effects in ((*luck_effects("SPWI209",300),fx(133,1,du=60)),(fx(33,1,du=300),),()):
+            game=self.game({"SPWI209.SPL":spell([SplAbility(1,1,48,effects)],spell_type=1)})
+            self.install(game)
+            bonus=[e for e in SplFile.from_bytes(game.snapshot()["SPWI209.SPL"]).abilities[0].effects if e.opcode in (22,133)]
+            self.assertTrue(bonus);self.assertEqual({90},{e.duration for e in bonus})
+
 
     def test_scs_prebuff_copy_changes_with_the_spell(self):
         cosmetic = {139, 141, 174, 50}
@@ -604,7 +663,7 @@ class BlessTests(Fixture):
             "CBRBLESS.ITM": item(fx(146, 0, 1, tg=1, tm=1, res="SPPR101"), description=SR_BLESS_REF),
         })
         self.prebuff_map = scs_prebuff_map(game, ("WIZARD_SHIELD_PREBUFF", "dwsw114"),
-                                           ("CLERIC_BLESS_PREBUFF", "dwsp101"))
+                                           ("CLERIC_BLESS_PREBUFF", "C0BLESS"), ("CLERIC_BLESS_PREBUFF", "dwsp101"))
         return game
 
     def assert_bless(self, game, name, build, *, druids=False):
@@ -650,7 +709,7 @@ class BlessTests(Fixture):
         game = self.game({"SPPR101.SPL": spell([bless_ability(1, native_bless_effects(36), NATIVE_BLESS_RAW)],
                                                level=1, desc=NATIVE_BLESS_REF)})
         # A map entry for a file that does not exist is ignored.
-        scs_prebuff_map(game, ("CLERIC_BLESS_PREBUFF", "dwsp101"))
+        scs_prebuff_map(game, ("CLERIC_BLESS_PREBUFF", "C0BLESS"), ("CLERIC_BLESS_PREBUFF", "dwsp101"))
         output = self.install(game)
         self.assertIn("Bless is already available to druids; nothing changed", output)
         self.assertEqual({"SPPR101.SPL"}, self.changed(game))
@@ -685,31 +744,21 @@ class BlessTests(Fixture):
         struct.pack_into("<I", expected, 0x1E, struct.unpack_from("<I", expected, 0x1E)[0] & 0x7FFFFFFF)
         self.assertEqual(bytes(expected), game.snapshot()[name])
 
-    def test_conflicting_or_missing_bless_bonus_is_left_unchanged(self):
-        conflict = self.game({"SPPR101.SPL": sr_bless(effects=(*bless_effects(300), fx(130, 1, pw=1, du=60))),
-                              "SPWI209.SPL": luck()})
-        output = self.install(conflict, warnings=True)
-        self.assertIn("Chris Revisions: Bless left unchanged: SPPR101.spl (ability for level 1) "
-                      "has Bless bonuses with different durations", output)
-        self.assertIn("Bless: druids can learn and cast it again", output)
-        self.assert_only_druid_access(conflict)
-        self.assertEqual({"SPPR101.SPL", "SPWI209.SPL"}, self.changed(conflict))
-        # SCS's prebuff copy changes with the spell, so one that cannot stops both.
-        missing = self.game({"SPPR101.SPL": sr_bless(),
-                             "DWSP101.SPL": sr_bless(effects=(fx(142, 0, 17, pw=1, du=300),))})
-        scs_prebuff_map(missing, ("CLERIC_BLESS_PREBUFF", "DWSP101"))
-        output = self.install(missing, warnings=True)
-        self.assertIn("DWSP101.spl (ability for level 1) has no timed Bless bonus", output)
-        self.assert_only_druid_access(missing)
-        self.assertEqual(missing.original["DWSP101.SPL"], missing.snapshot()["DWSP101.SPL"])
+    def test_missing_bless_and_edited_prebuff_are_rebuilt(self):
+        game=self.game({"SPPR101.SPL":sr_bless(effects=(*bless_effects(300),fx(130,1,pw=1,du=60))),
+                        "DWSP101.SPL":sr_bless(effects=(fx(142,0,17,pw=1,du=300),))})
+        scs_prebuff_map(game,("CLERIC_BLESS_PREBUFF","DWSP101"));self.install(game)
+        for name in ("SPPR101.SPL","DWSP101.SPL"):
+            for ability in SplFile.from_bytes(game.snapshot()[name]).abilities:
+                bonus=[e for e in ability.effects if e.opcode==130]
+                self.assertTrue(bonus);self.assertEqual({bless_duration(ability.required_level)},{e.duration for e in bonus})
+        self.repeat(game)
 
-    def test_unrecognized_description_warns_and_keeps_the_text(self):
-        game = self.game({"SPPR101.SPL": sr_bless(desc=GERMAN_REF)})
-        output = self.install(game, warnings=True)
-        self.assertIn("Bless: the description of SPPR101.spl has different or untranslated text", output)
-        after = game.snapshot()["SPPR101.SPL"]
-        self.assertEqual(GERMAN_REF, struct.unpack_from("<i", after, 0x50)[0])
-        self.assertEqual(bless_effects(150), SplFile.from_bytes(after).abilities[-1].effects)
+
+    def test_changed_description_receives_complete_bless_text(self):
+        game=self.game({'SPPR101.SPL':sr_bless(desc=GERMAN_REF)})
+        self.install(game)
+        self.assertEqual(GOLDEN['bless'],description(game,game.snapshot()['SPPR101.SPL']))
 
 
 class DruidAccessTests(Fixture):
@@ -733,11 +782,11 @@ class DruidAccessTests(Fixture):
         self.assertEqual(set(), self.changed(game))
         self.repeat(game)
 
-    def test_spells_no_priest_or_no_druid_can_learn_are_left_unchanged(self):
-        self.left_unchanged(self.game({"SPPR508.SPL": chaotic_commands(0xC0000000)}),
-                            "excluded for every priest class", "SPPR508.SPL")
-        self.left_unchanged(self.game({"SPPR508.SPL": chaotic_commands(0x80000000, spell_type=1)}),
-                            "is not a priest spell", "SPPR508.SPL")
+    def test_druid_bit_is_written_despite_other_exclusions_or_spell_type(self):
+        for original in (chaotic_commands(0xC0000000),chaotic_commands(0x80000000,spell_type=1)):
+            game=self.game({"SPPR508.SPL":original});self.install(game)
+            expected=bytearray(original);struct.pack_into('<I',expected,0x1e,struct.unpack_from('<I',expected,0x1e)[0]&0x7fffffff)
+            self.assertEqual(bytes(expected),game.snapshot()["SPPR508.SPL"])
 
 
 class PrayerRecitationTests(Fixture):
@@ -769,79 +818,41 @@ class PrayerRecitationTests(Fixture):
             self.assertEqual(after["SPPR422.SPL"][0x50:0x54], after[scroll][0x54:0x58])
         self.uninstall(game)
 
-    def test_refresh_order_saves_and_an_existing_block_are_respected(self):
-        d = recitation_duration
-        reordered = []
-        for level in RECITATION_LEVELS:
-            old = recitation_effects("#RECITEG", d(level), 1)
-            block = fx(206, -1, pw=4, du=6, res="#PRAYERG")
-            reordered.append(SplAbility(level, 4, 337, (old[1], old[0], *old[2:], block)))
-        # A block between two refreshes of the payload itself is synchronized too.
-        old = recitation_effects("#RECITEG", d(20), 1)
-        early = fx(206, -1, pw=4, du=6, res="#PRAYERG")
-        reordered[-1] = SplAbility(20, 4, 337, (old[0], early, old[0], *old[1:]))
-        game = self.game(prayer_recitation(**{
-            "#RECITEG.SPL": spell(reordered, level=4),
-            "#RECITEB.SPL": sub_spell(recitation_effects, "#RECITEB", RECITATION_LEVELS, d, -1, 4, save=1)}))
-        self.install(game)
-        after = game.snapshot()
-        bonus, penalty = effects_by_level(after["#RECITEG.SPL"]), effects_by_level(after["#RECITEB.SPL"])
-        for ability in reordered:
-            level, old = ability.required_level, ability.effects
-            if level == 20:
-                template = next(e for e in old if e.opcode == 54)
-                self.assertEqual((old[0], dataclasses.replace(old[1], duration=d(20)), old[2],
-                                  like(template, 321, timing=1, resource="#PRAYERG"), *old[3:]), bonus[20])
-                continue
-            # The new records follow the payload's own refresh, wherever it is, and
-            # the existing block now lasts as long as the bonus.
-            self.assertEqual(expected_recitation(old, "#PRAYERG", d(level), lead=2, keep_block=old[-1]),
-                             bonus[level], level)
-            old_penalty = recitation_effects("#RECITEB", d(level), -1, save=1)
-            expected = expected_recitation(old_penalty, "#PRAYERB", d(level))
-            self.assertEqual(expected, penalty[level], level)
-            # A creature that saves against the penalty keeps Prayer's penalty.
-            self.assertEqual({1}, {e.save_type for e in expected[1:3]})
+    def test_refresh_order_saves_and_edited_existing_controls_are_rewritten(self):
+        old=recitation_effects("#RECITEG",42,1,save=1)
+        game=self.game(prayer_recitation(**{"#RECITEG.SPL":spell([SplAbility(1,4,337,(old[1],old[0],*old[2:],fx(206,9,tg=1,du=1,res="#PRAYERG"),fx(321,9,res="#PRAYERG")))],level=4)}))
+        self.install(game);effects=effects_by_level(game.snapshot()["#RECITEG.SPL"])[1]
+        self.assertEqual(old[1],effects[0]);self.assertEqual(old[0],effects[1])
+        controls=[e for e in effects if e.resource=="#PRAYERG"]
+        self.assertEqual([321,206],[e.opcode for e in controls])
+        self.assertEqual({1},{e.save_type for e in controls});self.assertEqual(42,controls[1].duration)
+        self.repeat(game)
 
-    def test_payloads_that_cannot_be_kept_apart_are_left_unchanged(self):
-        mixed = spell([SplAbility(1, 5, 1, (fx(54, 1, tg=3, du=30), fx(54, -1, tg=5, du=30)))],
-                      level=3, desc=PRAYER_REF)
-        game = self.game({**prayer_recitation(**{"SPPR327.SPL": mixed}), "SPWI209.SPL": luck()})
-        self.left_unchanged(game, "Prayer and Recitation left unchanged: SPPR327.spl gives both bonuses "
-                            "and penalties", *(n for n in prayer_recitation()))
-        self.assertEqual({"SPWI209.SPL"}, self.changed(game))
 
-        casts = [SplAbility(lvl, 4, 337, (*prayer_effects("#PRAYERG", prayer_duration(lvl), 1),
-                                          fx(146, 0, 1, tg=1, tm=1, res="CBRPRAY")))
-                 for lvl in PRAYER_LEVELS]
-        game = self.game(prayer_recitation(**{"#PRAYERG.SPL": spell(casts, level=3),
-                                              "CBRPRAY.SPL": spell([SplAbility(1, 1, 1, (fx(50, du=1),))])}))
-        self.left_unchanged(game, "#PRAYERG.spl carries Prayer's bonus or penalty and also casts other spells",
-                            *(n for n in prayer_recitation()))
+    def test_mixed_prayer_payload_is_split_and_foreign_casts_survive(self):
+        mixed=spell([SplAbility(1,5,1,(fx(54,1,tg=3,du=30),fx(54,-1,tg=5,du=30),fx(146,0,1,tm=1,res="FOREIGN")))],level=3,desc=PRAYER_REF)
+        game=self.game(prayer_recitation(**{"SPPR327.SPL":mixed,"FOREIGN.SPL":spell([SplAbility(1,1,1,(fx(50,du=1),))])}))
+        self.install(game);after=game.snapshot()
+        main=SplFile.from_bytes(after["SPPR327.SPL"]).abilities[0].effects
+        self.assertTrue(any(e.resource=="FOREIGN" for e in main))
+        for sign,helper,recite in ((1,"CQP0G","#RECITEG"),(-1,"CQP0B","#RECITEB")):
+            effects=SplFile.from_bytes(after[helper+".SPL"]).abilities[0].effects
+            self.assertEqual([sign],[e.parameter1 for e in effects if e.opcode==54])
+            self.assertTrue(any(e.opcode==206 and e.resource==helper for e in SplFile.from_bytes(after[recite+".SPL"]).abilities[0].effects))
+        self.assertEqual(game.original["FOREIGN.SPL"],after["FOREIGN.SPL"])
+        self.repeat(game)
 
-        uneven = [SplAbility(lvl, 4, 337, tuple(dataclasses.replace(e, duration=60) if e.opcode == 325 else e
-                                                for e in recitation_effects("#RECITEG", recitation_duration(lvl), 1)))
-                  for lvl in RECITATION_LEVELS]
-        game = self.game(prayer_recitation(**{"#RECITEG.SPL": spell(uneven, level=4)}))
-        self.left_unchanged(game, "has no single timed bonus duration", *(n for n in prayer_recitation()))
+    def test_deep_delivery_chain_and_cycle_do_not_veto_pairing(self):
+        resources=prayer_recitation()
+        resources["SPPR422.SPL"]=casting_spell("LAYER1","#RECITEB",level=4,desc=RECITATION_REF)
+        for i in range(1,5):resources[f"LAYER{i}.SPL"]=casting_spell("#RECITEG" if i==4 else f"LAYER{i+1}","LAYER1",level=4,desc=-1)
+        game=self.game(resources);self.install(game)
+        self.assertTrue(any(e.opcode==206 and e.resource=="#PRAYERG" for e in SplFile.from_bytes(game.snapshot()["#RECITEG.SPL"]).abilities[0].effects))
 
-    def test_other_wording_gets_the_note_and_untranslated_text_is_kept(self):
-        game = self.game(prayer_recitation(**{
-            "SPPR422.SPL": casting_spell("#RECITEG", "#RECITEB", level=4, desc=OTHER_RECITATION_REF)}))
-        output = self.install(game, warnings=True)
-        self.assertIn("SPPR422.spl does not have the expected sentence about Prayer; the note was added", output)
-        after = game.snapshot()
-        self.assertEqual(OTHER_RECITATION + "\n\n" + RECITATION_NOTE, description(game, after["SPPR422.SPL"]))
-        self.assertIn("#RECITEG.SPL", self.changed(game))
 
-        game = self.game(prayer_recitation(**{
-            "SPPR422.SPL": casting_spell("#RECITEG", "#RECITEB", level=4, desc=GERMAN_RECITATION_REF)}))
-        output = self.install(game, warnings=True)
-        self.assertIn("SPPR422.spl has different or untranslated text; left unchanged", output)
-        after = game.snapshot()
-        self.assertEqual(game.original["SPPR422.SPL"], after["SPPR422.SPL"])
-        self.assertEqual(game.original["CDID422.ITM"], after["CDID422.ITM"])
-        self.assertIn("#RECITEG.SPL", self.changed(game))
+    def test_other_wording_gets_complete_prayer_and_recitation_text(self):
+        game=self.game(prayer_recitation(**{"SPPR422.SPL":casting_spell("#RECITEG","#RECITEB",level=4,desc=GERMAN_RECITATION_REF)}))
+        self.install(game);self.assertEqual(RECITATION_NEW,description(game,game.snapshot()["SPPR422.SPL"]))
 
 
 if __name__ == "__main__":
