@@ -1,187 +1,157 @@
-// Patch the resolved effect-bearing Spellstrike resource, not its Spell Shield
-// wrapper. The caller supplies that resource's own identity for timed refresh.
+// Own Spellstrike's recipient casting-failure package, protection removal,
+// and timed self-refresh. Spell Shield wrappers remain the caller's concern.
 DEFINE_PATCH_FUNCTION cbr_sr_spellstrike_patch
   STR_VAR payload_resref = ~~
+  RET cbr_ss_readable
 BEGIN
-  PATCH_IF (STRING_LENGTH ~%payload_resref%~ < 1 OR STRING_LENGTH ~%payload_resref%~ > 8) BEGIN
-    PATCH_FAIL ~CBR Spellstrike: expected a payload resref of 1-8 characters.~
-  END
+  // Resource identity may come through a game delivery chain. It is never a
+  // reason to reject an otherwise writable spell.
   SPRINT cbr_ss_resref ~%payload_resref%~
   TO_UPPER cbr_ss_resref
-  PATCH_IF (BUFFER_LENGTH < 0x72) BEGIN PATCH_FAIL ~CBR Spellstrike: truncated SPL header.~ END
-  READ_ASCII 0 cbr_ss_signature (8)
-  PATCH_IF NOT (~%cbr_ss_signature%~ STRING_EQUAL ~SPL V1  ~) BEGIN
-    PATCH_FAIL ~CBR Spellstrike: expected SPL V1.~
-  END
-  READ_LONG 0x64 cbr_ss_ab
-  READ_SHORT 0x68 cbr_ss_ab_count
-  READ_LONG 0x6a cbr_ss_fx
-  READ_SHORT 0x6e cbr_ss_cast_first
-  READ_SHORT 0x70 cbr_ss_cast_count
-  PATCH_IF (cbr_ss_ab < 0x72 OR cbr_ss_ab_count = 0
-    OR cbr_ss_ab + 0x28 * cbr_ss_ab_count > BUFFER_LENGTH
-    OR cbr_ss_fx < cbr_ss_ab + 0x28 * cbr_ss_ab_count
-    OR cbr_ss_fx > BUFFER_LENGTH
-    OR ((BUFFER_LENGTH - cbr_ss_fx) MODULO 0x30 != 0)) BEGIN
-    PATCH_FAIL ~CBR Spellstrike: invalid ability/effect tables.~
-  END
-  SET cbr_ss_total = (BUFFER_LENGTH - cbr_ss_fx) / 0x30
-  PATCH_IF (cbr_ss_total > 65535 OR cbr_ss_cast_first + cbr_ss_cast_count > cbr_ss_total) BEGIN
-    PATCH_FAIL ~CBR Spellstrike: invalid casting-effect slice.~
-  END
-  FOR (cbr_ss_i = 0; cbr_ss_i < cbr_ss_total; ++cbr_ss_i) BEGIN
-    SET $cbr_ss_owner(~%cbr_ss_i%~) = (0 - 2)
-    SET $cbr_ss_owned(~%cbr_ss_i%~) = 0
-    SET $cbr_ss_marker(~%cbr_ss_i%~) = 0
-  END
-  FOR (cbr_ss_i = cbr_ss_cast_first; cbr_ss_i < cbr_ss_cast_first + cbr_ss_cast_count; ++cbr_ss_i) BEGIN
-    SET $cbr_ss_owner(~%cbr_ss_i%~) = (0 - 1)
-  END
-
-  SET cbr_ss_expected = cbr_ss_total
-  FOR (cbr_ss_a = 0; cbr_ss_a < cbr_ss_ab_count; ++cbr_ss_a) BEGIN
-    SET cbr_ss_header = cbr_ss_ab + 0x28 * cbr_ss_a
-    READ_SHORT (cbr_ss_header + 0x1e) cbr_ss_count
-    READ_SHORT (cbr_ss_header + 0x20) cbr_ss_first
-    PATCH_IF (cbr_ss_count = 0 OR cbr_ss_first + cbr_ss_count > cbr_ss_total) BEGIN
-      PATCH_FAIL ~CBR Spellstrike: invalid ability-effect slice.~
+  SET cbr_ss_readable = BUFFER_LENGTH >= 0x72
+  PATCH_IF cbr_ss_readable BEGIN
+    READ_LONG 0x64 cbr_ss_ab
+    READ_SHORT 0x68 cbr_ss_ab_count
+    READ_LONG 0x6a cbr_ss_fx
+    READ_SHORT 0x6e cbr_ss_cast_first
+    READ_SHORT 0x70 cbr_ss_cast_count
+    SET cbr_ss_total = cbr_ss_cast_first + cbr_ss_cast_count
+    SET cbr_ss_readable = cbr_ss_ab >= 0x72
+      AND cbr_ss_ab + 0x28 * cbr_ss_ab_count <= BUFFER_LENGTH
+      AND cbr_ss_fx >= 0x72 AND cbr_ss_fx <= BUFFER_LENGTH
+    FOR (cbr_ss_a = 0; cbr_ss_readable AND cbr_ss_a < cbr_ss_ab_count; ++cbr_ss_a) BEGIN
+      READ_SHORT (cbr_ss_ab + cbr_ss_a * 0x28 + 0x1e) cbr_ss_count
+      READ_SHORT (cbr_ss_ab + cbr_ss_a * 0x28 + 0x20) cbr_ss_first
+      SET cbr_ss_total = (cbr_ss_total > cbr_ss_first + cbr_ss_count ? cbr_ss_total : cbr_ss_first + cbr_ss_count)
     END
-    SET $cbr_ss_first(~%cbr_ss_a%~) = cbr_ss_first
-    SET $cbr_ss_count(~%cbr_ss_a%~) = cbr_ss_count
-    SET cbr_ss_strip_count = 0
-    SET cbr_ss_marker_count = 0
-    FOR (cbr_ss_mode = 0; cbr_ss_mode < 2; ++cbr_ss_mode) BEGIN
-      SET $cbr_ss_failure_count(~%cbr_ss_mode%~) = 0
+    SET cbr_ss_readable = cbr_ss_readable AND cbr_ss_fx + cbr_ss_total * 0x30 <= BUFFER_LENGTH
+  END
+  PATCH_IF cbr_ss_readable BEGIN
+    // Shared slices become independent; empty abilities get our package too.
+    READ_ASCII (cbr_ss_fx + cbr_ss_cast_first * 0x30) cbr_ss_cast (cbr_ss_cast_count * 0x30)
+    FOR (cbr_ss_a = 0; cbr_ss_a < cbr_ss_ab_count; ++cbr_ss_a) BEGIN
+      SET cbr_ss_header = cbr_ss_ab + 0x28 * cbr_ss_a
+      READ_ASCII cbr_ss_header $cbr_ss_ability(~%cbr_ss_a%~) (0x28)
+      READ_SHORT (cbr_ss_header + 0x1e) cbr_ss_count
+      READ_SHORT (cbr_ss_header + 0x20) cbr_ss_first
+      READ_ASCII (cbr_ss_fx + cbr_ss_first * 0x30) $cbr_ss_effects(~%cbr_ss_a%~) (cbr_ss_count * 0x30)
     END
-    FOR (cbr_ss_i = cbr_ss_first; cbr_ss_i < cbr_ss_first + cbr_ss_count; ++cbr_ss_i) BEGIN
-      PATCH_IF ($cbr_ss_owner(~%cbr_ss_i%~) != (0 - 2)) BEGIN
-        PATCH_FAIL ~CBR Spellstrike: overlapping effect slices.~
+    // Normalize table storage; other spell-header fields stay.
+    DELETE_BYTES 0x72 (BUFFER_LENGTH - 0x72)
+    SET cbr_ss_ab = 0x72
+    PATCH_IF cbr_ss_ab_count = 0 BEGIN
+      SET cbr_ss_ab_count = 1
+      INNER_PATCH_SAVE $cbr_ss_ability(~0~) ~~ BEGIN
+        INSERT_BYTES 0 0x28
+        WRITE_BYTE 0 1 WRITE_BYTE 0x0c 1 WRITE_BYTE 0x0d 1
+        WRITE_SHORT 0x10 1 WRITE_SHORT 0x26 1
       END
-      SET $cbr_ss_owner(~%cbr_ss_i%~) = cbr_ss_a
-      SET cbr_ss_at = cbr_ss_fx + cbr_ss_i * 0x30
-      READ_SHORT cbr_ss_at cbr_ss_op
-      READ_BYTE (cbr_ss_at + 2) cbr_ss_target
-      READ_LONG (cbr_ss_at + 4) cbr_ss_p1
-      READ_LONG (cbr_ss_at + 8) cbr_ss_mode
-      READ_BYTE (cbr_ss_at + 0xc) cbr_ss_timing
-      READ_LONG (cbr_ss_at + 0x24) cbr_ss_save
-      PATCH_IF (cbr_ss_op = 221 AND cbr_ss_p1 = 9 AND cbr_ss_mode = 1) BEGIN
-        ++cbr_ss_strip_count
+      SPRINT $cbr_ss_effects(~0~) ~~
+    END
+    INSERT_BYTES 0x72 (cbr_ss_ab_count * 0x28)
+    SET cbr_ss_fx = BUFFER_LENGTH
+    INSERT_BYTES cbr_ss_fx (cbr_ss_cast_count * 0x30)
+    WRITE_ASCIIE cbr_ss_fx ~%cbr_ss_cast%~ (cbr_ss_cast_count * 0x30)
+    WRITE_LONG 0x64 cbr_ss_ab WRITE_SHORT 0x68 cbr_ss_ab_count
+    WRITE_LONG 0x6a cbr_ss_fx WRITE_SHORT 0x6e 0
+    SET cbr_ss_out_count = cbr_ss_cast_count
+    FOR (cbr_ss_a = 0; cbr_ss_a < cbr_ss_ab_count; ++cbr_ss_a) BEGIN
+      SET cbr_ss_header = cbr_ss_ab + cbr_ss_a * 0x28
+      SPRINT cbr_ss_raw $cbr_ss_ability(~%cbr_ss_a%~)
+      WRITE_ASCIIE cbr_ss_header ~%cbr_ss_raw%~ (0x28)
+      WRITE_SHORT (cbr_ss_header + 0x20) cbr_ss_out_count
+      SPRINT cbr_ss_raw $cbr_ss_effects(~%cbr_ss_a%~)
+      // Keep unowned metadata (power, dispelling and extension fields) from
+      // the first record of each behavior. Old values never gate the write.
+      INNER_PATCH_SAVE cbr_ss_failure_donor ~~ BEGIN
+        INSERT_BYTES 0 0x30 WRITE_BYTE 0xd 2 WRITE_BYTE 0x12 100
       END
-      // Only the recipient's no-save, timed arcane/divine failure is owned.
-      // Save extension flags are metadata, not saving-throw categories.
-      PATCH_IF (cbr_ss_op = 60 AND cbr_ss_target = 2 AND cbr_ss_timing = 0
-        AND (cbr_ss_mode = 0 OR cbr_ss_mode = 1) AND (cbr_ss_save BAND 0x1f) = 0) BEGIN
-        SET $cbr_ss_owned(~%cbr_ss_i%~) = 1
-        PATCH_IF ($cbr_ss_failure_count(~%cbr_ss_mode%~) = 0) BEGIN
-          SET $cbr_ss_donor(~%cbr_ss_a%~ ~%cbr_ss_mode%~) = cbr_ss_i
-        END
-        SET $cbr_ss_failure_count(~%cbr_ss_mode%~) += 1
-      END
-      PATCH_IF (cbr_ss_op = 321) BEGIN
-        READ_ASCII (cbr_ss_at + 0x14) cbr_ss_resource (8) NULL
-        PATCH_IF (~%cbr_ss_resource%~ STRING_EQUAL_CASE ~%cbr_ss_resref%~) BEGIN
-          READ_BYTE (cbr_ss_at + 3) cbr_ss_power
-          READ_BYTE (cbr_ss_at + 0xd) cbr_ss_flags
-          READ_LONG (cbr_ss_at + 0xe) cbr_ss_duration
-          READ_BYTE (cbr_ss_at + 0x12) cbr_ss_probability1
-          READ_BYTE (cbr_ss_at + 0x13) cbr_ss_probability2
-          READ_LONG (cbr_ss_at + 0x1c) cbr_ss_dice
-          READ_LONG (cbr_ss_at + 0x20) cbr_ss_sides
-          READ_LONG (cbr_ss_at + 0x28) cbr_ss_save_bonus
-          READ_LONG (cbr_ss_at + 0x2c) cbr_ss_special
-          PATCH_IF (cbr_ss_target != 2 OR cbr_ss_power != 0 OR cbr_ss_p1 != 0
-            OR cbr_ss_mode != 2 OR cbr_ss_timing != 1 OR cbr_ss_flags != 2
-            OR cbr_ss_duration != 0 OR cbr_ss_probability1 != 100 OR cbr_ss_probability2 != 0
-            OR cbr_ss_dice != 0 OR cbr_ss_sides != 0 OR cbr_ss_save != 0
-            OR cbr_ss_save_bonus != 0 OR cbr_ss_special != 0) BEGIN
-            PATCH_FAIL ~CBR Spellstrike: incompatible existing self-refresh effect.~
+      SPRINT cbr_ss_strip_donor ~%cbr_ss_failure_donor%~
+      INNER_PATCH ~%cbr_ss_raw%~ BEGIN
+        SET cbr_ss_have_failure = 0 SET cbr_ss_have_strip = 0
+        FOR (cbr_ss_at = 0; cbr_ss_at < BUFFER_LENGTH; cbr_ss_at += 0x30) BEGIN
+          READ_SHORT cbr_ss_at cbr_ss_op READ_LONG (cbr_ss_at + 8) cbr_ss_mode
+          PATCH_IF NOT cbr_ss_have_failure AND cbr_ss_op = 60
+            AND (cbr_ss_mode = 0 OR cbr_ss_mode = 1) BEGIN
+            READ_ASCII cbr_ss_at cbr_ss_failure_donor (0x30)
+            SET cbr_ss_have_failure = 1
           END
-          SET $cbr_ss_marker(~%cbr_ss_i%~) = 1
-          ++cbr_ss_marker_count
+          PATCH_IF NOT cbr_ss_have_strip AND cbr_ss_op = 221 AND cbr_ss_mode = 1 BEGIN
+            READ_ASCII cbr_ss_at cbr_ss_strip_donor (0x30)
+            SET cbr_ss_have_strip = 1
+          END
         END
       END
-    END
-    PATCH_IF (cbr_ss_strip_count != 1) BEGIN
-      PATCH_FAIL ~CBR Spellstrike: expected one level-9 spell-protection removal per ability.~
-    END
-    FOR (cbr_ss_mode = 0; cbr_ss_mode < 2; ++cbr_ss_mode) BEGIN
-      PATCH_IF ($cbr_ss_failure_count(~%cbr_ss_mode%~) < 1
-        OR $cbr_ss_failure_count(~%cbr_ss_mode%~) > 2) BEGIN
-        PATCH_FAIL ~CBR Spellstrike: expected arcane and divine failure donors.~
+      // Replace each owned behavior at its first position; append absent
+      // behaviors. Extra/edited records cannot suppress the decided package.
+      INNER_PATCH_SAVE cbr_ss_payload ~~ BEGIN
+        INSERT_BYTES 0 0x30
+        WRITE_SHORT 0 321 WRITE_BYTE 2 2 WRITE_LONG 8 2
+        WRITE_BYTE 0xc 1 WRITE_BYTE 0xd 2 WRITE_BYTE 0x12 100
+        WRITE_ASCIIE 0x14 ~%cbr_ss_resref%~ #8
       END
-    END
-    // Collapse the overlapping SR stages only when their delivery is coherent.
-    // Preserve every donor byte except amount/duration; do not erase foreign
-    // conditional effects merely because their opcode happens to be 60.
-    SET cbr_ss_donor_at = cbr_ss_fx + $cbr_ss_donor(~%cbr_ss_a%~ ~0~) * 0x30
-    FOR (cbr_ss_i = cbr_ss_first; cbr_ss_i < cbr_ss_first + cbr_ss_count; ++cbr_ss_i) BEGIN
-      PATCH_IF $cbr_ss_owned(~%cbr_ss_i%~) BEGIN
-        SET cbr_ss_at = cbr_ss_fx + cbr_ss_i * 0x30
-        FOR (cbr_ss_b = 2; cbr_ss_b < 0x30; ++cbr_ss_b) BEGIN
-          PATCH_IF ((cbr_ss_b < 4 OR cbr_ss_b >= 12) AND (cbr_ss_b < 14 OR cbr_ss_b >= 18)) BEGIN
-            READ_BYTE (cbr_ss_at + cbr_ss_b) cbr_ss_left
-            READ_BYTE (cbr_ss_donor_at + cbr_ss_b) cbr_ss_right
-            PATCH_IF (cbr_ss_left != cbr_ss_right) BEGIN
-              PATCH_FAIL ~CBR Spellstrike: failure donors have inconsistent delivery metadata.~
+      SET cbr_ss_wrote_strip = 0 SET cbr_ss_wrote_failure = 0
+      INNER_PATCH ~%cbr_ss_raw%~ BEGIN
+        SET cbr_ss_count = BUFFER_LENGTH / 0x30
+      END
+      // The extra iteration supplies missing records even to an empty ability.
+      FOR (cbr_ss_i = 0; cbr_ss_i <= cbr_ss_count; ++cbr_ss_i) BEGIN
+        SET cbr_ss_op = 0 - 1 SET cbr_ss_mode = 0 SPRINT cbr_ss_resource ~~
+        PATCH_IF cbr_ss_i < cbr_ss_count BEGIN
+          INNER_PATCH ~%cbr_ss_raw%~ BEGIN
+            SET cbr_ss_at = cbr_ss_i * 0x30
+            READ_SHORT cbr_ss_at cbr_ss_op READ_LONG (cbr_ss_at + 8) cbr_ss_mode
+            READ_ASCII (cbr_ss_at + 0x14) cbr_ss_resource (8) NULL
+            READ_ASCII cbr_ss_at cbr_ss_record (0x30)
+          END
+        END
+        SET cbr_ss_strip = cbr_ss_op = 221 AND cbr_ss_mode = 1
+        SET cbr_ss_failure = cbr_ss_op = 60 AND (cbr_ss_mode = 0 OR cbr_ss_mode = 1)
+        PATCH_IF NOT cbr_ss_wrote_strip AND (cbr_ss_strip OR cbr_ss_i = cbr_ss_count) BEGIN
+          INNER_PATCH_SAVE cbr_ss_payload ~%cbr_ss_payload%~ BEGIN
+            SET cbr_ss_at = BUFFER_LENGTH INSERT_BYTES cbr_ss_at 0x30
+            WRITE_ASCIIE cbr_ss_at ~%cbr_ss_strip_donor%~ (0x30)
+            WRITE_SHORT cbr_ss_at 221 WRITE_BYTE (cbr_ss_at + 2) 2
+            WRITE_LONG (cbr_ss_at + 4) 9 WRITE_LONG (cbr_ss_at + 8) 1
+            WRITE_BYTE (cbr_ss_at + 0xc) 1 WRITE_BYTE (cbr_ss_at + 0xd) 2
+            WRITE_BYTE (cbr_ss_at + 0x12) 100 WRITE_BYTE (cbr_ss_at + 0x13) 0
+            WRITE_LONG (cbr_ss_at + 0xe) 0
+            READ_LONG (cbr_ss_at + 0x24) cbr_ss_save
+            WRITE_LONG (cbr_ss_at + 0x24) (cbr_ss_save BAND 0xffffffe0)
+          END
+          SET cbr_ss_wrote_strip = 1
+        END
+        PATCH_IF NOT cbr_ss_wrote_failure AND (cbr_ss_failure OR cbr_ss_i = cbr_ss_count) BEGIN
+          INNER_PATCH_SAVE cbr_ss_payload ~%cbr_ss_payload%~ BEGIN
+            FOR (cbr_ss_kind = 0; cbr_ss_kind < 2; ++cbr_ss_kind) BEGIN
+              SET cbr_ss_at = BUFFER_LENGTH INSERT_BYTES cbr_ss_at 0x30
+              WRITE_ASCIIE cbr_ss_at ~%cbr_ss_failure_donor%~ (0x30)
+              WRITE_SHORT cbr_ss_at 60 WRITE_BYTE (cbr_ss_at + 2) 2
+              WRITE_LONG (cbr_ss_at + 4) 15 WRITE_LONG (cbr_ss_at + 8) cbr_ss_kind
+              WRITE_BYTE (cbr_ss_at + 0xc) 0 WRITE_LONG (cbr_ss_at + 0xe) 12
+              WRITE_BYTE (cbr_ss_at + 0x12) 100 WRITE_BYTE (cbr_ss_at + 0x13) 0
+              READ_LONG (cbr_ss_at + 0x24) cbr_ss_save
+              WRITE_LONG (cbr_ss_at + 0x24) (cbr_ss_save BAND 0xffffffe0)
             END
           END
+          SET cbr_ss_wrote_failure = 1
+        END
+        PATCH_IF cbr_ss_i < cbr_ss_count AND NOT cbr_ss_strip AND NOT cbr_ss_failure
+          AND NOT (cbr_ss_op = 321 AND ~%cbr_ss_resource%~ STRING_EQUAL_CASE ~%cbr_ss_resref%~) BEGIN
+          INNER_PATCH_SAVE cbr_ss_payload ~%cbr_ss_payload%~ BEGIN
+            SET cbr_ss_at = BUFFER_LENGTH INSERT_BYTES cbr_ss_at 0x30
+            WRITE_ASCIIE cbr_ss_at ~%cbr_ss_record%~ (0x30)
+          END
         END
       END
+      INNER_PATCH ~%cbr_ss_payload%~ BEGIN SET cbr_ss_length = BUFFER_LENGTH END
+      SET cbr_ss_dest = BUFFER_LENGTH INSERT_BYTES cbr_ss_dest cbr_ss_length
+      WRITE_ASCIIE cbr_ss_dest ~%cbr_ss_payload%~ (cbr_ss_length)
+      SET cbr_ss_new_count = cbr_ss_length / 0x30
+      WRITE_SHORT (cbr_ss_header + 0x1e) cbr_ss_new_count
+      SET cbr_ss_out_count += cbr_ss_new_count
     END
-    SET $cbr_ss_new_count(~%cbr_ss_a%~) = cbr_ss_count
-      - $cbr_ss_failure_count(~0~) - $cbr_ss_failure_count(~1~) - cbr_ss_marker_count + 3
-    SET cbr_ss_expected += $cbr_ss_new_count(~%cbr_ss_a%~) - cbr_ss_count
+  END ELSE BEGIN
+    PATCH_PRINT ~CBR Spellstrike: unreadable spell tables; leaving this file unchanged.~
   END
-  PATCH_IF (cbr_ss_expected > 65535) BEGIN PATCH_FAIL ~CBR Spellstrike: too many output effects.~ END
-  FOR (cbr_ss_i = 0; cbr_ss_i < cbr_ss_total; ++cbr_ss_i) BEGIN
-    PATCH_IF ($cbr_ss_owner(~%cbr_ss_i%~) = (0 - 2)) BEGIN
-      PATCH_FAIL ~CBR Spellstrike: unowned effects outside the casting/ability slices.~
-    END
-  END
-
-  // Build after the original table so all input offsets stay readable. Casting
-  // slices and out-of-order ability groups retain their original relative order.
-  SET cbr_ss_out_count = 0
-  FOR (cbr_ss_i = 0; cbr_ss_i < cbr_ss_total; ++cbr_ss_i) BEGIN
-    SET cbr_ss_a = $cbr_ss_owner(~%cbr_ss_i%~)
-    PATCH_IF (cbr_ss_i = cbr_ss_cast_first) BEGIN WRITE_SHORT 0x6e cbr_ss_out_count END
-    PATCH_IF (cbr_ss_a >= 0) BEGIN
-      PATCH_IF (cbr_ss_i = $cbr_ss_first(~%cbr_ss_a%~)) BEGIN
-        WRITE_SHORT (cbr_ss_ab + cbr_ss_a * 0x28 + 0x20) cbr_ss_out_count
-        WRITE_SHORT (cbr_ss_ab + cbr_ss_a * 0x28 + 0x1e) $cbr_ss_new_count(~%cbr_ss_a%~)
-        SET cbr_ss_dest = BUFFER_LENGTH
-        INSERT_BYTES cbr_ss_dest 0x30
-        WRITE_SHORT cbr_ss_dest 321
-        WRITE_BYTE (cbr_ss_dest + 2) 2
-        WRITE_LONG (cbr_ss_dest + 8) 2
-        WRITE_BYTE (cbr_ss_dest + 0xc) 1
-        WRITE_BYTE (cbr_ss_dest + 0xd) 2
-        WRITE_BYTE (cbr_ss_dest + 0x12) 100
-        WRITE_ASCIIE (cbr_ss_dest + 0x14) ~%cbr_ss_resref%~ #8
-        ++cbr_ss_out_count
-      END
-    END
-    SET cbr_ss_at = cbr_ss_fx + cbr_ss_i * 0x30
-    SET cbr_ss_keep = NOT $cbr_ss_marker(~%cbr_ss_i%~)
-    PATCH_IF $cbr_ss_owned(~%cbr_ss_i%~) BEGIN
-      READ_LONG (cbr_ss_at + 8) cbr_ss_mode
-      SET cbr_ss_keep = (cbr_ss_i = $cbr_ss_donor(~%cbr_ss_a%~ ~%cbr_ss_mode%~))
-    END
-    PATCH_IF cbr_ss_keep BEGIN
-      SET cbr_ss_dest = BUFFER_LENGTH
-      INSERT_BYTES cbr_ss_dest 0x30
-      FOR (cbr_ss_b = 0; cbr_ss_b < 0x30; ++cbr_ss_b) BEGIN
-        READ_BYTE (cbr_ss_at + cbr_ss_b) cbr_ss_byte
-        WRITE_BYTE (cbr_ss_dest + cbr_ss_b) cbr_ss_byte
-      END
-      PATCH_IF $cbr_ss_owned(~%cbr_ss_i%~) BEGIN
-        WRITE_LONG (cbr_ss_dest + 4) 15
-        WRITE_LONG (cbr_ss_dest + 0xe) 12
-      END
-      ++cbr_ss_out_count
-    END
-  END
-  PATCH_IF (cbr_ss_cast_first = cbr_ss_total) BEGIN WRITE_SHORT 0x6e cbr_ss_out_count END
-  DELETE_BYTES cbr_ss_fx (cbr_ss_total * 0x30)
 END

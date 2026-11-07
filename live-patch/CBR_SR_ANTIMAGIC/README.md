@@ -1,5 +1,11 @@
 # SR anti-magic existing-install patch
 
+Current source follows [We overwrite](../../AGENTS.md#we-overwrite): Spell Revisions
+is not a feature requirement, and changed payloads or descriptions do not veto an
+owned write. The release instructions below describe the older v0.8.10 archive;
+its separate setup template still has SR footprint gates pending integration.
+Do not infer that the source policy update has been released or live accepted.
+
 Source version **v0.8.10** (210 and 211 are unchanged since v0.8.1 except for their texts in v0.8.9;
 212 and 213 are new in v0.8.9). Component 210 was applied
 with authorization to Christopher's private stream installation on October 6;
@@ -9,9 +15,9 @@ gameplay acceptance remains separate from the automated release checks.
 - **210:** Pierce Magic halves current MR, subtracting at least 10 and at most
   40 percentage points, rounded up; never below zero. Duration: five rounds.
   Recasts refresh the existing reduction, preserving its original amount.
-  Combines with Lower Resistance. Requires **SR main component 0 and EEex**.
+  Combines with Lower Resistance. Requires **EEex**. The older archive additionally requires SR.
 - **211:** Spellstrike gives **15% arcane/divine spell failure for two rounds**;
-  its own failures refresh instead of stacking. Requires **SR main component 0**.
+  its own failures refresh instead of stacking. The older archive requires SR.
 
 Both preserve spell-protection removal, Spell Shield interception and installed
 invisible targeting. Pierce Shield, Lower Resistance and Entropy Shield are not
@@ -35,8 +41,8 @@ changed. These components are independent; choose either or both.
    before testing new casts: stored effects are not rewritten by an installer.
 
 The installer resolves parent spells through `spell.ids` and follows their actual
-payload links. It rejects unsupported or ambiguous payloads and foreign private
-resource collisions. It writes each description in Spell Revisions' layout (keeping the
+payload links. The current libraries write owned payloads and private resources
+even when previous content differs. They write each description in Spell Revisions' layout (keeping the
 invisible-target note only for a spell that can target invisible creatures) and updates the
 items and spells that show the old mechanic. The runtime's private resource identity is `CBRPM`; no existing
 MR modifier or save is globally rewritten.
@@ -45,18 +51,12 @@ MR modifier or save is globally rewritten.
 
 For an installation that already has the changed mechanic, whichever installer or private
 tail made it, **212** (Pierce Magic) and **213** (Spellstrike) change descriptions and nothing
-else. They refuse a payload that does not carry the mechanic (the `CBRPM` callback for 212,
-a 15% failure for 213), so they cannot describe a mechanic that is not there.
+else. Selecting them declares that the mechanic was installed separately; current
+libraries do not inspect old payloads to approve or reject that choice.
 
-- The spell's description is rewritten in Spell Revisions' layout. 213 keeps a Spellstrike
-  text that already has that layout and states the 15%, and points the rest at it.
-- Scrolls and other items that learn or cast the spell and still show an old description
-  (the strref of the spell as it was, of its payload spells, or any string with the same long
-  text) show the new one; an item with its own text keeps it and the installer prints its name.
-- Items that reach the payload through another spell, such as the Wand of Spell Striking, get a
-  private copy of their text with only this spell's `Special:` line replaced, if it is
-  recognizable; otherwise they keep their text and the installer prints their name.
-- Other spells that cast the same payload and show an old description are repointed.
+- Complete owned English descriptions are written from the mod's templates,
+  including linked scrolls, spells and the Wand of Spell Striking.
+- Other languages keep their existing text with a log line until a translation exists.
 
 Select 212 and/or 213 only (`--force-install-list 212 213`): choosing 210 or 211 there installs
 the mechanic. They also work after the main installer's 210 / 211. Uninstalling restores the

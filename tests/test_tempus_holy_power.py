@@ -3520,19 +3520,11 @@ class TempusHolyPowerTests(unittest.TestCase):
             for predicate in (
                 r"GAME_IS\s+~bg2ee eet~",
                 r"FILE_EXISTS_IN_GAME\s+~OHTEMPUS\.2DA~",
-                r"FILE_EXISTS_IN_GAME\s+~OHTMPS1\.SPL~",
-                r"IDS_OF_SYMBOL\s*\(\s*~spell~\s+~CLERIC_HOLY_POWER~\s*\)",
-                r"IDS_OF_SYMBOL\s*\(\s*~spell~\s+~WIZARD_IMPROVED_HASTE~\s*\)",
-                r"FILE_EXISTS_IN_GAME\s+~SPLSTATE\.IDS~",
-                r"FILE_EXISTS_IN_GAME\s+~SPLPROT\.2DA~",
             ):
                 predicate_match = re.search(rf"REQUIRE_PREDICATE.*?{predicate}", block)
                 self.assertIsNotNone(predicate_match, f"component {component}: missing {predicate}")
                 self.assertLess(predicate_match.start(), lam_position)
-            infrastructure = block.find("@9407")
-            self.assertGreaterEqual(infrastructure, 0)
-            self.assertLess(infrastructure, block.find("@9403"))
-            self.assertLess(infrastructure, block.find("@9404"))
+            self.assertEqual(2, len(re.findall(r"\bREQUIRE_PREDICATE\b", block)))
             self.assertNotRegex(block, r"\b(?:COPY|COPY_EXISTING|INCLUDE|LAF)\b")
         self.assertEqual(1, len(family_tokens), "components 401-403 must share one family")
 
@@ -3547,17 +3539,15 @@ class TempusHolyPowerTests(unittest.TestCase):
         self.assertGreaterEqual(wrapper_start, 0, "missing shared Tempus component wrapper")
         self.assertGreater(wrapper_end, wrapper_start, "missing shared wrapper end marker")
         body = _strip_weidu_comments(setup_raw[wrapper_start:wrapper_end])
-        for guard in (
-            r"ACTION_IF\s+\(cbr_tempus_divine_id\s+<\s+1100\s+OR\s+cbr_tempus_divine_id\s+>\s+1999\)",
-            r"ACTION_IF\s+\(cbr_tempus_haste_id\s+<\s+2100\s+OR\s+cbr_tempus_haste_id\s+>\s+2999\)",
-            r"ACTION_IF\s+!\(FILE_EXISTS_IN_GAME\s+~%cbr_tempus_divine_resref%\.SPL~\)",
-            r"ACTION_IF\s+!\(FILE_EXISTS_IN_GAME\s+~%cbr_tempus_haste_resref%\.SPL~\)",
+        for symbol, variable in (
+            ("CLERIC_HOLY_POWER", "cbr_tempus_divine_resref"),
+            ("WIZARD_IMPROVED_HASTE", "cbr_tempus_haste_resref"),
         ):
-            self.assertRegex(body, guard)
+            self.assertRegex(body, rf"LAF\s+cbr_setup_spell\s+STR_VAR\s+symbol\s*=\s*~{symbol}~"
+                                   rf"\s+RET\s+{variable}\s*=\s*resref\s+END")
+        self.assertNotRegex(body, r"\b(?:FAIL|WARN|REQUIRE_PREDICATE|ACTION_IF)\b")
         self.assertNotRegex(body, r"\bSPPR412\b|\bSPWI613\b")
-        # The floors match cbr_validate_spell_ids' require-mode contract, so
-        # every derivable slot is three digits and no zero-padding branch may
-        # reappear in the wrapper.
+        # Address decoding and padding belong to the shared setup resolver.
         self.assertNotRegex(body, r"SPPR00%|SPPR0%|SPWI00%|SPWI0%")
 
         staged = (
@@ -3571,8 +3561,9 @@ class TempusHolyPowerTests(unittest.TestCase):
         apply_position = body.find("LAF cbr_apply_tempus_holy_power")
         self.assertGreater(apply_position, 0)
         for resource in staged:
+            staging_function = "cbr_setup_ids" if resource == "SPLSTATE.IDS" else "cbr_setup_stage"
             copy = re.search(
-                rf"COPY_EXISTING\s+~{re.escape(resource)}~\s+~override/{re.escape(resource)}~",
+                rf"LAF\s+{staging_function}\s+STR_VAR\s+file\s*=\s*~{re.escape(resource)}~\s+END",
                 body,
                 re.IGNORECASE,
             )
@@ -3584,8 +3575,8 @@ class TempusHolyPowerTests(unittest.TestCase):
             )
         self.assertEqual(
             len(staged),
-            len(re.findall(r"\bCOPY_EXISTING\b", body)),
-            "the wrapper must materialize exactly the six file-backed inputs",
+            len(re.findall(r"\bLAF\s+cbr_setup_(?:stage|ids)\b", body)),
+            "the wrapper must stage each file-backed input independently",
         )
         self.assertNotRegex(body, r"COPY_EXISTING\s+~SPELL\.IDS~")
         self.assertRegex(body, r"resource_dir\s*=\s*~override~")

@@ -180,12 +180,13 @@ class DragonInstallerTests(unittest.TestCase):
         self.assertEqual(snapshot(game.override), game.before)
         self.assert_stable(game)
 
-    def test_missing_scs_skips_both_components_without_writes(self) -> None:
+    def test_available_dragon_resources_install_without_scs_footprint(self) -> None:
         game = self.game(scs=False)
         result = game.run("--force-install-list", "110", "111")
-        self.assertIn("SKIPPING", result.stdout)
-        self.assertNotIn("SUCCESSFULLY INSTALLED", result.stdout)
-        self.assertEqual(snapshot(game.override), game.before)
+        self.assert_success(result)
+        self.assertNotIn("INSTALLED WITH WARNINGS", result.stdout)
+        self.assertEqual(snapshot(game.override).keys() - game.before.keys(), SCRIPTS | PAYLOADS)
+        self.assert_stable(game)
 
     def test_foreign_last_cre_rolls_back_before_any_payload(self) -> None:
         game = self.game()

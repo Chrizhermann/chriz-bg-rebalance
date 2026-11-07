@@ -1,5 +1,9 @@
 # 00 — Project Scope & Plan
 
+This is a historical scope/status record. Current implementation follows
+[We overwrite](../AGENTS.md#we-overwrite); older prerequisite and content-validation
+instructions below are superseded. Recorded test results apply to their dated builds.
+
 ## Goal
 
 Principled, well-credited balance adjustments on top of **SCS** and **Spell Revisions** for a
@@ -126,8 +130,9 @@ collect concrete gripes with numbers, then design per-spell adjustments.
 ## Method
 
 Research → design (numbers + rationale) → user sign-off → tail-install WeiDU component →
-cautious test on the live install. Never uninstall; resolve mod-added resrefs via `spell.ids`
-symbols; components idempotent + predicate-guarded. Follow CLAUDE.md.
+separately authorized gameplay check. Never uninstall an active stack; resolve mod-added
+resrefs via `spell.ids`; write idempotent owned results without old-content preflights.
+Follow [AGENTS.md](../AGENTS.md).
 
 ## Relationship to sibling repos
 

@@ -56,6 +56,7 @@ class LiveAdapterTests(unittest.TestCase):
     def assert_installed(self, result: subprocess.CompletedProcess) -> None:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('SUCCESSFULLY INSTALLED', result.stdout)
+        self.assertNotIn('INSTALLED WITH WARNINGS', result.stdout)
 
     def test_private_tail_matches_public_component(self):
         public, private = self.games('public', 'private')
@@ -118,21 +119,50 @@ class LiveAdapterTests(unittest.TestCase):
         self.assertEqual(tree(game.override), game.before)
         self.assert_stable(game)
 
-    def test_runtime_update_never_allocates_a_second_marker(self):
+    def test_runtime_update_recreates_a_missing_marker(self):
         (game,) = self.games('game')
         adapter = stage(game.root, DEPLOYED_RUNTIME)
         self.assert_installed(install(game, '0'))
         ids = game.override / 'SPLSTATE.IDS'
         ids.write_text('IDS V1.0\n0 NORMAL\n', encoding='ascii', newline='\n')
-        before = tree(game.override)
         shutil.copy2(CURRENT_RUNTIME, adapter / 'lua/M_CBRRES.lua')
         result = install(game, '1')
-        self.assertNotIn('SUCCESSFULLY INSTALLED', result.stdout)
-        self.assertIn('CBR_PHYSICAL_SOFTCAP marker from component 0 is missing',
-                      result.stdout + result.stderr)
-        self.assertNotRegex(game.active_log(), r'(?mi)#0\s+#1\b')
-        self.assertEqual(tree(game.override), before)
+        self.assert_installed(result)
+        self.assertEqual(game.marker_rows(), [(255, 'CBR_PHYSICAL_SOFTCAP')])
+        self.assertEqual((game.override / 'M_CBRRES.lua').read_text(), stamped(CURRENT_RUNTIME, 255))
         self.assert_stable(game)
+
+    def test_runtime_update_recreates_missing_runtime_and_table(self):
+        (game,) = self.games('game')
+        stage(game.root)
+        self.assert_installed(install(game, '0'))
+        (game.override / 'SPLSTATE.IDS').unlink()
+        (game.override / 'M_CBRRES.lua').unlink()
+        self.assert_installed(install(game, '1'))
+        self.assertEqual(game.marker_rows(), [(255, 'CBR_PHYSICAL_SOFTCAP')])
+        self.assertEqual((game.override / 'M_CBRRES.lua').read_text(), stamped(CURRENT_RUNTIME, 255))
+        self.assert_stable(game)
+
+    def test_missing_edited_duplicate_and_full_marker_tables(self):
+        variants = (
+            (None, 255),
+            ('IDS V1.0\n', 255),
+            ('IDS V1.0\n230 CBR_PHYSICAL_SOFTCAP\n230 OTHER\n', 230),
+            ('IDS V1.0\n230 CBR_PHYSICAL_SOFTCAP\n231 CBR_PHYSICAL_SOFTCAP\n', 231),
+            ('IDS V1.0\n999 CBR_PHYSICAL_SOFTCAP\n', 255),
+            ('IDS V1.0\n' + ''.join(f'{i} OTHER_{i}\n' for i in range(256)), 255),
+        )
+        for states, marker in variants:
+            with self.subTest(states=states):
+                with tempfile.TemporaryDirectory(prefix='cbr-cap-variant-') as temporary:
+                    game = ResistanceGame(Path(temporary) / 'game', states=states)
+                    stage(game.root)
+                    self.assert_installed(install(game, '0'))
+                    self.assertEqual(game.marker_rows(), [(marker, 'CBR_PHYSICAL_SOFTCAP')])
+                    before = tree(game.override)
+                    self.assert_installed(install(game, '1'))
+                    self.assertEqual(tree(game.override), before)
+                    self.assert_stable(game)
 
 
 if __name__ == '__main__':

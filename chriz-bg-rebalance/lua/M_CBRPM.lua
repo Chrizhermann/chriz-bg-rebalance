@@ -23,22 +23,33 @@ local function inspect(sprite, tick)
     EEex_Utility_IterateCPtrList(sprite.m_timedEffectList, function(fx)
         if string.upper(fx.m_sourceRes:get()) ~= OWNER then return end
         if fx.m_effectId ~= 166 and fx.m_effectId ~= 142 then return end
-        if fx.m_effectId == 166 and (fx.m_dWFlags ~= 0
-            or fx.m_effectAmount > 0 or fx.m_effectAmount < -40) then
-            error("CBR Pierce Magic: malformed owned MR effect")
-        end
-        if fx.m_durationType ~= 4096 then
-            error("CBR Pierce Magic: unexpected owned effect timing")
-        end
         if fx.m_done ~= 0 or fx.m_duration <= tick then
             if fx.m_effectId == 166 then stale = true end
             return
         end
+        -- The saved private package is ours. Repair its fields and collapse
+        -- duplicates without adding a second subtraction or rejecting a save.
+        fx.m_durationType = 4096
         if fx.m_effectId == 166 then
-            if reduction then error("CBR Pierce Magic: duplicate owned MR effects") end
-            reduction = fx
-        elseif fx.m_dWFlags == 106 then
-            icons[#icons + 1] = fx
+            if reduction then
+                fx.m_effectAmount = 0
+                fx.m_done = 1
+            else
+                reduction = fx
+                fx.m_dWFlags = 0
+                local amount = tonumber(fx.m_effectAmount)
+                if not amount or amount ~= amount or math.abs(amount) == math.huge then
+                    fx.m_effectAmount = 0
+                    local mr = math.max(0, EEex_Sprite_GetStat(sprite, MR_STAT))
+                    amount = math.min(mr, math.max(10, math.min(40, math.ceil(mr / 2))))
+                end
+                fx.m_effectAmount = -math.min(40, math.abs(amount))
+            end
+        elseif #icons == 0 then
+            fx.m_dWFlags = 106
+            icons[1] = fx
+        else
+            fx.m_done = 1
         end
     end)
     return reduction, icons, stale

@@ -2,42 +2,87 @@ BACKUP ~CBR_PHYSICAL_CAP/backup~
 AUTHOR ~ChrizFader~
 VERSION ~private-oct20-immunity-windows~
 
+ALWAYS
+  // This adapter owns its marker and runtime. Keep the allocator here so a
+  // shared library's content preflight cannot block a tail update.
+  DEFINE_ACTION_FUNCTION cbr_cap_write_runtime BEGIN
+    ACTION_IF (NOT FILE_EXISTS ~override/SPLSTATE.IDS~) BEGIN
+      ACTION_IF (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) BEGIN
+        COPY_EXISTING ~SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
+      END ELSE BEGIN
+        COPY ~CBR_PHYSICAL_CAP/lua/M_CBRRES.lua~ ~override/SPLSTATE.IDS~
+          DELETE_BYTES 0 BUFFER_LENGTH
+          INSERT_BYTES 0 (STRING_LENGTH ~IDS V1.0%WNL%~)
+          WRITE_ASCIIE 0 ~IDS V1.0%WNL%~
+      END
+    END
+    OUTER_SET cbr_cap_state = (0 - 1)
+    COPY ~override/SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
+      FOR (i = 0; i < 256; ++i) BEGIN SET $cbr_cap_used(~%i%~) = 0 END
+      READ_ASCII 0 cbr_cap_ids (BUFFER_LENGTH)
+      INNER_PATCH ~%cbr_cap_ids%~ BEGIN
+        REPLACE_EVALUATE CASE_INSENSITIVE
+          ~^[ %TAB%]*\([^ %TAB%%WNL%%MNL%%LNL%]+\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
+        BEGIN
+          PATCH_IF (IS_AN_INT ~%MATCH1%~) BEGIN
+            SET value = MATCH1
+            PATCH_IF (value >= 0 && value < 256) BEGIN
+              PATCH_IF (~%MATCH2%~ STRING_EQUAL_CASE ~CBR_PHYSICAL_SOFTCAP~) BEGIN
+                SET cbr_cap_state = value
+              END ELSE BEGIN SET $cbr_cap_used(~%value%~) = 1 END
+            END
+          END
+        END ~~
+      END
+      FOR (i = 255; i >= 0 && cbr_cap_state < 0; --i) BEGIN
+        PATCH_IF ($cbr_cap_used(~%i%~) = 0) BEGIN SET cbr_cap_state = i END
+      END
+      // The native marker is one byte. A full table still receives our owned
+      // preferred symbol; foreign aliases are not grounds to reject it.
+      PATCH_IF (cbr_cap_state < 0) BEGIN SET cbr_cap_state = 255 END
+      SET written = 0
+      REPLACE_EVALUATE CASE_INSENSITIVE
+        ~^[ %TAB%]*[^ %TAB%%WNL%%MNL%%LNL%]+[ %TAB%]+CBR_PHYSICAL_SOFTCAP\b~
+      BEGIN
+        SPRINT replacement ~~
+        PATCH_IF (written = 0) BEGIN
+          SPRINT replacement ~%cbr_cap_state% CBR_PHYSICAL_SOFTCAP~
+          SET written = 1
+        END
+      END ~%replacement%~
+      PATCH_IF (written = 0) BEGIN
+        SPRINT prefix ~~
+        PATCH_IF (BUFFER_LENGTH > 0) BEGIN
+          READ_BYTE (BUFFER_LENGTH - 1) last
+          PATCH_IF (last != 10 && last != 13) BEGIN SPRINT prefix ~%WNL%~ END
+        END
+        SPRINT row ~%prefix%%cbr_cap_state% CBR_PHYSICAL_SOFTCAP%WNL%~
+        SET end = BUFFER_LENGTH
+        INSERT_BYTES end (STRING_LENGTH ~%row%~)
+        WRITE_ASCIIE end ~%row%~
+      END
+    BUT_ONLY
+    CLEAR_IDS_MAP
+    COPY ~CBR_PHYSICAL_CAP/lua/M_CBRRES.lua~ ~override/M_CBRRES.lua~
+      REPLACE_TEXTUALLY ~%CBR_RES_CAP%~ ~90~
+      REPLACE_TEXTUALLY ~%CBR_RES_STATE%~ ~%cbr_cap_state%~
+    BUT_ONLY
+  END
+END
+
 BEGIN ~Party physical resistance: half effectiveness above 80%, maximum 90%~
 DESIGNATED 0
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) ~This patch requires BG2EE or EET.~
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) ~This patch requires EEex.~
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) ~SPLSTATE.IDS is required.~
-
-INCLUDE ~CBR_PHYSICAL_CAP/lib/tempus_holy_power.tpa~
-INCLUDE ~CBR_PHYSICAL_CAP/lib/tempus_spec_apr_eeex.tpa~
-INCLUDE ~CBR_PHYSICAL_CAP/lib/physical_resistance.tpa~
-COPY_EXISTING ~SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
-LAF cbr_apply_physical_resistance
-  INT_VAR cap = 90
-  STR_VAR template_file = ~CBR_PHYSICAL_CAP/lua/M_CBRRES.lua~
-END
+LAF cbr_cap_write_runtime END
 
 // In-place runtime update for a game that already has component 0 in the
 // middle of its log: a new tail entry replaces only override/M_CBRRES.lua
-// (WeiDU keeps the old file in backup/1) and reuses the existing marker.
+// (WeiDU keeps the old file in backup/1) and writes the owned marker if missing.
 BEGIN ~Update installed runtime: short immunity windows (Divine Protection) keep 100%~
 DESIGNATED 1
 REQUIRE_PREDICATE (MOD_IS_INSTALLED ~CBR_PHYSICAL_CAP/setup-cbr_physical_cap.tp2~ ~0~) ~Install component 0 first.~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) ~This patch requires BG2EE or EET.~
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) ~This patch requires EEex.~
 
-INCLUDE ~CBR_PHYSICAL_CAP/lib/tempus_holy_power.tpa~
-INCLUDE ~CBR_PHYSICAL_CAP/lib/tempus_spec_apr_eeex.tpa~
-INCLUDE ~CBR_PHYSICAL_CAP/lib/physical_resistance.tpa~
-ACTION_IF (NOT FILE_EXISTS ~override/SPLSTATE.IDS~) OR (NOT FILE_EXISTS ~override/M_CBRRES.lua~) BEGIN
-  FAIL ~Component 0 is incomplete: override/SPLSTATE.IDS and override/M_CBRRES.lua are both required.~
-END
-// An update must reuse the marker component 0 allocated, never add one.
-CLEAR_IDS_MAP
-ACTION_IF (IDS_OF_SYMBOL (~SPLSTATE~ ~CBR_PHYSICAL_SOFTCAP~) < 0) BEGIN
-  FAIL ~The CBR_PHYSICAL_SOFTCAP marker from component 0 is missing from SPLSTATE.IDS.~
-END
-LAF cbr_apply_physical_resistance
-  INT_VAR cap = 90
-  STR_VAR template_file = ~CBR_PHYSICAL_CAP/lua/M_CBRRES.lua~
-END
+LAF cbr_cap_write_runtime END

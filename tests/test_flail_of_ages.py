@@ -291,14 +291,14 @@ class FlailTests(unittest.TestCase):
         self.assertIn("NOT INSTALLED DUE TO ERRORS", output)
         self.assertEqual(expected, {p.name.upper(): p.read_bytes() for p in g.override.iterdir() if p.is_file()})
 
-    def test_missing_target_skips_before_writing(self):
-        g = self.game()
+    def test_missing_one_target_does_not_block_other_flails(self):
+        g = self.game("vanilla")
         (g.override / "BLUN30D.ITM").unlink()
-        expected = {p.name.upper(): p.read_bytes() for p in g.override.iterdir() if p.is_file()}
-        _, output = g.run()
-        self.assertIn("SKIPPING", output)
-        self.assertNotIn("SUCCESSFULLY INSTALLED", output)
-        self.assertEqual(expected, {p.name.upper(): p.read_bytes() for p in g.override.iterdir() if p.is_file()})
+        output = self.assert_installed(g)
+        self.assertNotIn("BLUN30D.ITM", output)
+        for name in ("BLUN14", "BLUN30C", "BLUN30"):
+            slow = next(fx for fx in read_itm(g.override / f"{name}.ITM").abilities[0].effects if fx.opcode == 40)
+            self.assertEqual(-TIERS[name], slow.save_bonus)
 
     def test_save_extension_bits_remain(self):
         g = self.game()

@@ -28,13 +28,18 @@ FORMS = ("DVGASFRM.ITM", "OHBEGASF.SPL", "BDGASFOR.SPL", "OHGASFRM.SPL", "FINBOD
 RESISTANCE_OPCODES = (27, 28, 29, 30, 31, 84, 85, 86, 87, 88, 89)
 OLD_PHRASE = "immune to almost all forms of damage"
 NEW_PHRASE = "75% resistant to physical, elemental and magic damage while retaining poison immunity"
-TEXTS = [
-    "Untouched shared sentinel.",
-    "Summon Efreeti\nOnce per day an efreeti can turn into gaseous form, becoming "
-    + OLD_PHRASE + " for a short time.\nUnrelated spell statistics remain unchanged.",
-    "Summon Djinni\nOnce per day a djinni can turn into gaseous form, becoming "
-    + OLD_PHRASE + " for a short time.\nUnrelated spell statistics remain unchanged.",
+TEXTS = ["Untouched shared sentinel.",
+    "Summon Efreeti\nLevel: 7\nSchool: Conjuration\nRange: Long\nDuration: 8 rounds + 1 round/level\nCasting Time: 1 round\nArea of Effect: Special\nSaving Throw: None\n\nWith this spell, the conjurer can cajole an efreeti, a massive genie with powerful abilities, to leave the Elemental Plane of Fire and enter the Prime Material Plane. The gated genie is immune to Banishment and has access to several spell-like abilities which can be cast instantly as a 10th level caster. Once per day an efreeti can turn into gaseous form, becoming immune to almost all forms of damage for a short time. The genie will generally use this ability when badly injured, to either regenerate before attacking again, or to leave the battlefield avoiding further damage. The efreeti will serve for the duration indicated above, attacking the enemies of the conjurer until the duration of the spell runs out.\n\nEfreeti (10 Hit Dice):\nSTR 19, DEX 17, CON 16, INT 13, WIS 14, CHA 15; AL Lawful Evil\nHP 98, AC 1, THAC0 5, Saving Throws 8/11/8/11/11\n2 Attacks Per Round, 1d8+10 Slashing +1d6 Fire Damage (Scimitar +2)\n\nSpecial Qualities:\nFire Resistance 100%\n\nMemorized Spells:\n1. Burning Hands, Magic Missile (x2), Shield\n2. Agannazar's Scorcher, Invisibility (x2)\n3. Fireball (x3)\n4. Fire Shield (x2)\n5. Conjure Lesser Fire Elemental",
+    'Summon Djinni\nLevel: 7\nSchool: Conjuration\nRange: Long\nDuration: 8 rounds + 1 round/level\nCasting Time: 1 round\nArea of Effect: Special\nSaving Throw: None\n\nWith this spell, the conjurer can cajole a djinni, a massive genie with powerful abilities, to leave the Elemental Plane of Air and enter the Prime Material Plane. The gated genie is immune to Banishment and has access to several spell-like abilities which can be cast instantly as a 10th level caster. Once per day a djinni can turn into gaseous form, becoming immune to almost all forms of damage for a short time. The genie will generally use this ability when badly injured, to either regenerate before attacking again, or to leave the battlefield avoiding further damage. The djinni will serve for the duration indicated above, attacking the enemies of the conjurer until the duration of the spell runs out.\n\nDjinni (10 Hit Dice):\nSTR 17, DEX 19, CON 15, INT 14, WIS 14, CHA 15; AL Chaotic Good\nHP 89, AC 0, THAC0 7, Saving Throws 11/7/11/7/7\n3 Attacks Per Round, 1d8+5 Slashing Damage (Scimitar +2)\n\nMemorized Spells:\n1. Magic Missile (x3), Shield\n2. Invisibility (x2), Mirror Image\n3. Haste, Lightning Bolt (x2)\n4. Improved Invisibility, Minor Globe of Invulnerability\n5. Conjure Lesser Air Elemental'
 ]
+EXPECTED_TEXTS = [text.replace(OLD_PHRASE, NEW_PHRASE) for text in TEXTS]
+CHANNELS = {
+    "DVGASFRM.ITM": (27, 28, 29, 30, 31, 86, 87, 88, 89),
+    "OHBEGASF.SPL": (27, 28, 31, 85, 86, 87, 88, 89),
+    "BDGASFOR.SPL": (27, 28, 31, 85, 86, 87, 88, 89),
+    "OHGASFRM.SPL": (27, 28, 31, 85, 86, 87, 88, 89),
+    "FINBODGF.ITM": RESISTANCE_OPCODES,
+}
 
 
 def effect(opcode, p1=0, p2=0, *, item=False, resource="", **kwargs):
@@ -52,11 +57,12 @@ def form(name):
     fx = [effect(135, p2=1, resource="GASFORM4", item=True) if fin
           else effect(53, 0x7F39, item=item),
           effect(98, 20 if fin else 3, 2, item=item)]
-    for opcode in RESISTANCE_OPCODES:
+    for opcode in CHANNELS[name]:
         value = 50 if fin and opcode in (30, 84) else 75 if fin and opcode == 31 else 100
         fx.append(effect(opcode, value, 1, item=item))
-    fx.extend((effect(166, 0 if fin else 100, 1, item=item),
-               effect(101, p2=25, item=item),  # poison immunity
+    if item:
+        fx.append(effect(166, 0 if fin else 100, 1, item=True))
+    fx.extend((effect(101, p2=25, item=item),  # poison immunity
                effect(173, 100, item=item),   # poison resistance, not a header byte
                effect(101, p2=40, item=item),  # control immunity
                effect(144, p2=2, item=item),
@@ -64,6 +70,8 @@ def form(name):
                effect(139, 0, item=item, timing=1, duration=0)))
     if item:
         return ItmFile(abilities=(), global_effects=tuple(fx)).to_bytes()
+    duration = 20 if name == "OHGASFRM.SPL" else 18
+    fx = [dataclasses.replace(f, duration=duration) if f.timing == 0 else f for f in fx]
     return make_spl((SplAbility(1, 5, 1, tuple(fx)),)).to_bytes()
 
 
@@ -153,28 +161,23 @@ def referenced_effect_offsets(blob):
 
 
 def expected_form(blob):
+    """Byte oracle for the normal provider fixtures, not an input validator."""
     raw = bytearray(blob)
-    for offset in referenced_effect_offsets(blob):
+    offsets = referenced_effect_offsets(blob)
+    fin = blob[:3] == b"ITM" and any(struct.unpack_from("<H", blob, o)[0] == 135 for o in offsets)
+    for offset in offsets:
         opcode, = struct.unpack_from("<H", blob, offset)
-        p1, p2 = struct.unpack_from("<ii", blob, offset + 4)
-        # Immunity (a set value of 100 or more) is owned; lower values are
-        # another mod's or an earlier decision and stay as they are.
-        if opcode in RESISTANCE_OPCODES and p2 == 1 and p1 >= 100:
-            struct.pack_into("<i", raw, offset + 4, 75)
-        elif opcode == 166 and (p1, p2) == (100, 1):
-            struct.pack_into("<ii", raw, offset + 4, 0, 0)
+        if opcode in RESISTANCE_OPCODES:
+            struct.pack_into("<ii", raw, offset + 4, 50 if fin and opcode in (30, 84) else 75, 1)
+        elif opcode == 166:
+            struct.pack_into("<ii", raw, offset + 4, 0, int(fin))
     return bytes(raw)
 
 
 def expected_clone(blob):
     raw = bytearray(blob)
-    # CRE V1: 0x5D is MR; 0x63 is MISSILE, not poison resistance. Signed bytes.
     for offset in range(0x59, 0x64):
-        value, = struct.unpack_from("<b", blob, offset)
-        if offset == 0x5D:
-            raw[offset] = 0
-        elif value >= 100:
-            raw[offset] = 75
+        raw[offset] = 0 if offset == 0x5D else 75
     return bytes(raw)
 
 
@@ -189,9 +192,11 @@ def mutate_effect(blob, match_opcode, **fields):
 
 
 class Game:
-    def __init__(self, root, resources, *, public=False, texts=TEXTS):
+    def __init__(self, root, resources, *, public=False, texts=TEXTS, language="en_us"):
         self.root = root
         self.public = public
+        (root / "WeiDU.log").write_text("", encoding="utf-8")
+        self.language = language
         self.override = root / "override"
         self.override.mkdir(parents=True)
         if public:
@@ -204,9 +209,13 @@ class Game:
         for name, raw in resources.items():
             (self.override / name).write_bytes(raw)
         self.bif = _write_key_and_bif(root, (("OH6000", "ARE", b"BG2EE marker"),))
-        self.tlk = root / "lang/en_us/dialog.tlk"
+        self.tlk = root / f"lang/{language}/dialog.tlk"
         self.tlk.parent.mkdir(parents=True)
         self.tlk.write_bytes(tlk(list(texts)))
+        if language != "en_us":
+            english = root / "lang/en_us/dialog.tlk"
+            english.parent.mkdir(parents=True)
+            english.write_bytes(self.tlk.read_bytes())
         (root / "dialog.tlk").write_bytes(self.tlk.read_bytes())
         self.original = self.snapshot()
         self.original_texts = list(texts)
@@ -233,7 +242,7 @@ class Game:
         completed = subprocess.run([
             str(WEIDU), target,
             "--force-uninstall-list" if uninstall else "--force-install-list", component,
-            "--language", "0", "--use-lang", "en_us", "--no-exit-pause", "--quick-log",
+            "--language", "0", "--use-lang", self.language, "--no-exit-pause", "--quick-log",
         ], cwd=self.root, capture_output=True, text=True, timeout=60)
         return completed.returncode, completed.stdout + completed.stderr
 
@@ -248,16 +257,8 @@ class CloudFormsTests(unittest.TestCase):
         code, output = game.run(**kwargs)
         self.assertEqual(0, code, output)
         self.assertIn("SUCCESSFULLY INSTALLED", output)
-
-    def failed_unchanged(self, game, expected_message=None):
-        code, output = game.run()
-        self.assertNotEqual(0, code, output)
-        self.assertIn("NOT INSTALLED DUE TO ERRORS", output)
-        if expected_message:
-            self.assertIn(expected_message, output)
-        self.assertEqual(game.original, game.snapshot(), output)
-        self.assertEqual(game.original_tlk, game.tlk.read_bytes(), output)
-        self.assert_stable(game)
+        self.assertNotIn("INSTALLED WITH WARNINGS", output)
+        self.assertNotIn("WARNING:", output)
 
     def assert_stable(self, game):
         for path, before in game.stable.items():
@@ -278,9 +279,7 @@ class CloudFormsTests(unittest.TestCase):
                 continue
             old_ref, = struct.unpack_from("<I", expected[name], 0x50)
             new_ref, = struct.unpack_from("<I", after[name], 0x50)
-            wanted = game.original_texts[old_ref]
-            if described:
-                wanted = wanted.replace(OLD_PHRASE, NEW_PHRASE)
+            wanted = EXPECTED_TEXTS[1 if name == "SPWI677.SPL" else 2] if described else game.original_texts[old_ref]
             self.assertEqual(wanted, strings(game.tlk)[new_ref])
             if wanted != game.original_texts[old_ref]:
                 self.assertGreaterEqual(new_ref, len(game.original_texts))
@@ -305,8 +304,8 @@ class CloudFormsTests(unittest.TestCase):
             blob = game.snapshot()[name]
             parsed = ItmFile.from_bytes(blob) if name.endswith(".ITM") else SplFile.from_bytes(blob)
             effects = parsed.global_effects if name.endswith(".ITM") else parsed.all_effects()
-            mr = next(fx for fx in effects if fx.opcode == 166)
-            self.assertEqual((0, 1 if name == "FINBODGF.ITM" else 0), (mr.parameter1, mr.parameter2))
+            mr = [(fx.parameter1, fx.parameter2) for fx in effects if fx.opcode == 166]
+            self.assertEqual([(0, int(name == "FINBODGF.ITM"))] if name.endswith(".ITM") else [], mr)
         self.assert_exact_install(game)
 
     def test_vampire_clone_all_ten_damage_channels_and_zero_mr(self):
@@ -330,16 +329,19 @@ class CloudFormsTests(unittest.TestCase):
                 self.installed(game)
                 self.assert_exact_install(game)
 
-    def test_missing_all_providers_is_adapter_failure_without_mutations(self):
-        self.failed_unchanged(self.game({"OTHERGAS.SPL": form("OHGASFRM.SPL")}),
-                              "No supported combat cloud form is installed.")
+    def test_missing_all_providers_logs_and_continues(self):
+        game = self.game({"OTHERGAS.SPL": form("OHGASFRM.SPL")})
+        self.installed(game)
+        self.assertEqual(game.original, game.snapshot())
+        self.assertEqual(game.original_tlk, game.tlk.read_bytes())
 
-    def test_missing_all_providers_public_component_skips(self):
+    def test_missing_all_providers_public_component_logs_and_continues(self):
         game = self.game({}, public=True)
         code, output = game.run()
         self.assertEqual(0, code, output)
-        self.assertIn("SKIPPING", output)
-        self.assertNotIn("SUCCESSFULLY INSTALLED", output)
+        self.assertNotIn("SKIPPING", output)
+        self.assertIn("SUCCESSFULLY INSTALLED", output)
+        self.assertIn("absent", output)
         self.assertEqual(game.original, game.snapshot())
         self.assertEqual(game.original_tlk, game.tlk.read_bytes())
 
@@ -377,275 +379,238 @@ class CloudFormsTests(unittest.TestCase):
         self.installed(game)
         self.assert_exact_install(game)
 
-    def test_private_resref_collision_fails_without_touching_any_provider(self):
+    def test_private_resref_is_overwritten(self):
         resources = synthetic()
-        resources["CBRGAS75.CRE"] = expected_clone(resources["GASFORM4.CRE"]) + b"foreign"
-        self.failed_unchanged(self.game(resources), "reserved CBRGAS75.CRE")
+        resources["CBRGAS75.CRE"] = b"a previous private resource"
+        game = self.game(resources)
+        self.installed(game)
+        self.assert_exact_install(game)
 
-    def test_missing_combat_donor_fails_transactionally(self):
+    def test_missing_combat_donor_costs_only_that_branch(self):
         resources = synthetic()
         del resources["GASFORM4.CRE"]
-        self.failed_unchanged(self.game(resources), "combat mist donor is missing")
+        game = self.game(resources)
+        self.installed(game)
+        after = game.snapshot()
+        self.assertNotIn("CBRGAS75.CRE", after)
+        self.assertEqual(resources["DW#VMGAS.SPL"], after["DW#VMGAS.SPL"])
+        self.assertEqual(expected_form(resources["OHGASFRM.SPL"]), after["OHGASFRM.SPL"])
 
-    def test_unsupported_donor_header_or_inventory_fails(self):
-        # Resistance bytes are not fingerprints any more (2026-10-17); see
-        # test_donor_resistance_bytes_follow_the_immunity_rule.
-        mutations = ((0, b"CRE V9.9"), (0x28, struct.pack("<I", 0x6400)),
-                     (0x2C0, struct.pack("<I", 1)), (0x33, bytes([2])))
-        for offset, replacement in mutations:
-            with self.subTest(offset=hex(offset)):
-                resources = synthetic()
-                raw = bytearray(resources["GASFORM4.CRE"])
-                raw[offset:offset + len(replacement)] = replacement
-                resources["GASFORM4.CRE"] = bytes(raw)
-                self.failed_unchanged(self.game(resources))
-
-    def test_donor_additional_damage_defenses_rejected_in_both_effect_formats(self):
-        for v2 in (False, True):
-            for fx in (effect(208, 1), effect(120, 0, 2), effect(101, p2=12),
-                       effect(30, 100, 1), effect(166, 100, 1)):
-                with self.subTest(v2=v2, opcode=fx.opcode):
-                    resources = synthetic()
-                    resources["GASFORM4.CRE"] = donor((fx,), v2=v2)
-                    self.failed_unchanged(self.game(resources))
-
-    def test_unreviewed_form_invulnerability_fails_before_any_publication(self):
-        for fx in (effect(208, 1), effect(120, 0, 2), effect(101, p2=12)):
-            with self.subTest(opcode=fx.opcode):
-                resources = synthetic()
-                parsed = ItmFile.from_bytes(resources["FINBODGF.ITM"])
-                resources["FINBODGF.ITM"] = dataclasses.replace(
-                    parsed, global_effects=(*parsed.global_effects, fx)).to_bytes()
-                self.failed_unchanged(self.game(resources))
-
-    def test_unreviewed_combat_vampire_immunity_fails(self):
-        for fx in (effect(208, 1), effect(120, 0, 2), effect(101, p2=12),
-                   effect(30, 100, 1), effect(166, 100, 1)):
-            with self.subTest(opcode=fx.opcode):
-                resources = synthetic()
-                resources["DW#VMGAS.SPL"] = vampire(fx)
-                self.failed_unchanged(self.game(resources))
-
-    def test_late_description_failure_rolls_back_already_patched_resources(self):
+    def test_donor_animation_inventory_signature_and_resistance_are_not_gates(self):
         resources = synthetic()
-        # Regression: without description preflight this second description
-        # failed after resource writes and the first description's new strref;
-        # WeiDU restored the resources but left the appended TLK entry behind.
+        raw = bytearray(resources["GASFORM4.CRE"])
+        raw[:8] = b"CRE V9.9"
+        struct.pack_into("<I", raw, 0x28, 0x6400)
+        struct.pack_into("<I", raw, 0x2C0, 1)
+        raw[0x59:0x64] = bytes((125, 80, 206, 60, 40, 99, 0, 75, 20, 50, 110))
+        resources["GASFORM4.CRE"] = bytes(raw)
+        game = self.game(resources)
+        self.installed(game)
+        expected = bytearray(expected_clone(raw)); expected[:8] = b"CRE V1.0"
+        self.assertEqual(bytes(expected), game.snapshot()["CBRGAS75.CRE"])
+        self.assertEqual(bytes(raw), game.snapshot()["GASFORM4.CRE"])
+
+    def test_donor_competing_defenses_removed_in_both_effect_formats(self):
+        for v2 in (False, True):
+            with self.subTest(v2=v2):
+                extra = (effect(208, 1), effect(120, 0, 2), effect(101, p2=12),
+                         effect(30, -40, 2), effect(166, 35, 0))
+                game = self.game({"DW#VMGAS.SPL": vampire(), "GASFORM4.CRE": donor(extra, v2=v2)})
+                self.installed(game)
+                self.assertEqual(expected_clone(donor(v2=v2)), game.snapshot()["CBRGAS75.CRE"])
+                first = game.snapshot()
+                self.installed(game, repeat=True)
+                self.assertEqual(first, game.snapshot())
+
+    def package(self, blob, *, item=False):
+        parsed = (ItmFile if item else SplFile).from_bytes(blob)
+        return parsed.global_effects if item else parsed.abilities[0].effects
+
+    def assert_package(self, effects, name):
+        values = {f.opcode: f.parameter1 for f in effects if f.opcode in RESISTANCE_OPCODES}
+        expected = {op: 50 if name == "FINBODGF.ITM" and op in (30, 84) else 75 for op in CHANNELS[name]}
+        self.assertEqual(expected, values)
+        owned = [f for f in effects if f.opcode in RESISTANCE_OPCODES]
+        self.assertEqual(len(expected), len(owned))
+        duration = 0 if name.endswith(".ITM") else 20 if name == "OHGASFRM.SPL" else 18
+        for f in owned:
+            self.assertEqual((1, 1, 2 if name.endswith(".ITM") else 0, duration, 100, 0, 0),
+                             (f.target, f.parameter2, f.timing, f.duration, f.probability1, f.save_type, f.save_bonus))
+        self.assertFalse(any(f.opcode in (120, 208) or (f.opcode == 101 and f.parameter2 == 12) for f in effects))
+        mr = [f for f in effects if f.opcode == 166]
+        self.assertEqual([(0, int(name == "FINBODGF.ITM"))] if name.endswith(".ITM") else [],
+                         [(f.parameter1, f.parameter2) for f in mr])
+
+    def test_added_item_and_spell_defenses_cannot_keep_cloud_invulnerable(self):
+        for name in FORMS:
+            with self.subTest(name=name):
+                item = name.endswith(".ITM")
+                parsed = (ItmFile if item else SplFile).from_bytes(form(name))
+                extra = (effect(208, 1), effect(120, 0, 2), effect(101, p2=12),
+                         effect(166, 40), effect(86, 99, 2), effect(30, 100, 1))
+                if item:
+                    changed = dataclasses.replace(parsed, global_effects=(*parsed.global_effects, *extra))
+                else:
+                    a = parsed.abilities[0]
+                    changed = dataclasses.replace(parsed, abilities=(dataclasses.replace(a, effects=(*a.effects, *extra)),))
+                game = self.game({name: changed.to_bytes()})
+                self.installed(game)
+                self.assert_package(self.package(game.snapshot()[name], item=item), name)
+
+    def test_vampire_polymorph_replaces_missing_extra_or_changed_effects(self):
+        for effects in ((), (effect(135, 7, 1, target=2, timing=2, duration=0, resource="DACEMIST"),),
+                        (effect(135, resource="FOREIGN"), effect(135, resource="EXTRA"))):
+            with self.subTest(effects=effects):
+                foreign = effect(215, resource="SPDISPMA", duration=3)
+                original = make_spl((SplAbility(1, 5, 1, (foreign, *effects, effect(166, 40))),)).to_bytes()
+                game = self.game({"DW#VMGAS.SPL": original, "GASFORM4.CRE": donor()})
+                self.installed(game)
+                fx = SplFile.from_bytes(game.snapshot()["DW#VMGAS.SPL"]).all_effects()
+                self.assertEqual([foreign], [f for f in fx if f.opcode == 215])
+                self.assertEqual([effect(135, resource="CBRGAS75", duration=18)], [f for f in fx if f.opcode == 135])
+                self.assertFalse(any(f.opcode == 166 for f in fx))
+
+    def test_unreadable_description_costs_only_that_file(self):
+        resources = synthetic()
         resources["SPWI678.SPL"] = resources["SPWI678.SPL"][:70]
-        self.failed_unchanged(self.game(resources), "invalid summon description resource")
+        game = self.game(resources)
+        self.installed(game)
+        self.assertEqual(resources["SPWI678.SPL"], game.snapshot()["SPWI678.SPL"])
+        self.assertEqual(expected_form(resources["DVGASFRM.ITM"]), game.snapshot()["DVGASFRM.ITM"])
+        self.assertEqual(EXPECTED_TEXTS[1], strings(game.tlk)[SplFile.from_bytes(game.snapshot()["SPWI677.SPL"]).description_strref])
 
-    def test_unreviewed_resistance_delivery_or_missing_form_signature_fails(self):
-        # A partial value and a missing regeneration are valid variations now
-        # (2026-10-17); see the tests after test_partial_existing_75_values_do_not_compound.
-        changes = ((86, {"parameter2": 0}),
-                   (86, {"target": 2}), (86, {"timing": 2}), (86, {"duration": 0}),
-                   (53, {"parameter1": 0x6400}))
-        for opcode, fields in changes:
-            with self.subTest(opcode=opcode, fields=fields):
-                resources = synthetic()
-                resources["OHBEGASF.SPL"] = mutate_effect(resources["OHBEGASF.SPL"], opcode, **fields)
-                self.failed_unchanged(self.game(resources))
+    def test_owned_values_and_delivery_are_written_without_old_value_tests(self):
+        for value in (-50, 0, 60, 75, 80, 99, 100, 110):
+            with self.subTest(value=value):
+                name = "OHBEGASF.SPL"
+                raw = mutate_effect(form(name), 86, parameter1=value, parameter2=0, target=2,
+                                    timing=2, duration=0, probability1=17, save_type=4, save_bonus=3)
+                raw = mutate_effect(raw, 53, parameter1=0x6400)
+                game = self.game({name: raw})
+                self.installed(game)
+                self.assert_package(self.package(game.snapshot()[name]), name)
+                # The animation is outside resistance ownership.
+                self.assertEqual(0x6400, next(f.parameter1 for f in self.package(game.snapshot()[name]) if f.opcode == 53))
 
-    def test_unreviewed_combat_polymorph_shape_fails(self):
-        for fields in ({"parameter2": 1}, {"target": 2}, {"timing": 2},
-                       {"duration": 0}, {"resource": "DACEMIST"}, {"opcode": 142}):
-            with self.subTest(fields=fields):
-                resources = synthetic()
-                resources["DW#VMGAS.SPL"] = mutate_effect(resources["DW#VMGAS.SPL"], 135, **fields)
-                self.failed_unchanged(self.game(resources))
+    def test_missing_effects_and_empty_abilities_get_the_decided_package(self):
+        for name in FORMS:
+            with self.subTest(name=name):
+                item = name.endswith(".ITM")
+                foreign = effect(142, 71, item=item)
+                raw = ItmFile(abilities=(), global_effects=(foreign,)).to_bytes() if item else make_spl((SplAbility(1, 1, 1, (foreign,)),)).to_bytes()
+                game = self.game({name: raw})
+                self.installed(game)
+                effects = self.package(game.snapshot()[name], item=item)
+                self.assert_package(effects, name)
+                self.assertIn(foreign, effects)
+                before = game.snapshot()
+                self.installed(game, repeat=True)
+                self.assertEqual(before, game.snapshot())
 
-    def test_malformed_resource_tables_fail_transactionally(self):
+    def test_empty_spell_with_only_casting_hooks_gets_an_ability(self):
+        hook = effect(146, resource="FOREIGN", timing=1, duration=0)
+        game = self.game({"OHGASFRM.SPL": SplFile(abilities=(), casting_effects=(hook,)).to_bytes()})
+        self.installed(game)
+        parsed = SplFile.from_bytes(game.snapshot()["OHGASFRM.SPL"])
+        self.assertEqual((hook,), parsed.casting_effects)
+        self.assertEqual(1, len(parsed.abilities))
+        self.assert_package(parsed.abilities[0].effects, "OHGASFRM.SPL")
+
+    def test_item_activation_cannot_substitute_for_equipped_resistance(self):
+        fx = effect(89, 100, 1, item=True)
+        foreign = effect(139, 3, timing=1, duration=0)
+        parsed = ItmFile(abilities=(ItmAbility(raw=bytes(56), effects=(fx, foreign)),), global_effects=())
+        game = self.game({"DVGASFRM.ITM": parsed.to_bytes()})
+        self.installed(game)
+        changed = ItmFile.from_bytes(game.snapshot()["DVGASFRM.ITM"])
+        self.assert_package(changed.global_effects, "DVGASFRM.ITM")
+        self.assertEqual((foreign,), changed.abilities[0].effects)
+
+    def test_shared_slices_and_effects_before_abilities_are_supported(self):
+        a = SplAbility(1, 5, 1, (effect(86, 10), effect(142, 71)))
+        raw = bytearray(make_spl((a, dataclasses.replace(a, required_level=5))).to_bytes())
+        struct.pack_into("<H", raw, 0x72 + 40 + 0x20, 0)
+        ab = bytes(raw[0x72:0x72+80]); fx = bytes(raw[0x72+80:])
+        raw[0x72:] = fx + ab
+        struct.pack_into("<I", raw, 0x64, 0x72+len(fx)); struct.pack_into("<I", raw, 0x6A, 0x72)
+        game = self.game({"OHGASFRM.SPL": bytes(raw)})
+        self.installed(game)
+        parsed = SplFile.from_bytes(game.snapshot()["OHGASFRM.SPL"])
+        self.assertEqual([1, 5], [a.required_level for a in parsed.abilities])
+        for a in parsed.abilities:
+            self.assert_package(a.effects, "OHGASFRM.SPL")
+            self.assertEqual(1, sum(f.opcode == 142 for f in a.effects))
+
+    def test_unreadable_tables_cost_only_that_file(self):
         original = form("OHGASFRM.SPL")
-        mutations = [("truncated", original[:70]), ("wrong-version", b"SPL V2  " + original[8:]),
-                     ("partial-effect", original[:-1])]
+        mutations = [("truncated", original[:70]), ("partial-effect", original[:-1])]
         for name, offset, fmt, value in (("ability-offset", 0x64, "I", len(original) + 1),
                                         ("effect-offset", 0x6A, "I", 3),
                                         ("casting-slice", 0x70, "H", 65535),
                                         ("ability-slice", 0x72 + 0x1E, "H", 65535)):
-            raw = bytearray(original)
-            struct.pack_into("<" + fmt, raw, offset, value)
+            raw = bytearray(original); struct.pack_into("<" + fmt, raw, offset, value)
             mutations.append((name, bytes(raw)))
         for name, malformed in mutations:
             with self.subTest(name=name):
-                resources = synthetic()
-                resources["OHGASFRM.SPL"] = malformed
-                self.failed_unchanged(self.game(resources))
+                game = self.game({"OHGASFRM.SPL": malformed, "DVGASFRM.ITM": form("DVGASFRM.ITM")})
+                self.installed(game)
+                self.assertEqual(malformed, game.snapshot()["OHGASFRM.SPL"])
+                self.assertEqual(expected_form(form("DVGASFRM.ITM")), game.snapshot()["DVGASFRM.ITM"])
 
-    def test_unused_effect_record_is_not_treated_as_cloud_owned(self):
+    def test_signature_and_orphan_effect_are_not_install_fingerprints(self):
+        raw = b"SPL V2  " + form("OHGASFRM.SPL")[8:] + effect(208, 1).to_bytes()
+        game = self.game({"OHGASFRM.SPL": raw})
+        self.installed(game)
+        self.assertEqual(expected_form(form("OHGASFRM.SPL")), game.snapshot()["OHGASFRM.SPL"])
+
+    def test_unreadable_creature_tables_do_not_stop_other_forms(self):
+        for raw in (donor()[:70], donor()[:-1]):
+            with self.subTest(size=len(raw)):
+                game = self.game({"GASFORM4.CRE": raw, "DW#VMGAS.SPL": vampire(), "OHGASFRM.SPL": form("OHGASFRM.SPL")})
+                self.installed(game)
+                self.assertNotIn("CBRGAS75.CRE", game.snapshot())
+                self.assertEqual(vampire(), game.snapshot()["DW#VMGAS.SPL"])
+                self.assertEqual(expected_form(form("OHGASFRM.SPL")), game.snapshot()["OHGASFRM.SPL"])
+
+    def test_full_descriptions_replace_other_english_text_and_ignore_old_poison(self):
         resources = synthetic()
-        resources["OHGASFRM.SPL"] += effect(30, 100, 1).to_bytes()
-        game = self.game(resources)
+        resources["DVGASFRM.ITM"] = mutate_effect(mutate_effect(resources["DVGASFRM.ITM"], 101, opcode=142), 173, opcode=142)
+        texts = [TEXTS[0], "Hand-edited English text.", "Another mod's description."]
+        game = self.game(resources, texts=texts)
         self.installed(game)
         self.assert_exact_install(game)
-
-    def test_global_spell_effect_partition_is_supported(self):
-        resources = synthetic()
-        parsed = SplFile.from_bytes(resources["OHGASFRM.SPL"])
-        resources["OHGASFRM.SPL"] = SplFile(
-            abilities=(), casting_effects=parsed.all_effects()).to_bytes()
-        game = self.game(resources)
-        self.installed(game)
-        self.assert_exact_install(game)
-
-    def test_partial_existing_75_values_do_not_compound(self):
-        resources = synthetic()
-        for name in FORMS:
-            resources[name] = mutate_effect(resources[name], 86, parameter1=75)
-            resources[name] = mutate_effect(resources[name], 27, parameter1=75)
-        game = self.game(resources)
-        self.installed(game)
-        self.assert_exact_install(game)
-
-    def test_lower_resistances_are_kept_and_only_immunity_becomes_75(self):
-        resources = synthetic()
-        for name in ("OHBEGASF.SPL", "BDGASFOR.SPL", "FINBODGF.ITM"):
-            blob = mutate_effect(resources[name], 86, parameter1=80)
-            blob = mutate_effect(blob, 87, parameter1=110)
-            blob = mutate_effect(blob, 27, parameter1=-50)  # a vulnerability
-            resources[name] = mutate_effect(blob, 28, parameter1=99)
-        game = self.game(resources)
-        self.installed(game)
-        self.assert_exact_install(game)
-        changed = SplFile.from_bytes(game.snapshot()["OHBEGASF.SPL"]).all_effects()
-        values = {fx.opcode: fx.parameter1 for fx in changed if fx.opcode in RESISTANCE_OPCODES}
-        self.assertEqual({27: -50, 28: 99, 29: 75, 30: 75, 31: 75, 84: 75, 85: 75,
-                          86: 80, 87: 75, 88: 75, 89: 75}, values)
         first, first_tlk = game.snapshot(), game.tlk.read_bytes()
         self.installed(game, repeat=True)
-        self.assertEqual(first, game.snapshot())
-        self.assertEqual(first_tlk, game.tlk.read_bytes())
+        self.assertEqual(first, game.snapshot()); self.assertEqual(first_tlk, game.tlk.read_bytes())
 
-    def test_forms_without_regeneration_or_with_fewer_resistances_install(self):
-        resources = synthetic()
-        resources["OHBEGASF.SPL"] = mutate_effect(resources["OHBEGASF.SPL"], 98, opcode=142)
-        blob = mutate_effect(resources["BDGASFOR.SPL"], 89, opcode=142)
-        resources["BDGASFOR.SPL"] = mutate_effect(blob, 84, opcode=142)
-        game = self.game(resources)
+    def test_other_language_preserves_text_and_still_writes_mechanics(self):
+        texts = [TEXTS[0], "Anderer Beschreibungstext.", "Djinni auf Deutsch."]
+        game = self.game(texts=texts, language="de_de")
         self.installed(game)
-        self.assert_exact_install(game)
-
-    def test_already_reduced_form_is_left_as_it_is(self):
-        resources = {"OHGASFRM.SPL": form("OHGASFRM.SPL")}
-        for opcode in RESISTANCE_OPCODES:
-            resources["OHGASFRM.SPL"] = mutate_effect(resources["OHGASFRM.SPL"], opcode, parameter1=60)
-        resources["OHGASFRM.SPL"] = mutate_effect(resources["OHGASFRM.SPL"], 166, parameter1=0)
-        game = self.game(resources)
-        code, output = game.run()
-        self.assertEqual(0, code, output)
-        self.assertIn("has no resistance at immunity level", output)
-        self.assertEqual(game.original, game.snapshot())
-
-    def test_donor_resistance_bytes_follow_the_immunity_rule(self):
-        resources = synthetic()
-        raw = bytearray(resources["GASFORM4.CRE"])
-        raw[0x59] = 125   # above immunity: 75
-        raw[0x5A] = 80    # another mod's partial value: kept
-        raw[0x5B] = 0xCE  # -50, a vulnerability: kept
-        raw[0x5D] = 40    # MR: always 0 on the combat form
-        raw[0x63] = 75
-        resources["GASFORM4.CRE"] = bytes(raw)
-        game = self.game(resources)
-        self.installed(game)
-        self.assert_exact_install(game)
-        clone = game.snapshot()["CBRGAS75.CRE"]
-        self.assertEqual(bytes([75, 80, 0xCE, 75, 0, 75, 75, 75, 75, 75, 75]), clone[0x59:0x64])
-        self.assertEqual(67, clone[0x64])
-        first = game.snapshot()
-        self.installed(game, repeat=True)
-        self.assertEqual(first, game.snapshot())
-
-    def test_genie_text_needs_75_on_every_channel_and_poison_immunity(self):
-        def partial_slashing(blob):
-            return mutate_effect(blob, 86, parameter1=80)
-
-        def immune_crushing_above_100(blob):  # becomes 75 like 100: text still true
-            return mutate_effect(blob, 87, parameter1=120)
-
-        def no_magical_fire_or_cold(blob):  # the real DVGASFRM.ITM sets neither
-            return mutate_effect(mutate_effect(blob, 84, opcode=142), 85, opcode=142)
-
-        def no_slashing(blob):
-            return mutate_effect(blob, 86, opcode=142)
-
-        def no_poison_defense(blob):
-            return mutate_effect(mutate_effect(blob, 101, opcode=142), 173, opcode=142)
-
-        def poison_resistance_only(blob):  # op 173 at 100 is poison immunity too
-            return mutate_effect(blob, 101, opcode=142)
-
-        def poison_resistance_reduced(blob):  # op 173 adds up: 100 - 50 is not immunity
-            parsed = ItmFile.from_bytes(mutate_effect(blob, 101, opcode=142))
-            weaker = effect(173, -50, item=True)
-            return dataclasses.replace(parsed, global_effects=(*parsed.global_effects, weaker)).to_bytes()
-
-        def with_activation(blob, *effects):
-            raw = bytearray(56)
-            raw[0] = 3  # magical activation, applies only when used
-            parsed = ItmFile.from_bytes(blob)
-            used = ItmAbility(raw=bytes(raw), effects=tuple(effects))
-            return dataclasses.replace(parsed, abilities=(*parsed.abilities, used)).to_bytes()
-
-        def poison_part_only_on_activation(blob):  # equipped 60, +40 only when used
-            equipped = mutate_effect(mutate_effect(blob, 101, opcode=142), 173, parameter1=60)
-            return with_activation(equipped, effect(173, 40, item=True))
-
-        def missile_only_on_activation(blob):
-            return with_activation(mutate_effect(blob, 89, opcode=142), effect(89, 100, 1, item=True))
-
-        def poison_resistance_in_parts(blob):  # 60 + 40 is immunity
-            parsed = ItmFile.from_bytes(mutate_effect(mutate_effect(blob, 101, opcode=142), 173, parameter1=60))
-            rest = effect(173, 40, item=True)
-            return dataclasses.replace(parsed, global_effects=(*parsed.global_effects, rest)).to_bytes()
-
-        cases = ((partial_slashing, False), (immune_crushing_above_100, True),
-                 (no_magical_fire_or_cold, True), (no_slashing, False),
-                 (no_poison_defense, False), (poison_resistance_only, True),
-                 (poison_resistance_reduced, False), (poison_resistance_in_parts, True),
-                 (poison_part_only_on_activation, False), (missile_only_on_activation, False))
-        for change, described in cases:
-            with self.subTest(change=change.__name__):
-                resources = synthetic()
-                resources["DVGASFRM.ITM"] = change(resources["DVGASFRM.ITM"])
-                game = self.game(resources)
-                code, output = game.run()
-                if described:
-                    self.assertEqual(0, code, output)
-                else:
-                    self.assertEqual(3, code, output)
-                    self.assertIn("INSTALLED WITH WARNINGS", output)
-                    self.assertIn("description unchanged: the changed DVGASFRM.ITM", output)
-                    self.assertEqual(game.original_tlk, game.tlk.read_bytes())
-                self.assert_exact_install(game, described=described)
-
-    def test_alternate_description_warns_without_rewriting_or_touching_shared_tlk(self):
-        texts = [TEXTS[0], "Different or translated description.", TEXTS[2].replace(OLD_PHRASE, NEW_PHRASE)]
-        game = self.game(texts=texts)
-        code, output = game.run()
-        # WeiDU distinguishes successful installation with PATCH_WARN (3) from
-        # both clean success (0) and transactional failure.
-        self.assertEqual(3, code, output)
-        self.assertIn("INSTALLED WITH WARNINGS", output)
-        self.assertIn("different or untranslated text; description unchanged", output)
-        self.assert_exact_install(game)
+        self.assert_exact_install(game, described=False)
         self.assertEqual(game.original_tlk, game.tlk.read_bytes())
 
     def test_descriptions_require_shared_genie_form_provider(self):
-        resources = synthetic()
-        del resources["DVGASFRM.ITM"]
+        resources = synthetic(); del resources["DVGASFRM.ITM"]
         game = self.game(resources)
-        self.installed(game)
-        self.assert_exact_install(game)
+        self.installed(game); self.assert_exact_install(game)
         self.assertEqual(game.original_tlk, game.tlk.read_bytes())
 
     def test_missing_description_symbols_are_optional(self):
-        resources = synthetic()
-        resources["SPELL.IDS"] = b"2717 SOMETHING_ELSE\n"
+        resources = synthetic(); resources["SPELL.IDS"] = b"2717 SOMETHING_ELSE\n"
         game = self.game(resources)
         self.installed(game)
         for name in ("SPWI677.SPL", "SPWI678.SPL"):
             self.assertEqual(resources[name], game.snapshot()[name])
         self.assertEqual(game.original_tlk, game.tlk.read_bytes())
         self.assert_stable(game)
+
+    def test_small_dynamic_spell_ids_are_padded(self):
+        resources = {"DVGASFRM.ITM": form("DVGASFRM.ITM"), "SPWI007.SPL": described_spell(1),
+                     "SPELL.IDS": b"2007 WIZARD_SUMMON_EFREET\n"}
+        game = self.game(resources); self.installed(game)
+        ref = SplFile.from_bytes(game.snapshot()["SPWI007.SPL"]).description_strref
+        self.assertEqual(EXPECTED_TEXTS[1], strings(game.tlk)[ref])
 
 
 if __name__ == "__main__":

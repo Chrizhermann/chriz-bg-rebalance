@@ -47,16 +47,17 @@ local CBR_APR_STAT_KIT = 152
 local CBR_APR_MARKER_WORD = math.floor(CBR_APR_MARKER_STATE / 32)
 local CBR_APR_MARKER_MASK = EEex_LShift(1, CBR_APR_MARKER_STATE % 32)
 
-local cbrAprDead = false
-local cbrAprFailures = 0
+local cbrAprLogged = false
 
 -- Stat-8 key encoding: 0-5 whole attacks, 6-10 = 0.5-4.5.
 local function cbrAprDecode(key)
+    if key < 0 then return -cbrAprDecode(-key) end
     if key <= 5 then return key end
     return (key - 6) + 0.5
 end
 
 local function cbrAprEncode(apr)
+    if apr < 0 then return -cbrAprEncode(-apr) end
     if apr >= 5 then return 5 end
     local whole = math.floor(apr)
     if apr == whole then return whole end
@@ -89,13 +90,11 @@ local function cbrAprBody(sprite)
     -- styles and never legitimate ITM proficiency values.
     if prof < 89 or prof > 115 or (prof >= 111 and prof <= 114) then return end
     if stats:GetAtOffset(prof) < 2 then return end
-    -- The codec models keys 0..10 only; negative (penalty) keys mirror the
-    -- encoding and are left untouched rather than mis-encoded.
+    -- Negative penalty keys use the same signed encoding.
     local key = stats.m_nNumberOfAttacks
-    if key < 0 then return end
     -- Marker first, and verified: if the array cannot be written, or the
     -- binding handed back a copy so the bit did not persist, nothing is
-    -- bumped and the failure fuse below retires the listener instead of
+    -- bumped and the callback logs the unavailable binding instead of
     -- letting it run away again.
     states:set(CBR_APR_MARKER_WORD, EEex_BOr(word, CBR_APR_MARKER_MASK))
     if EEex_BAnd(stats.m_spellStates:get(CBR_APR_MARKER_WORD), CBR_APR_MARKER_MASK) == 0 then
@@ -105,13 +104,9 @@ local function cbrAprBody(sprite)
 end
 
 EEex_Opcode_AddListsResolvedListener(function(sprite)
-    if cbrAprDead then return end
-    local ok = pcall(cbrAprBody, sprite)
-    if not ok then
-        cbrAprFailures = cbrAprFailures + 1
-        if cbrAprFailures >= 10 then
-            cbrAprDead = true
-            print("CBR Tempus spec APR: disabled after repeated errors")
-        end
+    local ok, reason = pcall(cbrAprBody, sprite)
+    if not ok and not cbrAprLogged then
+        cbrAprLogged = true
+        print("CBR Tempus spec APR: sprite binding unavailable; continuing: " .. tostring(reason))
     end
 end)

@@ -1,5 +1,10 @@
 # Cross-repository BG compatibility follow-up
 
+This index records the October audits. Current work follows
+[We overwrite](../../AGENTS.md#we-overwrite); older recommendations to reject
+changed game content in these reports are superseded. Native hook signatures,
+format bounds, genuine capabilities and PC protection remain separate requirements.
+
 2026-10-08. User requested a hard compatibility policy after component 302
 rejected a community player's modified Flail of the Ages. The shared policy is
 `~/.agents/skills/bg-modding/references/compatibility-policy.md`; it applies across
@@ -37,6 +42,7 @@ checkout/ref, affected paths, plausible counterexamples, and tests to add.
    same-operation stale-plan checks protect item accounting and must remain.
 
 Implement in each owning repository, not by moving their code into this repo.
-Use isolated branches; preserve other agents' WIP. For each fix, demonstrate the
-valid alternate input and preservation first, then adjust matching and tests
-together. Do not mass-delete checks or turn omitted behavior into quiet success.
+Use isolated branches and preserve other agents' WIP. For each fix, demonstrate
+that changed input receives the same decided output while unrelated fields stay
+intact. Replace content preflights with owned writes and positive tests; removing
+a refusal without writing the decided result is not a fix.
