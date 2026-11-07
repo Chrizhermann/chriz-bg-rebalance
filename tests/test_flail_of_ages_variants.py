@@ -178,7 +178,7 @@ class FlailVariantTests(unittest.TestCase):
         self.assert_foreign_and_sources_unchanged(game, "FXROOT.EFF", "FXMIDDLE.SPL", "FXLEAF.EFF")
         self.assert_no_helpers_created(game)
 
-    def test_mixed_slow_and_damage_helper_rejects_and_rolls_back_without_cloning(self):
+    def test_mixed_slow_and_damage_helper_copies_slow_without_saving_damage(self):
         game = self.game("vanilla")
         slow = SplEffect(opcode=40, target=2, duration=26, probability1=73, probability2=17)
         damage = SplEffect(opcode=12, target=2, parameter1=11, parameter2=131072, timing=1, probability1=87, probability2=9, save_type=4, save_bonus=1, special=0x102)
@@ -187,15 +187,14 @@ class FlailVariantTests(unittest.TestCase):
         link = SplEffect(opcode=146, target=2, timing=1, resource="FXMIXED", probability1=68, probability2=29)
         self.with_abilities(game, (ability(1, (damage, link)),))
         self.with_abilities(game, (ability(1, (link, damage)),), "FOREIGN.ITM")
-        original_tlk = game.lang_tlk.read_bytes()
-        process, output = game.run()
-        self.assertNotEqual(0, process.returncode, output)
-        self.assertIn("mixes Slow with other effects", output)
-        self.assertIn("FXMIXED", output)
-        self.assertIn("NOT INSTALLED DUE TO ERRORS", output)
-        self.assertNotIn("SUCCESSFULLY INSTALLED", output)
-        self.assertEqual(game.original, {p.name.upper(): p.read_bytes() for p in game.override.iterdir() if p.is_file()})
-        self.assertEqual(original_tlk, game.lang_tlk.read_bytes())
+        self.assert_installed(game)
+        from tests.ie_formats import SplFile
+        effects = read_itm(game.override / "BLUN14.ITM").abilities[0].effects
+        self.assertEqual(damage, effects[0])
+        self.assertTrue(effects[1].resource.startswith("CF"))
+        self.assertEqual(0, effects[1].save_type & 31)
+        copied = SplFile.from_bytes((game.override / (effects[1].resource + ".SPL")).read_bytes())
+        self.assertEqual((damage, saved(slow)), copied.abilities[0].effects)
         self.assert_foreign_and_sources_unchanged(game, "FXMIXED.SPL")
 
     def test_localized_and_multiple_slow_description_lines_do_not_abort(self):
@@ -216,30 +215,24 @@ class FlailVariantTests(unittest.TestCase):
                 expected = dataclasses.replace(before, abilities=(dataclasses.replace(before.abilities[0], effects=tuple(saved(e) if e.opcode == 40 or (e.opcode == 139 and e.parameter1 == 14000) else e for e in before.abilities[0].effects)),))
                 self.assert_item_bytes(game, expected)
                 text = baseline.strings(game.lang_tlk)[read_itm(game.override / "BLUN14.ITM").identified_description]
-                if index == 0:
-                    self.assertIn("Unberuehrte Geschichte.", text)
-                    self.assertIn("Schaden: 1W6+4", text)
-                    self.assertEqual(1, text.count("(Save vs. Breath at -2 negates)"))
-                else:
-                    for line in ("Original lore remains.", "Damage: 1d6+4", "A foreign paragraph about slow travel remains."):
-                        self.assertIn(line, text)
-                    self.assertNotRegex(text, r"(?i)no sav(?:e|ing throw)")
-                    self.assertEqual(2, text.count("(Save vs. Breath at -2 negates)"))
+                self.assertIn("This flail has been in the care of Lord de'Arnise", text)
+                self.assertNotIn("Unberuehrte Geschichte", text)
+                self.assertEqual(1, text.count("(Save vs. Breath at -2 negates)"))
                 self.assert_foreign_and_sources_unchanged(game)
 
-    def test_no_slow_warns_without_claiming_a_nerf_or_altering_foreign_effects(self):
+    def test_missing_slow_is_supplied_without_changing_unrelated_effects(self):
         game = self.game("vanilla")
         damage = SplEffect(opcode=12, target=2, parameter1=19, parameter2=65536, timing=1, probability1=76, probability2=11, save_type=4, save_bonus=3)
         unrelated = SplEffect(opcode=139, target=2, parameter1=12345, timing=1, probability1=33)
         before = self.with_abilities(game, (ability(1, (damage, unrelated)),))
-        process, output = game.run()
-        self.assertEqual(0, process.returncode, output)
-        self.assertIn("SUCCESSFULLY INSTALLED", output)
-        self.assertRegex(output, r"(?im)^.*BLUN14[^\r\n]*(?:no|missing|not found)[^\r\n]*Slow[^\r\n]*$")
-        self.assertEqual(before.to_bytes(), (game.override / "BLUN14.ITM").read_bytes())
-        text = baseline.strings(game.lang_tlk)[read_itm(game.override / "BLUN14.ITM").identified_description]
-        self.assertEqual(game.texts[1], text)
-        self.assertNotIn("Save vs. Breath", text)
+        self.assert_installed(game)
+        effects = read_itm(game.override / "BLUN14.ITM").abilities[0].effects
+        self.assertEqual((damage, unrelated), effects[:2])
+        slow, feedback = effects[2:]
+        self.assertEqual((40, 2, -2, 20, 32),
+                         (slow.opcode, slow.save_type, slow.save_bonus, slow.duration, slow.probability1))
+        self.assertEqual((139, 14000, 2, -2),
+                         (feedback.opcode, feedback.parameter1, feedback.save_type, feedback.save_bonus))
         self.assert_foreign_and_sources_unchanged(game)
 
 

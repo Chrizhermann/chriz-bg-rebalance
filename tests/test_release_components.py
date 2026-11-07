@@ -114,10 +114,10 @@ class ReleaseComponentsTests(unittest.TestCase):
         self.assertNotIn("SUCCESSFULLY INSTALLED", output)
         self.assertEqual(g.original, g.snapshot())
 
-    def test_arrows_last_item_without_fire_package_warns_and_stays_unchanged(self):
+    def test_arrows_last_item_without_fire_package_receives_it(self):
         # Formerly a rollback test: a non-fire, unknown-mode damage record is not
-        # malformed, only not the fire package. Genuinely malformed tables still
-        # roll back (tests/test_elemental_arrows.py).
+        # malformed, only not the fire package. The writer supplies that package;
+        # unreadable bounds affect only that item (tests/test_elemental_arrows.py).
         resources = arrow_resources()
         item = ItmFile.from_bytes(resources["AROWKC.ITM"])
         ability = item.abilities[0]
@@ -127,10 +127,12 @@ class ReleaseComponentsTests(unittest.TestCase):
         g = self.game(resources, log="~STRATAGEMS/SETUP-STRATAGEMS.TP2~ #0 #2000\n")
         code, output = run_public(g, 130)
         self.assertNotIn("NOT INSTALLED", output)
-        self.assertIn("INSTALLED WITH WARNINGS", output)
-        self.assertIn("AROWKC.ITM has no fire damage package", output)
+        self.assertEqual(0, code, output)
+        self.assertIn("SUCCESSFULLY INSTALLED", output)
         after = g.snapshot()
-        self.assertEqual(g.original["AROWKC.ITM"], after["AROWKC.ITM"])
+        self.assertNotEqual(g.original["AROWKC.ITM"], after["AROWKC.ITM"])
+        effects = ItmFile.from_bytes(after["AROWKC.ITM"]).abilities[0].effects
+        self.assertTrue(any(e.opcode == 12 and e.parameter2 == 524288 and (e.dice_number, e.dice_size) == (1, 2) for e in effects))
         for name in ("AROW04", "AROW09", "AROW08"):
             self.assertNotEqual(g.original[name + ".ITM"], after[name + ".ITM"], name)
         code, output = run_public(g, 130, uninstall=True)

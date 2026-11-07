@@ -1,6 +1,9 @@
-// No spell/item rewriting: allocate a private per-rebuild marker and ship
-// the EEex listener. The 95% variant is deliberately not exposed until a
-// native integration can preserve the engine's discarded >100% values.
+// No spell/item rewriting: own the marker symbol and ship the EEex listener.
+// The 95% variant requires separate engine support and is not a public choice.
+<<<<<<<< cbr_physical_empty_ids
+IDS V1.0
+>>>>>>>>
+
 DEFINE_ACTION_FUNCTION cbr_apply_physical_resistance
   INT_VAR cap = 90
   STR_VAR
@@ -9,41 +12,66 @@ DEFINE_ACTION_FUNCTION cbr_apply_physical_resistance
 BEGIN
   OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
   OUTER_SPRINT template_file EVALUATE_BUFFER ~%template_file%~
-  ACTION_IF (cap != 90) BEGIN
+  // Only our callers supply cap; game data cannot reach this guard.
+  ACTION_IF cap != 90 BEGIN
     FAIL ~CBR physical resistance: only the 90% engine integration is implemented. The 95% option requires separate engine support.~
   END
-  ACTION_IF (NOT FILE_EXISTS ~%template_file%~) BEGIN
-    FAIL ~CBR physical resistance: the listener template is missing.~
-  END
   OUTER_SPRINT cbr_res_path ~%resource_dir%/SPLSTATE.IDS~
-  ACTION_IF (NOT FILE_EXISTS ~%cbr_res_path%~) BEGIN
-    FAIL ~CBR physical resistance: SPLSTATE.IDS must be materialized before allocation.~
+  ACTION_IF NOT FILE_EXISTS ~%cbr_res_path%~ BEGIN
+    COPY ~cbr_physical_empty_ids~ ~%cbr_res_path%~
   END
-
-  // The existing generic planner rejects shared/duplicate private symbols
-  // and chooses another unused bit if the preferred one is already owned.
-  OUTER_SET cbr_res_state = (0 - 1)
   COPY ~%cbr_res_path%~ ~%cbr_res_path%~
-    LPF cbr_plan_tempus_spec_apr_state
-      INT_VAR planned_value = 255
-      STR_VAR symbol = ~CBR_PHYSICAL_SOFTCAP~
-      RET cbr_res_state = state_value
+    FOR (i = 0; i < 256; ++i) BEGIN SET $cbr_res_used(~%i%~) = 0 END
+    SET own_value = (0 - 1)
+    READ_ASCII 0 contents (BUFFER_LENGTH)
+    INNER_PATCH ~%contents%~ BEGIN
+      REPLACE_EVALUATE
+        ~^[ %TAB%]*\([^ %TAB%%WNL%%MNL%%LNL%]+\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
+      BEGIN
+        PATCH_IF IS_AN_INT ~%MATCH1%~ BEGIN
+          SET value = MATCH1
+          PATCH_IF value >= 0 AND value <= 255 BEGIN
+            PATCH_IF ~%MATCH2%~ STRING_EQUAL_CASE ~CBR_PHYSICAL_SOFTCAP~ BEGIN
+              PATCH_IF own_value < 0 BEGIN SET own_value = value END
+            END ELSE BEGIN SET $cbr_res_used(~%value%~) = 1 END
+          END
+        END
+      END ~~
+    END
+    // Reading allocated numbers chooses an address; it never vetoes our symbol.
+    SET cbr_res_state = (0 - 1)
+    PATCH_IF own_value >= 0 BEGIN
+      PATCH_IF NOT $cbr_res_used(~%own_value%~) BEGIN SET cbr_res_state = own_value END
+    END
+    FOR (i = 255; i >= 0 AND cbr_res_state < 0; --i) BEGIN
+      PATCH_IF NOT $cbr_res_used(~%i%~) BEGIN SET cbr_res_state = i END
+    END
+    // If every engine bit is named, our decided marker owns the preferred bit.
+    PATCH_IF cbr_res_state < 0 BEGIN SET cbr_res_state = 255 END
+    SET written = 0
+    REPLACE_EVALUATE CASE_INSENSITIVE
+      ~^[ %TAB%]*[^ %TAB%%WNL%%MNL%%LNL%]+[ %TAB%]+CBR_PHYSICAL_SOFTCAP\b[^%WNL%%MNL%%LNL%]*~
+    BEGIN
+      SPRINT row ~~
+      PATCH_IF NOT written BEGIN
+        SPRINT row ~%cbr_res_state% CBR_PHYSICAL_SOFTCAP~
+        SET written = 1
+      END
+    END ~%row%~
+    PATCH_IF NOT written BEGIN
+      SPRINT row ~%cbr_res_state% CBR_PHYSICAL_SOFTCAP%LNL%~
+      PATCH_IF BUFFER_LENGTH > 0 BEGIN
+        READ_BYTE (BUFFER_LENGTH - 1) last
+        PATCH_IF last != 10 AND last != 13 BEGIN SPRINT row ~%LNL%%row%~ END
+      END
+      SET at = BUFFER_LENGTH
+      INSERT_BYTES at (STRING_LENGTH ~%row%~)
+      WRITE_ASCIIE at ~%row%~
     END
   BUT_ONLY
-  LAF cbr_find_or_allocate_splstate
-    INT_VAR planned_value = cbr_res_state
-    STR_VAR resource_path = EVAL ~%cbr_res_path%~ symbol = ~CBR_PHYSICAL_SOFTCAP~
-  END
   CLEAR_IDS_MAP
 
   COPY ~%template_file%~ ~%resource_dir%/M_CBRRES.lua~
-    PATCH_IF ((INDEX_BUFFER (~%CBR_RES_CAP%~) < 0) OR (INDEX_BUFFER (~%CBR_RES_STATE%~) < 0)) BEGIN
-      PATCH_FAIL ~CBR physical resistance: missing listener configuration placeholders.~
-    END
     REPLACE_TEXTUALLY ~%CBR_RES_CAP%~ ~%cap%~
     REPLACE_TEXTUALLY ~%CBR_RES_STATE%~ ~%cbr_res_state%~
-    PATCH_IF ((INDEX_BUFFER (~CBR_RES_CAP~) >= 0) OR (INDEX_BUFFER (~CBR_RES_STATE~) >= 0)) BEGIN
-      PATCH_FAIL ~CBR physical resistance: unresolved listener configuration.~
-    END
-  BUT_ONLY
 END

@@ -227,13 +227,20 @@ class FlailScsTests(unittest.TestCase):
         self.assertIn("SUCCESSFULLY REMOVED" if uninstall else "SUCCESSFULLY INSTALLED", output)
         return output
 
-    def assert_rollback(self, game, *diagnostics):
-        process, output = game.run()
-        self.assertNotEqual(0, process.returncode, output)
-        for diagnostic in diagnostics:
-            self.assertIn(diagnostic, output)
-        self.assertIn("NOT INSTALLED DUE TO ERRORS", output)
-        self.assertEqual(game.original, self.snapshot(game))
+    def assert_mixed_installed(self, game, item="BLUN30D", penalty=4):
+        self.install(game)
+        effects = read_itm(game.override / (item + ".ITM")).abilities[0].effects
+        links = [e for e in effects if e.resource.startswith("CF")]
+        self.assertTrue(links)
+        for link in links:
+            self.assertEqual(0, link.save_type & 31)
+            spell = SplFile.from_bytes((game.override / (link.resource + ".SPL")).read_bytes())
+            slow = [e for a in spell.abilities for e in a.effects if e.opcode == 40]
+            self.assertTrue(slow)
+            self.assertTrue(all((e.save_type & 31, e.save_bonus) == (2, -penalty) for e in slow))
+        for name, raw in game.original.items():
+            if not name.endswith(".ITM"):
+                self.assertEqual(raw, (game.override / name).read_bytes(), name)
 
     def assert_scs_contract(self, game):
         for name, penalty in TIERS.items():
@@ -278,7 +285,7 @@ class FlailScsTests(unittest.TestCase):
         self.assertEqual(game.original, self.snapshot(game))
         self.assertEqual(game.texts, baseline.strings(game.lang_tlk)[:len(game.texts)])
 
-    def test_mixed_scs_helpers_still_reject_and_roll_back(self):
+    def test_mixed_scs_helpers_install_with_private_saved_slow(self):
         cases = {
             "damage": dict(extra=(fx(12, parameter1=3, parameter2=65536, timing=1),)),
             "inner_save": dict(extra=(fx(40, duration=20, save_type=2, save_bonus=-2),)),
@@ -288,20 +295,20 @@ class FlailScsTests(unittest.TestCase):
             with self.subTest(case=label):
                 game = self.scs_game()
                 self.put(game, "BLUN30D.SPL", slow_helper("BLUN30D", **variation))
-                self.assert_rollback(game, "BLUN30D.SPL mixes Slow with other effects")
+                self.assert_mixed_installed(game)
         with self.subTest(case="area_projectile"):
             game = self.scs_game()
             helper = bytearray(slow_helper("BLUN30D"))
             helper[0x72 + 0x26] = 94
             self.put(game, "BLUN30D.SPL", bytes(helper))
-            self.assert_rollback(game, "BLUN30D.SPL mixes Slow")
+            self.assert_mixed_installed(game)
         with self.subTest(case="cancel_branch_is_not_feedback"):
             game = self.scs_game()
             self.put(game, "DW_NEG16.SPL", spl(SplAbility(0, 0, 0, (
                 fx(139, parameter1=310313, timing=1), fx(12, parameter1=5, timing=1)))))
-            self.assert_rollback(game, "BLUN14.SPL mixes Slow")
+            self.assert_mixed_installed(game, "BLUN14", 2)
 
-    def test_innate_haste_payload_with_another_effect_keeps_its_immunity(self):
+    def test_innate_haste_payload_with_another_effect_is_allowed(self):
         cases = {
             "damage": (innate_haste_payload(fx(12, parameter1=3, parameter2=65536, timing=1)),
                        r"(?i)BLUN30 keeps its immunity to SPIN572\. .*\(opcode 12\)"),
@@ -316,18 +323,20 @@ class FlailScsTests(unittest.TestCase):
                 else:
                     self.put(game, "SPIN572A.SPL", payload)
                 output = self.install(game)
-                self.assertRegex(output, diagnostic)
+                self.assertNotIn("WARNING", output.upper())
                 before = ItmFile.from_bytes(game.original["BLUN30.ITM"]).global_effects
                 after = read_itm(game.override / "BLUN30.ITM").global_effects
-                kept = tuple(e for e in before if not haste_blocker(e) or e.opcode == 206)
+                kept = tuple(e for e in before if not haste_blocker(e) or (label == "missing" and e.opcode == 206))
                 self.assertEqual([e.to_bytes() for e in kept], [e.to_bytes() for e in after])
 
-    def test_haste_check_on_an_unconfirmed_spell_state_rolls_back(self):
+    def test_haste_check_on_a_renamed_spell_state_still_allows_haste(self):
         game = self.scs_game()
         self.put(game, "SPLSTATE.IDS", SPLSTATES.replace("HASTE_IMMUNITY", "MOD_STATE").encode("ascii"))
-        self.assert_rollback(game, "BLUN30 sets spell state 138", "does not name it HASTE_IMMUNITY")
+        self.install(game)
+        self.assertFalse(any(e.opcode == 328 and e.parameter2 == 138
+                             for e in read_itm(game.override / "BLUN30.ITM").global_effects))
 
-    def test_haste_immunity_that_haste_does_not_check_is_kept(self):
+    def test_named_haste_immunity_is_removed_even_without_a_spell_check(self):
         game = self.scs_game()
         # Without the SPLSTATE=n self-checks in the wizard and innate Hastes
         # (shells and payloads), the state blocks no Haste the +5 allows; it is
@@ -339,9 +348,8 @@ class FlailScsTests(unittest.TestCase):
             self.put(game, name + ".SPL", dataclasses.replace(
                 spell, abilities=(dataclasses.replace(ability, effects=kept),)).to_bytes())
         output = self.install(game)
-        self.assertIn("keeps spell state HASTE_IMMUNITY (138): no Haste it allows checks it", output)
         plus5 = read_itm(game.override / "BLUN30.ITM").global_effects
-        self.assertIn(138, [e.parameter2 for e in plus5 if e.opcode == 328])
+        self.assertNotIn(138, [e.parameter2 for e in plus5 if e.opcode == 328])
 
     def test_direct_slow_shares_save_with_installed_penalty_and_refresh_only(self):
         game = self.scs_game()

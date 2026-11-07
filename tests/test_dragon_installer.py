@@ -187,24 +187,26 @@ class DragonInstallerTests(unittest.TestCase):
         self.assertNotIn("SUCCESSFULLY INSTALLED", result.stdout)
         self.assertEqual(snapshot(game.override), game.before)
 
-    def test_foreign_last_cre_rolls_back_before_any_payload(self) -> None:
+    def test_current_cre_identity_receives_its_prefix(self) -> None:
         game = self.game()
         data = bytearray((ORIGINALS / "shadra01.cre.orig").read_bytes())
         data[0x280:0x288] = b"FOREIGN1"
         (game.override / "shadra01.cre").write_bytes(data)
-        before = snapshot(game.override)
         result = game.run("--force-install-list", "110")
-        self.assertIn("NOT INSTALLED DUE TO ERRORS", result.stdout + result.stderr)
-        self.assertEqual(snapshot(game.override), before)
+        self.assert_success(result)
+        self.assertIn(b'"FOREIGN1"', (game.override / "shadra01.bcs").read_bytes())
         self.assert_stable(game)
 
-    def test_reserved_resource_collision_preserves_everything(self) -> None:
+    def test_reserved_resource_collision_writes_our_payload(self) -> None:
         game = self.game()
         (game.override / "CBRDV15.SPL").write_bytes(b"unrelated reserved-name owner")
         before = snapshot(game.override)
         result = game.run("--force-install-list", "110")
-        self.assertIn("NOT INSTALLED DUE TO ERRORS", result.stdout + result.stderr)
-        self.assertEqual(snapshot(game.override), before)
+        self.assert_success(result)
+        self.assertTrue((game.override / "CBRDV15.SPL").read_bytes().startswith(b"SPL V1  "))
+        for name, data in before.items():
+            if name.lower() != "cbrdv15.spl":
+                self.assertEqual((game.override / name).read_bytes(), data)
         self.assert_stable(game)
 
 

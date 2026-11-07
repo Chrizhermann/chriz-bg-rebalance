@@ -95,20 +95,13 @@ BEGIN
   ACTION_IF !(~%phase%~ STR_EQ ~preflight~) && !(~%phase%~ STR_EQ ~full~) BEGIN
     FAIL ~CBR 110: unknown resource phase %phase%.~
   END
-  ACTION_IF (~%resource_dir%~ STR_EQ ~~) || !DIRECTORY_EXISTS ~%resource_dir%~ BEGIN
-    FAIL ~CBR 110: resource directory is missing: %resource_dir%.~
+  ACTION_IF ~%resource_dir%~ STR_EQ ~~ BEGIN
+    FAIL ~CBR 110: resource directory argument is missing.~
   END
-  ACTION_IF !FILE_EXISTS ~%template_file%~ BEGIN
-    FAIL ~CBR 110: dragon vorpal runtime template is missing: %template_file%.~
-  END
+  MKDIR ~%resource_dir%~
   ACTION_CLEAR_ARRAY cbr_dve_files
-  COPY ~%template_file%~ ~%template_file%~
-    PATCH_IF (INDEX_BUFFER (~CBR_DRAGON_VORPAL_RUNTIME_V1~) < 0)
-          || (INDEX_BUFFER (~function CBRDVGO~) < 0) BEGIN
-      PATCH_FAIL ~CBR 110: unrecognized dragon vorpal runtime template.~
-    END
+  COPY - ~%template_file%~ ~cbr_dve_template_read~
     READ_ASCII 0 cbr_dve_lua (BUFFER_LENGTH)
-  BUT_ONLY
   OUTER_SPRINT $cbr_dve_files(~M_CBRDVG.lua~) ~%cbr_dve_lua%~
   ACTION_FOR_EACH cbr_dve_profile IN ~15~ ~10~ ~05~ BEGIN
     OUTER_SET cbr_dve_chance = 5
@@ -134,46 +127,17 @@ BEGIN
   LAF cbr_build_dragon_vorpal_spl RET cbr_dve_data = buffer END
   OUTER_SPRINT $cbr_dve_files(~CBRDVREM.SPL~) ~%cbr_dve_data%~
 
-  // Validate every reserved path before the first output is published. In
-  // game mode also check archived resources; a BIFF collision is still foreign.
-  // Opcode 321 matches ITM and SPL parent resrefs without checking extension.
-  ACTION_FOR_EACH cbr_dve_owned IN ~CBRDV15~ ~CBRDV10~ ~CBRDV05~ BEGIN
-    ACTION_IF FILE_EXISTS ~%resource_dir%/%cbr_dve_owned%.ITM~
-           || DIRECTORY_EXISTS ~%resource_dir%/%cbr_dve_owned%.ITM~ BEGIN
-      FAIL ~CBR 110: reserved cross-type resource collision: %cbr_dve_owned%.ITM.~
-    END
-    ACTION_IF game_mode BEGIN
-      ACTION_IF FILE_EXISTS_IN_GAME ~%cbr_dve_owned%.ITM~ BEGIN
-        FAIL ~CBR 110: reserved cross-type resource collision: %cbr_dve_owned%.ITM.~
-      END
-    END
-  END
+  // These eight resources belong to this component. Their old contents and
+  // same-resref items do not veto publication. A directory at a file destination
+  // is a filesystem obstruction; do not replace or remove user directories.
   ACTION_PHP_EACH cbr_dve_files AS cbr_dve_filename => cbr_dve_expected BEGIN
     ACTION_IF DIRECTORY_EXISTS ~%resource_dir%/%cbr_dve_filename%~ BEGIN
       FAIL ~CBR 110: reserved resource path is a directory: %cbr_dve_filename%.~
     END
-    ACTION_IF FILE_EXISTS ~%resource_dir%/%cbr_dve_filename%~ BEGIN
-      COPY ~%resource_dir%/%cbr_dve_filename%~ ~%resource_dir%/%cbr_dve_filename%~
-        READ_ASCII 0 cbr_dve_existing (BUFFER_LENGTH)
-        PATCH_IF !(~%cbr_dve_existing%~ STR_EQ ~%cbr_dve_expected%~) BEGIN
-          PATCH_FAIL ~CBR 110: reserved resource collision: %cbr_dve_filename%.~
-        END
-      BUT_ONLY
-    END ELSE ACTION_IF game_mode BEGIN
-      ACTION_IF FILE_EXISTS_IN_GAME ~%cbr_dve_filename%~ BEGIN
-        COPY_EXISTING ~%cbr_dve_filename%~ ~override~
-          READ_ASCII 0 cbr_dve_existing (BUFFER_LENGTH)
-          PATCH_IF !(~%cbr_dve_existing%~ STR_EQ ~%cbr_dve_expected%~) BEGIN
-            PATCH_FAIL ~CBR 110: reserved archived resource collision: %cbr_dve_filename%.~
-          END
-        BUT_ONLY
-      END
-    END
   END
   ACTION_IF (~%phase%~ STR_EQ ~full~) BEGIN
     ACTION_PHP_EACH cbr_dve_files AS cbr_dve_filename => cbr_dve_expected BEGIN
-      // The source is only a read handle; replace its buffer with the fully
-      // preflighted canonical bytes. CREATE would write before preflight.
+      // The source is only a read handle; always publish our complete bytes.
       COPY ~%template_file%~ ~%resource_dir%/%cbr_dve_filename%~
         DELETE_BYTES 0 BUFFER_LENGTH
         INSERT_BYTES 0 (STRING_LENGTH ~%cbr_dve_expected%~)
