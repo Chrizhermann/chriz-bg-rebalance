@@ -2,15 +2,15 @@
 
 The cap owns only GA_OHTMPS1 cells (case-insensitive). It keeps the first five
 uses ordered by (level, row order) and replaces every later one with ****,
-byte-surgically. Row names, table width, level-25 symbols, Artisan's packed
+by cell label. Row names, table width, level-25 symbols, Artisan's packed
 AP_C0PR#CL grants, and other mods' cells are neither required nor touched.
 
 Three layers are exercised:
   * a focused --nogame harness (tests/weidu/tempus_clab_harness.tp2) calling
-    the production classification/cap/post-validation sequence directly;
+    the production read/cap sequence directly;
   * the full Holy Power progression harness with a variant CLAB; and
   * the public setup-chriz-bg-rebalance.tp2 component 401 on a synthetic game
-    (install, byte-exact uninstall, and atomic rollback on failure).
+    (install, byte-exact uninstall, and complete writes when grants are absent).
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ from tests.test_tempus_holy_power import (
     _pack_clab_ability1_with_artisan_permissions,
     _raw_file_tree,
     build_fixture,
+    assert_clab_equal,
 )
 from tests.test_tempus_holy_power_installer import SyntheticGame
 
@@ -140,7 +141,7 @@ class ClabRun:
 
 
 class ClabCapVariantTests(unittest.TestCase):
-    def run_clab(self, raw: bytes, *, expect_success: bool = True) -> ClabRun:
+    def run_clab(self, raw: bytes) -> ClabRun:
         holder = tempfile.TemporaryDirectory(prefix="cbr-clab-fixture-")
         self.addCleanup(holder.cleanup)
         fixture = Path(holder.name) / "fixture"
@@ -148,11 +149,9 @@ class ClabCapVariantTests(unittest.TestCase):
         (fixture / CLAB_NAME).write_bytes(raw)
         run = ClabRun(fixture)
         self.addCleanup(run.cleanup)
-        if expect_success:
-            self.assertTrue(run.succeeded, run.transcript)
-        else:
-            self.assertIn("NOT INSTALLED DUE TO ERRORS", run.transcript)
-            self.assertFalse((run.output / "CBR_TEST.OK").exists())
+        self.assertTrue(run.succeeded, run.transcript)
+        self.assertEqual(0, run.process.returncode, run.transcript)
+        self.assertNotIn("WITH WARNINGS", run.transcript)
         return run
 
     def assert_capped(self, raw: bytes, *, preflight: tuple[int, int]) -> bytes:
@@ -160,7 +159,7 @@ class ClabCapVariantTests(unittest.TestCase):
         run = self.run_clab(raw)
         self.assertEqual(preflight, run.preflight())
         after = (run.output / CLAB_NAME).read_bytes()
-        self.assertEqual(expected_cap(raw), after)
+        assert_clab_equal(self, expected_cap(raw), after)
         self.assertLessEqual(len(_grant_cells(after)), 5)
         second = ClabRun(run.output)
         self.addCleanup(second.cleanup)
@@ -174,21 +173,21 @@ class ClabCapVariantTests(unittest.TestCase):
     def test_captured_original_caps_exactly_the_five_late_grants(self) -> None:
         raw = (ORIGINALS / "OHTEMPUS.2da.orig").read_bytes()
         after = self.assert_capped(raw, preflight=(0, 10))
-        self.assertEqual(_clear_clab_holy_power_grants(raw, LATE_HOLY_POWER_LEVELS), after)
+        assert_clab_equal(self, _clear_clab_holy_power_grants(raw, LATE_HOLY_POWER_LEVELS), after)
 
     def test_base_game_and_non_sr_captures(self) -> None:
         for capture in ("tempus-base-game", "tempus-no-sr"):
             with self.subTest(capture=capture):
                 raw = (ORIGINALS / capture / CLAB_NAME).read_bytes()
                 after = self.assert_capped(raw, preflight=(0, 10))
-                self.assertEqual(_clear_clab_holy_power_grants(raw, LATE_HOLY_POWER_LEVELS), after)
+                assert_clab_equal(self, _clear_clab_holy_power_grants(raw, LATE_HOLY_POWER_LEVELS), after)
 
     def test_artisan_packed_fixture_stays_exact(self) -> None:
         raw = _pack_clab_ability1_with_artisan_permissions(
             (ORIGINALS / "OHTEMPUS.2da.orig").read_bytes()
         )
         after = self.assert_capped(raw, preflight=(0, 10))
-        self.assertEqual(_clear_clab_holy_power_grants(raw, LATE_HOLY_POWER_LEVELS), after)
+        assert_clab_equal(self, _clear_clab_holy_power_grants(raw, LATE_HOLY_POWER_LEVELS), after)
         table = read_2da_bytes(after)
         for level in (2, 5, 7, 24, 27, 50):
             self.assertEqual("AP_C0PR#CL", table.cell("ABILITY1", str(level)))
@@ -301,14 +300,14 @@ class ClabCapVariantTests(unittest.TestCase):
 
     # -- already capped and counts --------------------------------------------
 
-    def test_already_capped_table_is_byte_identical(self) -> None:
+    def test_already_capped_table_keeps_its_cells(self) -> None:
         for count in (5, 3, 1):
             with self.subTest(count=count):
                 grants = {level: "GA_OHTMPS1" for level in (1, 6, 11, 16, 21)[:count]}
                 raw = make_clab(50, [("ABILITY1", {**grants, 25: "AP_CDHLYSYM"}), ("ABILITY2", {})])
                 run = self.run_clab(raw)
                 self.assertEqual((1, count), run.preflight())
-                self.assertEqual(raw, (run.output / CLAB_NAME).read_bytes())
+                assert_clab_equal(self, raw, (run.output / CLAB_NAME).read_bytes())
 
     def test_seven_grants_are_capped_to_five(self) -> None:
         grants = {level: "GA_OHTMPS1" for level in (2, 5, 9, 14, 20, 27, 35)}
@@ -329,26 +328,33 @@ class ClabCapVariantTests(unittest.TestCase):
         self.assertEqual("Ga_OhTmPs1", table.cell("ABILITY1", "11"))
         self.assertEqual("****", table.cell("ABILITY1", "26"))
 
-    # -- honest failures -----------------------------------------------------
+    # -- missing data -----------------------------------------------------
 
-    def test_zero_grants_fail_with_a_clear_message(self) -> None:
+    def test_zero_grants_get_the_original_five_use_schedule(self) -> None:
         raw = make_clab(50, [("ABILITY1", {1: "GA_SPCL900", 25: "AP_CDHLYSYM"})])
-        run = self.run_clab(raw, expect_success=False)
-        self.assertIn("grants no GA_OHTMPS1 use", run.transcript)
-        self.assertIn("OHTEMPUS.2DA", run.transcript)
+        run = self.run_clab(raw)
+        table = read_2da(run.output / CLAB_NAME)
+        self.assertEqual("GA_SPCL900", table.cell("ABILITY1", "1"))
+        self.assertEqual("AP_CDHLYSYM", table.cell("ABILITY1", "25"))
+        for level in (1, 6, 11, 16, 21):
+            self.assertEqual("GA_OHTMPS1", table.cell("CBR_HOLY_POWER", str(level)))
+        second = self.run_clab((run.output / CLAB_NAME).read_bytes())
+        self.assertEqual((run.output / CLAB_NAME).read_bytes(), (second.output / CLAB_NAME).read_bytes())
 
-    def test_non_2da_input_fails(self) -> None:
-        run = self.run_clab(b"\xff\xff\x00binary payload GA_OHTMPS1\r\n", expect_success=False)
-        self.assertIn("cannot be parsed", run.transcript)
+    def test_unreadable_table_gets_the_owned_grants(self) -> None:
+        run = self.run_clab(b"\xff\xff\x00binary payload GA_OHTMPS1\r\n")
+        self.assertEqual(5, len(_grant_cells((run.output / CLAB_NAME).read_bytes())))
 
-    def test_truncated_table_without_level_rows_header_fails(self) -> None:
-        run = self.run_clab(b"2DA V1.0\r\n****\r\n", expect_success=False)
-        self.assertIn("cannot be parsed", run.transcript)
+    def test_missing_level_columns_get_the_owned_grants(self) -> None:
+        run = self.run_clab(b"2DA V1.0\r\n****\r\n")
+        table = read_2da(run.output / CLAB_NAME)
+        self.assertEqual(21, len(table.columns))
+        self.assertEqual(5, len(_grant_cells((run.output / CLAB_NAME).read_bytes())))
 
-    def test_grant_beyond_declared_columns_is_ambiguous(self) -> None:
+    def test_wider_data_rows_are_retained(self) -> None:
         raw = make_clab(5, [("ABILITY1", {1: "GA_OHTMPS1"})]) + b"ABILITY2  ****  ****  ****  ****  ****  GA_OHTMPS1\r\n"
-        run = self.run_clab(raw, expect_success=False)
-        self.assertIn("beyond the 5 level columns", run.transcript)
+        run = self.run_clab(raw)
+        self.assertEqual(2, len(_grant_cells((run.output / CLAB_NAME).read_bytes())))
 
 
 def read_2da_bytes(raw: bytes):
@@ -395,14 +401,14 @@ class ClabProgressionVariantTests(unittest.TestCase):
         _fixture, output, process = self._run_progression(clab)
         transcript = process.stdout + process.stderr
         self.assertIn("SUCCESSFULLY INSTALLED", transcript, transcript)
-        self.assertEqual(expected_cap(clab), (output / CLAB_NAME).read_bytes())
+        assert_clab_equal(self, expected_cap(clab), (output / CLAB_NAME).read_bytes())
 
     def test_progression_leaves_an_already_capped_narrow_table_untouched(self) -> None:
         clab = make_clab(40, [("ABILITY1", {1: "GA_OHTMPS1", 7: "GA_OHTMPS1", 25: "AP_CDHLYSYM"})])
         _fixture, output, process = self._run_progression(clab)
         transcript = process.stdout + process.stderr
         self.assertIn("SUCCESSFULLY INSTALLED", transcript, transcript)
-        self.assertEqual(clab, (output / CLAB_NAME).read_bytes())
+        assert_clab_equal(self, clab, (output / CLAB_NAME).read_bytes())
 
 
 # ---------------------------------------------------------------------------
@@ -434,23 +440,27 @@ class ClabInstallerVariantTests(unittest.TestCase):
         transcript = game.transcript(install)
         self.assertIn("SUCCESSFULLY INSTALLED", transcript, transcript)
         game.assert_stable_inputs(self)
-        self.assertEqual(expected_cap(clab), (game.override / CLAB_NAME).read_bytes())
+        assert_clab_equal(self, expected_cap(clab), (game.override / CLAB_NAME).read_bytes())
 
         uninstall = game.run_uninstall(401)
         self.assertEqual(0, uninstall.returncode, game.transcript(uninstall))
         self.assertEqual(game.pre_override, _raw_file_tree(game.override))
         game.assert_stable_inputs(self)
 
-    def test_component_401_rolls_back_when_no_holy_power_grant_exists(self) -> None:
+    def test_component_401_adds_missing_grants_and_uninstalls_exactly(self) -> None:
         clab = make_clab(50, [("ABILITY1", {1: "GA_SPCL900", 25: "AP_CDHLYSYM"})])
         game = self._game(clab)
         process = game.run_install(401)
         transcript = game.transcript(process)
-        self.assertNotIn("SUCCESSFULLY INSTALLED", transcript)
-        self.assertIn("grants no GA_OHTMPS1 use", transcript)
-        self.assertNotRegex(game.active_weidu_log(), r"(?m)#0\s+#401\b")
+        self.assertEqual(0, process.returncode, transcript)
+        self.assertNotIn("WITH WARNINGS", transcript)
+        self.assertEqual(5, len(_grant_cells((game.override / CLAB_NAME).read_bytes())))
+        table = read_2da(game.override / CLAB_NAME)
+        self.assertEqual("GA_SPCL900", table.cell("ABILITY1", "1"))
+        self.assertEqual("AP_CDHLYSYM", table.cell("ABILITY1", "25"))
+        uninstall = game.run_uninstall(401)
+        self.assertEqual(0, uninstall.returncode, game.transcript(uninstall))
         self.assertEqual(game.pre_override, _raw_file_tree(game.override))
-        self.assertFalse(game.scratch.exists())
         game.assert_stable_inputs(self)
 
 

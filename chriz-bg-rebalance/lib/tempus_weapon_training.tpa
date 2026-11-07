@@ -1,33 +1,8 @@
-// chriz-bg-rebalance — Cleric of Tempus weapon training (component 400).
-//
-// Formalizes the 2026-07-14 live hotfix as a reproducible, preflight-first,
-// file-based transformation:
-//   * WEAPPROF.2DA — the OHTEMPUS column caps every inherited cleric weapon,
-//     longsword/axe/crossbow, and all four fighting styles at 2.
-//   * C0PR#C4.SPL — every ability header carrying Artisan's Tempus axe grant
-//     gains whichever of the longsword permission gate and the longsword and
-//     crossbow starter pips it lacks, inserted into that header's own effect
-//     slice (the axe pair and every other existing record are Artisan's or
-//     another mod's and stay bit-for-bit).
-//   * CBRTMG2 (+CBRTMG2L/CBRTMG2X) — an idempotent, gate-guarded migration
-//     helper for an already-joined Tempus cleric; every gate uses relation
-//     "<=" so it is correct whether an untrained proficiency stat reads 0 or
-//     -1 (the suspected failure mode of the retired 2026-07-14 CBRTMIG).
-//
-// File-based library rules: every game input lives in %resource_dir%; this
-// library never resolves resources against an installed game. The library is
-// idempotent over the live hotfixed state: when WEAPPROF.2DA and C0PR#C4.SPL
-// already carry the target values, neither file is rewritten (BUT_ONLY), so a
-// live install stays byte-identical.
-//
-// Requires chriz-bg-rebalance/lib/tempus_holy_power.tpa to be INCLUDEd first
-// (cbr_validate_spl_v1, cbr_append_spl_effect_record,
-// cbr_add_basic_self_ability, cbr_find_or_append_splprot).
+// Tempus weapon training owns its prescribed two-pip caps, the longsword
+// permission and longsword/crossbow starter pips, and the migration helpers.
+// Other kit cells, legacy composite proficiencies, axe grants and other effects
+// remain external. Readable spell storage is serialized before adding behavior.
 
-// The three private resrefs reserved for component 400. Never reuse CBRTMIG:
-// the dead 2026-07-14 helper of that name may still exist as an untracked
-// override orphan on the live game, and reusing the resref would make the
-// two histories indistinguishable.
 DEFINE_ACTION_FUNCTION cbr_define_tempus_training_resrefs
   RET
     cbr_training_migration
@@ -39,452 +14,113 @@ BEGIN
   OUTER_SPRINT cbr_training_pip_crossbow  ~CBRTMG2X~
 END
 
-// ---------------------------------------------------------------------------
-// WEAPPROF.2DA
-// ---------------------------------------------------------------------------
-
-// Resolve the header/data geometry once. WeiDU's 2DA readers are token-count
-// filtered: the header row carries one token fewer than data rows (there is
-// no header cell above the unlabelled row-name column), so reading at
-// (columns - 1) yields header+data and reading at columns yields data only.
-DEFINE_PATCH_FUNCTION cbr_wt_locate_weapprof_columns
-  RET
-    weapprof_columns
-    cleric_header_index
-    ohtempus_header_index
-BEGIN
-  COUNT_2DA_COLS weapprof_columns
-  PATCH_IF (weapprof_columns < 4) BEGIN
-    PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: expected an unlabelled row-name column plus kit columns, found %weapprof_columns% columns.~
+DEFINE_PATCH_FUNCTION cbr_wt_transform_weapprof RET changed_cells BEGIN
+  LPM cbr_tempus_read_table
+  SET changed_cells = 0 SET cbr_wt_kit = (0 - 1) SET cbr_wt_cleric = (0 - 1)
+  FOR (cbr_wt_c = 0; cbr_wt_c < cbr_t_cols; ++cbr_wt_c) BEGIN
+    SPRINT cbr_wt_label $cbr_t_cell(2 ~%cbr_wt_c%~)
+    PATCH_IF ~%cbr_wt_label%~ STRING_EQUAL_CASE ~OHTEMPUS~ BEGIN SET cbr_wt_kit = cbr_wt_c + 1 END
+    PATCH_IF ~%cbr_wt_label%~ STRING_EQUAL_CASE ~CLERIC~ BEGIN SET cbr_wt_cleric = cbr_wt_c + 1 END
   END
-  SET cbr_wt_wide_cols = weapprof_columns - 1
-  READ_2DA_ENTRIES_NOW cbr_wt_wide cbr_wt_wide_cols
-  PATCH_IF (cbr_wt_wide < 2) BEGIN
-    PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: no header/data rows.~
-  END
-  SET cleric_header_index = "-1"
-  SET ohtempus_header_index = "-1"
-  FOR (cbr_wt_col = 0; cbr_wt_col < cbr_wt_wide_cols; ++cbr_wt_col) BEGIN
-    READ_2DA_ENTRY_FORMER cbr_wt_wide 0 cbr_wt_col cbr_wt_header
-    PATCH_IF (~%cbr_wt_header%~ STR_EQ ~CLERIC~) BEGIN
-      PATCH_IF (cleric_header_index >= 0) BEGIN
-        PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: duplicate CLERIC column.~
-      END
-      SET cleric_header_index = cbr_wt_col
-    END
-    PATCH_IF (~%cbr_wt_header%~ STR_EQ ~OHTEMPUS~) BEGIN
-      PATCH_IF (ohtempus_header_index >= 0) BEGIN
-        PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: duplicate OHTEMPUS column.~
-      END
-      SET ohtempus_header_index = cbr_wt_col
+  PATCH_IF cbr_wt_kit < 0 BEGIN
+    SPRINT $cbr_t_cell(2 ~%cbr_t_cols%~) ~OHTEMPUS~ ++cbr_t_cols SET cbr_wt_kit = cbr_t_cols
+    FOR (cbr_wt_r = 3; cbr_wt_r < cbr_t_lines; ++cbr_wt_r) BEGIN
+      SPRINT $cbr_t_cell(~%cbr_wt_r%~ ~%cbr_wt_kit%~) ~0~
     END
   END
-  PATCH_IF (cleric_header_index < 0) BEGIN
-    PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: no CLERIC column header.~
+  // The fixed cleric arsenal and the three decided additions always receive
+  // their caps, even when old permission/cap cells or whole rows are absent.
+  PATCH_FOR_EACH cbr_wt_name IN ~LONGSWORD~ ~AXE~ ~CROSSBOW~ ~WARHAMMER~ ~MACE~ ~FLAILMORNINGSTAR~
+    ~QUARTERSTAFF~ ~SLING~ ~CLUB~ ~2HANDED~ ~SWORDANDSHIELD~ ~SINGLEWEAPON~ ~2WEAPON~ BEGIN
+    SET cbr_wt_found = 0
+    FOR (cbr_wt_r = 3; cbr_wt_r < cbr_t_lines; ++cbr_wt_r) BEGIN
+      SPRINT cbr_wt_label $cbr_t_cell(~%cbr_wt_r%~ 0)
+      PATCH_IF ~%cbr_wt_label%~ STRING_EQUAL_CASE ~%cbr_wt_name%~ BEGIN
+        SET cbr_wt_found = 1
+        SPRINT $cbr_t_cell(~%cbr_wt_r%~ ~%cbr_wt_kit%~) ~2~ ++changed_cells
+      END
+    END
+    PATCH_IF NOT cbr_wt_found BEGIN
+      SPRINT $cbr_t_cell(~%cbr_t_lines%~ 0) ~%cbr_wt_name%~
+      FOR (cbr_wt_c = 1; cbr_wt_c <= cbr_t_cols; ++cbr_wt_c) BEGIN
+        SPRINT $cbr_t_cell(~%cbr_t_lines%~ ~%cbr_wt_c%~) ~%cbr_t_default%~
+      END
+      SPRINT $cbr_t_cell(~%cbr_t_lines%~ ~%cbr_wt_kit%~) ~2~ ++cbr_t_lines ++changed_cells
+    END
   END
-  PATCH_IF (ohtempus_header_index < 0) BEGIN
-    PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: no OHTEMPUS column header (is the Cleric of Tempus kit installed?).~
+  // Inherited extra weapon availability remains a feature input: cap every
+  // additional weapon granted to the cleric class or kit. Legacy BG1 groups
+  // and EXTRA placeholders are outside this component's owned fields.
+  FOR (cbr_wt_r = 3; cbr_wt_r < cbr_t_lines; ++cbr_wt_r) BEGIN
+    SPRINT cbr_wt_label $cbr_t_cell(~%cbr_wt_r%~ 0) TO_UPPER cbr_wt_label
+    SET cbr_wt_allowed = 0
+    PATCH_IF cbr_wt_cleric >= 0 BEGIN
+      SPRINT cbr_wt_value $cbr_t_cell(~%cbr_wt_r%~ ~%cbr_wt_cleric%~)
+      PATCH_IF IS_AN_INT ~%cbr_wt_value%~ BEGIN SET cbr_wt_allowed = (cbr_wt_value > 0) END
+    END
+    SPRINT cbr_wt_value $cbr_t_cell(~%cbr_wt_r%~ ~%cbr_wt_kit%~)
+    PATCH_IF IS_AN_INT ~%cbr_wt_value%~ BEGIN SET cbr_wt_allowed = cbr_wt_allowed OR (cbr_wt_value > 0) END
+    PATCH_IF cbr_wt_allowed AND (~%cbr_wt_label%~ STRING_MATCHES_REGEXP ~.*_BG1~) != 0
+      AND (~%cbr_wt_label%~ STRING_MATCHES_REGEXP ~EXTRA.*~) != 0 BEGIN
+      SPRINT $cbr_t_cell(~%cbr_wt_r%~ ~%cbr_wt_kit%~) ~2~
+    END
   END
+  // Every occurrence of the owned column receives the same decided values.
+  FOR (cbr_wt_c = 0; cbr_wt_c < cbr_t_cols; ++cbr_wt_c) BEGIN
+    SPRINT cbr_wt_label $cbr_t_cell(2 ~%cbr_wt_c%~)
+    PATCH_IF ~%cbr_wt_label%~ STRING_EQUAL_CASE ~OHTEMPUS~ BEGIN
+      SET cbr_wt_dest = cbr_wt_c + 1
+      FOR (cbr_wt_r = 3; cbr_wt_r < cbr_t_lines; ++cbr_wt_r) BEGIN
+        SPRINT $cbr_t_cell(~%cbr_wt_r%~ ~%cbr_wt_dest%~) $cbr_t_cell(~%cbr_wt_r%~ ~%cbr_wt_kit%~)
+      END
+    END
+  END
+  LPM cbr_tempus_write_table
 END
 
-// Row classification, shared by the transformer and the verifier so the two
-// can never drift. Classes:
-//   2 = fighting style        (always capped at 2)
-//   3 = forced weapon         (LONGSWORD/AXE/CROSSBOW: capped at 2)
-//   1 = ordinary weapon row   (capped at 2 iff installed CLERIC>0 or OHTEMPUS>0)
-//   0 = out of scope          (*_BG1 composites, EXTRA*: explicitly untouched —
-//       BG2EE/EET individual rows are authoritative; legacy composite rows keep
-//       their installed values, matching the live hotfix)
-DEFINE_PATCH_FUNCTION cbr_wt_classify_weapprof_row
-  STR_VAR
-    row_label = ~~
-  RET
-    row_class
-BEGIN
-  SET row_class = 1
-  PATCH_IF (~%row_label%~ STR_EQ ~2HANDED~
-         || ~%row_label%~ STR_EQ ~SWORDANDSHIELD~
-         || ~%row_label%~ STR_EQ ~SINGLEWEAPON~
-         || ~%row_label%~ STR_EQ ~2WEAPON~) BEGIN
-    SET row_class = 2
-  END ELSE PATCH_IF (~%row_label%~ STR_EQ ~LONGSWORD~
-                  || ~%row_label%~ STR_EQ ~AXE~
-                  || ~%row_label%~ STR_EQ ~CROSSBOW~) BEGIN
-    SET row_class = 3
-  END ELSE PATCH_IF ((~%row_label%~ STRING_MATCHES_REGEXP ~.*_BG1~) = 0
-                  || (~%row_label%~ STRING_MATCHES_REGEXP ~EXTRA.*~) = 0) BEGIN
-    SET row_class = 0
-  END
+DEFINE_PATCH_FUNCTION cbr_wt_owned_effect INT_VAR at = 0 RET owned BEGIN
+  READ_SHORT at cbr_wt_op READ_LONG (at + 8) cbr_wt_p2 READ_ASCII (at + 0x14) cbr_wt_res (8) NULL
+  SET owned = ((cbr_wt_op = 233 AND (cbr_wt_p2 = 90 OR cbr_wt_p2 = 103))
+    OR (cbr_wt_op = 326 AND (~%cbr_wt_res%~ STRING_EQUAL_CASE ~C0PR#90~)))
 END
 
-// Validate shape and (when verify_only = 0) apply the transformation.
-// SET_2DA_ENTRY re-renders the table, so every write is guarded by a
-// read-compare: an already-transformed table (the live hotfixed game) takes
-// zero writes and stays byte-identical under BUT_ONLY.
-DEFINE_PATCH_FUNCTION cbr_wt_transform_weapprof
-  INT_VAR
-    verify_only = 0
-  RET
-    changed_cells
-BEGIN
-  SET changed_cells = 0
-  LPF cbr_wt_locate_weapprof_columns
-    RET
-      cbr_wt_cols     = weapprof_columns
-      cbr_wt_cleric   = cleric_header_index
-      cbr_wt_ohtempus = ohtempus_header_index
-  END
-  READ_2DA_ENTRIES_NOW cbr_wt_data cbr_wt_cols
-  PATCH_IF (cbr_wt_data < 4) BEGIN
-    PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: too few data rows (%cbr_wt_data%).~
-  END
-  SET cbr_wt_seen_longsword = 0
-  SET cbr_wt_seen_axe = 0
-  SET cbr_wt_seen_crossbow = 0
-  SET cbr_wt_seen_styles = 0
-  FOR (cbr_wt_row = 0; cbr_wt_row < cbr_wt_data; ++cbr_wt_row) BEGIN
-    READ_2DA_ENTRY_FORMER cbr_wt_data cbr_wt_row 0 cbr_wt_label
-    LPF cbr_wt_classify_weapprof_row
-      STR_VAR row_label = EVAL ~%cbr_wt_label%~
-      RET cbr_wt_class = row_class
+DEFINE_PATCH_FUNCTION cbr_wt_complete_tempus_grant RET appended_effects BEGIN
+  LPF cbr_tempus_repack_spl INT_VAR default_target = 1 END
+  READ_LONG 0x64 cbr_wt_ab READ_SHORT 0x68 cbr_wt_na READ_LONG 0x6a cbr_wt_fx
+  READ_SHORT 0x70 cbr_wt_cast
+  SET cbr_wt_total = 0 SET appended_effects = 0
+  FOR (cbr_wt_a = (0 - 1); cbr_wt_a < cbr_wt_na; ++cbr_wt_a) BEGIN
+    SET cbr_wt_first = 0 SET cbr_wt_n = cbr_wt_cast
+    PATCH_IF cbr_wt_a >= 0 BEGIN
+      READ_SHORT (cbr_wt_ab + cbr_wt_a * 0x28 + 0x1e) cbr_wt_n
+      READ_SHORT (cbr_wt_ab + cbr_wt_a * 0x28 + 0x20) cbr_wt_first
     END
-    PATCH_IF (cbr_wt_class > 0) BEGIN
-      READ_2DA_ENTRY_FORMER cbr_wt_data cbr_wt_row (cbr_wt_cleric + 1) cbr_wt_cleric_value
-      READ_2DA_ENTRY_FORMER cbr_wt_data cbr_wt_row (cbr_wt_ohtempus + 1) cbr_wt_tempus_value
-      PATCH_IF (!(IS_AN_INT ~%cbr_wt_cleric_value%~) || !(IS_AN_INT ~%cbr_wt_tempus_value%~)) BEGIN
-        PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: row %cbr_wt_label% has a non-numeric CLERIC/OHTEMPUS cell.~
-      END
-      PATCH_IF (~%cbr_wt_label%~ STR_EQ ~LONGSWORD~) BEGIN
-        ++cbr_wt_seen_longsword
-      END
-      PATCH_IF (~%cbr_wt_label%~ STR_EQ ~AXE~) BEGIN
-        ++cbr_wt_seen_axe
-      END
-      PATCH_IF (~%cbr_wt_label%~ STR_EQ ~CROSSBOW~) BEGIN
-        ++cbr_wt_seen_crossbow
-      END
-      PATCH_IF (cbr_wt_class = 2) BEGIN
-        ++cbr_wt_seen_styles
-      END
-      SET cbr_wt_wants_cap = (cbr_wt_class >= 2 || cbr_wt_cleric_value > 0 || cbr_wt_tempus_value > 0)
-      PATCH_IF (cbr_wt_wants_cap && cbr_wt_tempus_value != 2) BEGIN
-        PATCH_IF (verify_only) BEGIN
-          PATCH_FAIL ~CBR WEAPPROF.2DA verification failed: row %cbr_wt_label% should cap OHTEMPUS at 2, found %cbr_wt_tempus_value%.~
-        END
-        SET_2DA_ENTRY cbr_wt_row (cbr_wt_ohtempus + 1) cbr_wt_cols ~2~
-        ++changed_cells
+    SET $cbr_wt_first(~%cbr_wt_a%~) = cbr_wt_total
+    FOR (cbr_wt_i = 0; cbr_wt_i < cbr_wt_n; ++cbr_wt_i) BEGIN
+      SET cbr_wt_at = cbr_wt_fx + (cbr_wt_first + cbr_wt_i) * 0x30
+      LPF cbr_wt_owned_effect INT_VAR at = cbr_wt_at RET owned END
+      PATCH_IF NOT owned BEGIN
+        LPF cbr_append_raw_spl_effect_record INT_VAR source_offset = cbr_wt_at END
+        ++cbr_wt_total
       END
     END
+    PATCH_IF cbr_wt_a >= 0 BEGIN
+      LPF cbr_append_spl_effect_record INT_VAR opcode = 326 target = 1 STR_VAR resource = ~C0PR#90~ END
+      PATCH_FOR_EACH cbr_wt_prof IN ~90~ ~103~ BEGIN
+        SET cbr_wt_prof_n = %cbr_wt_prof%
+        LPF cbr_append_spl_effect_record INT_VAR opcode = 233 target = 1 parameter1 = 1 parameter2 = cbr_wt_prof_n timing = 9 END
+      END
+      SET cbr_wt_total += 3 SET appended_effects += 3
+    END
+    SET $cbr_wt_count(~%cbr_wt_a%~) = cbr_wt_total - $cbr_wt_first(~%cbr_wt_a%~)
   END
-  PATCH_IF (cbr_wt_seen_longsword != 1 || cbr_wt_seen_axe != 1 || cbr_wt_seen_crossbow != 1) BEGIN
-    PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: expected exactly one LONGSWORD, AXE, and CROSSBOW row.~
-  END
-  PATCH_IF (cbr_wt_seen_styles != 4) BEGIN
-    PATCH_FAIL ~CBR WEAPPROF.2DA validation failed: expected exactly the four fighting-style rows.~
+  DELETE_BYTES cbr_wt_fx (BUFFER_LENGTH - cbr_wt_fx - cbr_wt_total * 0x30)
+  WRITE_SHORT 0x6e 0 WRITE_SHORT 0x70 $cbr_wt_count(~-1~)
+  FOR (cbr_wt_a = 0; cbr_wt_a < cbr_wt_na; ++cbr_wt_a) BEGIN
+    WRITE_SHORT (cbr_wt_ab + cbr_wt_a * 0x28 + 0x1e) $cbr_wt_count(~%cbr_wt_a%~)
+    WRITE_SHORT (cbr_wt_ab + cbr_wt_a * 0x28 + 0x20) $cbr_wt_first(~%cbr_wt_a%~)
   END
 END
-
-// ---------------------------------------------------------------------------
-// C0PR#C4.SPL (Artisan's Tempus level-1 grant)
-// ---------------------------------------------------------------------------
-//
-// Owned behavior: every ability header that carries Artisan's axe grant
-// (opcode 326 -> C0PR#92 permission gate plus opcode 233 proficiency-92 pip)
-// also carries a longsword gate (326 -> C0PR#90) and longsword/crossbow pips
-// (233 proficiency 90/103).  Missing records are cloned from that header's
-// own axe records so power, resistance, timing, probability, and SPLPROT
-// condition follow the installed convention.  Records are located by meaning
-// inside each header's indexed effect slice; casting-feature storage, other
-// headers, extra visual/marker records, and record order are not assumed.
-// Existing records stay byte-identical; only their positions may move when a
-// slice in front of them grows.
-
-// Compare two complete effect records byte for byte.
-DEFINE_PATCH_FUNCTION cbr_wt_records_identical
-  INT_VAR
-    first_offset  = 0
-    second_offset = 0
-  RET
-    identical
-BEGIN
-  SET identical = 1
-  FOR (cbr_wt_cmp = 0; cbr_wt_cmp < 0x30; SET cbr_wt_cmp += 4) BEGIN
-    READ_LONG (first_offset + cbr_wt_cmp) cbr_wt_cmp_first
-    READ_LONG (second_offset + cbr_wt_cmp) cbr_wt_cmp_second
-    PATCH_IF (cbr_wt_cmp_first != cbr_wt_cmp_second) BEGIN
-      SET identical = 0
-    END
-  END
-END
-
-// Classify the Artisan grant records inside one ability header's slice.
-// gate/pip_ambiguous = 1 when several axe gates (pips) exist that are not
-// byte-identical, so no single clone template is defined.
-DEFINE_PATCH_FUNCTION cbr_wt_scan_grant_header
-  INT_VAR
-    header_index   = 0
-    ability_offset = 0
-    effect_offset  = 0
-  RET
-    carries_grant
-    gate_axe_offset
-    pip_axe_offset
-    gate_ambiguous
-    pip_ambiguous
-    gate_longsword_count
-    pip_longsword_count
-    pip_crossbow_count
-    header_level
-BEGIN
-  SET cbr_wt_header_offset = ability_offset + (header_index * 0x28)
-  READ_SHORT (cbr_wt_header_offset + 0x10) header_level
-  READ_SHORT (cbr_wt_header_offset + 0x1e) cbr_wt_slice_count
-  READ_SHORT (cbr_wt_header_offset + 0x20) cbr_wt_slice_first
-  SET gate_axe_offset = "-1"
-  SET pip_axe_offset = "-1"
-  SET gate_ambiguous = 0
-  SET pip_ambiguous = 0
-  SET gate_longsword_count = 0
-  SET pip_longsword_count = 0
-  SET pip_crossbow_count = 0
-  FOR (cbr_wt_fx = cbr_wt_slice_first; cbr_wt_fx < (cbr_wt_slice_first + cbr_wt_slice_count); ++cbr_wt_fx) BEGIN
-    SET cbr_wt_fx_offset = effect_offset + (cbr_wt_fx * 0x30)
-    READ_SHORT cbr_wt_fx_offset cbr_wt_opcode
-    READ_LONG  (cbr_wt_fx_offset + 0x08) cbr_wt_parameter2
-    READ_ASCII (cbr_wt_fx_offset + 0x14) cbr_wt_resource (8) NULL
-    PATCH_IF (cbr_wt_opcode = 326) BEGIN
-      PATCH_IF (~%cbr_wt_resource%~ STRING_EQUAL_CASE ~C0PR#92~) BEGIN
-        PATCH_IF (gate_axe_offset < 0) BEGIN
-          SET gate_axe_offset = cbr_wt_fx_offset
-        END ELSE BEGIN
-          LPF cbr_wt_records_identical
-            INT_VAR first_offset = gate_axe_offset second_offset = cbr_wt_fx_offset
-            RET cbr_wt_same = identical
-          END
-          PATCH_IF (!cbr_wt_same) BEGIN
-            SET gate_ambiguous = 1
-          END
-        END
-      END
-      PATCH_IF (~%cbr_wt_resource%~ STRING_EQUAL_CASE ~C0PR#90~) BEGIN
-        ++gate_longsword_count
-      END
-    END
-    PATCH_IF (cbr_wt_opcode = 233) BEGIN
-      PATCH_IF (cbr_wt_parameter2 = 92) BEGIN
-        PATCH_IF (pip_axe_offset < 0) BEGIN
-          SET pip_axe_offset = cbr_wt_fx_offset
-        END ELSE BEGIN
-          LPF cbr_wt_records_identical
-            INT_VAR first_offset = pip_axe_offset second_offset = cbr_wt_fx_offset
-            RET cbr_wt_same = identical
-          END
-          PATCH_IF (!cbr_wt_same) BEGIN
-            SET pip_ambiguous = 1
-          END
-        END
-      END
-      PATCH_IF (cbr_wt_parameter2 = 90) BEGIN
-        ++pip_longsword_count
-      END
-      PATCH_IF (cbr_wt_parameter2 = 103) BEGIN
-        ++pip_crossbow_count
-      END
-    END
-  END
-  SET carries_grant = (gate_axe_offset >= 0 && pip_axe_offset >= 0)
-END
-
-// Validate the whole SPL V1 partition and classify every header.  Fails when
-// no header carries the axe pair (nothing to clone from) or when a record that
-// must be cloned has no unambiguous template.  Read-only.
-DEFINE_PATCH_FUNCTION cbr_wt_scan_tempus_grant
-  RET
-    carrying_headers
-    incomplete_headers
-    missing_records
-BEGIN
-  LPF cbr_validate_spl_v1
-    STR_VAR resource_name = ~C0PR#C4.SPL~
-    RET
-      cbr_wt_ability_offset = ability_offset
-      cbr_wt_ability_count  = ability_count
-      cbr_wt_effect_offset  = effect_offset
-  END
-  SET carrying_headers = 0
-  SET incomplete_headers = 0
-  SET missing_records = 0
-  FOR (cbr_wt_header = 0; cbr_wt_header < cbr_wt_ability_count; ++cbr_wt_header) BEGIN
-    LPF cbr_wt_scan_grant_header
-      INT_VAR
-        header_index   = cbr_wt_header
-        ability_offset = cbr_wt_ability_offset
-        effect_offset  = cbr_wt_effect_offset
-      RET
-        cbr_wt_carries   = carries_grant
-        cbr_wt_gate_amb  = gate_ambiguous
-        cbr_wt_pip_amb   = pip_ambiguous
-        cbr_wt_has_gate90 = gate_longsword_count
-        cbr_wt_has_pip90  = pip_longsword_count
-        cbr_wt_has_pip103 = pip_crossbow_count
-        cbr_wt_level      = header_level
-    END
-    PATCH_IF (cbr_wt_carries) BEGIN
-      ++carrying_headers
-      SET cbr_wt_missing = (cbr_wt_has_gate90 = 0) + (cbr_wt_has_pip90 = 0) + (cbr_wt_has_pip103 = 0)
-      PATCH_IF (cbr_wt_missing > 0) BEGIN
-        ++incomplete_headers
-        SET missing_records += cbr_wt_missing
-      END
-      PATCH_IF (cbr_wt_has_gate90 = 0 && cbr_wt_gate_amb) BEGIN
-        PATCH_FAIL ~CBR C0PR#C4.SPL ability header %cbr_wt_header% (level %cbr_wt_level%) has several axe permission gates (opcode 326 -> C0PR#92) that differ; the longsword gate it lacks has no unambiguous template to clone.~
-      END
-      PATCH_IF ((cbr_wt_has_pip90 = 0 || cbr_wt_has_pip103 = 0) && cbr_wt_pip_amb) BEGIN
-        PATCH_FAIL ~CBR C0PR#C4.SPL ability header %cbr_wt_header% (level %cbr_wt_level%) has several axe pips (opcode 233, proficiency 92) that differ; the longsword/crossbow pips it lacks have no unambiguous template to clone.~
-      END
-    END
-  END
-  PATCH_IF (carrying_headers = 0) BEGIN
-    PATCH_FAIL ~CBR C0PR#C4.SPL validation failed: no ability header carries Artisan's axe permission gate (opcode 326 -> C0PR#92) together with the axe pip (opcode 233, proficiency 92), so there is no Tempus grant to complete and nothing to clone the longsword/crossbow grants from.~
-  END
-END
-
-// Insert a byte copy of source_offset's record at the end of one header's
-// slice and keep every index consistent: that header's count grows by one and
-// every other slice (other headers and the casting-feature slice) starting at
-// or after the insertion point moves up by one.  validate_spl_v1 guarantees
-// the effect table follows the ability table and runs to the end of the file,
-// so no other file offset moves.
-DEFINE_PATCH_FUNCTION cbr_wt_insert_slice_clone
-  INT_VAR
-    header_index   = 0
-    ability_offset = 0
-    ability_count  = 0
-    effect_offset  = 0
-    source_offset  = 0
-  RET
-    inserted_offset
-BEGIN
-  SET cbr_wt_header_offset = ability_offset + (header_index * 0x28)
-  READ_SHORT (cbr_wt_header_offset + 0x1e) cbr_wt_slice_count
-  READ_SHORT (cbr_wt_header_offset + 0x20) cbr_wt_slice_first
-  SET cbr_wt_insert_index = cbr_wt_slice_first + cbr_wt_slice_count
-  SET inserted_offset = effect_offset + (cbr_wt_insert_index * 0x30)
-  PATCH_IF (source_offset < effect_offset || (source_offset + 0x30) > BUFFER_LENGTH || inserted_offset > BUFFER_LENGTH) BEGIN
-    PATCH_FAIL ~CBR C0PR#C4.SPL completion: clone source %source_offset% or insertion point %inserted_offset% is out of bounds.~
-  END
-  SET cbr_wt_source = source_offset
-  PATCH_IF (cbr_wt_source >= inserted_offset) BEGIN
-    SET cbr_wt_source += 0x30
-  END
-  INSERT_BYTES inserted_offset 0x30
-  FOR (cbr_wt_copy = 0; cbr_wt_copy < 0x30; SET cbr_wt_copy += 4) BEGIN
-    READ_LONG (cbr_wt_source + cbr_wt_copy) cbr_wt_copy_value
-    WRITE_LONG (inserted_offset + cbr_wt_copy) cbr_wt_copy_value
-  END
-  WRITE_SHORT (cbr_wt_header_offset + 0x1e) (cbr_wt_slice_count + 1)
-  FOR (cbr_wt_other = 0; cbr_wt_other < ability_count; ++cbr_wt_other) BEGIN
-    PATCH_IF (cbr_wt_other != header_index) BEGIN
-      SET cbr_wt_other_offset = ability_offset + (cbr_wt_other * 0x28)
-      READ_SHORT (cbr_wt_other_offset + 0x20) cbr_wt_other_first
-      PATCH_IF (cbr_wt_other_first >= cbr_wt_insert_index) BEGIN
-        WRITE_SHORT (cbr_wt_other_offset + 0x20) (cbr_wt_other_first + 1)
-      END
-    END
-  END
-  READ_SHORT 0x6e cbr_wt_casting_first
-  PATCH_IF (cbr_wt_casting_first >= cbr_wt_insert_index) BEGIN
-    WRITE_SHORT 0x6e (cbr_wt_casting_first + 1)
-  END
-END
-
-// Complete every carrying header with whichever of the longsword gate,
-// longsword pip, and crossbow pip it lacks.  Records already present (one or
-// more, from another mod or a previous run) are kept and never duplicated.
-DEFINE_PATCH_FUNCTION cbr_wt_complete_tempus_grant
-  RET
-    appended_effects
-BEGIN
-  SET appended_effects = 0
-  LPF cbr_wt_scan_tempus_grant END
-  LPF cbr_validate_spl_v1
-    STR_VAR resource_name = ~C0PR#C4.SPL~
-    RET
-      cbr_wt_ability_offset = ability_offset
-      cbr_wt_ability_count  = ability_count
-      cbr_wt_effect_offset  = effect_offset
-  END
-  FOR (cbr_wt_header = 0; cbr_wt_header < cbr_wt_ability_count; ++cbr_wt_header) BEGIN
-    LPF cbr_wt_scan_grant_header
-      INT_VAR
-        header_index   = cbr_wt_header
-        ability_offset = cbr_wt_ability_offset
-        effect_offset  = cbr_wt_effect_offset
-      RET
-        cbr_wt_carries    = carries_grant
-        cbr_wt_gate_axe   = gate_axe_offset
-        cbr_wt_pip_axe    = pip_axe_offset
-        cbr_wt_has_gate90 = gate_longsword_count
-        cbr_wt_has_pip90  = pip_longsword_count
-        cbr_wt_has_pip103 = pip_crossbow_count
-    END
-    // Insertions land at the end of this header's slice, behind both axe
-    // templates, so their offsets stay valid across this header's edits.
-    PATCH_IF (cbr_wt_carries) BEGIN
-      PATCH_IF (cbr_wt_has_gate90 = 0) BEGIN
-        LPF cbr_wt_insert_slice_clone
-          INT_VAR
-            header_index   = cbr_wt_header
-            ability_offset = cbr_wt_ability_offset
-            ability_count  = cbr_wt_ability_count
-            effect_offset  = cbr_wt_effect_offset
-            source_offset  = cbr_wt_gate_axe
-          RET cbr_wt_new_offset = inserted_offset
-        END
-        WRITE_ASCIIE (cbr_wt_new_offset + 0x14) ~C0PR#90~ #8
-        ++appended_effects
-      END
-      PATCH_IF (cbr_wt_has_pip90 = 0) BEGIN
-        LPF cbr_wt_insert_slice_clone
-          INT_VAR
-            header_index   = cbr_wt_header
-            ability_offset = cbr_wt_ability_offset
-            ability_count  = cbr_wt_ability_count
-            effect_offset  = cbr_wt_effect_offset
-            source_offset  = cbr_wt_pip_axe
-          RET cbr_wt_new_offset = inserted_offset
-        END
-        WRITE_LONG (cbr_wt_new_offset + 0x08) 90
-        ++appended_effects
-      END
-      PATCH_IF (cbr_wt_has_pip103 = 0) BEGIN
-        LPF cbr_wt_insert_slice_clone
-          INT_VAR
-            header_index   = cbr_wt_header
-            ability_offset = cbr_wt_ability_offset
-            ability_count  = cbr_wt_ability_count
-            effect_offset  = cbr_wt_effect_offset
-            source_offset  = cbr_wt_pip_axe
-          RET cbr_wt_new_offset = inserted_offset
-        END
-        WRITE_LONG (cbr_wt_new_offset + 0x08) 103
-        ++appended_effects
-      END
-    END
-  END
-  // Re-validate: the edited table must still be an exact partition and every
-  // carrying header must now hold all three grants.
-  LPF cbr_wt_scan_tempus_grant
-    RET cbr_wt_check_incomplete = incomplete_headers
-  END
-  PATCH_IF (cbr_wt_check_incomplete != 0) BEGIN
-    PATCH_FAIL ~CBR C0PR#C4.SPL completion left %cbr_wt_check_incomplete% axe-carrying ability header(s) without a longsword gate, longsword pip, and crossbow pip.~
-  END
-END
-
-// ---------------------------------------------------------------------------
-// Migration helper (CBRTMG2 family)
-// ---------------------------------------------------------------------------
 
 DEFINE_ACTION_FUNCTION cbr_wt_create_pip_helper
   INT_VAR
@@ -495,7 +131,8 @@ DEFINE_ACTION_FUNCTION cbr_wt_create_pip_helper
 BEGIN
   OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
   OUTER_SPRINT helper_resref EVALUATE_BUFFER ~%helper_resref%~
-  CREATE SPL ~%helper_resref%~
+  COPY ~cbr-training-empty~ ~%resource_dir%/%helper_resref%.spl~
+    LPF cbr_tempus_blank END
     LPF cbr_add_basic_self_ability END
     // Field-for-field mirror of Artisan's starter pip (opcode 233, one star,
     // timing 9 permanent).
@@ -503,11 +140,6 @@ BEGIN
       INT_VAR opcode = 233 target = 1 power = 0 parameter1 = 1 parameter2 = proficiency timing = 9
     END
     WRITE_SHORT 0x90 1
-  ACTION_IF !(~%resource_dir%~ STR_EQ ~override~) BEGIN
-    ACTION_IF !(FILE_EXISTS ~%resource_dir%/%helper_resref%.spl~) BEGIN
-      MOVE ~override/%helper_resref%.spl~ ~%resource_dir%/%helper_resref%.spl~
-    END
-  END
 END
 
 DEFINE_ACTION_FUNCTION cbr_wt_create_migration_helper
@@ -525,17 +157,19 @@ BEGIN
   OUTER_SPRINT migration_resref EVALUATE_BUFFER ~%migration_resref%~
   OUTER_SPRINT pip_longsword_resref EVALUATE_BUFFER ~%pip_longsword_resref%~
   OUTER_SPRINT pip_crossbow_resref EVALUATE_BUFFER ~%pip_crossbow_resref%~
-  ACTION_IF (ls_perm_row < 0 || ls_pips_row < 0 || xbow_pips_row < 0) BEGIN
+  ACTION_IF (ls_pips_row < 0 || xbow_pips_row < 0) BEGIN
     FAIL ~CBR cannot create the Tempus migration helper without all three SPLPROT gate rows.~
   END
-  CREATE SPL ~%migration_resref%~
+  COPY ~cbr-training-empty~ ~%resource_dir%/%migration_resref%.spl~
+    LPF cbr_tempus_blank END
     LPF cbr_add_basic_self_ability END
     // Gate rows use relation "<=" against 0, so each branch fires exactly
     // when the permission/pips are absent and never again afterwards —
     // recasting the helper is harmless by construction.
-    LPF cbr_append_spl_effect_record
-      INT_VAR opcode = 326 target = 1 power = 0 parameter2 = ls_perm_row timing = 0
-      STR_VAR resource = ~C0PR#90~
+    PATCH_IF ls_perm_row >= 0 BEGIN
+      LPF cbr_append_spl_effect_record
+        INT_VAR opcode = 326 target = 1 parameter2 = ls_perm_row
+        STR_VAR resource = ~C0PR#90~ END
     END
     LPF cbr_append_spl_effect_record
       INT_VAR opcode = 326 target = 1 power = 0 parameter2 = ls_pips_row timing = 0
@@ -545,17 +179,8 @@ BEGIN
       INT_VAR opcode = 326 target = 1 power = 0 parameter2 = xbow_pips_row timing = 0
       STR_VAR resource = EVAL ~%pip_crossbow_resref%~
     END
-    WRITE_SHORT 0x90 3
-  ACTION_IF !(~%resource_dir%~ STR_EQ ~override~) BEGIN
-    ACTION_IF !(FILE_EXISTS ~%resource_dir%/%migration_resref%.spl~) BEGIN
-      MOVE ~override/%migration_resref%.spl~ ~%resource_dir%/%migration_resref%.spl~
-    END
-  END
+    WRITE_SHORT 0x90 (2 + (ls_perm_row >= 0))
 END
-
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
 
 DEFINE_ACTION_FUNCTION cbr_apply_tempus_weapon_training
   INT_VAR
@@ -570,13 +195,23 @@ BEGIN
   ACTION_IF (~%resource_dir%~ STR_EQ ~~) BEGIN
     FAIL ~CBR Tempus weapon training requires resource_dir.~
   END
-  ACTION_IF (ls_perm_stat <= 0 || ls_perm_stat > 65535) BEGIN
-    FAIL ~CBR Tempus weapon training: ls_perm_stat %ls_perm_stat% is not a valid stat identifier.~
+  <<<<<<<< cbr-training-empty
+>>>>>>>>
+  ACTION_IF NOT FILE_EXISTS ~%resource_dir%/WEAPPROF.2DA~ BEGIN
+    <<<<<<<< cbr-training-weapprof
+2DA V1.0
+0
+CLERIC OHTEMPUS
+>>>>>>>>
+    COPY ~cbr-training-weapprof~ ~%resource_dir%/WEAPPROF.2DA~
   END
-  ACTION_FOR_EACH cbr_wt_input IN ~WEAPPROF.2DA~ ~C0PR#C4.SPL~ ~SPLPROT.2DA~ BEGIN
-    ACTION_IF !(FILE_EXISTS ~%resource_dir%/%cbr_wt_input%~) BEGIN
-      FAIL ~CBR Tempus weapon training requires %resource_dir%/%cbr_wt_input%.~
-    END
+  ACTION_IF NOT FILE_EXISTS ~%resource_dir%/SPLPROT.2DA~ BEGIN
+    <<<<<<<< cbr-training-splprot
+2DA V1.0
+0
+STAT VALUE RELATION
+>>>>>>>>
+    COPY ~cbr-training-splprot~ ~%resource_dir%/SPLPROT.2DA~
   END
   LAF cbr_define_tempus_training_resrefs
     RET
@@ -585,26 +220,15 @@ BEGIN
       cbr_wt_pip_xb    = cbr_training_pip_crossbow
   END
 
-  // Preflight every input before mutating any of them.
-  COPY ~%resource_dir%/WEAPPROF.2DA~ ~%resource_dir%/WEAPPROF.2DA~
-    LPF cbr_wt_locate_weapprof_columns RET cbr_wt_pre_cols = weapprof_columns END
-  BUT_ONLY
-  COPY ~%resource_dir%/C0PR#C4.SPL~ ~%resource_dir%/C0PR#C4.SPL~
-    LPF cbr_wt_scan_tempus_grant END
-  BUT_ONLY
-  COPY ~%resource_dir%/SPLPROT.2DA~ ~%resource_dir%/SPLPROT.2DA~
-    LPF cbr_find_or_append_splprot
-      INT_VAR stat = ls_perm_stat value = 0 relation = 0 append = 0
-      STR_VAR row_label = ~CBR_TEMPUS_C0LS_LE0~
-    END
-  BUT_ONLY
-
   // Gate rows first: the migration helper embeds the row indices.
   COPY ~%resource_dir%/SPLPROT.2DA~ ~%resource_dir%/SPLPROT.2DA~
+    SET cbr_wt_ls_perm_row = (0 - 1)
+    PATCH_IF ls_perm_stat > 0 AND ls_perm_stat <= 65535 BEGIN
     LPF cbr_find_or_append_splprot
       INT_VAR stat = ls_perm_stat value = 0 relation = 0
       STR_VAR row_label = ~CBR_TEMPUS_C0LS_LE0~
       RET cbr_wt_ls_perm_row = row_index
+    END
     END
     LPF cbr_find_or_append_splprot
       INT_VAR stat = 90 value = 0 relation = 0
@@ -622,9 +246,15 @@ BEGIN
     LPF cbr_wt_transform_weapprof RET cbr_wt_changed = changed_cells END
   BUT_ONLY
 
-  COPY ~%resource_dir%/C0PR#C4.SPL~ ~%resource_dir%/C0PR#C4.SPL~
-    LPF cbr_wt_complete_tempus_grant RET cbr_wt_appended = appended_effects END
-  BUT_ONLY
+  ACTION_IF FILE_EXISTS ~%resource_dir%/C0PR#C4.SPL~ BEGIN
+    COPY ~%resource_dir%/C0PR#C4.SPL~ ~%resource_dir%/C0PR#C4.SPL~
+      LPF cbr_validate_spl_v1 STR_VAR resource_name = ~C0PR#C4.SPL~ RET readable END
+      PATCH_IF readable BEGIN LPF cbr_wt_complete_tempus_grant END END
+    BUT_ONLY
+  END ELSE BEGIN PRINT ~CBR: C0PR#C4.SPL is absent; weapon caps and migration helpers still apply.~ END
+  ACTION_IF ls_perm_stat <= 0 OR ls_perm_stat > 65535 BEGIN
+    PRINT ~CBR: longsword permission stat is absent; only the migration permission check is omitted.~
+  END
 
   LAF cbr_wt_create_pip_helper
     INT_VAR proficiency = 90
@@ -646,19 +276,4 @@ BEGIN
       pip_crossbow_resref = EVAL ~%cbr_wt_pip_xb%~
   END
 
-  // Final verification: the transformed table must hold the target caps and
-  // every axe-carrying C0PR#C4 header at least one longsword gate, longsword
-  // pip, and crossbow pip, whichever path produced them.
-  COPY ~%resource_dir%/WEAPPROF.2DA~ ~%resource_dir%/WEAPPROF.2DA~
-    LPF cbr_wt_transform_weapprof INT_VAR verify_only = 1 END
-  BUT_ONLY
-  COPY ~%resource_dir%/C0PR#C4.SPL~ ~%resource_dir%/C0PR#C4.SPL~
-    LPF cbr_wt_scan_tempus_grant
-      RET cbr_wt_final_incomplete = incomplete_headers
-    END
-    PATCH_IF (cbr_wt_final_incomplete != 0) BEGIN
-      PATCH_FAIL ~CBR Tempus weapon training verification failed: C0PR#C4.SPL does not carry the completed grant set.~
-    END
-  BUT_ONLY
-  PRINT ~cbr 400: WEAPPROF cells changed: %cbr_wt_changed%; C0PR#C4 effects appended: %cbr_wt_appended%.~
 END

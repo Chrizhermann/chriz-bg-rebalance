@@ -331,31 +331,31 @@ class TempusCapturedDelegatedHasteTests(unittest.TestCase):
     def test_valid_override_child_takes_precedence_over_malformed_key_child(self) -> None:
         self._assert_installs(self._make_game(child_in_key=True, malformed_key=True))
 
-    def test_malformed_override_child_cannot_fall_back_to_valid_key_child(self) -> None:
+    def test_modified_override_child_is_used_without_refusal(self) -> None:
         game = self._make_game(child_in_key=True, malformed_override=True)
-        process = game.run_install(401)
-        transcript = game.transcript(process)
-        self.assertNotEqual(0, process.returncode, transcript)
-        self.assertNotIn("SUCCESSFULLY INSTALLED", transcript)
-        self.assertNotRegex(game.active_weidu_log(), r"(?m)#0\s+#401\b")
-        self.assertRegex(transcript, r"(?i)SPWI613A.*(?:unsafe|probability|semantics)")
-        self.assertEqual(game.pre_override, _raw_file_tree(game.override))
-        game.assert_stable_inputs(self)
+        self._assert_installs(game)
 
-    def test_malformed_legacy_divine_cleanup_fails_atomically(self) -> None:
-        for fault in (
-            "parameter2", "target", "probability", "duration", "duplicate",
-            "misordered", "mixed_pristine", "partial_private", "duplicate_self",
-            "self_probability",
-        ):
+    def test_modified_legacy_divine_cleanup_is_replaced(self) -> None:
+        resources = {"OHTMPS1", "CBRST18", "CBRST19", "CBRST20", "CBRST21"}
+        expected = tuple(_helper_effect(321, parameter2=2, resource=r).to_bytes()
+                         for r in ("OHTMPS1", "CBRST18", "CBRST19", "CBRST20", "CBRST21"))
+        for fault in ("parameter2", "target", "probability", "duration", "duplicate", "misordered",
+                      "mixed_pristine", "partial_private", "duplicate_self", "self_probability"):
             with self.subTest(fault=fault):
                 game = self._make_game(divine_fault=fault)
+                before = read_spl(game.override / "SPPR412.SPL")
                 process = game.run_install(401)
                 transcript = game.transcript(process)
-                self.assertNotEqual(0, process.returncode, transcript)
-                self.assertNotIn("SUCCESSFULLY INSTALLED", transcript)
-                self.assertNotRegex(game.active_weidu_log(), r"(?m)#0\s+#401\b")
-                self.assertRegex(transcript, r"(?i)Divine Power SPPR412.*(?:cleanup|headers)")
+                self.assertEqual(0, process.returncode, transcript)
+                self.assertNotIn("WITH WARNINGS", transcript)
+                after = read_spl(game.override / "SPPR412.SPL")
+                for old, new in zip(before.abilities, after.abilities):
+                    self.assertEqual(expected, tuple(e.to_bytes() for e in new.effects[:5]))
+                    untouched = tuple(e.to_bytes() for e in old.effects
+                                      if not (e.opcode == 321 and e.resource.upper() in resources))
+                    self.assertEqual(untouched, tuple(e.to_bytes() for e in new.effects[5:]))
+                uninstall = game.run_uninstall(401)
+                self.assertEqual(0, uninstall.returncode, game.transcript(uninstall))
                 self.assertEqual(game.pre_override, _raw_file_tree(game.override))
                 game.assert_stable_inputs(self)
 

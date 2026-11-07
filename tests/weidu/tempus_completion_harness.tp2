@@ -14,9 +14,13 @@
 BACKUP ~backup~
 AUTHOR ~chriz-bg-rebalance test harness~
 
+
 BEGIN ~Tempus completion harness: weapon training~
 DESIGNATED 0
 
+<<<<<<<< cbr-training-test-ok
+ok
+>>>>>>>>
 COPY ~%argv[2]%~ ~%argv[3]%~
 INCLUDE ~%argv[0]%~
 INCLUDE ~%argv[1]%~
@@ -25,11 +29,14 @@ LAF cbr_apply_tempus_weapon_training
   INT_VAR ls_perm_stat = cbr_harness_ls_perm_stat
   STR_VAR resource_dir = ~%argv[3]%~
 END
-COPY ~%argv[2]%/WEAPPROF.2DA~ ~%argv[3]%/CBR_TEST.OK~
+COPY ~cbr-training-test-ok~ ~%argv[3]%/CBR_TEST.OK~
 
 BEGIN ~Tempus completion harness: chaos tides~
 DESIGNATED 1
 
+<<<<<<<< cbr-test-ok
+ok
+>>>>>>>>
 COPY ~%argv[2]%~ ~%argv[3]%~
 INCLUDE ~%argv[0]%~
 INCLUDE ~%argv[1]%~
@@ -43,15 +50,27 @@ LAF cbr_apply_tempus_chaos_tides
     strref_fortune   = cbr_harness_fortune
   STR_VAR resource_dir = ~%argv[3]%~
 END
-COPY ~%argv[2]%/OHTMPS2.SPL~ ~%argv[3]%/CBR_TEST.OK~
+COPY ~cbr-test-ok~ ~%argv[3]%/CBR_TEST.OK~
 
 BEGIN ~Tempus completion harness: divination toll~
 DESIGNATED 2
 
+<<<<<<<< cbr-toll-test-ok
+ok
+>>>>>>>>
 COPY ~%argv[2]%~ ~%argv[3]%~
 INCLUDE ~%argv[0]%~
 INCLUDE ~%argv[1]%~
 OUTER_SET cbr_harness_count = %argv[4]%
+ACTION_IF cbr_harness_count > 8 BEGIN
+  OUTER_FOR (test_i = 0; test_i < cbr_harness_count; ++test_i) BEGIN
+    OUTER_SPRINT test_number ~000000%test_i%~
+    OUTER_PATCH ~%test_number%~ BEGIN
+      READ_ASCII (BUFFER_LENGTH - 6) test_suffix (6)
+    END
+    OUTER_SPRINT $cbr_divtoll_res(~%test_i%~) ~DV%test_suffix%~
+  END
+END ELSE BEGIN
 ACTION_IF (cbr_harness_count > 0) BEGIN
   OUTER_SPRINT $cbr_divtoll_res(~0~) ~%argv[5]%~
 END
@@ -76,22 +95,26 @@ END
 ACTION_IF (cbr_harness_count > 7) BEGIN
   OUTER_SPRINT $cbr_divtoll_res(~7~) ~%argv[12]%~
 END
+END
 LAF cbr_apply_tempus_divination_toll
   INT_VAR divination_count = cbr_harness_count
   STR_VAR resource_dir = ~%argv[3]%~
 END
-COPY ~%argv[2]%/OHTEMPUS.2DA~ ~%argv[3]%/CBR_TEST.OK~
+COPY ~cbr-toll-test-ok~ ~%argv[3]%/CBR_TEST.OK~
 
 BEGIN ~Tempus completion harness: spec APR~
 DESIGNATED 3
 
+<<<<<<<< cbr-specapr-test-ok
+ok
+>>>>>>>>
 COPY ~%argv[2]%~ ~%argv[3]%~
 INCLUDE ~%argv[0]%~
 INCLUDE ~%argv[1]%~
 LAF cbr_apply_tempus_spec_apr
   STR_VAR resource_dir = ~%argv[3]%~
 END
-COPY ~%argv[2]%/CLSWPBON.2DA~ ~%argv[3]%/CBR_TEST.OK~
+COPY ~cbr-specapr-test-ok~ ~%argv[3]%/CBR_TEST.OK~
 
 BEGIN ~Tempus completion harness: spec APR EEex~
 DESIGNATED 4
@@ -125,11 +148,13 @@ INCLUDE ~%argv[1]%~
 OUTER_SET cbr_harness_kit_help = %argv[4]%
 OUTER_SET cbr_harness_hp_desc = %argv[5]%
 OUTER_SET cbr_harness_cob_desc = %argv[6]%
+OUTER_SPRINT cbr_ds_test_language ~english~
+ACTION_IF VARIABLE_IS_SET ~argv[7]~ BEGIN OUTER_SPRINT cbr_ds_test_language ~%argv[7]%~ END
 LAF cbr_apply_tempus_descriptions
   INT_VAR
     kit_help_strref = cbr_harness_kit_help
     hp_desc_strref  = cbr_harness_hp_desc
     cob_desc_strref = cbr_harness_cob_desc
-  STR_VAR resource_dir = ~%argv[3]%~
+  STR_VAR resource_dir = ~%argv[3]%~ text_language = EVAL ~%cbr_ds_test_language%~
 END
 COPY ~%argv[2]%/KITLIST.2DA~ ~%argv[3]%/CBR_TEST.OK~

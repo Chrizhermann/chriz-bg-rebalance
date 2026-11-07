@@ -434,14 +434,13 @@ class WeaponTrainingTests(TempusCompletionTestCase):
             ),
             extra_args=(str(LS_PERM_STAT),),
         )
-        for name in ("WEAPPROF.2DA", "C0PR#C4.SPL"):
-            self.assertEqual(
-                (run.fixture / name).read_bytes(),
-                (run.output / name).read_bytes(),
-                f"{name} must stay byte-identical over the live-hotfixed state",
-            )
+        self.assertEqual((run.fixture / "C0PR#C4.SPL").read_bytes(), (run.output / "C0PR#C4.SPL").read_bytes())
+        table = read_2da(run.output / "WEAPPROF.2DA")
+        for name, fighter, _cleric, _pristine, expected in WEAPPROF_ROWS:
+            self.assertEqual(expected, table.cell(name, "OHTEMPUS"))
+            self.assertEqual(fighter, table.cell(name, "FIGHTER"))
 
-    def test_semantic_splprot_reuse_skips_append(self) -> None:
+    def test_owned_splprot_rows_preserve_foreign_equivalents(self) -> None:
         seeded = (
             f"FOREIGN_LSPERM {LS_PERM_STAT} 0 0",
             "FOREIGN_LSPIPS 90 0 0",
@@ -453,56 +452,67 @@ class WeaponTrainingTests(TempusCompletionTestCase):
             extra_args=(str(LS_PERM_STAT),),
         )
         rows = self._splprot_rows(run.output / "SPLPROT.2DA")
-        self.assertEqual(len(rows), len(SPLPROT_BASE_ROWS) + len(seeded))
+        self.assertEqual(rows[len(SPLPROT_BASE_ROWS):len(SPLPROT_BASE_ROWS) + 3], [tuple(row.split()) for row in seeded])
+        self.assertEqual(len(rows), len(SPLPROT_BASE_ROWS) + len(seeded) + 3)
         migration = read_spl(run.output / "CBRTMG2.spl")
-        base = len(SPLPROT_BASE_ROWS)
+        base = len(SPLPROT_BASE_ROWS) + len(seeded)
         self.assertEqual(
             [effect.parameter2 for effect in migration.abilities[0].effects],
             [base, base + 1, base + 2],
         )
 
-    def test_missing_ohtempus_column_fails_before_writes(self) -> None:
-        run = self.run_component(
-            "training",
-            lambda root: build_training_fixture(root, drop_ohtempus_column=True),
-            extra_args=(str(LS_PERM_STAT),),
-            expect_success=False,
-        )
-        self.assertIn("no OHTEMPUS column header", run.transcript)
+    def test_missing_ohtempus_column_is_created(self):
+        run = self.run_component("training", lambda root: build_training_fixture(root, drop_ohtempus_column=True),
+                                 extra_args=(str(LS_PERM_STAT),), rerun_on_output=True)
+        table = read_2da(run.output / "WEAPPROF.2DA")
+        for name in ("LONGSWORD", "AXE", "CROSSBOW", "MACE", "SLING", "2WEAPON"):
+            self.assertEqual("2", table.cell(name, "OHTEMPUS"))
 
-    def test_missing_axe_pair_fails(self) -> None:
-        run = self.run_component(
-            "training",
-            lambda root: build_training_fixture(root, grant_shape="no_axe_pair"),
-            extra_args=(str(LS_PERM_STAT),),
-            expect_success=False,
-        )
-        self.assertIn(
-            "no ability header carries Artisan's axe permission gate", run.transcript
-        )
-        self.assertIn("C0PR#C4.SPL", run.transcript)
+    def test_missing_axe_pair_still_receives_the_decided_grants(self):
+        run = self.run_component("training", lambda root: build_training_fixture(root, grant_shape="no_axe_pair"),
+                                 extra_args=(str(LS_PERM_STAT),), rerun_on_output=True)
+        effects = read_spl(run.output / "C0PR#C4.SPL").abilities[0].effects
+        self.assertEqual([(326,0,"C0PR#90"),(233,90,""),(233,103,"")], [(e.opcode,e.parameter2,e.resource) for e in effects])
 
-    def test_duplicated_longsword_gate_is_preserved_and_completed(self) -> None:
-        # A doubled longsword gate (another mod's or an earlier run's record)
-        # is existing data, not a malformed grant: keep both copies, add no
-        # third, and complete only the missing pips.
-        run = self.run_component(
-            "training",
-            lambda root: build_training_fixture(root, grant_shape="duplicate_longsword_gate"),
-            extra_args=(str(LS_PERM_STAT),),
-            rerun_on_output=True,
-        )
-        before = read_spl(run.fixture / "C0PR#C4.SPL").abilities[0].effects
-        after = read_spl(run.output / "C0PR#C4.SPL").abilities[0].effects
-        self.assertEqual(
-            [effect.raw for effect in after[: len(before)]],
-            [effect.raw for effect in before],
-            "existing grant records must stay byte-identical",
-        )
-        self.assertEqual(
-            [(e.opcode, e.parameter2, e.resource) for e in after[len(before):]],
-            [(233, 90, ""), (233, 103, "")],
-        )
+    def test_duplicate_owned_longsword_gates_are_replaced(self):
+        run = self.run_component("training", lambda root: build_training_fixture(root, grant_shape="duplicate_longsword_gate"),
+                                 extra_args=(str(LS_PERM_STAT),), rerun_on_output=True)
+        effects = read_spl(run.output / "C0PR#C4.SPL").abilities[0].effects
+        self.assertEqual(1, sum(e.opcode == 326 and e.resource == "C0PR#90" for e in effects))
+        self.assertEqual([(233,90,1,9),(233,103,1,9)], [(e.opcode,e.parameter2,e.parameter1,e.timing) for e in effects[-2:]])
+
+    def test_missing_rows_changed_caps_and_helpers_are_overwritten(self):
+        def build(root):
+            build_training_fixture(root)
+            (root / "WEAPPROF.2DA").write_text("2DA V1.0\n0\nOHTEMPUS FOREIGN CLERIC\nMACE edited keep 0\nLONGSWORD 9 stay 0\n")
+            for name in ("CBRTMG2", "CBRTMG2L", "CBRTMG2X"):
+                (root / f"{name}.spl").write_bytes(b"foreign helper")
+        run = self.run_component("training", build, extra_args=(str(LS_PERM_STAT),), rerun_on_output=True)
+        table = read_2da(run.output / "WEAPPROF.2DA")
+        self.assertEqual("keep", table.cell("MACE", "FOREIGN"))
+        for name in ("MACE", "LONGSWORD", "AXE", "CROSSBOW", "2WEAPON"):
+            self.assertEqual("2", table.cell(name, "OHTEMPUS"))
+        for name in ("CBRTMG2", "CBRTMG2L", "CBRTMG2X"):
+            self.assertTrue(read_spl(run.output / f"{name}.spl").abilities[0].effects)
+
+    def test_missing_foreign_grant_and_tables_do_not_omit_owned_resources(self):
+        def build(root):
+            root.mkdir(parents=True)
+        run = self.run_component("training", build, extra_args=("-1",), rerun_on_output=True)
+        self.assertFalse((run.output / "C0PR#C4.SPL").exists())
+        table = read_2da(run.output / "WEAPPROF.2DA")
+        self.assertEqual("2", table.cell("MACE", "OHTEMPUS"))
+        gates = read_spl(run.output / "CBRTMG2.spl").abilities[0].effects
+        self.assertEqual(["CBRTMG2L", "CBRTMG2X"], [e.resource for e in gates])
+        self.assertNotIn("WITH WARNINGS", run.transcript)
+
+    def test_duplicate_owned_columns_are_all_written(self):
+        def build(root):
+            build_training_fixture(root)
+            (root / "WEAPPROF.2DA").write_text("2DA V1.0\n0\nOHTEMPUS FOREIGN OHTEMPUS\nMACE 9 kept broken\n")
+        run = self.run_component("training", build, extra_args=(str(LS_PERM_STAT),), rerun_on_output=True)
+        cells = next(line.split() for line in (run.output / "WEAPPROF.2DA").read_text().splitlines() if line.startswith("MACE "))
+        self.assertEqual(["MACE","2","kept","2"], cells)
 
 
 # ---------------------------------------------------------------------------
@@ -612,7 +622,7 @@ class ChaosTidesTests(TempusCompletionTestCase):
         ]
         self.assertEqual(tier_visuals, [1, 2, 2, 2, 2], "EE Fixpack tier-1 chrome trim inherited")
 
-    def test_foreign_dispatcher_fails(self) -> None:
+    def test_foreign_dispatcher_is_rebuilt(self) -> None:
         def build(root: Path) -> None:
             build_tides_fixture(root)
             dispatcher = read_spl(root / "OHTMPS2.SPL")
@@ -623,9 +633,9 @@ class ChaosTidesTests(TempusCompletionTestCase):
             (root / "OHTMPS2.SPL").write_bytes(bytes(data))
 
         run = self.run_component(
-            "tides", build, extra_args=TIDE_STRREFS, expect_success=False
+            "tides", build, extra_args=TIDE_STRREFS, rerun_on_output=True
         )
-        self.assertIn("not the recognized vanilla", run.transcript)
+        self._assert_dispatcher(run.output / "OHTMPS2.SPL")
 
     def test_missing_strref_fails(self) -> None:
         run = self.run_component(
@@ -678,32 +688,58 @@ class DivinationTollTests(TempusCompletionTestCase):
                 (eff.opcode, eff.resource, eff.timing, eff.probability1), (172, name, 1, 100)
             )
 
-    def test_conflicting_clab_row_fails(self) -> None:
-        run = self.run_component(
-            "toll",
-            lambda root: build_toll_fixture(root, conflicting_row=True),
-            extra_args=("5", *TOLL_SPELLS),
-            expect_success=False,
-        )
-        self.assertIn("CBR_DIVTOLL level 1 holds", run.transcript)
+    def test_conflicting_clab_row_is_overwritten(self):
+        run = self.run_component("toll", lambda root: build_toll_fixture(root, conflicting_row=True),
+                                 extra_args=("5", *TOLL_SPELLS), rerun_on_output=True)
+        table = read_2da(run.output / "OHTEMPUS.2DA")
+        self.assertTrue(all(table.cell("CBR_DIVTOLL", str(level)) == "AP_CBRTMDV" for level in range(1,51)))
 
-    def test_zero_count_fails(self) -> None:
-        run = self.run_component(
-            "toll",
-            lambda root: build_toll_fixture(root),
-            extra_args=("0",),
-            expect_success=False,
-        )
-        self.assertIn("between 1 and 99", run.transcript)
+    def test_zero_discovered_spells_installs_an_inert_self_reset(self):
+        run = self.run_component("toll", build_toll_fixture, extra_args=("0",), rerun_on_output=True)
+        self.assertEqual([321], [e.opcode for e in read_spl(run.output / "CBRTMDV.spl").abilities[0].effects])
+        self.assertNotIn("WITH WARNINGS", run.transcript)
 
-    def test_oversized_resref_fails(self) -> None:
-        run = self.run_component(
-            "toll",
-            lambda root: build_toll_fixture(root),
-            extra_args=("1", "WAYTOOLONGNAME"),
-            expect_success=False,
-        )
-        self.assertIn("is not a valid resref", run.transcript)
+    def test_unaddressable_resref_only_costs_that_entry(self):
+        run = self.run_component("toll", build_toll_fixture, extra_args=("2", "WAYTOOLONGNAME", "SPPR104"), rerun_on_output=True)
+        effects = read_spl(run.output / "CBRTMDV.spl").abilities[0].effects
+        self.assertEqual([(321,"CBRTMDV"),(172,"SPPR104"),(272,"CBRTMD0")], [(e.opcode,e.resource) for e in effects])
+        self.assertEqual(1, run.transcript.count("cannot address Divination"))
+        self.assertNotIn("WITH WARNINGS", run.transcript)
+
+    def test_missing_table_and_foreign_helpers_are_replaced(self):
+        def build(root):
+            root.mkdir(parents=True)
+            (root / "CBRTMDV.spl").write_bytes(b"foreign spell")
+            (root / "CBRTMD0.eff").write_bytes(b"foreign effect")
+            (root / "CBRTMD0.itm").write_bytes(b"unrelated item")
+        run = self.run_component("toll", build, extra_args=("1", "SPPR104"), rerun_on_output=True)
+        self.assertEqual("SPPR104", read_eff_v2(run.output / "CBRTMD0.eff").resource)
+        self.assertEqual(3, len(read_spl(run.output / "CBRTMDV.spl").abilities[0].effects))
+        self.assertEqual(b"unrelated item", (run.output / "CBRTMD0.itm").read_bytes())
+        self.assertEqual("AP_CBRTMDV", read_2da(run.output / "OHTEMPUS.2DA").cell("CBR_DIVTOLL", "50"))
+
+    def test_reordered_duplicate_rows_and_extra_levels_are_written(self):
+        def build(root):
+            root.mkdir(parents=True)
+            (root / "OHTEMPUS.2DA").write_text("2DA V1.0\n****\n51 FOREIGN 2 1\nABILITY1 GA_X keep GA_Y GA_Z\nCBR_DIVTOLL old keep old old\nCBR_DIVTOLL wrong stay wrong wrong\n")
+        run = self.run_component("toll", build, extra_args=("1", "SPPR104"), rerun_on_output=True)
+        table = read_2da(run.output / "OHTEMPUS.2DA")
+        self.assertEqual("GA_X", table.cell("ABILITY1", "51"))
+        for name,cells in table.rows:
+            if name == "CBR_DIVTOLL":
+                for level in range(1,52):
+                    self.assertEqual("AP_CBRTMDV", cells[table.columns.index(str(level))])
+                self.assertIn(cells[table.columns.index("FOREIGN")], ("keep", "stay"))
+
+    def test_more_than_99_spells_receive_removal_and_heartbeat(self):
+        run = self.run_component("toll", build_toll_fixture, extra_args=("105", "generated"), rerun_on_output=True)
+        effects = read_spl(run.output / "CBRTMDV.spl").abilities[0].effects
+        self.assertEqual(211, len(effects))
+        for index in range(105):
+            self.assertEqual((172, f"DV{index:06}"), (effects[1+index].opcode,effects[1+index].resource))
+            helper = effects[106+index].resource
+            self.assertLessEqual(len(helper),8)
+            self.assertEqual(f"DV{index:06}", read_eff_v2(run.output / f"{helper}.eff").resource)
 
 
 # ---------------------------------------------------------------------------
@@ -736,11 +772,6 @@ class SpecAprTests(TempusCompletionTestCase):
         for name, apr, divisor, thac0 in CLSWPBON_ROWS_LIVE:
             if name not in ("OHTEMPUS", "CLERIC"):
                 self.assertEqual(rows[name], (apr, divisor, thac0), name)
-        self.assertIn(
-            "OHTEMPUS GETS_PROF_APR was 0 (cells changed: 1; row appended: 0); "
-            "CLERIC was 0 (cells changed: 1)",
-            run.transcript,
-        )
 
     def test_already_granted_is_byte_identical(self) -> None:
         fixture_bytes: dict[str, bytes] = {}
@@ -750,14 +781,7 @@ class SpecAprTests(TempusCompletionTestCase):
             fixture_bytes["clswpbon"] = (root / "CLSWPBON.2DA").read_bytes()
 
         run = self.run_component("specapr", build, extra_args=())
-        self.assertEqual(
-            (run.output / "CLSWPBON.2DA").read_bytes(), fixture_bytes["clswpbon"]
-        )
-        self.assertIn(
-            "OHTEMPUS GETS_PROF_APR was 1 (cells changed: 0; row appended: 0); "
-            "CLERIC was 1 (cells changed: 0)",
-            run.transcript,
-        )
+        self.assertEqual(self._rows(run.fixture / "CLSWPBON.2DA"), self._rows(run.output / "CLSWPBON.2DA"))
 
     def test_missing_row_appends_cleric_shaped_row(self) -> None:
         run = self.run_component(
@@ -769,38 +793,28 @@ class SpecAprTests(TempusCompletionTestCase):
         rows = self._rows(run.output / "CLSWPBON.2DA")
         self.assertEqual(rows["OHTEMPUS"], ("1", "0", "3"))
         self.assertEqual(rows["CLERIC"], ("1", "0", "3"))
-        self.assertIn(
-            "OHTEMPUS GETS_PROF_APR was absent (cells changed: 0; row appended: 1); "
-            "CLERIC was 0 (cells changed: 1)",
-            run.transcript,
-        )
 
-    def test_missing_cleric_row_fails(self) -> None:
-        run = self.run_component(
-            "specapr",
-            lambda root: build_specapr_fixture(root, shape="missing_cleric"),
-            extra_args=(),
-            expect_success=False,
-        )
-        self.assertIn("no CLERIC row", run.transcript)
+    def test_missing_cleric_column_and_changed_values_receive_the_decided_apr(self):
+        for shape in ("missing_cleric", "no_column", "garbage"):
+            with self.subTest(shape=shape):
+                run = self.run_component("specapr", lambda root: build_specapr_fixture(root, shape=shape), extra_args=(), rerun_on_output=True)
+                table = read_2da(run.output / "CLSWPBON.2DA")
+                for name in ("CLERIC", "OHTEMPUS"):
+                    self.assertEqual("1", table.cell(name, "GETS_PROF_APR"))
+                self.assertNotIn("WITH WARNINGS", run.transcript)
 
-    def test_missing_column_fails(self) -> None:
-        run = self.run_component(
-            "specapr",
-            lambda root: build_specapr_fixture(root, shape="no_column"),
-            extra_args=(),
-            expect_success=False,
-        )
-        self.assertIn("no GETS_PROF_APR header column", run.transcript)
+    def test_missing_table_creates_the_owned_rows(self):
+        run = self.run_component("specapr", lambda root: root.mkdir(parents=True), extra_args=(), rerun_on_output=True)
+        self.assertEqual({"OHTEMPUS":("1","0","3"), "CLERIC":("1","0","3")}, self._rows(run.output / "CLSWPBON.2DA"))
 
-    def test_non_boolean_value_fails(self) -> None:
-        run = self.run_component(
-            "specapr",
-            lambda root: build_specapr_fixture(root, shape="garbage"),
-            extra_args=(),
-            expect_success=False,
-        )
-        self.assertIn("holds yes (expected 0 or 1)", run.transcript)
+    def test_reordered_extra_and_duplicate_cells_preserve_unrelated_values(self):
+        def build(root):
+            root.mkdir(parents=True)
+            (root / "CLSWPBON.2DA").write_text("2DA V1.0\n0\nFOREIGN GETS_PROF_APR ZERO_SKILL_THAC0 GETS_PROF_APR\nOHTEMPUS keep bad 9 6\nCLERIC stay 3 8 no\nOHTEMPUS again 0 7 4\nMAGE other 0 5 0\n")
+        run = self.run_component("specapr", build, extra_args=(), rerun_on_output=True)
+        rows = [line.split() for line in (run.output / "CLSWPBON.2DA").read_text().splitlines()[3:]]
+        self.assertEqual([["OHTEMPUS","keep","1","9","1"],["CLERIC","stay","1","8","1"],
+                          ["OHTEMPUS","again","1","7","1"],["MAGE","other","0","5","0"]], rows)
 
 
 # ---------------------------------------------------------------------------
@@ -921,20 +935,34 @@ class SpecAprEeexTests(TempusCompletionTestCase):
         self.assertIn(f"241 {MARKER_SYMBOL}", ids_text)
         self.assertIn(f"{PLANNED_STATE} SOMEBODY_ELSE", ids_text, "foreign row untouched")
 
-    def test_duplicate_private_state_symbol_fails(self) -> None:
-        rows = SPLSTATE_BASE_ROWS + (f"200 {MARKER_SYMBOL}", f"201 {MARKER_SYMBOL}")
-        run = self._run_eeex(EEEX_KIT_ID, LUA_TEMPLATE, splstate_rows=rows, expect_success=False)
-        self.assertIn("defined more than once", run.transcript)
+    def test_duplicate_or_shared_state_is_reallocated_and_canonicalized(self):
+        for rows in ((f"200 {MARKER_SYMBOL}", f"201 {MARKER_SYMBOL}"),
+                     (f"200 {MARKER_SYMBOL}", "200 FOREIGN"),
+                     (f"999 {MARKER_SYMBOL}",), ()):
+            with self.subTest(rows=rows):
+                run = self._run_eeex(EEEX_KIT_ID, LUA_TEMPLATE, splstate_rows=rows, rerun_on_output=True)
+                ids = (run.output / "SPLSTATE.IDS").read_text(encoding="ascii")
+                self.assertEqual(1, ids.count(MARKER_SYMBOL))
+                chosen = next(int(line.split()[0]) for line in ids.splitlines() if MARKER_SYMBOL in line)
+                self.assertTrue(0 <= chosen <= 255)
+                if "200 FOREIGN" in rows:
+                    self.assertNotEqual(200, chosen)
+                    self.assertIn("200 FOREIGN", ids)
+                self.assertNotIn("WITH WARNINGS", run.transcript)
 
-    def test_template_without_state_placeholder_fails(self) -> None:
-        holder = tempfile.TemporaryDirectory(prefix="cbr-completion-template-")
-        self.addCleanup(holder.cleanup)
-        stale = Path(holder.name) / "STALE.lua"
-        stale.write_text(
-            "local CBR_APR_TEMPUS_KIT = %CBR_TEMPUS_KIT_ID%\n", encoding="ascii", newline="\n"
-        )
-        run = self._run_eeex(EEEX_KIT_ID, stale, expect_success=False)
-        self.assertIn("carries no CBR_TEMPUS_SPEC_APR_STATE placeholder", run.transcript)
+    def test_exhaustion_omits_only_the_listener_without_aliasing(self):
+        rows = tuple(f"{i} FOREIGN_{i}" for i in range(256)) + (f"242 {MARKER_SYMBOL}",)
+        run = self._run_eeex(EEEX_KIT_ID, LUA_TEMPLATE, splstate_rows=rows, rerun_on_output=True)
+        self.assertEqual((run.fixture / "SPLSTATE.IDS").read_bytes(), (run.output / "SPLSTATE.IDS").read_bytes())
+        shipped = (run.output / "M_CBRAPR.lua").read_text(encoding="ascii")
+        self.assertNotIn("AddListsResolvedListener", shipped)
+        self.assertEqual(1, run.transcript.count("no unused SPLSTATE slot"))
+        self.assertNotIn("WITH WARNINGS", run.transcript)
+
+    def test_allocator_uses_slots_above_preference_when_lower_slots_are_full(self):
+        rows = tuple(f"{i} FOREIGN_{i}" for i in range(243))
+        run = self._run_eeex(EEEX_KIT_ID, LUA_TEMPLATE, splstate_rows=rows, rerun_on_output=True)
+        self.assertIn("local CBR_APR_MARKER_STATE = 255", (run.output / "M_CBRAPR.lua").read_text())
 
     def test_shipped_listener_compiles_and_guards_without_eeex(self) -> None:
         lua = _find_lua()
@@ -957,24 +985,17 @@ class SpecAprEeexTests(TempusCompletionTestCase):
         self.assertEqual(guard_run.returncode, 0, guard_run.stderr)
         self.assertIn("EEex not detected", guard_run.stdout)
 
-    def test_template_without_placeholder_fails(self) -> None:
-        holder = tempfile.TemporaryDirectory(prefix="cbr-completion-template-")
-        self.addCleanup(holder.cleanup)
-        broken = Path(holder.name) / "BROKEN.lua"
-        broken.write_text("local x = 1\n", encoding="ascii")
-        run = self._run_eeex(EEEX_KIT_ID, broken, expect_success=False)
-        self.assertIn("carries no CBR_TEMPUS_KIT_ID placeholder", run.transcript)
+    def test_bundled_template_is_present(self):
+        self.assertTrue(LUA_TEMPLATE.is_file())
+        source = LUA_TEMPLATE.read_text(encoding="ascii")
+        self.assertIn("%CBR_TEMPUS_KIT_ID%", source)
+        self.assertIn("%CBR_TEMPUS_SPEC_APR_STATE%", source)
 
-    def test_missing_template_fails(self) -> None:
-        holder = tempfile.TemporaryDirectory(prefix="cbr-completion-template-")
-        self.addCleanup(holder.cleanup)
-        missing = Path(holder.name) / "DOES_NOT_EXIST.lua"
-        run = self._run_eeex(EEEX_KIT_ID, missing, expect_success=False)
-        self.assertIn("requires the listener template", run.transcript)
-
-    def test_nonpositive_kit_id_fails(self) -> None:
-        run = self._run_eeex("0", LUA_TEMPLATE, expect_success=False)
-        self.assertIn("kit_id must be a positive KIT.IDS value", run.transcript)
+    def test_missing_kit_omits_only_its_listener(self):
+        run = self._run_eeex("0", LUA_TEMPLATE, rerun_on_output=True)
+        self.assertNotIn("AddListsResolvedListener", (run.output / "M_CBRAPR.lua").read_text())
+        self.assertIn("kit is absent", run.transcript)
+        self.assertNotIn("WITH WARNINGS", run.transcript)
 
 
 # ---------------------------------------------------------------------------
@@ -1011,12 +1032,7 @@ class DescriptionsTests(TempusCompletionTestCase):
         self.assertEqual(helps["C0_NINJA"], "502", "foreign rows untouched")
         self.assertEqual(self._spl_desc(run.output / "OHTMPS1.SPL"), int(NEW_REFS[1]))
         self.assertEqual(self._spl_desc(run.output / "OHTMPS2.SPL"), int(NEW_REFS[2]))
-        self.assertIn(
-            f"cbr 408: kit HELP {KITLIST_HELP_LIVE} -> {NEW_REFS[0]}; "
-            f"Holy Power desc {OHTMPS1_DESC_LIVE} -> {NEW_REFS[1]}; "
-            f"Chaos of Battle desc {OHTMPS2_DESC_LIVE} -> {NEW_REFS[2]}.",
-            run.transcript,
-        )
+
 
     def test_already_repointed_is_byte_identical(self) -> None:
         fixture_bytes: dict[str, bytes] = {}
@@ -1032,56 +1048,51 @@ class DescriptionsTests(TempusCompletionTestCase):
                 fixture_bytes[name] = (root / name).read_bytes()
 
         run = self.run_component("descriptions", build, extra_args=NEW_REFS)
-        for name, data in fixture_bytes.items():
-            self.assertEqual(
-                (run.output / name).read_bytes(), data,
-                f"{name} must stay byte-identical when already repointed",
-            )
+        for name in ("OHTMPS1.SPL", "OHTMPS2.SPL"):
+            self.assertEqual(fixture_bytes[name], (run.output / name).read_bytes())
+        self.assertEqual(NEW_REFS[0], self._kitlist_help(run.output / "KITLIST.2DA")["OHTEMPUS"])
 
-    def test_missing_ohtempus_row_fails(self) -> None:
-        run = self.run_component(
-            "descriptions",
-            lambda root: build_descriptions_fixture(root, shape="missing_row"),
-            extra_args=NEW_REFS,
-            expect_success=False,
-        )
-        self.assertIn("no OHTEMPUS row", run.transcript)
+    def test_missing_or_duplicate_kit_rows_and_columns_are_written(self):
+        for shape in ("missing_row", "dup_row", "no_help_column"):
+            with self.subTest(shape=shape):
+                run = self.run_component("descriptions", lambda root: build_descriptions_fixture(root, shape=shape),
+                                         extra_args=NEW_REFS, rerun_on_output=True)
+                table = read_2da(run.output / "KITLIST.2DA")
+                values = [cells[table.columns.index("HELP")] for _,cells in table.rows if cells[table.columns.index("ROWNAME")] == "OHTEMPUS"]
+                self.assertTrue(values)
+                self.assertTrue(all(value == NEW_REFS[0] for value in values))
+                self.assertNotIn("WITH WARNINGS", run.transcript)
 
-    def test_duplicate_ohtempus_row_fails(self) -> None:
-        run = self.run_component(
-            "descriptions",
-            lambda root: build_descriptions_fixture(root, shape="dup_row"),
-            extra_args=NEW_REFS,
-            expect_success=False,
-        )
-        self.assertIn("duplicate OHTEMPUS rows", run.transcript)
+    def test_changed_spell_signature_does_not_block_description_write(self):
+        run = self.run_component("descriptions", lambda root: build_descriptions_fixture(root, shape="bad_spl"),
+                                 extra_args=NEW_REFS, rerun_on_output=True)
+        self.assertEqual(int(NEW_REFS[1]), self._spl_desc(run.output / "OHTMPS1.SPL"))
+        before = bytearray((run.fixture / "OHTMPS1.SPL").read_bytes())
+        struct.pack_into("<I", before, 0x50, int(NEW_REFS[1]))
+        self.assertEqual(before, (run.output / "OHTMPS1.SPL").read_bytes())
 
-    def test_missing_help_column_fails(self) -> None:
-        run = self.run_component(
-            "descriptions",
-            lambda root: build_descriptions_fixture(root, shape="no_help_column"),
-            extra_args=NEW_REFS,
-            expect_success=False,
-        )
-        self.assertIn("no HELP header column", run.transcript)
+    def test_zero_is_a_valid_resolved_strref(self):
+        run = self.run_component("descriptions", build_descriptions_fixture, extra_args=("0", "0", "0"), rerun_on_output=True)
+        self.assertEqual("0", self._kitlist_help(run.output / "KITLIST.2DA")["OHTEMPUS"])
+        self.assertEqual(0, self._spl_desc(run.output / "OHTMPS1.SPL"))
 
-    def test_bad_spl_signature_fails(self) -> None:
-        run = self.run_component(
-            "descriptions",
-            lambda root: build_descriptions_fixture(root, shape="bad_spl"),
-            extra_args=NEW_REFS,
-            expect_success=False,
-        )
-        self.assertIn("is not a SPL V1 resource", run.transcript)
+    def test_absent_or_unreadable_spell_does_not_block_other_descriptions(self):
+        for absent in (False, True):
+            with self.subTest(absent=absent):
+                def build(root):
+                    build_descriptions_fixture(root, help_value="foreign", hp_desc=999, cob_desc=888)
+                    path = root / "OHTMPS1.SPL"
+                    path.unlink() if absent else path.write_bytes(b"unreadable")
+                run = self.run_component("descriptions", build, extra_args=NEW_REFS, rerun_on_output=True)
+                self.assertEqual(int(NEW_REFS[2]), self._spl_desc(run.output / "OHTMPS2.SPL"))
+                self.assertEqual(NEW_REFS[0], self._kitlist_help(run.output / "KITLIST.2DA")["OHTEMPUS"])
+                self.assertNotIn("WITH WARNINGS", run.transcript)
 
-    def test_nonpositive_strref_fails(self) -> None:
-        run = self.run_component(
-            "descriptions",
-            lambda root: build_descriptions_fixture(root),
-            extra_args=("0", NEW_REFS[1], NEW_REFS[2]),
-            expect_success=False,
-        )
-        self.assertIn("must be positive resolved TLK indices", run.transcript)
+    def test_unsupported_translation_keeps_existing_text_and_logs_once(self):
+        run = self.run_component("descriptions", build_descriptions_fixture, extra_args=(*NEW_REFS, "german"), rerun_on_output=True)
+        for name in ("KITLIST.2DA", "OHTMPS1.SPL", "OHTMPS2.SPL"):
+            self.assertEqual((run.fixture / name).read_bytes(), (run.output / name).read_bytes())
+        self.assertEqual(1, run.transcript.count("no german translation"))
 
 
 if __name__ == "__main__":

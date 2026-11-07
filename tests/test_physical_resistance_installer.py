@@ -110,6 +110,7 @@ class PhysicalResistanceInstallerTests(unittest.TestCase):
         transcript = process.stdout + "\n" + process.stderr
         self.assertEqual(process.returncode, 0, transcript)
         self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+        self.assertNotIn("WITH WARNINGS", transcript)
         self.assertRegex(game.active_log(), r"(?m)#0\s+#310\b")
         self.assert_stable(game)
         after = tree(game.override)
@@ -198,21 +199,39 @@ class PhysicalResistanceInstallerTests(unittest.TestCase):
     def test_missing_spell_state_table_rejects_before_writes(self) -> None:
         self.assert_rejected(self.game(states=None), "SPLSTATE")
 
-    def test_shared_private_marker_value_rejects_and_rolls_back(self) -> None:
+    def test_shared_private_marker_uses_a_free_state_and_preserves_foreign_owner(self) -> None:
         states = f"IDS V1.0\n0 NORMAL\n230 {SYMBOL}\n230 OTHER_MOD\n"
-        self.assert_rejected(self.game(states=states), "collision")
+        game = self.game(states=states)
+        self.assert_success(game, 255)
+        self.assertIn("230 OTHER_MOD", (game.override / "SPLSTATE.IDS").read_text(encoding="ascii"))
 
-    def test_duplicate_private_symbol_rejects_and_rolls_back(self) -> None:
+    def test_duplicate_private_symbol_is_canonicalized(self) -> None:
         states = f"IDS V1.0\n0 NORMAL\n230 {SYMBOL}\n231 {SYMBOL}\n"
-        self.assert_rejected(self.game(states=states), "collision")
+        self.assert_success(self.game(states=states), 231)
 
-    def test_out_of_range_private_marker_rejects_and_rolls_back(self) -> None:
+    def test_out_of_range_private_marker_is_replaced_with_a_free_state(self) -> None:
         states = f"IDS V1.0\n0 NORMAL\n256 {SYMBOL}\n"
-        self.assert_rejected(self.game(states=states), "collision")
+        self.assert_success(self.game(states=states), 255)
 
-    def test_exhausted_spell_state_space_rejects_and_rolls_back(self) -> None:
+    def test_exhausted_spell_state_space_omits_only_listener(self) -> None:
         states = "IDS V1.0\n" + "".join(f"{i} OTHER_{i}\n" for i in range(256))
-        self.assert_rejected(self.game(states=states), "exhausted")
+        game = self.game(states=states, override_states=True)
+        process = game.install()
+        transcript = process.stdout + "\n" + process.stderr
+        self.assertEqual(0, process.returncode, transcript)
+        self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+        self.assertNotIn("WITH WARNINGS", transcript)
+        self.assertRegex(game.active_log(), r"(?m)#0\s+#310\b")
+        self.assert_stable(game)
+        after = tree(game.override)
+        self.assertEqual(set(after), set(game.before) | {"M_CBRRES.LUA"})
+        for name, payload in game.before.items():
+            self.assertEqual(payload, after[name], name)
+        self.assertEqual(1, transcript.count(f"no unused SPLSTATE slot for {SYMBOL}"))
+        # This caller lives outside Tempus slice A. It must publish an inert
+        # listener when the shared planner returns -1, not invalid configuration.
+        shipped = (game.override / "M_CBRRES.lua").read_text(encoding="ascii")
+        self.assertNotIn("EEex_Opcode_AddListsResolvedListener", shipped)
 
     def test_optional_ninety_five_is_not_published_as_an_installer_choice(self) -> None:
         self.assertNotRegex((ROOT / TP2).read_text(encoding="utf-8"), r"\bDESIGNATED\s+311\b")

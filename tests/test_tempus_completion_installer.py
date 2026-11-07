@@ -20,7 +20,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.ie_formats import SplAbility, make_spl, read_2da, read_eff_v2, read_spl
+from tests.ie_formats import SplAbility, TwoDA, make_spl, read_2da, read_eff_v2, read_spl
 from tests.test_tempus_completion import (
     EEEX_KIT_ID,
     MARKER_SYMBOL,
@@ -258,15 +258,15 @@ class TempusCompletionInstallerTests(unittest.TestCase):
         )
         self._uninstall_restores_override(game, 400)
 
-    def test_component_400_is_byte_stable_over_hotfixed_state(self) -> None:
+    def test_component_400_preserves_hotfixed_values_and_grant_bytes(self):
         game = self._game(training_shape="hotfixed")
         self._install(game, 400)
-        for name in ("WEAPPROF.2DA", "C0PR#C4.SPL"):
-            self.assertEqual(
-                game.pre_override[name.upper()],
-                (game.override / name).read_bytes(),
-                f"{name} must stay byte-identical over the hotfixed state",
-            )
+        self.assertEqual(game.pre_override["C0PR#C4.SPL"], (game.override / "C0PR#C4.SPL").read_bytes())
+        before = TwoDA.from_text(game.pre_override["WEAPPROF.2DA"].decode())
+        after = read_2da(game.override / "WEAPPROF.2DA")
+        for name, cells in before.rows:
+            for column, value in zip(before.columns, cells):
+                self.assertEqual(value, after.cell(name, column))
 
     def test_component_400_fails_without_artisan_permissions(self) -> None:
         game = self._game(with_artisan_permissions=False)

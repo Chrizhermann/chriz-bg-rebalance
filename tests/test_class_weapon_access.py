@@ -546,6 +546,39 @@ class ClassWeaponAccessTests(unittest.TestCase):
             self.assertEqual(new_fd_text(game.original_texts[fd]), texts[fd_ref], table)
         self.assertEqual(0, self.table_ref(after["CLASTEXT.2DA"], "CLERIC"))
 
+    @staticmethod
+    def condition(table_raw, index):
+        table = TwoDA.from_text(table_raw.decode())
+        cells = table.rows[index][1]
+        def number(value):
+            try:
+                return int(value, 0)
+            except ValueError:
+                return value
+        return tuple(number(cells[table.columns.index(c)]) for c in ("STAT", "VALUE", "RELATION"))
+
+    def assert_grant_spell(self, expected, actual, expected_table, actual_table):
+        # Compare every byte, resolving opcode 326 row references by meaning.
+        # Row allocation and foreign aliases are not gameplay assertions.
+        meanings = set()
+        for table in (expected_table, actual_table):
+            meanings.update(self.condition(table, i) for i in range(len(TwoDA.from_text(table.decode()).rows)))
+        numbers = {value: i for i,value in enumerate(sorted(meanings, key=repr))}
+        def normalized(raw, table):
+            data = bytearray(raw)
+            effect_offset = struct.unpack_from("<I", data, 0x6a)[0]
+            for at in range(effect_offset, len(data), 0x30):
+                if struct.unpack_from("<H", data, at)[0] == 326:
+                    index = struct.unpack_from("<I", data, at+8)[0]
+                    struct.pack_into("<I", data, at+8, numbers[self.condition(table, index)])
+            return data
+        self.assertEqual(normalized(expected, expected_table), normalized(actual, actual_table))
+
+    def assert_foreign_splprot_rows(self, before, after):
+        first, second = (TwoDA.from_text(data.decode()) for data in (before,after))
+        self.assertEqual(first.rows, second.rows[:len(first.rows)])
+        self.assertEqual(first.columns, second.columns)
+
     def assert_410(self, game, fixture, *, kitpack=True, druid_owned=DRUID_OWNED, fd_owned=FD_OWNED):
         after = game.snapshot()
         before = game.original
@@ -559,10 +592,10 @@ class ClassWeaponAccessTests(unittest.TestCase):
             spell = SplFile.from_bytes(before["C0PR#CL.SPL"])
             wanted = dataclasses.replace(spell, abilities=(dataclasses.replace(
                 spell.abilities[0], effects=tuple(expected_grants(spell.abilities[0].effects, DRUID_GRANTS))),))
-            self.assertEqual(wanted.to_bytes(), after["C0PR#CL.SPL"])
-            self.assertEqual(before["SPLPROT.2DA"], after["SPLPROT.2DA"])
+            self.assert_grant_spell(wanted.to_bytes(), after["C0PR#CL.SPL"], before["SPLPROT.2DA"], after["SPLPROT.2DA"])
+            self.assert_foreign_splprot_rows(before["SPLPROT.2DA"], after["SPLPROT.2DA"])
         self.assert_descriptions(game, after)
-        untouched = set(before) - {"WEAPPROF.2DA", "C0PR#CL.SPL", "CLASTEXT.2DA", "BGCLATXT.2DA",
+        untouched = set(before) - {"SPLPROT.2DA", "WEAPPROF.2DA", "C0PR#CL.SPL", "CLASTEXT.2DA", "BGCLATXT.2DA",
                                    "SODCLTXT.2DA", *items()}
         for name in untouched:
             self.assertEqual(before[name], after[name], name)
@@ -645,14 +678,15 @@ class ClassWeaponAccessTests(unittest.TestCase):
         self.assertEqual(1, grants.count((DRUID, "C0PR#92")))
         wanted = expected_grants(effects, tuple((v, CLASS_ROW, p, (CLASS_ROW, 8)) for v, _, p, _ in DRUID_GRANTS),
                                  class_rows=(CLASS_ROW, 8))
-        self.assertEqual([e.canonical() for e in wanted], [e.canonical() for e in after.abilities[0].effects])
+        expected = dataclasses.replace(after, abilities=(dataclasses.replace(after.abilities[0], effects=tuple(wanted)),))
+        self.assert_grant_spell(expected.to_bytes(), after.to_bytes(), game.original["SPLPROT.2DA"], game.snapshot()["SPLPROT.2DA"])
 
     def test_410_every_grant_header_and_a_trailing_casting_slice(self):
         spell = c0prcl_multi()
         fixture = Fixture(c0prcl=spell)
         game = self.game(fixture)
         self.install(game, 410)
-        self.assertEqual(expected_multi(spell), game.snapshot()["C0PR#CL.SPL"])
+        self.assert_grant_spell(expected_multi(spell), game.snapshot()["C0PR#CL.SPL"], game.original["SPLPROT.2DA"], game.snapshot()["SPLPROT.2DA"])
 
     def test_410_header_without_class_grants_gets_the_plain_grant_shape(self):
         effects = [fx(321, resource="C0PR#92"), fx(326, 0, 4, "C0PR#92"), fx(326, 0, 0, "C0PR#KG")]
@@ -663,8 +697,8 @@ class ClassWeaponAccessTests(unittest.TestCase):
         new = [e for e in after if e.parameter1 in (DRUID, FIGHTER_DRUID)]
         self.assertEqual(5, len(new))
         for effect in new:
-            self.assertEqual((326, 2, 0, CLASS_ROW, 0, 0, 100, 0), (
-                effect.opcode, effect.target, effect.power, effect.parameter2, effect.timing,
+            self.assertEqual((326, 2, 0, (0x10d, -1, 1), 0, 0, 100, 0), (
+                effect.opcode, effect.target, effect.power, self.condition(game.snapshot()["SPLPROT.2DA"], effect.parameter2), effect.timing,
                 effect.special, effect.probability1, effect.dice_number))
         self.assertEqual("C0PR#KG", after[-1].resource)
 
@@ -695,13 +729,15 @@ class ClassWeaponAccessTests(unittest.TestCase):
         spell = SplFile.from_bytes(before["C0PR#CL.SPL"])
         effects = expected_grants(spell.abilities[0].effects, ((ALAGHOR_KIT, row, 92, (row,)),), special=0)
         wanted = dataclasses.replace(spell, abilities=(dataclasses.replace(spell.abilities[0], effects=tuple(effects)),))
-        self.assertEqual(wanted.to_bytes(), after["C0PR#CL.SPL"])
+        expected_table = after["SPLPROT.2DA"] if splprot_changed else before["SPLPROT.2DA"]
+        self.assert_grant_spell(wanted.to_bytes(), after["C0PR#CL.SPL"], expected_table, after["SPLPROT.2DA"])
+        self.assert_foreign_splprot_rows(before["SPLPROT.2DA"], after["SPLPROT.2DA"])
         texts = strings(game.tlk)
         self.assertEqual(game.original_texts, texts[:len(game.original_texts)])
         ref = self.table_ref(after["KITLIST.2DA"], "LK_ALAGHOR", column="HELP", match_column="ROWNAME")
         self.assertEqual(new_alaghor_text(game.original_texts[3]), texts[ref])
         hook = {"CBRKPKIT.2DA", "M_CBRKP.LUA"}
-        changed = {"WEAPPROF.2DA", "C0PR#CL.SPL", "KITLIST.2DA", *hook} | ({"SPLPROT.2DA"} if splprot_changed else set())
+        changed = {"WEAPPROF.2DA", "C0PR#CL.SPL", "KITLIST.2DA", "SPLPROT.2DA", *hook}
         for name in set(before) - changed:
             self.assertEqual(before[name], after[name], name)
         self.assertEqual(set(before) | hook, set(after))
@@ -845,8 +881,8 @@ class ClassWeaponAccessTests(unittest.TestCase):
         effects = SplFile.from_bytes(after["C0PR#CL.SPL"]).abilities[0].effects
         self.assertEqual("C0PR#KG", effects[-1].resource)
         kit_grants = [e for e in effects if e.parameter1 == ALAGHOR_KIT]
-        self.assertEqual([(326, KIT_ROW, "C0PR#92", 0)],
-                         [(e.opcode, e.parameter2, e.resource, e.special) for e in kit_grants])
+        self.assertEqual([(326, (152, -1, 1), "C0PR#92", 0)],
+                         [(e.opcode, self.condition(after["SPLPROT.2DA"], e.parameter2), e.resource, e.special) for e in kit_grants])
         self.assert_hook_installed(game, after)
         self.assert_uninstalled(game, 411, 410)
 

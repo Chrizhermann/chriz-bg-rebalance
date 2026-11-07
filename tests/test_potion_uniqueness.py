@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.ie_formats import IdsFile, ItmAbility, ItmFile, SplAbility, SplEffect, SplFile, make_spl
+from tests.ie_formats import IdsFile, ItmAbility, ItmFile, SplAbility, SplEffect, SplFile, TwoDA, make_spl
 from tests.test_cloud_forms import Game, ROOT, WEIDU
 from tests.test_flail_of_ages import strings
 
@@ -170,15 +170,20 @@ class PotionUniquenessTests(unittest.TestCase):
         power = states["CBR_POTION_POTN45"]
         self.assertTrue({own, family, power}.isdisjoint({0, 68, 240}))
         self.assertEqual(3, len({own, family, power}))
-        self.assertEqual(before["SPLPROT.2DA"], after["SPLPROT.2DA"])  # reused row 3
+        old_table = TwoDA.from_text(before["SPLPROT.2DA"].decode())
+        new_table = TwoDA.from_text(after["SPLPROT.2DA"].decode())
+        self.assertEqual(old_table.rows, new_table.rows[:len(old_table.rows)])
+        state_row = next(i for i, (label, _) in enumerate(new_table.rows) if label == "CBR_SPLSTATE_ACTIVE")
+        self.assertEqual((0x112,-1,1), tuple(int(new_table.rows[state_row][1][new_table.columns.index(c)],0)
+                                           for c in ("STAT","VALUE","RELATION")))
 
         for potion in ("POTN09.ITM", "DW#PTN09.ITM"):
             self.assert_keep_first(before[potion], effects_of(after[potion]), potion[:-4],
-                                   {own, family}, 3, 600)
+                                   {own, family}, state_row, 600)
         self.assert_keep_first(before["POTN45.ITM"], effects_of(after["POTN45.ITM"]), "POTN45",
-                               {power}, 3, 300)
+                               {power}, state_row, 300)
         for spl in ("C0BW202.SPL", "C0BW502.SPL", "C0BWG02.SPL"):
-            self.assert_keep_first(before[spl], effects_of(after[spl]), spl[:-4], {family}, 3, 600)
+            self.assert_keep_first(before[spl], effects_of(after[spl]), spl[:-4], {family}, state_row, 600)
 
         oil = effects_of(before["POTN14.ITM"])
         self.assertEqual([oil[0], refresh("POTN14"), *oil[1:]], effects_of(after["POTN14.ITM"]))
@@ -243,12 +248,14 @@ class PotionUniquenessTests(unittest.TestCase):
         self.install(game, 332)
         after = game.snapshot()
         family = self.states(game)["CBR_HEROISM_FAMILY"]
+        table = TwoDA.from_text(after["SPLPROT.2DA"].decode())
+        state_row = next(i for i,(name,_) in enumerate(table.rows) if name == "CBR_SPLSTATE_ACTIVE")
         rows = after["SPLPROT.2DA"].decode().split()
         self.assertEqual(["CBR_SPLSTATE_ACTIVE", "274", "-1", "1"],
                          rows[rows.index("CBR_SPLSTATE_ACTIVE"):][:4])
         for potion in ("POTN09.ITM", "DW#PTN09.ITM"):
             self.assert_keep_first(game.original[potion], effects_of(after[potion]), potion[:-4],
-                                   {family}, 3, 600)
+                                   {family}, state_row, 600)
         changed = {name for name in after if after[name] != game.original.get(name)}
         self.assertEqual({"POTN09.ITM", "DW#PTN09.ITM", "SPLSTATE.IDS", "SPLPROT.2DA"}, changed)
 

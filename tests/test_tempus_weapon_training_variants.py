@@ -1,13 +1,4 @@
-"""Variation tests for the C0PR#C4.SPL grant completion (component 400).
-
-Owned behavior: every ability header whose indexed effect slice carries
-Artisan's axe grant (opcode 326 -> C0PR#92 plus opcode 233 proficiency 92)
-also carries a longsword gate (326 -> C0PR#90) and longsword/crossbow pips
-(233 proficiency 90/103), cloned from that header's own axe records and
-inserted at the end of that header's slice. Every pre-existing record stays
-byte-identical; only positions move. Casting-feature storage position, extra
-headers, extra visual/marker records, and record order are not assumed.
-"""
+"""Decided weapon grants apply to every header, irrespective of old effects or layout."""
 
 from __future__ import annotations
 
@@ -136,8 +127,8 @@ class WeaponTrainingVariantTests(TempusCompletionTestCase):
             rerun_on_output=rerun and expect_success,
         )
 
-    def assert_completed(self, raw: bytes, additions: dict[int, list[bytes]]) -> bytes:
-        """Every original record stays byte-identical in its own slice; only `additions` follow it."""
+    def assert_completed(self, raw: bytes) -> bytes:
+        """Unowned effects survive; every header gets the three decided grants."""
         run = self.run_grant(raw)
         after = (run.output / GRANT).read_bytes()
         casting_before, headers_before = slices(raw)
@@ -145,9 +136,12 @@ class WeaponTrainingVariantTests(TempusCompletionTestCase):
         self.assertEqual(casting_before, casting_after, "casting features must stay byte-identical")
         self.assertEqual(len(headers_before), len(headers_after))
         self.assertEqual(raw[:0x64], after[:0x64], "SPL header fields outside the tables changed")
+        def unowned(raw):
+            effect = SplEffect.from_bytes(raw)
+            return not ((effect.opcode == 326 and effect.resource.upper() == "C0PR#90")
+                        or (effect.opcode == 233 and effect.parameter2 in (90, 103)))
         for index, (before, current) in enumerate(zip(headers_before, headers_after)):
-            self.assertEqual(before, current[: len(before)], f"header {index} lost or changed a record")
-            self.assertEqual(additions.get(index, []), current[len(before):], f"header {index} additions")
+            self.assertEqual([e for e in before if unowned(e)] + completion(GATE, PIP), current, f"header {index}")
         spell_before = read_spl(run.fixture / GRANT)
         spell_after = read_spl(run.output / GRANT)
         for before, current in zip(spell_before.abilities, spell_after.abilities):
@@ -159,95 +153,108 @@ class WeaponTrainingVariantTests(TempusCompletionTestCase):
 
     def test_casting_first_layout(self) -> None:
         raw = build_spl([_sound(), _visual(), GATE, PIP], [Header(1, 2, 2)], casting=(0, 2))
-        self.assert_completed(raw, {0: completion(GATE, PIP)})
+        self.assert_completed(raw)
 
     def test_casting_features_stored_after_the_abilities(self) -> None:
         raw = build_spl([GATE, PIP, _sound(), _visual()], [Header(1, 0, 2)], casting=(2, 2))
-        after = self.assert_completed(raw, {0: completion(GATE, PIP)})
-        self.assertEqual((5, 2), struct.unpack_from("<HH", after, 0x6E), "casting slice must shift")
+        after = self.assert_completed(raw)
+        self.assertEqual((0, 2), struct.unpack_from("<HH", after, 0x6E), "casting slice is serialized first")
 
     def test_extra_visual_and_marker_records_in_the_grant_slice(self) -> None:
         effects = [_visual(), GATE, _marker(), PIP, _visual("SPROTECT")]
         raw = build_spl(effects, [Header(1, 0, 5)])
-        self.assert_completed(raw, {0: completion(GATE, PIP)})
+        self.assert_completed(raw)
 
     def test_pip_before_gate(self) -> None:
         raw = build_spl([PIP, GATE], [Header(1, 0, 2)])
-        self.assert_completed(raw, {0: completion(GATE, PIP)})
+        self.assert_completed(raw)
 
     # -- several headers ----------------------------------------------------
 
-    def test_two_level_headers_both_carry_and_clone_their_own_templates(self) -> None:
+    def test_each_level_header_gets_the_decided_grants(self) -> None:
         gate_b = dataclasses.replace(GATE, power=3, parameter2=7)
         pip_b = dataclasses.replace(PIP, parameter1=2, probability1=90)
         effects = [GATE, PIP, _sound(), _marker(), pip_b, gate_b]
         raw = build_spl(effects, [Header(1, 0, 2), Header(10, 3, 3)], casting=(2, 1))
-        after = self.assert_completed(raw, {0: completion(GATE, PIP), 1: completion(gate_b, pip_b)})
-        self.assertEqual((5, 1), struct.unpack_from("<HH", after, 0x6E))
+        after = self.assert_completed(raw)
+        self.assertEqual((0, 1), struct.unpack_from("<HH", after, 0x6E))
 
-    def test_header_without_the_axe_pair_stays_unchanged(self) -> None:
+    def test_header_without_the_axe_pair_receives_the_grants(self) -> None:
         other_pip = _pip(95)
         effects = [GATE, PIP, other_pip, _visual(), GATE]
         # Header 1 has only an axe gate (no pip), header 2 only an unrelated pip.
         raw = build_spl(effects, [Header(1, 0, 2), Header(5, 2, 2), Header(9, 4, 1)])
-        self.assert_completed(raw, {0: completion(GATE, PIP)})
+        self.assert_completed(raw)
 
     def test_carrying_header_after_a_non_carrying_one(self) -> None:
         effects = [_visual(), GATE, PIP]
         raw = build_spl(effects, [Header(1, 0, 1), Header(2, 1, 2)])
-        self.assert_completed(raw, {1: completion(GATE, PIP)})
+        self.assert_completed(raw)
 
     # -- existing grant records ---------------------------------------------
 
-    def test_already_complete_nonstandard_layout_is_byte_identical(self) -> None:
+    def test_already_complete_nonstandard_layout_preserves_unrelated_effects(self) -> None:
         effects = [
             _sound(),
             _pip(103), GATE, _visual(), _pip(90), PIP, GATE90,
             GATE, PIP, GATE90, _pip(90), _pip(103),
         ]
         raw = build_spl(effects, [Header(1, 1, 6), Header(12, 7, 5)], casting=(0, 1))
-        run = self.run_grant(raw)
-        self.assertEqual(raw, (run.output / GRANT).read_bytes())
+        self.assert_completed(raw)
 
-    def test_partially_present_grants_are_kept_and_never_duplicated(self) -> None:
+    def test_partial_owned_grants_are_replaced_once(self) -> None:
         effects = [GATE, PIP, _pip(90), _pip(90), _pip(103)]
         raw = build_spl(effects, [Header(1, 0, 5)])
-        self.assert_completed(raw, {0: [gate90_from(GATE)]})
+        self.assert_completed(raw)
 
     def test_identical_duplicate_axe_templates_are_accepted(self) -> None:
         raw = build_spl([GATE, PIP, GATE, PIP], [Header(1, 0, 4)])
-        self.assert_completed(raw, {0: completion(GATE, PIP)})
+        self.assert_completed(raw)
 
     def test_differing_duplicates_are_irrelevant_when_nothing_must_be_cloned(self) -> None:
         effects = [GATE, dataclasses.replace(GATE, power=2), PIP, dataclasses.replace(PIP, parameter1=3),
                    GATE90, _pip(90), _pip(103)]
         raw = build_spl(effects, [Header(1, 0, 7)])
-        run = self.run_grant(raw)
-        self.assertEqual(raw, (run.output / GRANT).read_bytes())
+        self.assert_completed(raw)
 
-    # -- honest failures -----------------------------------------------------
-
-    def test_differing_duplicate_axe_gates_fail_as_ambiguous(self) -> None:
+    def test_differing_duplicate_axe_gates_preserve_axe_and_write_our_grants(self):
         effects = [GATE, PIP, dataclasses.replace(GATE, power=2)]
         raw = build_spl([_sound(), *effects], [Header(1, 1, 3)], casting=(0, 1))
-        run = self.run_grant(raw, expect_success=False)
-        self.assertIn("C0PR#C4.SPL ability header 0 (level 1) has several axe permission gates", run.transcript)
+        self.assert_completed(raw)
 
-    def test_differing_duplicate_axe_pips_fail_as_ambiguous(self) -> None:
+    def test_differing_duplicate_axe_pips_preserve_axe_and_write_our_grants(self):
         effects = [GATE, PIP, GATE90, dataclasses.replace(PIP, timing=0)]
-        raw = build_spl(effects, [Header(3, 0, 4)])
-        run = self.run_grant(raw, expect_success=False)
-        self.assertIn("C0PR#C4.SPL ability header 0 (level 3) has several axe pips", run.transcript)
+        self.assert_completed(build_spl(effects, [Header(3, 0, 4)]))
 
-    def test_axe_pair_split_across_headers_has_no_carrier(self) -> None:
-        raw = build_spl([GATE, PIP], [Header(1, 0, 1), Header(2, 1, 1)])
-        run = self.run_grant(raw, expect_success=False)
-        self.assertIn("no ability header carries Artisan's axe permission gate", run.transcript)
+    def test_axe_pair_split_across_headers_does_not_omit_our_grants(self):
+        self.assert_completed(build_spl([GATE, PIP], [Header(1, 0, 1), Header(2, 1, 1)]))
 
-    def test_overlapping_slices_are_still_rejected(self) -> None:
-        raw = build_spl([GATE, PIP], [Header(1, 0, 2), Header(2, 1, 1)])
-        run = self.run_grant(raw, expect_success=False)
-        self.assertIn("exact nonoverlapping partition", run.transcript)
+    def test_overlapping_slices_are_serialized_with_decided_grants(self):
+        run = self.run_grant(build_spl([GATE, PIP], [Header(1, 0, 2), Header(2, 1, 1)]))
+        casting, headers = slices((run.output / GRANT).read_bytes())
+        self.assertEqual([], casting)
+        self.assertEqual([[GATE.to_bytes(), PIP.to_bytes()] + completion(GATE, PIP),
+                          [PIP.to_bytes()] + completion(GATE, PIP)], headers)
+
+    def test_changed_owned_effects_and_casting_copies_are_replaced(self):
+        bad = [dataclasses.replace(GATE90, target=9, probability1=20),
+               dataclasses.replace(_pip(90), parameter1=7), dataclasses.replace(_pip(103), timing=0)]
+        raw = build_spl([_sound(), *bad, GATE, PIP, *bad], [Header(1, 4, 5)], casting=(0, 4))
+        run = self.run_grant(raw)
+        casting, headers = slices((run.output / GRANT).read_bytes())
+        self.assertEqual([_sound().to_bytes()], casting)
+        self.assertEqual([GATE.to_bytes(), PIP.to_bytes()] + completion(GATE, PIP), headers[0])
+
+    def test_empty_grant_receives_a_complete_header(self):
+        run = self.run_grant(build_spl([], []))
+        casting, headers = slices((run.output / GRANT).read_bytes())
+        self.assertEqual([completion(GATE, PIP)], headers)
+
+    def test_unreadable_grant_does_not_stop_table_or_helper_changes(self):
+        run = self.run_grant(b"unreadable")
+        self.assertEqual(b"unreadable", (run.output / GRANT).read_bytes())
+        self.assertTrue((run.output / "CBRTMG2.spl").exists())
+        self.assertNotIn("WITH WARNINGS", run.transcript)
 
 
 class WeaponTrainingVariantInstallerTests(unittest.TestCase):
