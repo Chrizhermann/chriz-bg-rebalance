@@ -146,18 +146,17 @@ class KitProficiencyRuntimeTests(unittest.TestCase):
         self.assertEqual("no registered kits", g.CBRKitProficiency.Status)
         self.assertEqual((0, 0), (g.hooks, g.disabled))
 
-    def test_invalid_registry_installs_nothing(self):
-        for name, rows, columns, message in (
-            ("columns", (("8", "16432"),), ("KIT", "CLASS"), "invalid CBRKPKIT registry"),
-            ("class 0", (("0", "16432"),), ("CLASS", "KIT"), "invalid class identifier"),
-            ("class text", (("FIGHTER", "16432"),), ("CLASS", "KIT"), "invalid class identifier"),
-            ("true class", (("8", "16384"),), ("CLASS", "KIT"), "invalid kit identifier"),
-            ("outside the kit range", (("8", "99999"),), ("CLASS", "KIT"), "invalid kit identifier"),
-        ):
-            with self.subTest(name):
-                g = self.runtime(rows, columns=columns).globals()
-                self.assertEqual((0, 0), (g.hooks, g.disabled))
-                self.assertIn(message, g.CBRKitProficiency.Status)
+    def test_reordered_extra_columns_address_the_registered_pair(self):
+        g = self.runtime((("ignored", "16432", "8"),), columns=("EXTRA", "KIT", "CLASS")).globals()
+        self.assertEqual("active", g.CBRKitProficiency.Status)
+        self.assertTrue(takes_kit_column(g.generated, 0x30, 8))
+
+    def test_changed_identifiers_do_not_block_other_registrations(self):
+        for row in (("0", "16432"), ("FIGHTER", "16432"), ("8", "16384"), ("8", "99999")):
+            with self.subTest(row=row):
+                g = self.runtime((row, ("14", "16432"))).globals()
+                self.assertEqual((1, 1), (g.hooks, g.disabled))
+                self.assertTrue(takes_kit_column(g.generated, 0x30, 14))
 
     def test_hook_error_restores_code_protection(self):
         g = self.runtime(hook_error="jit failed").globals()

@@ -1153,7 +1153,7 @@ class EmotionHopeCourageInstallerTests(unittest.TestCase):
             always.group("body"),  # type: ignore[union-attr]
             r"(?i)\bINCLUDE\s+~chriz-bg-rebalance/lib/emotion_hope_courage\.tpa~",
         )
-        blocks = re.findall(r"(?ms)^BEGIN\b(?:(?!^BEGIN\b).)*", setup)
+        blocks = re.findall(r"(?ms)^BEGIN\s+@(?:(?!^BEGIN\s+@).)*", setup)
         components = [block for block in blocks if re.search(r"\bDESIGNATED\s+301\b", block)]
         self.assertEqual(1, len(components))
         component = components[0]
@@ -1161,10 +1161,8 @@ class EmotionHopeCourageInstallerTests(unittest.TestCase):
         self.assertEqual(1, len(re.findall(rf"\bLABEL\s+~{LABEL}~", component)))
         self.assertRegex(component, rf"\bGROUP\s+@{GROUP_REF}\b")
         self.assertRegex(component, r"(?is)REQUIRE_PREDICATE.*GAME_IS\s+~[^~]*\bbg2ee\b[^~]*\beet\b")
-        self.assertRegex(
-            component,
-            r"(?is)REQUIRE_PREDICATE.*?FILE_EXISTS_IN_GAME\s+~STATDESC\.2DA~",
-        )
+        self.assertIn("~STATDESC.2DA~", component)
+        self.assertNotRegex(component, r"(?m)^REQUIRE_PREDICATE.*FILE_EXISTS")
         self.assertRegex(tra, r"(?im)^@9301\s*=.*STATDESC\.2DA")
         self.assertRegex(tra, r"(?m)^@301\s*=")
         self.assertRegex(tra, rf"(?m)^@{GROUP_REF}\s*=")
@@ -1181,7 +1179,7 @@ class EmotionHopeCourageInstallerTests(unittest.TestCase):
         self.assertIn(HOPELESS_SYMBOL, component)
         self.assertIn(COURAGE_FALLBACK_SCROLL, component)
         self.assertIn(HOPE_FALLBACK_SCROLL, component)
-        self.assertRegex(component, r"(?is)(?:donor|scroll).*\bFAIL\s+@\d+")
+        self.assertNotRegex(component, r"(?m)^\s*(?:PATCH_FAIL|FAIL|PATCH_WARN)\b")
         for forbidden in ("SPWI428", "SCRL6M", "SCRL5H", "DECK14", "SHOP08", "RIBALD"):
             self.assertNotIn(forbidden, component.upper())
         emotion_source = component + "\n" + library
@@ -1736,37 +1734,139 @@ class EmotionHopeCourageInstallerTests(unittest.TestCase):
                 self.assert_exact_store_clones(game, donor_map)
                 self.assert_publication_delta(game, {courage, hope}, scrolls)
 
-    def test_wrong_level_missing_donor_and_malformed_resources_roll_back(self) -> None:
-        cases = (
-            (
-                GameOptions(symbols="both", malformed="wrong_level"),
-                r"(?i)(?:spell|beneficial).*(?:level|four|4)|(?:level|four|4).*(?:spell|beneficial)",
-            ),
-            (GameOptions(symbols="both", malformed="target"), r"(?i)SPL|signature|target"),
-            (GameOptions(symbols="both", malformed="adverse"), r"(?i)partition|effect|fear"),
-            (GameOptions(symbols="neither", malformed="missing_donor"), r"(?i)donor|scroll|enchanted"),
-        )
-        for options, message in cases:
-            with self.subTest(options=options):
-                game = self.make_game(options)
-                process = game.run_install()
-                self.assert_failed_atomically(game, process)
-                self.assertRegex(game.transcript(process), message)
+    def test_wrong_level_target_and_damaged_adverse_do_not_block_install(self):
+        for variant in ("wrong_level", "target", "adverse"):
+            game = self.make_game(GameOptions(symbols="both", malformed=variant))
+            result = game.run_install()
+            self.assertEqual(0, result.returncode, game.transcript(result))
+            self.assertIn("SUCCESSFULLY INSTALLED", game.transcript(result))
+            self.assertNotIn("INSTALLED WITH WARNINGS", game.transcript(result))
+            if variant == "adverse":
+                self.assertEqual(game.original_bytes(FEAR_RESREF, "SPL"), (game.override / f"{FEAR_RESREF}.SPL").read_bytes())
 
-    def test_invalid_or_colliding_statdesc_fails_before_tlk_mutation(self) -> None:
-        for layout, message in (
-            ("malformed_shape", r"(?i)STATDESC.*shape"),
-            ("courage_d_collision", r"(?i)status BAM.*conflicting STATDESC"),
-        ):
+    def test_missing_fallback_donors_still_build_both_spells_and_scrolls(self):
+        game = self.make_game(GameOptions(symbols="neither", malformed="missing_donor"))
+        result = game.run_install()
+        self.assert_installed(game, result)
+        self.assertNotIn("INSTALLED WITH WARNINGS", game.transcript(result))
+        for name in (COURAGE_FALLBACK_SCROLL, HOPE_FALLBACK_SCROLL):
+            self.assertTrue((game.override / f"{name}.ITM").exists())
+
+    def test_reordered_scroll_tables_and_trailing_bytes_receive_owned_text(self):
+        game = self.make_game(GameOptions(symbols="both"))
+        raw = game.original_bytes(COURAGE_EXISTING_SCROLL, "ITM")
+        ability, = struct.unpack_from('<I', raw, 0x64)
+        count, = struct.unpack_from('<H', raw, 0x68)
+        effects, = struct.unpack_from('<I', raw, 0x6A)
+        moved = bytearray(raw[:0x72] + raw[effects:] + raw[ability:ability + count * 0x38] + b'foreign trailer')
+        struct.pack_into('<I', moved, 0x64, 0x72 + len(raw) - effects)
+        struct.pack_into('<I', moved, 0x6A, 0x72)
+        path = game.override / f'{COURAGE_EXISTING_SCROLL}.ITM'
+        path.write_bytes(moved)
+        process = game.run_install()
+        self.assert_installed(game, process)
+        after = path.read_bytes()
+        spell = (game.override / f'{COURAGE_RESREF}.SPL').read_bytes()
+        self.assertEqual(spell[0x50:0x54], after[0x54:0x58])
+        self.assertEqual(bytes(moved[0x72:]), after[0x72:])
+        self.assertFalse((game.override / f'{COURAGE_FALLBACK_SCROLL}.ITM').exists())
+
+    def test_missing_provider_learn_scroll_is_supplied(self):
+        game = self.make_game(GameOptions(symbols="both"))
+        raw = bytearray(game.original_bytes(COURAGE_EXISTING_SCROLL, "ITM"))
+        effects, = struct.unpack_from('<I', raw, 0x6A)
+        for at in range(effects, len(raw), 48):
+            if struct.unpack_from('<H', raw, at)[0] == 147:
+                struct.pack_into('<H', raw, at, 0)
+        (game.override / f'{COURAGE_EXISTING_SCROLL}.ITM').write_bytes(raw)
+        self.assert_installed(game, game.run_install())
+        scroll = (game.override / f'{COURAGE_FALLBACK_SCROLL}.ITM').read_bytes()
+        self.assertIn(COURAGE_RESREF, _learned_resrefs(scroll))
+
+    def test_every_donor_receives_distribution_and_existing_owned_stock_is_written(self):
+        game = self.make_game(GameOptions(symbols="neither", ambiguous_donor=ENCHANTED_RESREF))
+        tail = struct.pack('<HHHHIII', 0, 3, 0, 0, 1, 7, 0)
+        edited = struct.pack('<HHHHIII', 0, 99, 0, 0, 8, 0, 1)
+        before = _store(((ENCHANTED_DONOR_SCROLL, tail), (COURAGE_FALLBACK_SCROLL, edited),
+                         (AMBIGUOUS_ENCHANTED_DONOR_SCROLL, tail)))
+        path = game.override / 'CUSTOM.STO'
+        path.write_bytes(before)
+        self.assert_installed(game, game.run_install())
+        rows = _store_entries(path.read_bytes())
+        for i, entry in enumerate(rows):
+            if _entry_resref(entry) in (ENCHANTED_DONOR_SCROLL, AMBIGUOUS_ENCHANTED_DONOR_SCROLL):
+                self.assertEqual(_entry_resref(rows[i + 1]), COURAGE_FALLBACK_SCROLL)
+                self.assertEqual(rows[i + 1][8:], tail)
+        self.assertEqual(sum(_entry_resref(r) == COURAGE_FALLBACK_SCROLL for r in rows), 2)
+
+    def test_empty_status_table_and_textual_private_row_label_are_repaired(self):
+        for raw in (b'', b'2DA V1.0\n-1\nDESCRIPTION BAM_FILE\nprivate 99 SPWI402D\n'):
+            with self.subTest(raw=raw):
+                game = self.make_game(GameOptions(symbols="neither"))
+                (game.override / 'STATDESC.2DA').write_bytes(raw)
+                self.assert_installed(game, game.run_install())
+                table = TwoDA.from_text((game.override / 'STATDESC.2DA').read_text())
+                self.assertIn('DESCRIPTION', table.columns)
+                self.assertIn('BAM_FILE', table.columns)
+                self.assertTrue(all(label.isdecimal() for label, _ in table.rows))
+                for symbol, name in ((COURAGE_SYMBOL, 'Courage'), (HOPE_SYMBOL, 'Hope')):
+                    resref = spell_resref(game.effective_ids().value(symbol), symbol)
+                    effects = [f for f in read_spl(game.override / f'{resref}.SPL').all_effects()
+                               if f.opcode == 142]
+                    self.assertEqual(1, len(effects))
+                    row = str(effects[0].parameter2)
+                    self.assertEqual(resref + 'D', table.cell(row, 'BAM_FILE'))
+                    self.assertEqual(name, _tlk_string(game.lang_tlk, int(table.cell(row, 'DESCRIPTION'))))
+
+    def test_one_scroll_may_anchor_both_private_distributions(self):
+        game = self.make_game(GameOptions(symbols="neither"))
+        donor = bytearray(game.original_bytes(ENCHANTED_DONOR_SCROLL, 'ITM'))
+        effects, = struct.unpack_from('<I', donor, 0x6A)
+        for at in range(effects, len(donor), 48):
+            if (struct.unpack_from('<H', donor, at)[0] == 147
+                    and donor[at + 20:at + 28].rstrip(b'\0') == UNRELATED_LEARN_RESREF.encode()):
+                donor[at + 20:at + 28] = HOPELESS_RESREF.encode().ljust(8, b'\0')
+        (game.override / f'{ENCHANTED_DONOR_SCROLL}.ITM').write_bytes(donor)
+        tail = struct.pack('<HHHHIII', 0, 1, 0, 0, 1, 4, 0)
+        path = game.override / 'DUAL.STO'
+        path.write_bytes(_store(((ENCHANTED_DONOR_SCROLL, tail),)))
+        self.assert_installed(game, game.run_install())
+        rows = _store_entries(path.read_bytes())
+        self.assertEqual({_entry_resref(r) for r in rows},
+                         {ENCHANTED_DONOR_SCROLL, COURAGE_FALLBACK_SCROLL, HOPE_FALLBACK_SCROLL})
+        self.assertTrue(all(r[8:] == tail for r in rows))
+
+    def test_untranslated_language_retains_installed_emotion_text(self):
+        game = self.make_game(GameOptions(symbols="both"))
+        lang = game.root / "lang/de_de"
+        lang.mkdir()
+        (lang / "dialog.tlk").write_bytes(ONE_EMPTY_STRING_TLK)
+        result = subprocess.run([str(WEIDU), str(game.root / SETUP_TP2.name), "--game", str(game.root),
+            "--force-install-list", "301", "--language", "0", "--use-lang", "de_de", "--no-exit-pause", "--quick-log"],
+            cwd=game.root, capture_output=True, text=True, timeout=90)
+        self.assertEqual(0, result.returncode, game.transcript(result))
+        for resref in (COURAGE_RESREF, HOPE_RESREF):
+            original = game.original_bytes(resref, "SPL")
+            output = (game.override / f"{resref}.SPL").read_bytes()
+            self.assertEqual(original[0x08:0x10], output[0x08:0x10])
+            self.assertEqual(original[0x50:0x54], output[0x50:0x54])
+        self.assertIn("no translation", game.transcript(result))
+
+    def test_missing_status_column_and_existing_private_row_are_repaired(self):
+        for layout in ("malformed_shape", "courage_d_collision"):
             with self.subTest(layout=layout):
-                game = self.make_game(
-                    GameOptions(symbols="neither", statdesc_layout=layout)
-                )
+                game = self.make_game(GameOptions(symbols="neither", statdesc_layout=layout))
                 process = game.run_install()
-                self.assert_failed_atomically(game, process)
-                self.assertRegex(game.transcript(process), message)
+                self.assert_installed(game, process)
+                self.assertNotIn("INSTALLED WITH WARNINGS", game.transcript(process))
+                table = (game.override / "STATDESC.2DA").read_text()
+                self.assertIn("BAM_FILE", table)
+                ids = game.effective_ids()
+                for symbol in (COURAGE_SYMBOL, HOPE_SYMBOL):
+                    resref = spell_resref(ids.value(symbol), symbol)
+                    self.assertEqual(1, table.upper().count(resref + "D"))
 
-    def test_ambiguous_fallback_donor_discovery_fails_atomically(self) -> None:
+    def test_multiple_fallback_donors_still_publish_the_decided_resources(self) -> None:
         for donor_spell, candidates in (
             (
                 ENCHANTED_RESREF,
@@ -1792,11 +1892,10 @@ class EmotionHopeCourageInstallerTests(unittest.TestCase):
                     ]
                     self.assertEqual(1, len(matches), candidate)
                 process = game.run_install()
-                self.assert_failed_atomically(game, process)
-                self.assertRegex(
-                    game.transcript(process),
-                    r"(?i)(?:ambig|multiple|exactly\s+one|donor|scroll)",
-                )
+                self.assert_installed(game, process)
+                self.assertNotIn("INSTALLED WITH WARNINGS", game.transcript(process))
+                for name in (COURAGE_FALLBACK_SCROLL, HOPE_FALLBACK_SCROLL):
+                    self.assertTrue((game.override / f"{name}.ITM").exists())
 
     def test_malformed_matching_fallback_donor_is_ignored(self) -> None:
         for donor_spell in (ENCHANTED_RESREF, HOPELESS_RESREF):
@@ -1828,7 +1927,7 @@ class EmotionHopeCourageInstallerTests(unittest.TestCase):
                     self.target_scrolls(game, {courage, hope})[hope],
                 )
 
-    def test_learn_only_fallback_donor_is_rejected_atomically(self) -> None:
+    def test_learn_only_donor_does_not_block_authored_fallbacks(self) -> None:
         for donor_spell in (ENCHANTED_RESREF, HOPELESS_RESREF):
             with self.subTest(donor_spell=donor_spell):
                 game = self.make_game(
@@ -1862,8 +1961,8 @@ class EmotionHopeCourageInstallerTests(unittest.TestCase):
                     )
                 )
                 process = game.run_install()
-                self.assert_failed_atomically(game, process)
-                self.assertRegex(game.transcript(process), r"(?i)donor|scroll")
+                self.assert_installed(game, process)
+                self.assertNotIn("INSTALLED WITH WARNINGS", game.transcript(process))
 
     def test_each_optional_adverse_resource_may_be_absent(self) -> None:
         for missing in (

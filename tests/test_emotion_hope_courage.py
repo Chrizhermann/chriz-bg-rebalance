@@ -1613,108 +1613,102 @@ class EmotionHopeCourageTests(unittest.TestCase):
         self.assertTrue(second.succeeded, second.transcript)
         self.assertEqual(_raw_tree(first.output), _raw_tree(second.output))
 
-    def test_preflight_rejects_wrong_type_and_level_atomically(self) -> None:
-        for malformed, token in (
-            ("wrong_type", ERR_BENEFICIAL_TYPE),
-            ("wrong_level", ERR_BENEFICIAL_LEVEL),
-        ):
-            with self.subTest(malformed=malformed):
-                result, _fixture = self.run_case(FixtureOptions(malformed=malformed), expect_success=False)
-                self.assertIn(token, result.transcript)
+    def test_wrong_type_and_level_are_overwritten(self):
+        for variant in ("wrong_type", "wrong_level"):
+            result, _ = self.run_case(FixtureOptions(malformed=variant))
+            spell = read_spl(result.output / f"{COURAGE}.SPL")
+            self.assertEqual(1, struct.unpack_from("<H", spell.header_raw, 0x1c)[0])
+            self.assertEqual(4, struct.unpack_from("<I", spell.header_raw, 0x34)[0])
 
-    def test_preflight_rejects_malformed_signatures_and_partitions_atomically(self) -> None:
-        cases = (
-            ("courage_signature", ERR_SPL_SIGNATURE),
-            ("beneficial_slice", ERR_BENEFICIAL_PARTITION),
-            ("beneficial_gap", ERR_BENEFICIAL_PARTITION),
-            ("beneficial_trailing", ERR_BENEFICIAL_PARTITION),
-            ("beneficial_partial", ERR_BENEFICIAL_PARTITION),
-            ("casting_slice", ERR_CASTING_PARTITION),
-            ("casting_orphan", ERR_CASTING_PARTITION),
-            ("fear_slice", ERR_ADVERSE_PARTITION),
-            ("scroll_gap", ERR_ITM_PARTITION),
-            ("scroll_overlap", ERR_ITM_PARTITION),
-            ("scroll_trailing", ERR_ITM_PARTITION),
-            ("scroll_orphan", ERR_ITM_PARTITION),
-            ("scroll_partial", ERR_ITM_PARTITION),
-        )
-        for malformed, token in cases:
-            with self.subTest(malformed=malformed):
-                result, _fixture = self.run_case(FixtureOptions(malformed=malformed), expect_success=False)
-                self.assertIn(token, result.transcript)
+    def test_variant_layouts_and_damaged_files_do_not_abort_other_resources(self):
+        for variant in ("courage_signature", "beneficial_slice", "beneficial_gap", "beneficial_trailing",
+                        "beneficial_partial", "casting_slice", "casting_orphan", "fear_slice",
+                        "scroll_gap", "scroll_overlap", "scroll_trailing", "scroll_orphan", "scroll_partial"):
+            with self.subTest(variant=variant):
+                result, fixture = self.run_case(FixtureOptions(malformed=variant))
+                self.assertNotIn("INSTALLED WITH WARNINGS", result.transcript)
+                if variant == "casting_slice":
+                    self.assertEqual((fixture / f"{HOPE}.SPL").read_bytes(), (result.output / f"{HOPE}.SPL").read_bytes())
+                    self.assertEqual(_expected_courage(), read_spl(result.output / f"{COURAGE}.SPL").abilities[0].effects)
+                else:
+                    self.assertEqual(_expected_hope(), read_spl(result.output / f"{HOPE}.SPL").abilities[0].effects)
 
-    def test_preflight_rejects_empty_long_and_identical_resrefs_atomically(self) -> None:
-        cases = (
-            ({"courage": ""}, ERR_RESREF_EMPTY),
-            ({"hope": "TOO_LONG9"}, ERR_RESREF_LENGTH),
-            ({"hope": COURAGE}, ERR_RESREF_COLLISION),
-            ({"hope": COURAGE.lower()}, ERR_RESREF_COLLISION),
-            ({"fear": COURAGE}, ERR_RESREF_COLLISION),
-            ({"horror": COURAGE}, ERR_RESREF_COLLISION),
-            ({"innate_horror": COURAGE}, ERR_RESREF_COLLISION),
-            ({"hopelessness": HOPE}, ERR_RESREF_COLLISION),
-            ({"symbol": HOPE}, ERR_RESREF_COLLISION),
-        )
-        for resrefs, token in cases:
-            with self.subTest(resrefs=resrefs):
-                result, _fixture = self.run_case(resrefs=resrefs, expect_success=False)
-                self.assertIn(token, result.transcript)
+    def test_absent_or_aliased_identities_do_not_abort_the_component(self):
+        for refs in ({"courage": ""}, {"hope": "TOO_LONG9"}, {"hope": COURAGE},
+                     {"hope": COURAGE.lower()}, {"fear": COURAGE}, {"horror": COURAGE},
+                     {"innate_horror": COURAGE}, {"hopelessness": HOPE}, {"symbol": HOPE}):
+            with self.subTest(refs=refs):
+                result, _ = self.run_case(resrefs=refs)
+                self.assertNotIn("INSTALLED WITH WARNINGS", result.transcript)
 
-    def test_preflight_rejects_missing_beneficial_resources_atomically(self) -> None:
-        for malformed, token in (
-            ("missing_courage", ERR_MISSING_COURAGE),
-            ("missing_hope", ERR_MISSING_HOPE),
-        ):
-            with self.subTest(malformed=malformed):
-                result, _fixture = self.run_case(FixtureOptions(malformed=malformed), expect_success=False)
-                self.assertIn(token, result.transcript)
+    def test_missing_beneficial_target_does_not_block_the_other(self):
+        for variant, present in (("missing_courage", HOPE), ("missing_hope", COURAGE)):
+            result, _ = self.run_case(FixtureOptions(malformed=variant))
+            self.assertIn("is absent; continuing", result.transcript)
+            self.assertTrue(read_spl(result.output / f"{present}.SPL").abilities[0].effects)
 
-    def test_preflight_rejects_present_adverse_with_zero_abilities_atomically(self) -> None:
-        holder = tempfile.TemporaryDirectory(prefix="cbr-emotion-zero-adverse-")
-        self.addCleanup(holder.cleanup)
-        fixture = Path(holder.name) / "fixture"
-        build_fixture(fixture, FixtureOptions(malformed="adverse_zero_abilities"))
-        fear_raw = (fixture / f"{FEAR}.SPL").read_bytes()
-        _assert_exact_partition_coverage(self, fear_raw, SPL_ABILITY_SIZE)
-        self.assertEqual(0, len(SplFile.from_bytes(fear_raw).abilities))
+    def test_empty_adverse_spell_receives_an_ability_and_remover(self):
+        result, _ = self.run_case(FixtureOptions(malformed="adverse_zero_abilities"))
+        spell = read_spl(result.output / f"{FEAR}.SPL")
+        self.assertEqual(1, len(spell.abilities))
+        self.assertEqual([COURAGE], [f.resource for f in spell.abilities[0].effects if f.opcode == 321])
 
-        result = HarnessResult(fixture)
-        self.addCleanup(result.cleanup)
-        self.assertFalse(result.succeeded, "zero-header adverse SPL was accepted")
-        self.assertIn(ERR_ADVERSE_PARTITION, result.transcript)
-        self.assertFalse((result.output / "CBR_TEST.OK").exists())
-        self.assertEqual({}, _raw_tree(result.output), "failed preflight did not roll back atomically")
+    def test_dual_emotion_scroll_uses_first_spell_description(self):
+        for variant, name, description in (("scroll_ambiguous_courage_first", COURAGE_NAME, COURAGE_DESC),
+                                           ("scroll_ambiguous_hope_first", HOPE_NAME, HOPE_DESC)):
+            result, fixture = self.run_case(FixtureOptions(malformed=variant))
+            raw = (result.output / "ZCRGSC1.ITM").read_bytes()
+            self.assertEqual(name, struct.unpack_from("<i", raw, 0x0c)[0])
+            self.assertEqual(description, struct.unpack_from("<i", raw, 0x54)[0])
+            expected = bytearray((fixture / "ZCRGSC1.ITM").read_bytes())
+            struct.pack_into("<i", expected, 0xc, name)
+            struct.pack_into("<i", expected, 0x54, description)
+            self.assertEqual(bytes(expected), raw)
 
-    def test_preflight_rejects_scroll_that_teaches_both_emotions_atomically(self) -> None:
-        for malformed, expected_order in (
-            ("scroll_ambiguous_courage_first", [COURAGE, HOPE]),
-            ("scroll_ambiguous_hope_first", [HOPE, COURAGE]),
-        ):
-            with self.subTest(malformed=malformed):
-                holder = tempfile.TemporaryDirectory(prefix="cbr-emotion-ambiguous-scroll-")
-                self.addCleanup(holder.cleanup)
-                fixture = Path(holder.name) / "fixture"
-                build_fixture(fixture, FixtureOptions(malformed=malformed))
-                item_raw = (fixture / "ZCRGSC1.ITM").read_bytes()
-                _assert_exact_partition_coverage(self, item_raw, ITM_ABILITY_SIZE)
-                item = ItmFile.from_bytes(item_raw)
-                learned = [
-                    effect.resource
-                    for ability in item.abilities
-                    for effect in ability.effects
-                    if effect.opcode == 147
-                ]
-                self.assertEqual(expected_order, learned)
-                self.assertTrue(all(len(ability.effects) == 1 for ability in item.abilities))
+    def test_missing_or_duplicate_hostile_donors_still_get_one_remover(self):
+        import dataclasses
+        for duplicate in (False, True):
+            holder = tempfile.TemporaryDirectory(prefix="cbr-emotion-donors-")
+            self.addCleanup(holder.cleanup)
+            fixture = Path(holder.name) / "fixture"
+            build_fixture(fixture)
+            for resref, opcode in ((FEAR, 24), (SYMBOL, 45)):
+                path = fixture / f"{resref}.SPL"
+                spell = read_spl(path)
+                abilities = []
+                for ability in spell.abilities:
+                    effects = tuple(f for f in ability.effects if f.opcode != opcode)
+                    if duplicate:
+                        donor = next(f for f in ability.effects if f.opcode == opcode)
+                        effects += (donor, donor, donor)
+                    abilities.append(dataclasses.replace(ability, effects=effects))
+                path.write_bytes(dataclasses.replace(spell, abilities=tuple(abilities)).to_bytes())
+            result = HarnessResult(fixture)
+            self.addCleanup(result.cleanup)
+            self.assertTrue(result.succeeded, result.transcript)
+            for resref, positive in ((FEAR, COURAGE), (SYMBOL, HOPE)):
+                for ability in read_spl(result.output / f"{resref}.SPL").abilities:
+                    self.assertEqual(1, sum(f.opcode == 321 and f.resource == positive for f in ability.effects))
+            second = HarnessResult(result.output)
+            self.addCleanup(second.cleanup)
+            self.assertTrue(second.succeeded, second.transcript)
+            self.assertEqual(_raw_tree(result.output), _raw_tree(second.output))
 
-                result = HarnessResult(fixture)
-                self.addCleanup(result.cleanup)
-                self.assertFalse(result.succeeded, "dual-Emotion learn scroll was accepted")
-                self.assertIn(ERR_SCROLL_AMBIGUOUS, result.transcript)
-                self.assertFalse((result.output / "CBR_TEST.OK").exists())
-                self.assertEqual(
-                    {}, _raw_tree(result.output), "ambiguous-scroll preflight did not roll back atomically"
-                )
+    def test_effect_table_before_abilities_rebuilds_like_normal_storage(self):
+        result, fixture = self.run_case()
+        expected = _raw_tree(result.output)
+        for resref in (COURAGE, HOPE, FEAR, SYMBOL, HOPELESSNESS):
+            path = fixture / f"{resref}.SPL"
+            raw = path.read_bytes()
+            ab, fx = struct.unpack_from("<I", raw, 0x64)[0], struct.unpack_from("<I", raw, 0x6a)[0]
+            changed = bytearray(raw[:0x72] + raw[fx:] + raw[ab:fx])
+            struct.pack_into("<I", changed, 0x64, 0x72 + len(raw[fx:]))
+            struct.pack_into("<I", changed, 0x6a, 0x72)
+            path.write_bytes(changed)
+        changed = HarnessResult(fixture)
+        self.addCleanup(changed.cleanup)
+        self.assertTrue(changed.succeeded, changed.transcript)
+        self.assertEqual(expected, _raw_tree(changed.output))
 
     def test_harness_is_hermetic_and_calls_the_public_action_once(self) -> None:
         source = re.sub(r"//[^\n]*", "", HARNESS.read_text(encoding="utf-8"))

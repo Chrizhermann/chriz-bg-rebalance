@@ -19,40 +19,42 @@ local function requireValue(condition, message)
 end
 
 local function initialize()
-    local version = EEex_Resource_Load2DA("CBRSPVER")
-    requireValue(version:getAtLabels("VALUE", "API") == "1", "unsupported provider API")
     local registry = EEex_Resource_Load2DA("CBRSPKIT")
-    requireValue(registry:findColumnLabel("CLASS") == 0
-        and registry:findColumnLabel("KIT") == 1
-        and registry:findColumnLabel("TABLE") == 2, "invalid CBRSPKIT registry")
+    if not registry then
+        state.Status = "registry resource is absent"
+        print("CBR bard progression: " .. state.Status)
+        return
+    end
+    local function column(label, fallback)
+        local index = registry:findColumnLabel(label)
+        return index >= 0 and index + 1 or fallback
+    end
+    local classColumn, kitColumn, tableColumn = column("CLASS", 1), column("KIT", 2), column("TABLE", 3)
 
     -- Keep these userdata alive for the entire process. Generated native code
     -- embeds their addresses; freeing/replacing them would leave dangling pointers.
     state.tables = {}
     state.kits = {}
     for row in EEex_Resource_Get2DARowTableIterator(registry, false) do
-        local class, kit, resref = tonumber(row[1]), tonumber(row[2]), row[3]:upper()
-        requireValue(class and class == math.floor(class), "invalid class identifier")
+        local class, kit = tonumber(row[classColumn]), tonumber(row[kitColumn])
+        local resref = tostring(row[tableColumn] or ""):upper()
         -- Other class registrations are reserved for separate providers. This
         -- hook runs only inside the native bard branch and leaves them alone.
         if class == 5 then
-            requireValue(kit and kit >= 0 and kit <= 4294967295 and kit == math.floor(kit),
-                "invalid kit identifier")
-            requireValue(#resref > 0 and #resref <= 8 and resref:match("^[%w_#]+$"),
-                "invalid table resource name")
-            requireValue(not state.kits[kit] or state.kits[kit] == resref,
-                "conflicting tables for kit " .. kit)
-            if not state.tables[resref] then
-                local tab = EEex_Resource_Load2DA(resref)
-                local _, rows = tab:getDimensions()
-                requireValue(rows > 0, "missing or empty table " .. resref)
-                for tier = 1, 9 do
-                    requireValue(tab:findColumnLabel(tostring(tier)) >= 0,
-                        resref .. " must contain spell levels 1 through 9")
+            if kit and kit == kit and math.abs(kit) ~= math.huge then
+                kit = math.floor(kit) % 4294967296
+                if not state.tables[resref] then
+                    state.tables[resref] = EEex_Resource_Load2DA(resref)
                 end
-                state.tables[resref] = tab
+                if state.tables[resref] then
+                    -- Registration order is authoritative; the last row wins.
+                    state.kits[kit] = resref
+                else
+                    print("CBR bard progression: table " .. resref .. " is absent; continuing")
+                end
+            else
+                print("CBR bard progression: unreadable kit identifier; continuing")
             end
-            state.kits[kit] = resref
         end
     end
 

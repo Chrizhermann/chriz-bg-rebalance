@@ -254,6 +254,7 @@ scenarios.setter_failure = function()
         ordinaryWrite(object, key, value)
     end
     apply(s)
+    out("after_failure", fields(s))
     for _ = 1, 30 do apply(s) end
     out("physical", fields(s)); out("marker", marker(s))
     out("failed", CBRPhysRes.failed == true); out("failure_logs", #logs)

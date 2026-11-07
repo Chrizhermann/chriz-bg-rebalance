@@ -11,10 +11,11 @@ from pathlib import Path
 
 from tests.ie_formats import ItmAbility, ItmFile, SplAbility, SplEffect, make_spl, SplFile
 from tests.test_flail_of_ages import tlk
+from tests.test_sr_hardiness import _strings
 from tests.test_tempus_holy_power_installer import _write_key_and_bif
 
 ROOT = Path(__file__).resolve().parents[1]
-WEIDU = ROOT / "weidu.exe"
+WEIDU = Path(__import__("os").environ.get("WEIDU", ROOT / "weidu.exe"))
 CAPTURES = ROOT / ".worktrees/sr-bracers-captures"
 ADAPTER = ROOT / "live-patch/CBR_SR_BRACERS"
 LIB = ROOT / "chriz-bg-rebalance/lib/sr_bracers.tpa"
@@ -104,6 +105,7 @@ def synthetic():
 class Game:
     def __init__(self, root, resources):
         self.root = root
+        self.language = "en_us"
         self.override = root / "override"
         self.override.mkdir(parents=True)
         shutil.copytree(ADAPTER, root / "CBR_SR_BRACERS")
@@ -115,8 +117,9 @@ class Game:
         self.tlk.parent.mkdir(parents=True)
         self.tlk.write_bytes(tlk(["unchanged"]))
         (root / "dialog.tlk").write_bytes(self.tlk.read_bytes())
+        (root / "weidu.log").write_text("", encoding="ascii")
         self.original = self.snapshot()
-        self.stable = {p: p.read_bytes() for p in (self.bif, root / "chitin.key", self.tlk)}
+        self.stable = {p: p.read_bytes() for p in (self.bif, root / "chitin.key")}
 
     def snapshot(self): return {p.name.upper(): p.read_bytes() for p in self.override.iterdir() if p.is_file()}
 
@@ -134,14 +137,15 @@ class Game:
             target = "CBR_SR_BRACERS/setup-cbr_sr_bracers.tp2"
         p = subprocess.run([str(WEIDU), target,
             "--force-uninstall-list" if uninstall else "--force-install-list", "0",
-            "--use-lang", "en_us", "--no-exit-pause", "--quick-log"],
+            "--use-lang", self.language, "--no-exit-pause", "--quick-log"],
             cwd=self.root, capture_output=True, text=True, timeout=60)
         return p, p.stdout + p.stderr
 
 
 class BracersTests(unittest.TestCase):
     def game(self, resources=None):
-        temporary = tempfile.TemporaryDirectory(prefix="cbr-sr-bracers-")
+        (ROOT / "work").mkdir(exist_ok=True)
+        temporary = tempfile.TemporaryDirectory(prefix="cbr-sr-bracers-", dir=ROOT / "work")
         self.addCleanup(temporary.cleanup)
         return Game(Path(temporary.name), resources or synthetic())
 
@@ -149,6 +153,7 @@ class BracersTests(unittest.TestCase):
         p, output = g.run(**kwargs)
         self.assertEqual(0, p.returncode, output)
         self.assertIn("SUCCESSFULLY INSTALLED", output)
+        self.assertNotIn("WARNING", output)
 
     def check(self, g):
         after = g.snapshot()
@@ -174,7 +179,7 @@ class BracersTests(unittest.TestCase):
             self.assertEqual(1, e.target)
             if e.timing in (0, 4): self.assertEqual(20, e.duration)
         old, new = g.original["BRAC16.ITM"], after["BRAC16.ITM"]
-        self.assertEqual(old[:0x6e], new[:0x6e])
+        self.assertEqual(old[:0x54] + old[0x58:0x6e], new[:0x54] + new[0x58:0x6e])
         ab, = struct.unpack_from("<I", new, 0x64)
         self.assertEqual(old[ab:ab+30], new[ab:ab+30])
         self.assertEqual(old[ab+34:ab+56], new[ab+34:ab+56])
@@ -188,7 +193,7 @@ class BracersTests(unittest.TestCase):
         guards = {e.resource for e in ability.effects if e.opcode == 206}
         self.assertIn("CBRBIH", guards)
         for name, before in g.original.items():
-            if not name.endswith(".SPL"): continue
+            if not name.endswith(".SPL") or name == "CBRBIH.SPL": continue
             newer = after[name]
             if newer == before: continue
             self.assertIn(name[:-4], guards)
@@ -203,16 +208,36 @@ class BracersTests(unittest.TestCase):
         for p, raw in g.stable.items(): self.assertEqual(raw, p.read_bytes())
         self.assertFalse(any(n.endswith(".INSTALLED") for n in after))
 
+    def test_low_dynamic_haste_slots_are_padded(self):
+        original = synthetic()
+        resources = {}
+        for name, blob in original.items():
+            name = name.replace("SPWI677", "SPWI007").replace("SPWI355", "SPWI050")
+            resources[name] = blob.replace(b"SPWI677", b"SPWI007").replace(b"SPWI355", b"SPWI050")
+        resources["SPELL.IDS"] = b"2007 WIZARD_IMPROVED_HASTE\n2050 WIZARD_HASTE\n"
+        game = self.game(resources)
+        self.installed(game)
+        after = game.snapshot()
+        self.assertIn("CBRBIH.SPL", after)
+        guards = {f.resource for f in SplFile.from_bytes(after["CBRBIH.SPL"]).all_effects() if f.opcode == 206}
+        self.assertTrue({"SPWI007", "SPWI050", "CBRBIH"} <= guards)
+        for name in ("SPWI007.SPL", "SPWI050.SPL"):
+            for ability in SplFile.from_bytes(after[name]).abilities:
+                self.assertEqual(1, sum(f.opcode == 206 and f.resource == "CBRBIH" for f in ability.effects))
+        self.installed(game, repeat=True)
+        self.assertEqual(after, game.snapshot())
+
     def test_native_transformation_relocated_symbols_and_aliases(self):
         g = self.game()
         self.installed(g)
         self.check(g)
         self.assertEqual(g.original["NOTHASTE.SPL"], g.snapshot()["NOTHASTE.SPL"])
-        before = next(effects(g.original["BRAC16.ITM"], 56))
-        after = next(effects(g.snapshot()["BRAC16.ITM"], 56))
-        for effect in before:
-            if op(effect) in (61, 139) and struct.unpack_from("<I", effect, 4)[0] == 1234:
-                self.assertIn(effect, after)
+        after = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"])
+        description = _strings(g.tlk)[after.identified_description]
+        self.assertIn("Improved Haste once per day", description)
+        self.assertIn("20 seconds", description)
+        self.assertTrue(description.startswith("Knight Wesic"))
+        self.assertEqual("unchanged", _strings(g.tlk)[0])
 
     def test_global_only_and_empty_marker_spells_are_untouched(self):
         r = synthetic()
@@ -250,16 +275,14 @@ class BracersTests(unittest.TestCase):
         self.assertEqual(0, p.returncode, output)
         self.assertEqual(g.original, g.snapshot())
 
-    def test_collision_fails_without_changes(self):
+    def test_private_helper_collision_is_overwritten(self):
         r = synthetic()
         r["CBRBIH.SPL"] = r["NOTHASTE.SPL"]
         g = self.game(r)
-        p, out = g.run()
-        self.assertNotEqual(0, p.returncode, out)
-        self.assertIn("different contents", out)
-        self.assertEqual(g.original, g.snapshot())
+        self.installed(g)
+        self.check(g)
 
-    def test_non_sr_double_apr_donor_rejected(self):
+    def test_native_double_apr_donor_becomes_additive(self):
         r = synthetic()
         donor = SplFile.from_bytes(r["SPWI677.SPL"])
         a = donor.abilities[0]
@@ -267,23 +290,78 @@ class BracersTests(unittest.TestCase):
             dataclasses.replace(e, opcode=16, parameter1=0, parameter2=1) if e.opcode == 1 else e
             for e in a.effects)),)).to_bytes()
         g = self.game(r)
-        p, out = g.run()
-        self.assertNotEqual(0, p.returncode, out)
-        self.assertEqual(g.original, g.snapshot())
+        self.installed(g)
+        self.check(g)
 
-    def test_late_alias_failure_rolls_back_already_published_helper(self):
+    def test_shared_alias_slices_are_rebuilt(self):
         r = synthetic()
-        # A shared effect slice is valid to inspect but deliberately unsupported
-        # by the rebuilding publisher. Failure occurs after helper publication.
+        # Sharing a slice does not change the alias's intended exclusion.
         blob = bytearray(r["ALTFAST.SPL"])
         ab, = struct.unpack_from("<I", blob, 0x64)
         struct.pack_into("<H", blob, ab+40+32, 0)
         r["ALTFAST.SPL"] = bytes(blob)
         g = self.game(r)
+        self.installed(g)
+        self.check(g)
+
+    def test_missing_effects_empty_abilities_and_edited_guards_are_rebuilt(self):
+        for variation in ("missing_apr", "empty_donor", "empty_item", "no_item_abilities", "edited_guards"):
+            with self.subTest(variation=variation):
+                r = synthetic()
+                donor = SplFile.from_bytes(r["SPWI677.SPL"])
+                ability = donor.abilities[0]
+                if variation == "missing_apr":
+                    r["SPWI677.SPL"] = dataclasses.replace(donor, abilities=(dataclasses.replace(
+                        ability, effects=tuple(e for e in ability.effects if e.opcode != 1)),)).to_bytes()
+                elif variation == "empty_donor":
+                    r["SPWI677.SPL"] = dataclasses.replace(donor, abilities=()).to_bytes()
+                elif variation.startswith("empty_item") or variation == "no_item_abilities":
+                    item = ItmFile.from_bytes(r["BRAC16.ITM"])
+                    abilities = () if variation == "no_item_abilities" else (dataclasses.replace(item.abilities[0], effects=()),)
+                    r["BRAC16.ITM"] = dataclasses.replace(item, abilities=abilities).to_bytes()
+                else:
+                    changed = tuple(dataclasses.replace(e, probability1=2, save_type=1, duration=0, timing=9)
+                                    if e.opcode == 206 else e for e in ability.effects)
+                    r["SPWI677.SPL"] = dataclasses.replace(donor, abilities=(dataclasses.replace(ability, effects=changed),)).to_bytes()
+                g = self.game(r)
+                self.installed(g)
+                helper = SplFile.from_bytes(g.snapshot()["CBRBIH.SPL"])
+                self.assertEqual([(1, 0, 20)], [(e.parameter1, e.parameter2, e.duration)
+                                              for e in helper.abilities[0].effects if e.opcode == 1])
+                item = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"])
+                self.assertEqual(1, sum(e.opcode == 146 and e.resource == "CBRBIH" for e in item.abilities[0].effects))
+                for e in helper.abilities[0].effects:
+                    if e.opcode == 206 and e.resource in ("SPWI355", "SPWI677", "CBRBIH"):
+                        self.assertEqual((1, 0, 20, 100, 0), (e.target, e.timing, e.duration, e.probability1, e.save_type))
+                before = g.snapshot()
+                self.installed(g, repeat=True)
+                self.assertEqual(before, g.snapshot())
+
+    def test_other_language_keeps_description_and_applies_mechanics(self):
+        g = self.game()
+        g.language = "de_de"
+        translated = g.root / "lang/de_de/dialog.tlk"
+        translated.parent.mkdir()
+        translated.write_bytes(g.tlk.read_bytes())
+        before = translated.read_bytes()
         p, out = g.run()
-        self.assertNotEqual(0, p.returncode, out)
-        self.assertIn("overlapping or orphaned", out)
-        self.assertEqual(g.original, g.snapshot())
+        self.assertEqual(0, p.returncode, out)
+        self.assertNotIn("WARNING", out)
+        self.assertIn("no translation", out)
+        self.assertEqual(before, translated.read_bytes())
+        old = ItmFile.from_bytes(g.original["BRAC16.ITM"])
+        new = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"])
+        self.assertEqual(old.identified_description, new.identified_description)
+        self.assertTrue(any(e.opcode == 146 and e.resource == "CBRBIH" for e in new.abilities[0].effects))
+
+    def test_unreadable_donor_or_item_is_logged_without_partial_publication(self):
+        for name in ("SPWI677.SPL", "BRAC16.ITM"):
+            with self.subTest(name=name):
+                r = synthetic()
+                r[name] = r[name][:-1]
+                g = self.game(r)
+                self.installed(g)
+                self.assertEqual(g.original, g.snapshot())
 
     @unittest.skipUnless(CAPTURES.exists(), "private captured resources not present")
     def test_captured_stream_install_and_tempus_helpers(self):
@@ -346,7 +424,7 @@ def _expected_payload(effects, spell=60, duration=20, donor="SPWI677"):
         if e.opcode == 206 and e.resource == "CBRBIH":
             continue
         changes = {}
-        if e.target == 2:
+        if e.target > 1:
             changes["target"] = 1
         if e.timing in (0, 4) and e.duration == spell:
             changes["duration"] = duration
@@ -368,11 +446,19 @@ class BracersVariationTests(unittest.TestCase):
         self.assertEqual((5, 1, 0), (ability.target, ability.projectile, ability.required_level))
         return helper
 
-    def failed(self, g, text):
-        p, out = g.run()
-        self.assertNotEqual(0, p.returncode, out)
-        self.assertIn(text, out)
-        self.assertEqual(g.original, g.snapshot())
+    def rewritten(self, g):
+        self.installed(g)
+        fx = self.helper(g).abilities[0].effects
+        self.assertTrue(all(e.target in (0, 1) for e in fx))
+        self.assertEqual([(1, 0, 20)], [(e.parameter1, e.parameter2, e.duration)
+                                      for e in fx if e.opcode == 1])
+        item = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"])
+        for ability in item.abilities:
+            calls = [e for e in ability.effects if e.opcode == 146 and e.resource == "CBRBIH"]
+            if calls:
+                self.assertEqual(1, len(calls))
+                self.assertFalse(any(e.opcode in (16, 317) for e in ability.effects))
+        self.repeat_is_exact(g)
 
     def repeat_is_exact(self, g):
         before = g.snapshot()
@@ -391,7 +477,18 @@ class BracersVariationTests(unittest.TestCase):
         self.assertEqual(extra.canonical(), new.abilities[1].canonical())
         self.assertEqual(extra.raw[:0x1e], new.abilities[1].raw[:0x1e])
         self.assertEqual(extra.raw[0x22:], new.abilities[1].raw[0x22:])
-        self.assertEqual([324, 146, 139, 61], [e.opcode for e in new.abilities[0].effects])
+        self.assertEqual([324, 146], [e.opcode for e in new.abilities[0].effects])
+        self.repeat_is_exact(g)
+
+    def test_reordered_abilities_preserve_the_unrelated_activation(self):
+        r = synthetic()
+        stock = ItmFile.from_bytes(r["BRAC16.ITM"]).abilities[0]
+        foreign = _item_ability((SplEffect(opcode=17, target=1, parameter1=5, timing=1),))
+        g = self.game(_with_item(r, abilities=(foreign, stock)))
+        self.installed(g)
+        item = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"])
+        self.assertEqual(foreign.canonical(), item.abilities[0].canonical())
+        self.assertEqual(1, sum(e.opcode == 146 and e.resource == "CBRBIH" for e in item.abilities[1].effects))
         self.repeat_is_exact(g)
 
     def test_reordered_item_and_donor_records(self):
@@ -404,7 +501,7 @@ class BracersVariationTests(unittest.TestCase):
         g = self.game(_with_donor(r, abilities=(dataclasses.replace(donor, effects=payload),)))
         self.installed(g)
         new = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"]).abilities[0].effects
-        self.assertEqual([61, 139, 146, 324], [e.opcode for e in new])
+        self.assertEqual([146, 324], [e.opcode for e in new])
         expected = _expected_payload(payload)
         fx = self.helper(g).abilities[0].effects
         self.assertEqual(expected, [e.canonical() for e in fx[:len(expected)]])
@@ -451,12 +548,12 @@ class BracersVariationTests(unittest.TestCase):
             self.assertEqual(1, sum(e.opcode == 206 and e.resource == "CBRBIH" for e in ability.effects))
         self.repeat_is_exact(g)
 
-    def test_donor_headers_with_different_payloads_fail(self):
+    def test_first_donor_header_defines_the_fixed_duration_copy(self):
         r = synthetic()
         base = _donor(r).abilities[0]
         stronger = dataclasses.replace(base, required_level=10, effects=tuple(
             dataclasses.replace(e, parameter1=2) if e.opcode == 1 else e for e in base.effects))
-        self.failed(self.game(_with_donor(r, abilities=(base, stronger))), "differ beyond their duration")
+        self.rewritten(self.game(_with_donor(r, abilities=(base, stronger))))
 
     def test_changed_donor_duration_keeps_independent_timers(self):
         r = synthetic()
@@ -485,7 +582,7 @@ class BracersVariationTests(unittest.TestCase):
         self.assertEqual([30], [e.duration for e in fx if e.opcode == 1])
         self.assertTrue(all(e.duration == 30 for e in fx if e.opcode == 206))
         new = ItmFile.from_bytes(g.snapshot()["BRAC16.ITM"]).abilities[0].effects
-        self.assertEqual([324, 146, 139, 61], [e.opcode for e in new])
+        self.assertEqual([324, 146], [e.opcode for e in new])
         self.repeat_is_exact(g)
 
     def test_foreign_donor_records_are_carried(self):
@@ -506,27 +603,27 @@ class BracersVariationTests(unittest.TestCase):
         self.assertEqual([0], [e.target for e in fx if e.opcode == 174 and e.resource == "EFF_X"])
         self.repeat_is_exact(g)
 
-    def test_group_targeted_donor_effect_fails(self):
+    def test_group_targeted_donor_effect_is_self_targeted(self):
         r = synthetic()
         base = _donor(r).abilities[0]
         party = _fx(0, p1=1, target=3)
         g = self.game(_with_donor(r, abilities=(dataclasses.replace(base, effects=base.effects + (party,)),)))
-        self.failed(g, "targets group 3")
+        self.rewritten(g)
 
-    def test_item_without_native_improved_haste_fails(self):
+    def test_item_without_native_improved_haste_is_overwritten(self):
         r = synthetic()
         stock = ItmFile.from_bytes(r["BRAC16.ITM"]).abilities[0]
         normal = dataclasses.replace(stock, effects=tuple(
             dataclasses.replace(e, parameter2=0) if e.opcode == 16 else e for e in stock.effects))
-        self.failed(self.game(_with_item(r, abilities=(normal,))), "no native Improved Haste activation")
+        self.rewritten(self.game(_with_item(r, abilities=(normal,))))
 
-    def test_activation_for_another_target_fails(self):
+    def test_activation_for_another_target_is_self_targeted(self):
         r = synthetic()
         stock = ItmFile.from_bytes(r["BRAC16.ITM"]).abilities[0]
         other = _item_ability(stock.effects, target=1)
-        self.failed(self.game(_with_item(r, abilities=(other,))), "does not target its user")
+        self.rewritten(self.game(_with_item(r, abilities=(other,))))
 
-    def test_shared_activation_record_fails(self):
+    def test_shared_activation_records_are_rebuilt(self):
         r = synthetic()
         item = ItmFile.from_bytes(r["BRAC16.ITM"])
         blob = bytearray(_with_item(r, abilities=item.abilities + (_item_ability(()),))["BRAC16.ITM"])
@@ -534,17 +631,17 @@ class BracersVariationTests(unittest.TestCase):
         count, first = struct.unpack_from("<HH", blob, ab + 0x1e)
         struct.pack_into("<HH", blob, ab + 56 + 0x1e, count, first)
         r["BRAC16.ITM"] = bytes(blob)
-        self.failed(self.game(r), "shared with another ability")
+        self.rewritten(self.game(r))
 
-    def test_transformed_item_without_helper_fails(self):
+    def test_transformed_item_without_helper_is_repaired(self):
         g = self.game()
         self.installed(g)
         next(p for p in g.override.iterdir() if p.name.upper() == "CBRBIH.SPL").unlink()
         before = g.snapshot()
-        p, out = g.run(repeat=True)
-        self.assertNotEqual(0, p.returncode, out)
-        self.assertIn("CBRBIH.SPL is missing", out)
-        self.assertEqual(before, g.snapshot())
+        self.installed(g, repeat=True)
+        self.assertIn("CBRBIH.SPL", g.snapshot())
+        self.assertEqual(before["BRAC16.ITM"], g.snapshot()["BRAC16.ITM"])
+        self.repeat_is_exact(g)
 
 
 class BracersReviewTests(unittest.TestCase):
@@ -552,7 +649,7 @@ class BracersReviewTests(unittest.TestCase):
     game = BracersTests.game
     installed = BracersTests.installed
     helper = BracersVariationTests.helper
-    failed = BracersVariationTests.failed
+    rewritten = BracersVariationTests.rewritten
     repeat_is_exact = BracersVariationTests.repeat_is_exact
 
     def test_activation_conditions_carry_over_to_the_helper_call(self):
@@ -602,7 +699,7 @@ class BracersReviewTests(unittest.TestCase):
         self.assertEqual(expected, [e.canonical() for e in fx[:len(expected)]])
         self.repeat_is_exact(g)
 
-    def test_level_headers_reordering_dependent_records_fail(self):
+    def test_later_level_headers_do_not_gate_the_copy(self):
         r = synthetic()
         base = _donor(r).abilities[0]
         protection = next(i for i, e in enumerate(base.effects) if e.opcode == 206)
@@ -622,7 +719,7 @@ class BracersReviewTests(unittest.TestCase):
             with self.subTest(name=name):
                 g = self.game(_with_donor(synthetic(), abilities=(
                     self.scaled(base, 1, 60, first), self.scaled(base, 10, 120, second))))
-                self.failed(g, "differ beyond their duration")
+                self.rewritten(g)
 
 
 def _cast(blob: bytes, name: str) -> list[set[str]]:

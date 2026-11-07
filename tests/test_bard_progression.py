@@ -37,7 +37,7 @@ class BardProgressionTests(unittest.TestCase):
         self.assertEqual(tables["CBRIWD8"][29][7], 1)
         self.assertTrue(all(r[7:] == [0, 0] for r in tables["CBRIWD7"].values()))
 
-    def runtime(self, *, bad_signature=False, conflict=False, iwdee=False):
+    def runtime(self, *, bad_signature=False, conflict=False, iwdee=False, edit=None):
         lua = LuaRuntime()
         lua.execute(r'''
             EEex_Active = true
@@ -90,6 +90,8 @@ class BardProgressionTests(unittest.TestCase):
             lua.execute("signature[17]=0x28")
         if conflict:
             lua.execute('table.insert(resources.CBRSPKIT.records, {"5","16384","CBRIWD8"})')
+        if edit:
+            lua.execute(edit)
         lua.execute(RUNTIME.read_text())
         lua.execute("listener()")
         return lua
@@ -117,10 +119,29 @@ class BardProgressionTests(unittest.TestCase):
         self.assertEqual(g.hooks, 1)
         self.assertEqual(g.CBRSpellProgression.GetBaseSlots(16500, 32, 8), 1)
 
-    def test_conflicting_registration_does_not_install_hook(self):
+    def test_last_registration_wins_without_blocking_hook(self):
         g = self.runtime(conflict=True).globals()
-        self.assertEqual((g.hooks, g.disabled), (0, 0))
-        self.assertIn("conflicting tables", g.CBRSpellProgression.Status)
+        self.assertEqual((g.hooks, g.disabled), (1, 1))
+        self.assertEqual("CBRIWD8", g.CBRSpellProgression.kits[16384])
+
+    def test_reordered_extra_columns_and_changed_api_marker_are_accepted(self):
+        g = self.runtime(edit='''
+            resources.CBRSPVER = nil
+            resources.CBRSPKIT.columns = {"EXTRA", "TABLE", "KIT", "CLASS"}
+            resources.CBRSPKIT.records = {{"ignored", "CBRIWD7", "16384", "5"}}
+        ''').globals()
+        self.assertEqual("active", g.CBRSpellProgression.Status)
+        self.assertEqual("CBRIWD7", g.CBRSpellProgression.kits[16384])
+
+    def test_missing_table_is_local_and_empty_table_does_not_block_registration(self):
+        g = self.runtime(edit='''
+            resources.CBRBG6 = nil
+            resources.CBRIWD8.records = {}
+            resources.CBRIWD8.columns = {"3"}
+        ''').globals()
+        self.assertEqual("active", g.CBRSpellProgression.Status)
+        self.assertEqual("CBRIWD7", g.CBRSpellProgression.kits[16384])
+        self.assertEqual("CBRIWD8", g.CBRSpellProgression.kits[16500])
 
 
 class BardInstallerTests(unittest.TestCase):

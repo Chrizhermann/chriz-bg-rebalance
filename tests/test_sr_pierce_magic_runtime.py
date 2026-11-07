@@ -89,7 +89,7 @@ class PierceMagicRuntimeTests(unittest.TestCase):
     def test_native_immunity_block_does_not_leave_a_success_icon(self) -> None:
         self.run_scenario("immunity")
 
-    def test_invalid_owned_records_fail_before_stacking_or_refresh(self) -> None:
+    def test_edited_owned_records_normalize_without_stacking_or_errors(self) -> None:
         for scenario in (
             "duplicate", "wrong_mode", "positive_amount", "invalid_amount",
             "permanent", "relative_timing",

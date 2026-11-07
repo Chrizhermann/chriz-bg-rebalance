@@ -35,8 +35,12 @@ function CBRDVGO(effect, target)
     end
     if minimum_hp > 0 then return end
 
-    local read_ok, args = pcall(function()
-        return {
+    local function source_number(field, fallback)
+        local ok, value = pcall(function() return effect[field] end)
+        return ok and tonumber(value) or fallback
+    end
+    local read_ok, source_res = pcall(function() return effect.m_sourceRes:get() end)
+    local args = {
             effectID = 13,
             targetType = 1,
             effectAmount = 0,
@@ -49,19 +53,12 @@ function CBRDVGO(effect, target)
             probabilityLower = 0,
             savingThrow = 0,
             saveMod = 0,
-            sourceID = effect.m_sourceId,
-            sourceTarget = effect.m_sourceTarget,
-            m_sourceRes = effect.m_sourceRes:get(),
-            m_sourceType = effect.m_sourceType,
-            m_sourceFlags = effect.m_sourceFlags,
+            sourceID = source_number("m_sourceId", -1),
+            sourceTarget = source_number("m_sourceTarget", -1),
+            m_sourceRes = read_ok and tostring(source_res or "") or "",
+            m_sourceType = source_number("m_sourceType", 1),
+            m_sourceFlags = source_number("m_sourceFlags", 0),
         }
-    end)
-    if not read_ok or type(args.sourceID) ~= "number"
-        or type(args.sourceTarget) ~= "number" or type(args.m_sourceRes) ~= "string"
-        or type(args.m_sourceType) ~= "number" or type(args.m_sourceFlags) ~= "number" then
-        disabled("effect source metadata unavailable")
-        return
-    end
     -- This public wrapper owns native effect allocation and forwards noSave
     -- to AddEffect. Do not remove Death Ward, opcode-101 effects, or spell states.
     local applied, reason = pcall(EEex_GameObject_ApplyEffect, target, args)

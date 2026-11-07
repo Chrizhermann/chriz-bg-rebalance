@@ -370,11 +370,18 @@ local function invalidOwned(kind)
     if kind == "duplicate" then
         sprite.m_timedEffectList[2] = nativeEffect({m_effectAmount = -25})
     end
-    local originalExpiry = bad.m_duration
     local ok = pcall(hit, sprite)
-    equal(ok, false, "invalid owned state must report an error")
-    equal(#calls, 0, "invalid state must not add or remove any effect")
-    equal(bad.m_duration, originalExpiry, "preflight must precede expiry refresh")
+    equal(ok, true, "edited owned state must be normalized")
+    local effect = snapshot(sprite)
+    equal(effect.m_dWFlags, 0)
+    equal(effect.m_durationType, 4096)
+    equal(effect.m_effectAmount, kind == "invalid_amount" and -30 or -20)
+    equal(effect.m_duration, now + 450)
+    equal(icon(sprite).m_duration, now + 450)
+    local before = calculateMR(sprite)
+    hit(sprite)
+    equal(calculateMR(sprite), before, "repair and refresh must not compound")
+    equal(#logs, 0, "game data must not warn")
 end
 for _, name in ipairs({"duplicate", "wrong_mode", "positive_amount", "invalid_amount", "permanent", "relative_timing"}) do
     scenarios[name] = function() invalidOwned(name) end

@@ -355,6 +355,7 @@ class AntimagicInstallerTests(unittest.TestCase):
         transcript = result.stdout + result.stderr
         self.assertEqual(0, result.returncode, transcript)
         self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+        self.assertNotIn("INSTALLED WITH WARNINGS", transcript)
         self.assertRegex(game.log(), rf"(?m)#0\s+#{component}\b")
         self.assert_stable(game)
 
@@ -471,13 +472,15 @@ class AntimagicInstallerTests(unittest.TestCase):
         for parent, component in ((PM, 210), (SS, 211)):
             self.assert_description_and_wrapper(game, parent, component=component)
 
-    def test_foreign_pierce_magic_namespace_collision_fails_without_writes(self):
+    def test_owned_runtime_overwrites_namespace_collisions(self):
         for name in ("CBRPM.SPL", "CBRPM.EFF", "CBRPM.ITM", "M_CBRPM.LUA"):
             with self.subTest(name=name):
                 game = self.make_game(changed={name: b"foreign owner sentinel"})
                 result = game.run(210)
-                self.assert_rejected(game, result, 210,
-                                     skipped="NOT INSTALLED DUE TO ERRORS" not in result.stdout + result.stderr)
+                self.assert_installed(game, result, 210)
+                self.assert_pierce_magic_payload(game)
+                if name != "M_CBRPM.LUA":
+                    self.assertEqual(b"foreign owner sentinel", game.effective(name[:-4], name[-3:]))
 
     def test_recognized_existing_runtime_is_accepted_and_restored_on_uninstall(self):
         template = (ROOT / "chriz-bg-rebalance/lua/M_CBRPM.lua").read_bytes()
@@ -489,7 +492,7 @@ class AntimagicInstallerTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual(game.original_override, _tree(game.override))
 
-    def test_malformed_pierce_magic_payload_rolls_back_before_runtime_publication(self):
+    def test_edited_pierce_magic_payload_is_replaced(self):
         original = SplFile.from_bytes(_payload(False))
         abilities = list(original.abilities)
         abilities[-1] = dataclasses.replace(abilities[-1], effects=tuple(
@@ -497,8 +500,8 @@ class AntimagicInstallerTests(unittest.TestCase):
             for fx in abilities[-1].effects))
         malformed = dataclasses.replace(original, abilities=tuple(abilities)).to_bytes()
         game = self.make_game(changed={f"{PM_BODY}.SPL": malformed})
-        self.assert_rejected(game, game.run(210), 210)
-        self.assertFalse((game.override / "M_CBRPM.lua").exists())
+        self.assert_installed(game, game.run(210), 210)
+        self.assert_pierce_magic_payload(game)
 
     def test_pierce_magic_reinstall_and_uninstall_are_byte_exact_in_synthetic_game(self):
         game = self.make_game()
@@ -527,12 +530,12 @@ class AntimagicInstallerTests(unittest.TestCase):
         self.assert_description_and_wrapper(game, SS, component=211)
         self.assertEqual(game.before[f"{SS_BODY}.SPL"], game.effective(SS_BODY))
 
-    def test_sr_main_is_required_not_just_warrior_hlas(self):
+    def test_antimagic_choices_install_without_sr(self):
         for sr_component in (None, 65):
             for component in (210, 211):
                 with self.subTest(sr_component=sr_component, component=component):
                     game = self.make_game(sr_component=sr_component)
-                    self.assert_rejected(game, game.run(component), component, skipped=True)
+                    self.assert_installed(game, game.run(component), component)
 
     def test_bgee_is_rejected(self):
         for component in (210, 211):
@@ -549,32 +552,39 @@ class AntimagicInstallerTests(unittest.TestCase):
         for component in (210, 211):
             with self.subTest(component=component):
                 game = self.make_game(symbols=False)
-                result = game.run(component)
-                self.assert_rejected(game, result, component,
-                                     skipped="NOT INSTALLED DUE TO ERRORS" not in result.stdout + result.stderr)
+                self.assert_installed(game, game.run(component), component)
+                self.assertEqual(game.original_override, _tree(game.override))
+                self.assertEqual(_tlk(game.strings), game.tlk.read_bytes())
 
-    def test_missing_effective_child_rolls_back_atomically(self):
+    def test_missing_effective_child_costs_only_that_resource(self):
         for component, body in ((210, PM_BODY), (211, SS_BODY)):
             with self.subTest(component=component):
                 game = self.make_game(changed={f"{body}.SPL": None})
                 result = game.run(component)
-                self.assert_rejected(game, result, component,
-                                     skipped="NOT INSTALLED DUE TO ERRORS" not in result.stdout + result.stderr)
+                self.assert_installed(game, result, component)
+                self.assertIn(f"{body}.spl is absent", result.stdout)
+                self.assertNotIn("WARNING", result.stdout + result.stderr)
 
-    def test_malformed_spellstrike_payload_does_not_publish_description(self):
+    def test_missing_spellstrike_failure_mode_is_restored(self):
         original = SplFile.from_bytes(_payload(True))
         abilities = list(original.abilities)
         abilities[-1] = dataclasses.replace(abilities[-1], effects=tuple(
             fx for fx in abilities[-1].effects if not (fx.opcode == 60 and fx.parameter2 == 1)))
         malformed = dataclasses.replace(original, abilities=tuple(abilities)).to_bytes()
         game = self.make_game(changed={f"{SS_BODY}.SPL": malformed})
-        self.assert_rejected(game, game.run(211), 211)
+        self.assert_installed(game, game.run(211), 211)
+        self.assert_spellstrike_payload(game)
+        self.assert_description_and_wrapper(game, SS, component=211)
 
-    def test_ambiguous_effective_spellstrike_children_fail_closed(self):
+    def test_all_effective_spellstrike_children_receive_the_package(self):
         parent = _spell((_effect(146, resource=SS_BODY), _effect(146, resource="OTHERSS"),
                           _effect(146, resource=SS_SHIELD)), level=9)
         game = self.make_game(changed={f"{SS}.SPL": parent, "OTHERSS.SPL": _payload(True)})
-        self.assert_rejected(game, game.run(211), 211)
+        self.assert_installed(game, game.run(211), 211)
+        self.assert_spellstrike_payload(game)
+        for ability in SplFile.from_bytes(game.effective("OTHERSS")).abilities:
+            self.assertEqual([(15, 0), (15, 1)], [(fx.parameter1, fx.parameter2)
+                for fx in ability.effects if fx.opcode == 60])
 
     def test_spellstrike_is_byte_idempotent_on_public_reinstall(self):
         game = self.make_game()
@@ -631,6 +641,8 @@ class AntimagicInstallerTests(unittest.TestCase):
         offset = 0x50 if extension == "SPL" or unidentified else 0x54
         expected = bytearray(original)
         expected[offset:offset + 4] = output[offset:offset + 4]
+        if extension == "ITM" and resref in (PM_SCROLL, SS_SCROLL, COPY_SCROLL, OWN_SCROLL):
+            expected[0x50:0x54] = output[0x50:0x54]
         self.assertEqual(bytes(expected), output, f"{resref}.{extension} changed beyond its description")
 
     def assert_untouched(self, game, resref, extension):
@@ -687,18 +699,17 @@ class AntimagicInstallerTests(unittest.TestCase):
         # installation finds what is stale through them.
         for resource in (PM_BODY, PM_SHIELD):
             self.assertEqual(1, game.strref(resource), resource)
-        # A scroll with its own text keeps it and the installer says so.
-        self.assert_untouched(game, OWN_SCROLL, "ITM")
-        self.assertIn(f"{OWN_SCROLL}.ITM", result.stdout)
+        self.assertEqual(new_ref, game.strref(OWN_SCROLL, "ITM"))
+        self.assert_only_description_changed(game, OWN_SCROLL, "ITM")
         # The wand: only the Special value of this spell's own entry changes.
         wand = _strings(game.tlk)[game.strref(PM_WAND, "ITM")]
         self.assertEqual(_wand_text(PM_NAME, _tra_string(2101)), wand)
         self.assertIn("Special: Dispels all specific and combat protections on target\n", wand)
         self.assert_only_description_changed(game, PM_WAND, "ITM")
-        # Wands whose line is not recognizable keep their text; the installer names them.
+        # Changed text does not gate a full description replacement.
         for resource in (ODD_WAND, ODD2_WAND):
-            self.assert_untouched(game, resource, "ITM")
-            self.assertIn(f"{resource}.ITM", result.stdout)
+            self.assertEqual(wand, game.text(resource, "ITM"))
+            self.assert_only_description_changed(game, resource, "ITM")
         # Items with inline effects, unrelated items and Spellstrike's items stay.
         for resource in (INLINE_ITEM, UNRELATED_ITEM, SS_SCROLL, SS_WAND):
             self.assert_untouched(game, resource, "ITM")
@@ -726,17 +737,17 @@ class AntimagicInstallerTests(unittest.TestCase):
         self.assert_installed(game, game.run(210), 210)
         self.assertEqual(game.strref(PM), game.strref(PM_SCROLL, "ITM"))
         self.assertNotEqual(1, game.strref(PM_SCROLL, "ITM"))
-        self.assert_untouched(game, OWN_SCROLL, "ITM")
+        self.assertEqual(game.strref(PM), game.strref(OWN_SCROLL, "ITM"))
 
-    def test_scroll_text_changed_by_another_mod_is_not_overwritten(self):
+    def test_scroll_text_changed_by_another_mod_is_overwritten(self):
         # The copy under strref 5 was rewritten: it is no longer the old description.
         strings = list(ORIGINAL_STRINGS)
         strings[5] = "Another mod rewrote this scroll: it now explains the spell in its own words, at length."
         game = self.make_game(strings=tuple(strings))
         result = game.run(210)
         self.assert_installed(game, result, 210)
-        self.assert_untouched(game, COPY_SCROLL, "ITM")
-        self.assertIn(f"{COPY_SCROLL}.ITM", result.stdout)
+        self.assertEqual(game.strref(PM), game.strref(COPY_SCROLL, "ITM"))
+        self.assert_only_description_changed(game, COPY_SCROLL, "ITM")
         self.assertEqual(game.strref(PM), game.strref(PM_SCROLL, "ITM"))
 
     def test_description_install_twice_changes_nothing_and_uninstall_restores_everything(self):
@@ -797,7 +808,7 @@ class AntimagicInstallerTests(unittest.TestCase):
         undo = game.run(212, 213, uninstall=True)
         self.assertEqual(0, undo.returncode, undo.stdout + undo.stderr)
 
-    def test_texts_tail_keeps_a_spellstrike_text_that_already_has_the_layout(self):
+    def test_texts_tail_replaces_private_spellstrike_text_with_full_template(self):
         # A private tail wrote this Spellstrike text in Spell Revisions' layout already.
         private = (SS_NAME + "\nLevel: 9\nSchool: Abjuration\nRange: Long\nDuration: Special\nCasting Time: 5\n"
                    "Area of Effect: 1 creature\nSaving Throw: None\n\nA private text with a 15% chance of spell failure.")
@@ -809,9 +820,9 @@ class AntimagicInstallerTests(unittest.TestCase):
         (game.override / f"{SS}.SPL").write_bytes(bytes(data))
         self.stale(game)
         self.assert_installed(game, game.run(213), 213)
-        self.assertEqual(private_ref, game.strref(SS), "the private layout text stays")
-        self.assertEqual(private_ref, game.strref(SS_SCROLL, "ITM"))
-        self.assertEqual(private_ref, game.strref(SS_SIBLING, "SPL"))
+        self.assertEqual(_tra_string(2110) + "\n\n" + _tra_string(2102), game.text(SS))
+        self.assertEqual(game.strref(SS), game.strref(SS_SCROLL, "ITM"))
+        self.assertEqual(game.strref(SS), game.strref(SS_SIBLING, "SPL"))
         self.assertEqual(_wand_text(SS_NAME, _tra_string(2111)), game.text(SS_WAND, "ITM"))
 
     def test_texts_tail_rewrites_a_short_spellstrike_text_that_has_no_header(self):
@@ -829,22 +840,20 @@ class AntimagicInstallerTests(unittest.TestCase):
         self.assertEqual(game.strref(SS), game.strref(SS_SCROLL, "ITM"))
         self.assertEqual(game.strref(SS), game.strref(SS_SIBLING, "SPL"))
 
-    def test_texts_tail_refuses_a_payload_without_the_changed_mechanic(self):
-        for component in (212, 213):
+    def test_texts_tail_writes_text_without_gating_on_the_mechanic(self):
+        for component, body in ((212, PM_BODY), (213, SS_BODY)):
             with self.subTest(component=component):
                 game = self.make_game(tail=True)
-                result = game.run(component)
-                self.assert_rejected(game, result, component)
-                self.assertIn("does not carry the changed mechanic", result.stdout + result.stderr)
+                self.assert_installed(game, game.run(component), component)
+                self.assertEqual(game.before[f"{body}.SPL"], game.effective(body))
 
-    def test_texts_tail_needs_spell_revisions_and_the_dynamic_symbol(self):
+    def test_texts_tail_external_sr_gate_and_absent_symbol(self):
         for component in (212, 213):
             game = self.make_game(tail=True, sr_component=None)
             self.assert_rejected(game, game.run(component), component, skipped=True)
             game = self.make_game(tail=True, symbols=False)
-            result = game.run(component)
-            self.assert_rejected(game, result, component,
-                                 skipped="NOT INSTALLED DUE TO ERRORS" not in result.stdout + result.stderr)
+            self.assert_installed(game, game.run(component), component)
+            self.assertEqual(game.original_override, _tree(game.override))
 
     def test_texts_tail_over_the_main_installers_components(self):
         # Installed by the main installer (the 0.1.0 situation), refreshed by the tail.
@@ -855,6 +864,84 @@ class AntimagicInstallerTests(unittest.TestCase):
         result = game.run(212, 213)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual(before, _tree(game.override), "the texts are already current")
+
+    def test_missing_all_payload_effects_empty_abilities_and_extra_records(self):
+        for component, body in ((210, PM_BODY), (211, SS_BODY)):
+            for effects in ((), (_effect(139, 2),),
+                            (_effect(166, 99, 0, timing=4),) * 3 if component == 210 else
+                            (_effect(60, 88, 0, timing=4),) * 3):
+                with self.subTest(component=component, effects=effects):
+                    game = self.make_game(changed={f"{body}.SPL": _spell(effects)})
+                    self.assert_installed(game, game.run(component), component)
+                    for ability in SplFile.from_bytes(game.effective(body)).abilities:
+                        if component == 210:
+                            self.assertEqual(1, sum(f.opcode == 402 and f.resource == "CBRPM" for f in ability.effects))
+                            self.assertEqual([(8, 1)], [(f.parameter1, f.parameter2) for f in ability.effects if f.opcode == 230])
+                        else:
+                            self.assertEqual([(15, 0), (15, 1)], [(f.parameter1, f.parameter2) for f in ability.effects if f.opcode == 60])
+                    before = game.effective(body)
+                    self.assert_installed(game, game.run(component), component)
+                    self.assertEqual(before, game.effective(body))
+
+    def test_multihop_payload_and_cyclic_dead_branch(self):
+        parent = _spell((_effect(146, resource="ZMIDDLE"), _effect(146, resource=SS_SHIELD)))
+        middle = _spell((_effect(146, resource=SS_BODY), _effect(146, resource="ZLOOP")))
+        game = self.make_game(changed={f"{SS}.SPL": parent, "ZMIDDLE.SPL": middle,
+                                      "ZLOOP.SPL": _spell((_effect(146, resource="ZLOOP"),))})
+        self.assert_installed(game, game.run(211), 211)
+        self.assert_spellstrike_payload(game)
+
+    def test_damaged_payload_does_not_block_other_component(self):
+        game = self.make_game(changed={f"{PM_BODY}.SPL": b"short"})
+        result = game.run(210, 211)
+        self.assert_installed(game, result, 210)
+        self.assert_installed(game, result, 211)
+        self.assertEqual(b"short", game.effective(PM_BODY))
+        self.assert_spellstrike_payload(game)
+        self.assertNotIn("WARNING", result.stdout + result.stderr)
+
+    def test_untranslated_language_retains_all_texts(self):
+        game = self.make_game()
+        translated = game.root / "lang/de_de"
+        translated.mkdir()
+        (translated / "dialog.tlk").write_bytes(_tlk(game.strings))
+        game.tlk = translated / "dialog.tlk"
+        result = subprocess.run([str(game.weidu), game.setup, "--game", str(game.root),
+            "--force-install-list", "210", "211", "--language", "0", "--use-lang", "de_de",
+            "--no-exit-pause", "--quick-log"], cwd=game.root, capture_output=True, text=True, timeout=90)
+        self.assert_installed(game, result, 210)
+        self.assertEqual(_tlk(game.strings), game.tlk.read_bytes())
+        self.assert_pierce_magic_payload(game)
+        self.assert_spellstrike_payload(game)
+
+
+    def test_empty_ability_table_shared_slices_and_changed_strip(self):
+        for component, body in ((210, PM_BODY), (211, SS_BODY)):
+            original = _payload(component == 211)
+            empty = bytearray(original[:0x72])
+            struct.pack_into("<IHIHH", empty, 0x64, 0x72, 0, 0x72, 0, 0)
+            shared = bytearray(original)
+            struct.pack_into("<H", shared, 0x72 + 40 + 0x20,
+                             struct.unpack_from("<H", shared, 0x72 + 0x20)[0])
+            for variant in (bytes(empty), bytes(shared)):
+                with self.subTest(component=component, empty=variant == bytes(empty)):
+                    game = self.make_game(changed={f"{body}.SPL": variant})
+                    self.assert_installed(game, game.run(component), component)
+                    self.assertTrue(SplFile.from_bytes(game.effective(body)).abilities)
+                    for ability in SplFile.from_bytes(game.effective(body)).abilities:
+                        self.assertTrue(any(f.opcode == (402 if component == 210 else 60) for f in ability.effects))
+
+    def test_missing_stat_symbol_and_item_resources(self):
+        game = self.make_game()
+        (game.override / "STATS.IDS").write_bytes(b"IDS V1.0\n")
+        self.assert_installed(game, game.run(210), 210)
+        self.assertIn(b"18 RESISTMAGIC", (game.override / "STATS.IDS").read_bytes())
+        self.assertIn(b"local MR_STAT = 18", (game.override / "M_CBRPM.lua").read_bytes())
+        removed = {f"{r}.ITM": None for r in (PM_SCROLL, SS_SCROLL, COPY_SCROLL, OWN_SCROLL,
+                   PM_WAND, SS_WAND, ODD_WAND, ODD2_WAND, INLINE_ITEM, UNRELATED_ITEM)}
+        game = self.make_game(changed=removed)
+        self.assert_installed(game, game.run(210), 210)
+
 
 
 if __name__ == "__main__":

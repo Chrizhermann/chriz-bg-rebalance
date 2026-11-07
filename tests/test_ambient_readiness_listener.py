@@ -335,7 +335,7 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         self.assertEqual(missing_try_aux["urgent_faulted"], "0")
         self.assertEqual(missing_try_aux["ambient_unsupported_logs"], "1")
 
-    def test_hot_reload_flags_and_independent_fault_fuses(self) -> None:
+    def test_hot_reload_flags_and_independent_callback_recovery(self) -> None:
         seen = self._run("runtime_shell")
         self.assertEqual(seen["listeners_after_reload"], "2")
         self.assertEqual(seen["started_after_reload"], "1")
@@ -346,7 +346,7 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         self.assertEqual(seen["urgent_owner_gate"], "1")
         self.assertEqual(seen["ambient_owner_independent"], "1")
         self.assertEqual(seen["ambient_tracebacks"], "1")
-        self.assertEqual(seen["ambient_fused"], "1")
+        self.assertEqual(seen["ambient_fused"], "0")
         self.assertEqual(seen["urgent_after_ambient_fault"], "1")
 
     def test_v12_sync_observer_only_confirms_and_never_schedules(self) -> None:
@@ -379,7 +379,7 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
         self.assertEqual(seen["actions_after_hotpatch"], "1")
         self.assertEqual(seen["confirmation_sentinel_after_hotpatch"], "1")
 
-    def test_missing_project_image_manifest_identity_retires_only_urgent(self) -> None:
+    def test_missing_project_image_identity_does_not_retire_urgent(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cbr-readiness-no-project-image-") as temporary:
             runtime = Path(temporary) / "M_CBRRDY.lua"
             manifest = _manifest_expression().replace(
@@ -391,8 +391,8 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
             seen = self._run("runtime_missing_project_image_identity", runtime=runtime)
         self.assertEqual(seen["ambient_live"], "1")
         self.assertEqual(seen["ambient_faulted"], "0")
-        self.assertEqual(seen["urgent_faulted"], "1")
-        self.assertEqual(seen["urgent_unsupported_logs"], "1")
+        self.assertEqual(seen["urgent_faulted"], "0")
+        self.assertEqual(seen["urgent_unsupported_logs"], "0")
 
     def test_runtime_uses_the_proven_installed_binding_shapes(self) -> None:
         source = PRODUCTION.read_text(encoding="ascii")
@@ -575,6 +575,21 @@ class AmbientReadinessRuntimeShellTests(_RuntimeCase):
 
 
 class AmbientReadinessListenerTests(_RuntimeCase):
+    def test_changed_spell_level_does_not_hide_a_memorized_slot(self):
+        seen = self._run("ambient_edited_level")
+        self.assertEqual(seen["available_after"], "0")
+        self.assertEqual(seen["active_after"], "1")
+
+    def test_old_manifest_qualification_fields_do_not_drop_authored_candidates(self):
+        with tempfile.TemporaryDirectory(prefix="cbr-readiness-edited-manifest-") as temporary:
+            runtime = Path(temporary) / "M_CBRRDY.lua"
+            manifest = _manifest_expression().replace("self_target = 1", "self_target = 0").replace(
+                "defensive = 1", "defensive = 0").replace("duration = 2400", "duration = 1")
+            _stamp_runtime(runtime, manifest)
+            seen = self._run("ambient_first_debit_and_refresh", runtime=runtime)
+        self.assertEqual(seen["ledger_charged"], "1")
+        self.assertEqual(seen["applications"], "2")
+
     def test_settled_scs_caster_classification_and_grades(self) -> None:
         seen = self._run("ambient_classification")
         self.assertEqual(seen["settled_scs"], "1")
@@ -659,13 +674,13 @@ class AmbientReadinessListenerTests(_RuntimeCase):
         self.assertEqual(seen["direct_effects"], "1")
         self.assertEqual(seen["quicklist_rebuilds"], "1")
 
-    def test_deferred_confirmation_rejects_an_odd_to_odd_flags_change(self) -> None:
+    def test_deferred_confirmation_preserves_other_flag_bits(self) -> None:
         seen = self._run("ambient_deferred_flags_change")
-        self.assertEqual(seen["flags_after"], "3")
-        self.assertEqual(seen["available_after"], "1")
-        self.assertEqual(seen["ledger_charged"], "0")
-        self.assertEqual(seen["disabled"], "1")
-        self.assertEqual(seen["quicklist_rebuilds"], "0")
+        self.assertEqual(seen["flags_after"], "2")
+        self.assertEqual(seen["available_after"], "0")
+        self.assertEqual(seen["ledger_charged"], "1")
+        self.assertEqual(seen["disabled"], "0")
+        self.assertEqual(seen["quicklist_rebuilds"], "1")
 
     def test_import_discards_an_in_flight_delivery_transaction(self) -> None:
         seen = self._run("ambient_deferred_import_boundary")
@@ -675,14 +690,14 @@ class AmbientReadinessListenerTests(_RuntimeCase):
         self.assertEqual(seen["direct_effects"], "1")
         self.assertEqual(seen["quicklist_rebuilds"], "0")
 
-    def test_deferred_confirmation_never_debits_after_the_slot_changes(self) -> None:
+    def test_deferred_confirmation_debits_an_available_slot_after_reordering(self) -> None:
         seen = self._run("ambient_deferred_slot_change")
-        self.assertEqual(seen["available_after"], "1")
-        self.assertEqual(seen["ledger_charged"], "0")
-        self.assertEqual(seen["disabled"], "1")
+        self.assertEqual(seen["available_after"], "0")
+        self.assertEqual(seen["ledger_charged"], "1")
+        self.assertEqual(seen["disabled"], "0")
         self.assertEqual(seen["applications"], "1")
         self.assertEqual(seen["direct_effects"], "1")
-        self.assertEqual(seen["quicklist_rebuilds"], "0")
+        self.assertEqual(seen["quicklist_rebuilds"], "1")
 
     def test_confirmed_scs_pair_reimburses_only_after_remove_mutates(self) -> None:
         seen = self._run("ambient_deferred_scs_reimbursement_race")
@@ -804,19 +819,19 @@ class AmbientReadinessListenerTests(_RuntimeCase):
             with self.subTest(gate=gate):
                 self.assertEqual(seen[f"{gate}_available_after_reset"], "1")
 
-    def test_reimbursement_requires_the_exact_component_debited_flags(self) -> None:
+    def test_reimbursement_restores_availability_and_preserves_changed_flag_bits(self) -> None:
         seen = self._run("ambient_reimbursement_exact_flags")
-        self.assertEqual(seen["component_flags_after"], "6")
-        self.assertEqual(seen["available_after"], "0")
-        self.assertEqual(seen["disabled"], "1")
+        self.assertEqual(seen["component_flags_after"], "7")
+        self.assertEqual(seen["available_after"], "1")
+        self.assertEqual(seen["disabled"], "0")
         self.assertEqual(seen["reimbursement_consumed"], "1")
-        self.assertEqual(seen["quicklist_rebuilds"], "1")
+        self.assertEqual(seen["quicklist_rebuilds"], "2")
 
     def test_failed_reimbursement_quicklist_update_rolls_back_exact_flags(self) -> None:
         seen = self._run("ambient_reimbursement_quicklist_rollback")
         self.assertEqual(seen["component_flags_after"], "0")
         self.assertEqual(seen["available_after"], "0")
-        self.assertEqual(seen["disabled"], "1")
+        self.assertEqual(seen["disabled"], "0")
         self.assertEqual(seen["reimbursement_consumed"], "1")
         self.assertEqual(seen["quicklist_rebuilds"], "1")
 
@@ -826,26 +841,28 @@ class AmbientReadinessListenerTests(_RuntimeCase):
         self.assertEqual(seen["unrelated_combat_reimbursed"], "0")
         self.assertEqual(seen["renewal_reimbursed"], "0")
 
-    def test_failed_transaction_restores_or_disables_without_looping(self) -> None:
+    def test_failed_transaction_remains_retryable_without_charging_twice(self) -> None:
         seen = self._run("ambient_transaction_failure")
         self.assertEqual(seen["apply_availability_restored"], "1")
-        self.assertEqual(seen["apply_disabled"], "1")
+        self.assertEqual(seen["apply_disabled"], "0")
         self.assertEqual(seen["apply_attempts"], "1")
         self.assertEqual(seen["apply_reason"], "first delivery confirmation timed out")
-        self.assertEqual(seen["apply_effect_calls"], "1")
+        self.assertEqual(seen["apply_effect_calls"], "2")
         self.assertEqual(seen["quick_availability_restored"], "1")
-        self.assertEqual(seen["quick_disabled"], "1")
+        self.assertEqual(seen["quick_disabled"], "0")
         self.assertEqual(seen["quick_attempts"], "1")
         self.assertEqual(seen["quick_reason"], "slot debit failed and was restored")
+        self.assertEqual(seen["quick_recovers_charged"], "1")
+        self.assertEqual(seen["apply_recovers_charged"], "1")
 
-    def test_malformed_saved_record_disables_only_that_spell(self) -> None:
+    def test_malformed_saved_records_are_normalized_and_readiness_continues(self) -> None:
         seen = self._run("ambient_malformed_ledger")
-        self.assertEqual(seen["malformed_spell_disabled"], "0")
+        self.assertEqual(seen["malformed_spell_disabled"], "1")
         self.assertEqual(seen["other_spell_continues"], "1")
         self.assertEqual(seen["legacy_discarded"], "1")
-        self.assertEqual(seen["uncharged_record_disabled"], "1")
-        self.assertEqual(seen["uncharged_record_applications"], "0")
-        self.assertEqual(seen["uncharged_record_available"], "1")
+        self.assertEqual(seen["uncharged_record_disabled"], "0")
+        self.assertEqual(seen["uncharged_record_applications"], "1")
+        self.assertEqual(seen["uncharged_record_available"], "0")
 
     def test_v1_charged_records_migrate_without_guessing_reimbursement(self) -> None:
         seen = self._run("ambient_v1_ledger_migration")
@@ -870,24 +887,24 @@ class AmbientReadinessListenerTests(_RuntimeCase):
         self.assertEqual(seen["original_flags"], "1")
         self.assertEqual(seen["debited_flags"], "0")
 
-    def test_retirement_hot_reload_and_fault_fuses(self) -> None:
+    def test_hot_reload_and_callback_recovery(self) -> None:
         seen = self._run("ambient_runtime_safety")
         self.assertEqual(seen["ambient_disabled_inert"], "1")
         self.assertEqual(seen["ambient_owner_inert"], "1")
         self.assertEqual(seen["listeners_after_reload"], "2")
         self.assertEqual(seen["ambient_tracebacks"], "1")
-        self.assertEqual(seen["ambient_inert_after_fault"], "1")
+        self.assertEqual(seen["ambient_recovers"], "1")
 
     def test_reused_engine_object_id_gets_fresh_session_state(self) -> None:
         seen = self._run("ambient_sprite_lifetime")
         self.assertEqual(seen["replacement_active"], "1")
         self.assertEqual(seen["replacement_available_after"], "0")
 
-    def test_incomplete_effect_list_view_fails_closed_before_debit(self) -> None:
+    def test_unavailable_sprite_effect_view_does_not_retire_the_layer(self) -> None:
         seen = self._run("ambient_incomplete_effect_view")
         self.assertEqual(seen["effect_active"], "0")
         self.assertEqual(seen["available_after"], "1")
-        self.assertEqual(seen["ambient_faulted"], "1")
+        self.assertEqual(seen["ambient_faulted"], "0")
 
 
 class UrgentReadinessListenerTests(_RuntimeCase):
@@ -975,7 +992,7 @@ class UrgentReadinessListenerTests(_RuntimeCase):
     def test_urgent_fault_is_independent_and_logs_once(self) -> None:
         seen = self._run("urgent_fault_fuse")
         self.assertEqual(seen["urgent_tracebacks"], "1")
-        self.assertEqual(seen["urgent_inert_after_fault"], "1")
+        self.assertEqual(seen["urgent_recovers"], "1")
         self.assertEqual(seen["ambient_still_active"], "1")
 
 

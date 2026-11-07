@@ -6,7 +6,7 @@ spell from its actual header.  These tests exercise valid alternate layouts
 (casting time, range, school, several level headers, reordered records) on
 both layers: the hermetic transformer harness and the public installer on a
 synthetic BG2:EE game.  They also pin the canonical description text and the
-remaining, deliberately kept rejections.
+authored results for edited input and unreadable-file boundaries.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from tests import test_emotion_hope_courage_installer as installer_tests
-from tests.ie_formats import SPL_ABILITY_SIZE, SplEffect, SplFile, read_spl
+from tests.ie_formats import SPL_ABILITY_SIZE, SplEffect, SplFile, TwoDA, read_spl
 from tests.test_emotion_hope_courage import (
     COURAGE,
     COURAGE_CHROME,
@@ -361,27 +361,19 @@ class EmotionVariantTransformerTests(unittest.TestCase):
         self.assertFalse((result.output / "CBR_TEST.OK").exists())
         self.assertEqual({}, _raw_tree(result.output), "failed preflight did not roll back")
 
-    def test_changed_target_type_is_a_controlled_failure_with_its_own_message(self) -> None:
-        for courage_variant, hope_variant, resref, header in (
-            (("target_1",), (), COURAGE, 0),
-            ((), ("second_target_1",), HOPE, 1),
-        ):
-            with self.subTest(resref=resref, header=header):
-                result, _fixture = self.run_harness(
-                    courage_variant=courage_variant, hope_variant=hope_variant
-                )
-                self.assert_rejected(
-                    result,
-                    ERR_BENEFICIAL_TARGET,
-                    f"{resref}.SPL ability header {header} has target type 1",
-                    "point-targeted area delivery (target type 4)",
-                )
+    def test_changed_target_type_is_overwritten(self):
+        for cv, hv, resref in ((("target_1",), (), COURAGE), ((), ("second_target_1",), HOPE)):
+            result, _ = self.run_harness(courage_variant=cv, hope_variant=hv)
+            self.assertTrue(result.succeeded, result.transcript)
+            self.assertTrue(all(a.target == 4 for a in read_spl(result.output / f"{resref}.SPL").abilities))
 
-    def test_beneficial_spell_without_ability_header_fails_clearly(self) -> None:
-        result, _fixture = self.run_harness(hope_variant=("no_abilities",))
-        self.assert_rejected(
-            result, ERR_BENEFICIAL_NO_ABILITY, f"{HOPE}.SPL has no ability header"
-        )
+    def test_beneficial_spell_without_ability_header_gets_the_package(self):
+        result, _ = self.run_harness(hope_variant=("no_abilities",))
+        self.assertTrue(result.succeeded, result.transcript)
+        spell = read_spl(result.output / f"{HOPE}.SPL")
+        self.assertEqual(1, len(spell.abilities))
+        self.assertEqual(4, spell.abilities[0].target)
+        self.assertTrue(any(f.opcode == 325 and f.parameter1 == 2 for f in spell.abilities[0].effects))
 
 
 class EmotionSliceLayoutTests(unittest.TestCase):
@@ -573,25 +565,12 @@ class EmotionSliceLayoutTests(unittest.TestCase):
                 (result.output / f"{untouched}.SPL").read_bytes(),
             )
 
-    def test_orphaned_effect_records_are_still_rejected_with_their_reason(self) -> None:
-        # A record no slice references would be dropped by the rebuild, and
-        # usually means a header count or first index is wrong.
-        for malformed, record in (("beneficial_gap", 2), ("beneficial_trailing", None)):
-            with self.subTest(malformed=malformed):
-                result, fixture = self.run_layout({}, options=FixtureOptions(malformed=malformed))
-                self.assertFalse(result.succeeded, "orphaned record was accepted")
-                self.assertIn("NOT INSTALLED DUE TO ERRORS", result.transcript)
-                self.assertIn(ERR_BENEFICIAL_PARTITION, result.transcript)
-                count, _coverage = _raw_partition_coverage(
-                    (fixture / f"{COURAGE}.SPL").read_bytes(), SPL_ABILITY_SIZE
-                )
-                index = record if record is not None else count - 1
-                self.assertRegex(
-                    result.transcript,
-                    rf"(?i){COURAGE}\.SPL effect record {index} is not referenced by "
-                    r"the casting-feature slice or any ability slice",
-                )
-                self.assertEqual({}, _raw_tree(result.output), "failed preflight did not roll back")
+    def test_orphaned_records_do_not_gate_rebuild(self):
+        for variant in ("beneficial_gap", "beneficial_trailing"):
+            result, _ = self.run_layout({}, options=FixtureOptions(malformed=variant))
+            self.assertTrue(result.succeeded, result.transcript)
+            spell = read_spl(result.output / f"{COURAGE}.SPL")
+            self.assertTrue(any(f.opcode == 18 and f.parameter1 == 5 for f in spell.abilities[0].effects))
 
 
 class EmotionVariantInstallerTests(unittest.TestCase):
@@ -607,18 +586,13 @@ class EmotionVariantInstallerTests(unittest.TestCase):
     target_scrolls = installer_tests.EmotionHopeCourageInstallerTests.target_scrolls
     assert_publication_delta = installer_tests.EmotionHopeCourageInstallerTests.assert_publication_delta
 
-    def install(self, options: GameOptions, *, warnings: bool = False):
+    def install(self, options: GameOptions):
         game = self.make_game(options)
         process = game.run_install()
         transcript = game.transcript(process)
-        if warnings:
-            # WeiDU exits with status 3 after an install that warned.
-            self.assertEqual(3, process.returncode, transcript)
-            self.assertIn("INSTALLED WITH WARNINGS", transcript)
-        else:
-            self.assertEqual(0, process.returncode, transcript)
-            self.assertIn("SUCCESSFULLY INSTALLED", transcript)
-            self.assertNotIn("INSTALLED WITH WARNINGS", transcript)
+        self.assertEqual(0, process.returncode, transcript)
+        self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+        self.assertNotIn("INSTALLED WITH WARNINGS", transcript)
         self.assertRegex(game.active_log(), r"(?m)#0\s+#301\b")
         game.assert_engine_inputs_stable(self)
         self.assert_spell_ids_contract(game)
@@ -798,31 +772,15 @@ class EmotionVariantInstallerTests(unittest.TestCase):
             self.descriptions(game),
         )
 
-    def test_disagreeing_headers_describe_the_first_header_and_warn(self) -> None:
-        game, transcript = self.install(
-            GameOptions(symbols="both", hope_variant=("two_headers_disagree",)),
-            warnings=True,
-        )
+    def test_disagreeing_headers_describe_first_without_warning(self):
+        game, transcript = self.install(GameOptions(symbols="both", hope_variant=("two_headers_disagree",)))
         self.assert_provider_variant_semantics(game)
-        second = read_spl(game.override / f"{HOPE_RESREF}.SPL").abilities[1]
-        self.assertEqual(
-            (70, 2),
-            (
-                struct.unpack_from("<H", second.raw, 0x0E)[0],
-                struct.unpack_from("<H", second.raw, 0x12)[0],
-            ),
-        )
         self.assertEqual(CANONICAL_HOPE_DESCRIPTION, self.descriptions(game)[HOPE_SYMBOL])
-        self.assertRegex(
-            transcript,
-            rf"WARNING: the ability headers of {HOPE_RESREF}\.SPL do not share one range "
-            r"and casting time; its installed description states the first header's "
-            r"range 50 and casting time 4\.",
-        )
+        self.assertNotIn("INSTALLED WITH WARNINGS", transcript)
 
-    def test_unknown_school_omits_the_school_line_and_warns(self) -> None:
+    def test_unknown_school_omits_the_school_line_without_warning(self) -> None:
         game, transcript = self.install(
-            GameOptions(symbols="both", courage_variant=("school_11",)), warnings=True
+            GameOptions(symbols="both", courage_variant=("school_11",))
         )
         self.assert_provider_variant_semantics(game)
         self.assertEqual(
@@ -833,44 +791,39 @@ class EmotionVariantInstallerTests(unittest.TestCase):
             self.descriptions(game),
         )
         self.assertTrue(self.descriptions(game)[COURAGE_SYMBOL].startswith("Emotion, Courage\n\nLevel: 4\n"))
-        self.assertRegex(
-            transcript,
-            rf"WARNING: {COURAGE_RESREF}\.SPL has spell school 11, which is not one of the "
-            r"eight standard BG2:EE schools; its installed description omits the school line\.",
-        )
+        self.assertNotRegex(transcript, r"WARNING:.*spell school")
 
-    def test_changed_target_type_fails_atomically_with_a_clear_message(self) -> None:
-        for options, resref, header in (
-            (GameOptions(symbols="both", courage_variant=("target_1",)), COURAGE_RESREF, 0),
-            (GameOptions(symbols="both", hope_variant=("second_target_1",)), HOPE_RESREF, 1),
-        ):
-            with self.subTest(resref=resref):
-                game = self.make_game(options)
-                process = game.run_install()
-                self.assert_failed_atomically(game, process)
-                transcript = game.transcript(process)
-                self.assertIn(ERR_BENEFICIAL_TARGET, transcript)
-                self.assertRegex(
-                    transcript,
-                    rf"(?i){resref}\.SPL ability header {header} has target type 1",
-                )
-                self.assertNotIn(ERR_BENEFICIAL_PARTITION, transcript)
+    def test_public_changed_target_type_is_overwritten(self):
+        for options, resref in ((GameOptions(symbols="both", courage_variant=("target_1",)), COURAGE_RESREF),
+                                (GameOptions(symbols="both", hope_variant=("second_target_1",)), HOPE_RESREF)):
+            game, _ = self.install(options)
+            self.assertTrue(all(a.target == 4 for a in read_spl(game.override / f"{resref}.SPL").abilities))
 
-    def test_late_failure_after_variant_descriptions_leaves_files_and_tlk_untouched(self) -> None:
-        # Hope is a valid multi-header variant whose description is generated
-        # after allocation; the newly allocated Courage then hits a conflicting
-        # STATDESC row before any string is resolved.
+    def test_existing_private_status_row_is_rewritten_with_variant_descriptions(self) -> None:
+        # Reuse the existing private icon row while publishing both descriptions.
         variant = ("two_headers", "casting_time_3", "range_60", "school_8", "reordered")
-        game = self.make_game(
+        game, _ = self.install(
             GameOptions(
                 symbols="hope_only",
                 hope_variant=variant,
                 statdesc_layout="courage_d_collision",
             )
         )
-        process = game.run_install()
-        self.assert_failed_atomically(game, process)
-        self.assertRegex(game.transcript(process), r"(?i)status BAM.*conflicting STATDESC")
+        self.assertEqual(
+            {
+                COURAGE_SYMBOL: CANONICAL_COURAGE_DESCRIPTION,
+                HOPE_SYMBOL: expected_description(
+                    CANONICAL_HOPE_DESCRIPTION, school=8, casting_time=3, range_=60
+                ),
+            },
+            self.descriptions(game),
+        )
+        courage = spell_resref(game.effective_ids().value(COURAGE_SYMBOL), COURAGE_SYMBOL)
+        table = TwoDA.from_text(game.effective_bytes("STATDESC", "2DA").decode("ascii"))
+        self.assertEqual(f"{courage}D", table.cell("201", "BAM_FILE"))
+        self.assertEqual("Courage", _tlk_string(game.lang_tlk, int(table.cell("201", "DESCRIPTION"))))
+        effects = [f for f in read_spl(game.override / f"{courage}.SPL").all_effects() if f.opcode == 142]
+        self.assertEqual([201], [f.parameter2 for f in effects])
 
     def test_variant_force_reinstall_is_byte_stable_and_uninstall_restores(self) -> None:
         game, _transcript = self.install(

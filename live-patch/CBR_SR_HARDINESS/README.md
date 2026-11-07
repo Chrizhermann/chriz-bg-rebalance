@@ -1,8 +1,13 @@
 # Hardiness existing-install patch — v0.8.10
 
+Current source follows [We overwrite](../../AGENTS.md#we-overwrite): SR is optional
+and changed effects do not veto the owned resistance profile. The older v0.8.10
+archive described below has additional SR requirements; the separate setup
+template's footprint gates still need integration before publishing this update.
+
 This new, standalone WeiDU mod appends its own entry after the current install.
 It does not reinstall Spell Revisions or any previously installed component.
-Requires BG2:EE/EET and SR component 65, Revised Warrior HLAs. It changes both
+Requires BG2:EE/EET. The older archive also requires SR component 65. It changes both
 normal Hardiness (`SPCL907`) and Wish-granted Hardiness (`SPWISH12`).
 
 | Selection | Result |
@@ -49,16 +54,15 @@ or reinstalling old entries. A future full reinstall should use the full mod.
 
 The change applies to future casts after loading the updated resources. An active
 Hardiness effect already stored in a save is not rewritten: let it expire and recast.
-No save files are changed. Unsupported spell structures abort transactionally.
+No save files are changed. Current libraries log an unreadable resource locally
+and continue with the remaining targets.
 
 ## Scope and evidence
 
-The patch recognizes SR's extra effects by matching every donor byte except opcode
-and resistance amount. Foreign effects with different delivery metadata survive.
-Each level header must have one additive modifier per physical damage type and
-either the complete seven-effect SR clone set or none. This supports SR's original
-20%, the old 40% hotfix, and repeated applications of these choices. It rejects
-partial or duplicate clone sets instead of deleting ambiguous effects.
+The current patch owns the resistance profile and complete English descriptions.
+Every ability receives the chosen profile even with missing, duplicate or edited
+old effects. Unrelated mechanics remain separate. Other languages retain their
+text with a log line until a translation exists.
 
 Automated verification uses real WeiDU with synthetic games and archived spell
 copies. It does not establish live-engine acceptance or collection integration.

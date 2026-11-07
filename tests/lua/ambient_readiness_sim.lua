@@ -62,9 +62,10 @@ function EEex_Utility_IterateCPtrList(list, callback)
     end
 end
 
-local function newLevelArray()
+local function newLevelArray(count)
     local result = { levels = {} }
     function result:getReference(index)
+        assert(index >= 0 and index < count, "native spellbook array bounds")
         return self.levels[index]
     end
     return result
@@ -253,8 +254,8 @@ local function newSprite(options)
         m_queuedActions = newPtrList(options.queue or {}),
         m_timedEffectList = newPtrList({}),
         m_equipedEffectList = newPtrList({}),
-        m_memorizedSpellsMage = newLevelArray(),
-        m_memorizedSpellsPriest = newLevelArray(),
+        m_memorizedSpellsMage = newLevelArray(9),
+        m_memorizedSpellsPriest = newLevelArray(7),
         locals = {
             caster_label_ini = options.scsCaster == false and 0 or 1,
             instantprep = options.instantprep or 0,
@@ -981,7 +982,7 @@ scenarios.runtime_shell = function()
     CBR_RDY_HANDLERS.ambient_tick = function() error("injected shell fault") end
     fireTick(sprite)
     fireTick(sprite)
-    out("ambient_tracebacks", countPrinted("ambient disabled"))
+    out("ambient_tracebacks", countPrinted("ambient callback could not run"))
     out("ambient_fused", CBR_RDY_STATE.ambient_faulted or 0)
     out("urgent_after_ambient_fault", bool(urgentCalls == 4))
 end
@@ -1132,6 +1133,15 @@ scenarios.ambient_priest_debit = function()
     out("available_after", countAvailable(sprite, "sppr506"))
     out("active_after", active(sprite, "sppr506"))
     out("quicklist_rebuilds", sprite.quickListRebuilds)
+end
+
+scenarios.ambient_edited_level = function()
+    local sprite = newSprite({})
+    memorize(sprite, "spwi408")
+    EEex_Resource_Demand = function() return { spellLevel = 99 } end
+    fireTick(sprite)
+    out("available_after", countAvailable(sprite, "spwi408"))
+    out("active_after", active(sprite, "spwi408"))
 end
 
 scenarios.ambient_spellbook_cache = function()
@@ -1724,6 +1734,15 @@ scenarios.ambient_transaction_failure = function()
     out("quick_disabled", (quickFailures.spwi408 or {}).disabled or 0)
     out("quick_attempts", (quickFailures.spwi408 or {}).attempts or 0)
     out("quick_reason", (quickFailures.spwi408 or {}).reason or "")
+    quick.failQuickList = false
+    fireTick(quick)
+    local quickLedger = exportedLedger(quick)
+    out("quick_recovers_charged", ((quickLedger or {}).spells.spwi408 or {}).charged or 0)
+    apply.failApply = false
+    advanceClockSeconds(2)
+    fireTick(apply)
+    local applyLedger = exportedLedger(apply)
+    out("apply_recovers_charged", ((applyLedger or {}).spells.spwi408 or {}).charged or 0)
 end
 
 scenarios.ambient_malformed_ledger = function()
@@ -1884,8 +1903,11 @@ scenarios.ambient_runtime_safety = function()
     removeActive(fault, "spwi408")
     advanceClockSeconds(2400)
     for _ = 1, 30 do fireTick(fault) end
-    out("ambient_tracebacks", countPrinted("ambient disabled"))
-    out("ambient_inert_after_fault", bool(applicationCount(fault, "spwi408") == 1))
+    out("ambient_tracebacks", countPrinted("ambient callback could not run"))
+    fault.failVisibility = false
+    fault.seeParty = false
+    for _ = 1, 30 do fireTick(fault) end
+    out("ambient_recovers", bool(applicationCount(fault, "spwi408") == 2))
 end
 
 scenarios.ambient_sprite_lifetime = function()
@@ -2078,8 +2100,10 @@ scenarios.urgent_fault_fuse = function()
     memorize(fault, "spwi611")
     fireTick(fault)
     fireTick(fault)
-    out("urgent_tracebacks", countPrinted("urgent disabled"))
-    out("urgent_inert_after_fault", bool(fault.queueCount == 0))
+    out("urgent_tracebacks", countPrinted("urgent callback could not run"))
+    fault.failVisibility = false
+    fireTick(fault)
+    out("urgent_recovers", bool(fault.queueCount == 1))
     local ambient = newSprite({ seeParty = false })
     memorize(ambient, "spwi408")
     fireTick(ambient)

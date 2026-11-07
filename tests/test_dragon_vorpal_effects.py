@@ -239,7 +239,7 @@ assert(#calls == 0 and #messages == 1)
 assert(messages[1]:find("[CBR 110]", 1, true))
 ''', setup=setup)
 
-    def test_unreadable_guard_or_source_metadata_fails_closed(self) -> None:
+    def test_unreadable_guard_is_local_and_missing_metadata_uses_native_defaults(self) -> None:
         self.run_lua(r'''
 target.minimum_hp = nil
 CBRDVGO(source, target)
@@ -247,8 +247,12 @@ target.minimum_hp = 0 / 0
 CBRDVGO(source, target)
 target.minimum_hp = 0
 source.m_sourceRes = nil
+source.m_sourceId = nil
+source.m_sourceFlags = nil
 CBRDVGO(source, target)
-assert(#calls == 0 and #messages == 2)
+assert(#calls == 1 and #messages == 1)
+assert(calls[1].args.m_sourceRes == "")
+assert(calls[1].args.sourceID == -1 and calls[1].args.m_sourceFlags == 0)
 ''')
 
     def test_application_failure_does_not_retry_or_change_protections(self) -> None:

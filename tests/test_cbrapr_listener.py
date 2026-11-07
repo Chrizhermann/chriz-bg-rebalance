@@ -152,13 +152,14 @@ class CbraprListenerTests(unittest.TestCase):
         seen = self._run("sibling_bits_preserved")
         self.assertEqual((seen["apr"], seen["marker"], seen["siblings_intact"]), ("7", "1", "1"))
 
-    def test_copy_semantics_array_retires_the_listener_instead_of_running_away(self) -> None:
+    def test_unavailable_marker_binding_cannot_retire_other_sprites(self) -> None:
         seen = self._run("copy_semantics_array")
         self.assertEqual(seen["apr"], "1", "no bump may land when the marker cannot persist")
+        self.assertEqual(seen["healthy_apr"], "7")
 
-    def test_negative_derived_key_is_left_alone(self) -> None:
+    def test_negative_derived_key_receives_the_half_attack(self) -> None:
         seen = self._run("negative_key")
-        self.assertEqual((seen["apr"], seen["marker"]), ("-1", "0"))
+        self.assertEqual((seen["apr"], seen["marker"]), ("-6", "1"))
 
     # -- binding surface missing: stay inert ----------------------------------
 

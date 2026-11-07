@@ -23,7 +23,7 @@ from tests.test_emotion_hope_courage_installer import _write_key_and_bif
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WEIDU = ROOT / "weidu.exe"
+WEIDU = Path(__import__("os").environ.get("WEIDU", ROOT / "weidu.exe"))
 SETUP = ROOT / "setup-chriz-bg-rebalance.tp2"
 LIBRARY = ROOT / "chriz-bg-rebalance/lib/sr_hardiness.tpa"
 HARNESS = ROOT / "tests/weidu/sr_hardiness_harness.tp2"
@@ -99,7 +99,7 @@ def _spell(*, wish: bool = False, physical: int = 20, extras: bool = True,
             effects.extend(dataclasses.replace(donor, opcode=op, parameter1=extra_value) for op in EXTRA)
         effects.extend((
             SplEffect(opcode=328, target=target, parameter2=902, duration=duration),
-            # A foreign resistance must survive even a physical-only selection.
+            # Another mod adds a duplicate resistance with different delivery.
             dataclasses.replace(donor, opcode=27, parameter1=13,
                                 duration=duration + 7, resource="FOREIGN"),
             SplEffect(opcode=139, target=target, parameter1=2, timing=1),
@@ -142,6 +142,7 @@ class SyntheticHardinessGame:
                  normal: bytes | None = None, wish: bytes | None = None,
                  missing: str | None = None, tail: bool = False):
         self.root = root
+        self.language = "en_us"
         root.mkdir()
         self.override = root / "override"
         self.override.mkdir()
@@ -186,7 +187,7 @@ class SyntheticHardinessGame:
     def run(self, *components: int, uninstall: bool = False) -> subprocess.CompletedProcess[str]:
         return subprocess.run([str(WEIDU), self.setup, "--game", str(self.root),
                                "--force-uninstall-list" if uninstall else "--force-install-list",
-                               *map(str, components), "--language", "0", "--use-lang", "en_us",
+                               *map(str, components), "--language", "0", "--use-lang", self.language,
                                "--no-exit-pause", "--quick-log"],
                               cwd=self.root, capture_output=True, text=True, timeout=90, check=False)
 
@@ -198,7 +199,8 @@ class SyntheticHardinessGame:
 
 class HardinessTestCase(unittest.TestCase):
     def temporary(self) -> Path:
-        holder = tempfile.TemporaryDirectory(prefix="cbr-hardiness-")
+        (ROOT / "work").mkdir(exist_ok=True)
+        holder = tempfile.TemporaryDirectory(prefix="cbr-hardiness-", dir=ROOT / "work")
         self.addCleanup(holder.cleanup)
         return Path(holder.name)
 
@@ -216,7 +218,8 @@ class HardinessTestCase(unittest.TestCase):
         old, new = SplFile.from_bytes(before), SplFile.from_bytes(after)
         old_header, new_header = bytearray(old.header_raw), bytearray(new.header_raw)
         # Casting effects may move when per-ability effect counts change.
-        old_header[0x6E:0x70] = new_header[0x6E:0x70]
+        old_header[0x64:0x68] = new_header[0x64:0x68]
+        old_header[0x6A:0x70] = new_header[0x6A:0x70]
         if description_changed:
             self.assertNotEqual(old.description_strref, new.description_strref)
             old_header[0x50:0x54] = new_header[0x50:0x54]
@@ -228,28 +231,30 @@ class HardinessTestCase(unittest.TestCase):
             old_raw, new_raw = bytearray(old_ability.raw), bytearray(new_ability.raw)
             old_raw[0x1E:0x22] = new_raw[0x1E:0x22]
             self.assertEqual(old_raw, new_raw, "casting speed, targeting or level changed")
-            donor = next(fx for fx in old_ability.effects if fx.opcode == 86)
+            donor = next((fx for fx in old_ability.effects if fx.opcode in PHYSICAL),
+                         SplEffect(target=3 if old_ability.target == 5 else 1,
+                                   resist_dispel=2, duration=max(1, old_ability.required_level // 2) * 6))
+            donor = dataclasses.replace(donor, parameter2=0)
             for opcode in PHYSICAL:
-                source = [fx for fx in old_ability.effects if fx.opcode == opcode]
                 output = [fx for fx in new_ability.effects if fx.opcode == opcode]
                 self.assertEqual(1, len(output))
-                self.assertEqual(dataclasses.replace(source[0], parameter1=physical).to_bytes(), output[0].to_bytes())
+                self.assertEqual(dataclasses.replace(donor, opcode=opcode, parameter1=physical).to_bytes(), output[0].to_bytes())
             for opcode in EXTRA:
-                output = [fx for fx in new_ability.effects if fx.opcode == opcode and _metadata(fx) == _metadata(donor)]
+                output = [fx for fx in new_ability.effects if fx.opcode == opcode]
                 self.assertEqual(1 if extra else 0, len(output), f"extra opcode {opcode}")
                 if extra:
                     self.assertEqual(dataclasses.replace(donor, opcode=opcode, parameter1=extra).to_bytes(), output[0].to_bytes())
             def foreign(effects):
-                return [fx.to_bytes() for fx in effects if fx.opcode not in PHYSICAL
-                        and not (fx.opcode in EXTRA and _metadata(fx) == _metadata(donor))]
+                return [fx.to_bytes() for fx in effects if fx.opcode not in PHYSICAL + EXTRA]
             self.assertEqual(foreign(old_ability.effects), foreign(new_ability.effects),
-                             "stacking, AI markers, icon or unrelated resistance changed")
+                             "stacking, AI markers, icon or unrelated effects changed")
 
     def transform(self, payload: bytes, physical: int, extra: int,
                   *, success: bool = True, error: str | None = None) -> tuple[bytes | None, str]:
         folder = self.temporary()
         source, destination = folder / "input.spl", folder / "output.spl"
         source.write_bytes(payload)
+        (folder / "weidu.log").write_text("", encoding="ascii")
         command = [str(WEIDU), str(HARNESS), "--nogame", "--force-install-list", "0",
                    "--no-exit-pause", "--quick-log"]
         for value in (LIBRARY, source, destination, physical, extra):
@@ -258,6 +263,7 @@ class HardinessTestCase(unittest.TestCase):
         transcript = result.stdout + result.stderr
         if success:
             self.assertEqual(0, result.returncode, transcript)
+            self.assertNotIn("WITH WARNINGS", transcript)
             self.assertIn("SUCCESSFULLY INSTALLED", transcript)
             self.assertTrue(destination.exists(), transcript)
         else:
@@ -320,59 +326,74 @@ class HardinessTransformerTests(HardinessTestCase):
                 self.transform(_spell(), physical, extra, success=False,
                                error="unsupported resistance choice")
 
-    def test_partial_duplicate_or_nonadditive_sr_clones_fail_closed(self):
+    def test_missing_extra_duplicate_and_edited_resistances_are_overwritten(self):
         def missing(effects):
-            return [fx for fx in effects if fx.opcode != 85]
+            return [fx for fx in effects if fx.opcode not in (85, 86, 88)]
         def duplicate(effects):
-            return effects + [next(fx for fx in effects if fx.opcode == 85)]
-        def nonadditive(effects):
-            return [dataclasses.replace(fx, parameter2=1) if fx.opcode == 85 else fx for fx in effects]
-        for mutation, error in ((missing, "incomplete SR resistance clone set"),
-                                (duplicate, "ambiguous duplicate SR resistance clones"),
-                                (nonadditive, "incomplete SR resistance clone set")):
-            with self.subTest(mutation=mutation.__name__):
-                self.transform(_mutate_effects(_spell(), mutation), 40, 0, success=False, error=error)
-
-    def test_missing_duplicate_or_incompatible_physical_effects_fail_closed(self):
-        def missing(effects):
-            return [fx for fx in effects if fx.opcode != 88]
-        def duplicate(effects):
-            return effects + [next(fx for fx in effects if fx.opcode == 86)]
-        def mode(effects):
-            return [dataclasses.replace(fx, parameter2=1) if fx.opcode == 87 else fx for fx in effects]
+            return effects + [dataclasses.replace(fx, parameter1=123, parameter2=1)
+                              for fx in effects if fx.opcode in PHYSICAL + EXTRA]
         def delivery(effects):
-            return [dataclasses.replace(fx, target=2) if fx.opcode == 89 else fx for fx in effects]
-        for mutation, error in ((missing, "expected one direct modifier"),
-                                (duplicate, "expected one direct modifier"),
-                                (mode, "physical resistance must use additive modifiers"),
-                                (delivery, "physical modifiers have inconsistent delivery metadata")):
-            with self.subTest(mutation=mutation.__name__):
-                self.transform(_mutate_effects(_spell(), mutation), 40, 20, success=False, error=error)
+            return [dataclasses.replace(fx, parameter2=2, target=2, probability1=31)
+                    if fx.opcode in (85, 87, 89) else fx for fx in effects]
+        def empty(effects):
+            return [fx for fx in effects if fx.opcode not in PHYSICAL + EXTRA]
+        for mutation in (missing, duplicate, delivery, empty):
+            for physical, extra in CHOICES.values():
+                with self.subTest(mutation=mutation.__name__, physical=physical, extra=extra):
+                    before = _mutate_effects(_spell(), mutation)
+                    after, _ = self.transform(before, physical, extra)
+                    self.assert_spell(before, after, physical, extra)
+                    again, _ = self.transform(after, physical, extra)
+                    self.assertEqual(after, again)
 
-    def test_malformed_effect_partitions_fail_closed(self):
-        source = _spell()
-        for case in ("signature", "empty", "truncated", "ability_bounds", "effect_bounds",
-                     "ability_overlap", "casting_overlap", "casting_bounds"):
+    def test_empty_abilities_receive_resistances(self):
+        before = _mutate_effects(_spell(), lambda effects: [])
+        after, _ = self.transform(before, 40, 20)
+        self.assert_spell(before, after, 40, 20)
+        spell = SplFile.from_bytes(_spell())
+        before = dataclasses.replace(spell, abilities=()).to_bytes()
+        after, _ = self.transform(before, 30, 0)
+        new = SplFile.from_bytes(after)
+        self.assertEqual(1, len(new.abilities))
+        self.assertEqual(set(PHYSICAL), {fx.opcode for fx in new.abilities[0].effects})
+        self.assertTrue(all(fx.parameter1 == 30 for fx in new.abilities[0].effects))
+
+    def test_shared_effect_slices_are_rebuilt_independently(self):
+        raw = bytearray(_spell())
+        first = struct.unpack_from("<H", raw, 0x72 + 0x20)[0]
+        struct.pack_into("<H", raw, 0x72 + 0x28 + 0x20, first)
+        before = bytes(raw)
+        after, _ = self.transform(before, 40, 20)
+        self.assert_spell(before, after, 40, 20)
+
+    def test_effect_table_before_abilities_is_relocated(self):
+        source = _spell(casting_at_end=True)
+        ab, fx = struct.unpack_from("<I", source, 0x64)[0], struct.unpack_from("<I", source, 0x6A)[0]
+        raw = bytearray(source[:0x72] + source[fx:] + source[ab:fx])
+        struct.pack_into("<I", raw, 0x64, 0x72 + len(source) - fx)
+        struct.pack_into("<I", raw, 0x6A, 0x72)
+        before = bytes(raw)
+        after, _ = self.transform(before, 30, 20)
+        # The shared test reader only accepts abilities before effects.
+        self.assert_spell(source, after, 30, 20)
+
+    def test_unreadable_file_is_logged_and_left_unchanged(self):
+        for case in ("header", "truncated", "ability_bounds", "effect_bounds", "casting_bounds"):
             with self.subTest(case=case):
-                raw = bytearray(source)
-                if case == "signature":
-                    raw[:8] = b"SPL V2  "
-                elif case == "empty":
-                    struct.pack_into("<H", raw, 0x68, 0)
+                raw = bytearray(_spell())
+                if case == "header":
+                    del raw[16:]
                 elif case == "truncated":
                     del raw[-1:]
                 elif case == "ability_bounds":
                     struct.pack_into("<H", raw, 0x68, 65535)
                 elif case == "effect_bounds":
                     struct.pack_into("<H", raw, 0x72 + 0x20, 65535)
-                elif case == "ability_overlap":
-                    first = struct.unpack_from("<H", raw, 0x72 + 0x20)[0]
-                    struct.pack_into("<H", raw, 0x72 + 0x28 + 0x20, first)
-                elif case == "casting_overlap":
-                    struct.pack_into("<H", raw, 0x6E, 2)
-                elif case == "casting_bounds":
+                else:
                     struct.pack_into("<H", raw, 0x6E, 65535)
-                self.transform(bytes(raw), 40, 0, success=False)
+                after, transcript = self.transform(bytes(raw), 40, 0)
+                self.assertEqual(bytes(raw), after)
+                self.assertIn("unreadable spell tables", transcript)
 
 
 class HardinessInstallerTests(HardinessTestCase):
@@ -413,12 +434,14 @@ class HardinessInstallerTests(HardinessTestCase):
                         self.assertNotIn("20%", description)
                 self.assertEqual({"SPCL907.SPL", "SPWISH12.SPL", "UNRELATE.SPL"}, set(_tree(game.override)))
 
-    def test_missing_sr_and_main_only_sr_are_noops(self):
+    def test_physical_choices_install_without_sr(self):
         for sr_component in (None, 0):
-            for component in (200, 201, 202):
+            for component in (200, 201):
                 with self.subTest(sr_component=sr_component, component=component):
                     game = self.make_game(sr_component=sr_component)
-                    self.assert_unchanged(game, game.run(component), component, skipped=True)
+                    self.assert_installed(game, game.run(component), component)
+                    self.assert_spell(game.before["SPCL907.SPL"], (game.override / "SPCL907.SPL").read_bytes(),
+                                      40 if component == 200 else 30, 0, description_changed=True)
 
     def test_non_bg2_game_is_a_noop(self):
         game = self.make_game(game="bgee")
@@ -432,16 +455,41 @@ class HardinessInstallerTests(HardinessTestCase):
         game = self.make_game(game="eet")
         self.assert_installed(game, game.run(200), 200)
 
-    def test_missing_second_spell_leaves_first_and_tlk_untouched(self):
+    def test_missing_wish_does_not_block_hardiness(self):
         game = self.make_game(missing="SPWISH12")
-        result = game.run(200)
-        self.assert_unchanged(game, result, 200,
-                              skipped="NOT INSTALLED DUE TO ERRORS" not in result.stdout + result.stderr)
+        self.assert_installed(game, game.run(200), 200)
+        self.assert_spell(game.before["SPCL907.SPL"], (game.override / "SPCL907.SPL").read_bytes(),
+                          40, 0, description_changed=True)
 
-    def test_malformed_second_spell_rolls_back_first_and_tlk(self):
+    def test_missing_resistance_in_second_spell_is_restored(self):
         malformed = _mutate_effects(_spell(wish=True), lambda effects: [fx for fx in effects if fx.opcode != 89])
         game = self.make_game(wish=malformed)
-        self.assert_unchanged(game, game.run(200), 200)
+        self.assert_installed(game, game.run(200), 200)
+        self.assert_spell(malformed, (game.override / "SPWISH12.SPL").read_bytes(),
+                          40, 0, description_changed=True)
+
+    def test_damaged_second_file_does_not_roll_back_readable_first_file(self):
+        damaged = _spell(wish=True)[:-1]
+        game = self.make_game(wish=damaged)
+        result = game.run(200)
+        self.assert_installed(game, result, 200)
+        self.assertIn("unreadable spell tables", result.stdout)
+        self.assertEqual(damaged, (game.override / "SPWISH12.SPL").read_bytes())
+        self.assert_spell(game.before["SPCL907.SPL"], (game.override / "SPCL907.SPL").read_bytes(),
+                          40, 0, description_changed=True)
+
+    def test_other_language_retains_text_and_receives_resistance_package(self):
+        game = self.make_game()
+        game.language = "de_de"
+        translated = game.root / "lang/de_de/dialog.tlk"
+        translated.parent.mkdir()
+        translated.write_bytes(game.tlk.read_bytes())
+        original = translated.read_bytes()
+        result = game.run(201)
+        self.assert_installed(game, result, 201)
+        self.assertIn("no translation", result.stdout)
+        self.assertEqual(original, translated.read_bytes())
+        self.assert_spell(game.before["SPCL907.SPL"], (game.override / "SPCL907.SPL").read_bytes(), 30, 0)
 
     def test_all_four_choices_restore_original_files_on_synthetic_uninstall(self):
         for components in CHOICES:

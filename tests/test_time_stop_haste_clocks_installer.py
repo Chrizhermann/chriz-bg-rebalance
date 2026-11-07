@@ -177,9 +177,9 @@ class TimeStopHasteClocksInstallerTests(unittest.TestCase):
     def test_refuses_without_eeex(self) -> None:
         self.assert_refused(self.game(eeex=False), "requires EEex. Install EEex before this component")
 
-    def test_refuses_earlier_game_versions(self) -> None:
-        self.assert_refused(self.game(patch27=False, exes={"Baldur.exe": executable(timestamp=STAMP_2660)}),
-                            "requires game version 2.7.3.0")
+    def test_refuses_incompatible_native_executable(self) -> None:
+        self.assert_refused(self.game(exes={"Baldur.exe": executable(timestamp=STAMP_2660)}),
+                            "Baldur.exe is a different build")
 
     def test_refuses_other_executables(self) -> None:
         for label, payload in (("2.6.6.0", executable(timestamp=STAMP_2660)),

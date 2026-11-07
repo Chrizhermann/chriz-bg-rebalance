@@ -107,12 +107,13 @@ class ReleaseComponentsTests(unittest.TestCase):
         self.assertEqual(0, code, output)
         self.assertEqual(g.original, g.snapshot())
 
-    def test_arrows_missing_scs_skips_without_changes(self):
+    def test_arrows_install_without_scs(self):
         g = self.game(arrow_resources())
-        code, output = run_public(g, 130)
-        self.assertIn("SKIPPING", output)
-        self.assertNotIn("SUCCESSFULLY INSTALLED", output)
-        self.assertEqual(g.original, g.snapshot())
+        self.installed(g, 130)
+        for name in ("AROW04", "AROW09", "AROW08", "AROWKC"):
+            damage = ItmFile.from_bytes(g.snapshot()[name + ".ITM"]).abilities[0].effects[0]
+            self.assertEqual(1, damage.dice_number)
+            self.assertEqual(3 if name == "AROW04" else 2, damage.dice_size)
 
     def test_arrows_last_item_without_fire_package_receives_it(self):
         # Formerly a rollback test: a non-fire, unknown-mode damage record is not
@@ -147,17 +148,27 @@ class ReleaseComponentsTests(unittest.TestCase):
         p, output = tail.run()
         self.assertEqual(0, p.returncode, output)
         self.installed(g, 220)
-        self.assertEqual(tail.snapshot(), g.snapshot())
+        tail_files, public_files = tail.snapshot(), g.snapshot()
+        tail_item, public_item = ItmFile.from_bytes(tail_files["BRAC16.ITM"]), ItmFile.from_bytes(public_files["BRAC16.ITM"])
+        # The complete description is allocated in different synthetic TLKs.
+        from tests.test_sr_hardiness import _strings
+        self.assertEqual(_strings(tail.tlk)[tail_item.identified_description],
+                         _strings(g.tlk)[public_item.identified_description])
+        normalized = bytearray(tail_files["BRAC16.ITM"])
+        struct.pack_into("<I", normalized, 0x54, public_item.identified_description)
+        tail_files["BRAC16.ITM"] = bytes(normalized)
+        self.assertEqual(tail_files, public_files)
         code, output = run_public(g, 220, uninstall=True)
         self.assertEqual(0, code, output)
         self.assertEqual(g.original, g.snapshot())
 
-    def test_bracers_without_sr_skips(self):
+    def test_bracers_install_without_sr(self):
         g = self.game(bracers_resources())
-        code, output = run_public(g, 220)
-        self.assertIn("SKIPPING", output)
-        self.assertNotIn("SUCCESSFULLY INSTALLED", output)
-        self.assertEqual(g.original, g.snapshot())
+        self.installed(g, 220)
+        helper = g.snapshot()["CBRBIH.SPL"]
+        from tests.ie_formats import SplFile
+        self.assertTrue(any(fx.opcode == 1 and fx.parameter1 == 1
+            for a in SplFile.from_bytes(helper).abilities for fx in a.effects))
 
     def test_extracted_full_archive_installs_new_public_components(self):
         from tools.package_sr_antimagic import build

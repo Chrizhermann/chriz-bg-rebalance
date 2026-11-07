@@ -272,10 +272,12 @@ scenarios.copy_semantics_array = function()
     rebuild(s, 1, tempusFlail2)
     fastPass(s, 30)
     out("apr", apr(s))
+    local healthy = newSprite({})
+    rebuild(healthy, 1, tempusFlail2)
+    out("healthy_apr", apr(healthy))
 end
 
--- Negative derived keys mirror the encoding (-6 = -1/2); the codec only
--- models 0..10, so the listener must leave them alone.
+-- Negative derived keys mirror the encoding (-6 = -1/2).
 scenarios.negative_key = function()
     local s = newSprite({})
     rebuild(s, -1, tempusFlail2)
