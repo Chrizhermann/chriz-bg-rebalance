@@ -1,5 +1,29 @@
 # chriz-bg-rebalance — Handover
 
+## November 8 — v0.8.11: Every decided result, whatever the game files hold
+
+Release preparation for PR #27, “Write every change whatever the game files hold.” All components
+now write their decided spells, items, kits, creatures and tables without treating old values,
+descriptions, effects or layouts as a reason to stop, warn or skip. This includes the Tempus
+bundle; Spell Revisions, SCS, Hope, cloud and setup changes; and the Flail, weapon access, bard,
+dragon, elemental-arrow and potion components.
+
+The branch keeps real requirements and intentionally separate mechanics: BG2:EE/EET for the
+balance components (IWD:EE where the bard provider supports it), EEex where a runtime feature
+needs it, and a selected base component or supplied kit where an option builds on one. It also
+keeps independent bard registrations and prevents the standalone and full versions of the same
+component from loading together.
+
+Verified by the lead on 2026-11-08: a full Chriz Easy BG Recommended installation on BG2:EE
+2.7.3.0 with EET, using commit 7936bd8 (the same component code as this release), installed all
+466 of 466 components with no errors and no new BG Rebalance warnings. A start test loaded a
+save and found the Rebalance runtimes: kit lists, bard progression, Time Stop 360 and physical
+resistance 310.
+
+Open:
+- Play the changed content; the start test did not provide gameplay acceptance.
+- Test installs over other mods' edited versions beyond the synthetic fixtures.
+
 ## November 4 — v0.8.10: Flail of the Ages without Spell Revisions (302)
 
 Christopher approved this release on 2026-11-04. It contains PR #26. A CEBG install of

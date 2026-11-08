@@ -5,7 +5,7 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.8.10.** Pierce Magic has a bounded five-round MR
+**Version: v0.8.11.** Pierce Magic has a bounded five-round MR
 reduction; Spellstrike causes 15% spell failure for two rounds.
 Hardiness has a recommended 40% physical-only
 profile, a 30% alternative, and an optional SR damage-resistance add-on.
@@ -36,9 +36,13 @@ Since v0.8.9: Pierce Magic (210) and Spellstrike (211) describe themselves in Sp
 layout, and the scrolls, the Wand of Spell Striking and other spells that show the old mechanic
 now say what the effects do. The anti-magic tail patch gains texts-only components 212 and 213
 for installations that already have the mechanic.
-New in v0.8.10: Flail of the Ages (302) installs without Spell Revisions, where SCS's own
+Since v0.8.10: Flail of the Ages (302) installs without Spell Revisions, where SCS's own
 Haste and Slow system is in place, and its +5 version now also lets Potion of Haste and Haste
 rings work, with and without Spell Revisions. The Slow saving throws are unchanged.
+New in v0.8.11: every component writes the result it chose even when a player or another mod
+changed the old spell, item, kit or table. This covers the Tempus, Spell Revisions, SCS, Hope,
+cloud, Flail, weapon, bard, dragon, arrow and potion work; real game, EEex and component
+requirements remain.
 Kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.

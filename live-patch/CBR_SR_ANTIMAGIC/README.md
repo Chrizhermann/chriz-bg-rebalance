@@ -1,12 +1,11 @@
 # SR anti-magic existing-install patch
 
-Current source follows [We overwrite](../../AGENTS.md#we-overwrite): Spell Revisions
-is not a feature requirement, and changed payloads or descriptions do not veto an
-owned write. The release instructions below describe the older v0.8.10 archive;
-the current standalone setup resolves available targets without SR footprint gates.
-Do not infer that the source policy update has been released or live accepted.
+Since v0.8.11 this patch follows [We overwrite](../../AGENTS.md#we-overwrite): Spell
+Revisions is not a feature requirement, and changed payloads or descriptions do not veto
+an owned write. The standalone setup resolves the available targets without SR footprint
+gates. The v0.8.11 archive has not been applied to a live game.
 
-Source version **v0.8.10** (210 and 211 are unchanged since v0.8.1 except for their texts in v0.8.9;
+Source version **v0.8.11** (210 and 211 are unchanged since v0.8.1 except for their texts in v0.8.9;
 212 and 213 are new in v0.8.9). Component 210 was applied
 with authorization to Christopher's private stream installation on October 6;
 211 was not. See the collection handover for backups and verification. Native
@@ -28,7 +27,7 @@ changed. These components are independent; choose either or both.
 1. Close the game and InfinityLoader. Verify the intended game root and its
    `WeiDU.log`. Keep a backup of the game, string tables and saves, plus a copy of
    the pre-patch log. Do not reuse an archive from a different development commit.
-2. Extract `CBR_SR_ANTIMAGIC-v0.8.10-windows.zip` into that root.
+2. Extract `CBR_SR_ANTIMAGIC-v0.8.11-windows.zip` into that root.
    It contains `Setup-cbr_sr_antimagic.exe` and the `CBR_SR_ANTIMAGIC` directory.
 3. Run the separate setup and choose 210 and/or 211. They append new entries at
    the end of the stack and use their own backup namespace. **Do not reinstall SR,
