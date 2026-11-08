@@ -38,6 +38,7 @@ class ResistanceGame:
     ) -> None:
         self.root = root
         self.root.mkdir()
+        (self.root / "WeiDU.log").write_text("", encoding="ascii")
         self.override = root / "override"
         self.override.mkdir()
         shutil.copy2(ROOT / TP2, root / TP2)
@@ -47,6 +48,7 @@ class ResistanceGame:
             ("SPELL", "IDS", b"IDS V1.0\n1 EMPTY_SPELL\n"),
             ("STATS", "IDS", b"IDS V1.0\n1 MAXHITPOINTS\n"),
             ("KIT", "IDS", b"IDS V1.0\n0 TRUECLASS\n"),
+            ("CLASS", "IDS", b"IDS V1.0\n0 DUMMY\n"),
             ("PROJECTL", "IDS", b"IDS V1.0\n1 NONE\n"),
         ]
         if states is not None:
@@ -110,6 +112,8 @@ class PhysicalResistanceInstallerTests(unittest.TestCase):
         transcript = process.stdout + "\n" + process.stderr
         self.assertEqual(process.returncode, 0, transcript)
         self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+        self.assertNotIn("WARNING", transcript.upper())
+        self.assertNotIn("ERROR", transcript.upper())
         self.assertRegex(game.active_log(), r"(?m)#0\s+#310\b")
         self.assert_stable(game)
         after = tree(game.override)
@@ -195,24 +199,53 @@ class PhysicalResistanceInstallerTests(unittest.TestCase):
     def test_unsupported_game_rejects_before_writes(self) -> None:
         self.assert_rejected(self.game(bg2ee=False), "BG2")
 
-    def test_missing_spell_state_table_rejects_before_writes(self) -> None:
-        self.assert_rejected(self.game(states=None), "SPLSTATE")
+    def test_missing_spell_state_table_is_created(self) -> None:
+        self.assert_success(self.game(states=None), 255)
 
-    def test_shared_private_marker_value_rejects_and_rolls_back(self) -> None:
+    def test_shared_private_marker_moves_to_a_free_bit(self) -> None:
         states = f"IDS V1.0\n0 NORMAL\n230 {SYMBOL}\n230 OTHER_MOD\n"
-        self.assert_rejected(self.game(states=states), "collision")
+        self.assert_success(self.game(states=states), 255)
 
-    def test_duplicate_private_symbol_rejects_and_rolls_back(self) -> None:
+    def test_duplicate_private_symbol_is_written_once(self) -> None:
         states = f"IDS V1.0\n0 NORMAL\n230 {SYMBOL}\n231 {SYMBOL}\n"
-        self.assert_rejected(self.game(states=states), "collision")
+        self.assert_success(self.game(states=states), 230)
 
-    def test_out_of_range_private_marker_rejects_and_rolls_back(self) -> None:
+    def test_out_of_range_private_marker_gets_an_engine_bit(self) -> None:
         states = f"IDS V1.0\n0 NORMAL\n256 {SYMBOL}\n"
-        self.assert_rejected(self.game(states=states), "collision")
+        self.assert_success(self.game(states=states), 255)
 
-    def test_exhausted_spell_state_space_rejects_and_rolls_back(self) -> None:
+    def test_exhaustion_omits_only_listener_and_preserves_all_foreign_states(self) -> None:
         states = "IDS V1.0\n" + "".join(f"{i} OTHER_{i}\n" for i in range(256))
-        self.assert_rejected(self.game(states=states), "exhausted")
+        for stale in (False, True):
+            with self.subTest(stale=stale):
+                source = states + (f"255 {SYMBOL}\n" if stale else "")
+                game = self.game(states=source, override_states=True)
+                if stale:
+                    (game.override / "M_CBRRES.lua").write_text("error('stale listener')", encoding="ascii")
+                process = game.install()
+                transcript = process.stdout + process.stderr
+                self.assertEqual(0, process.returncode, transcript)
+                self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+                self.assertNotIn("WARNING", transcript.upper())
+                self.assertEqual(1, transcript.count("no unused SPLSTATE slot"))
+                self.assertNotIn("Party physical resistance installed:", transcript)
+                self.assertEqual(source.encode("ascii"), (game.override / "SPLSTATE.IDS").read_bytes())
+                shipped = (game.override / "M_CBRRES.lua").read_text(encoding="ascii")
+                self.assertNotIn("AddListsResolvedListener", shipped)
+                self.assertNotIn("stale listener", shipped)
+                for name, payload in game.before.items():
+                    self.assertEqual(payload, tree(game.override)[name], name)
+                self.assert_stable(game)
+
+    def test_non_numeric_or_empty_table_does_not_veto_the_marker(self) -> None:
+        for states in ("", "IDS V1.0\njunk OTHER_MOD\n", f"IDS V1.0\njunk {SYMBOL}\n"):
+            with self.subTest(states=states):
+                self.assert_success(self.game(states=states, override_states=True), 255)
+
+    def test_owned_template_placeholders_are_checked_offline(self) -> None:
+        template = (ROOT / "chriz-bg-rebalance/lua/M_CBRRES.lua").read_text(encoding="ascii")
+        self.assertIn("%CBR_RES_CAP%", template)
+        self.assertIn("%CBR_RES_STATE%", template)
 
     def test_optional_ninety_five_is_not_published_as_an_installer_choice(self) -> None:
         self.assertNotRegex((ROOT / TP2).read_text(encoding="utf-8"), r"\bDESIGNATED\s+311\b")

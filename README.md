@@ -5,7 +5,7 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.8.10.** Pierce Magic has a bounded five-round MR
+**Version: v0.8.11.** Pierce Magic has a bounded five-round MR
 reduction; Spellstrike causes 15% spell failure for two rounds.
 Hardiness has a recommended 40% physical-only
 profile, a 30% alternative, and an optional SR damage-resistance add-on.
@@ -36,12 +36,29 @@ Since v0.8.9: Pierce Magic (210) and Spellstrike (211) describe themselves in Sp
 layout, and the scrolls, the Wand of Spell Striking and other spells that show the old mechanic
 now say what the effects do. The anti-magic tail patch gains texts-only components 212 and 213
 for installations that already have the mechanic.
-New in v0.8.10: Flail of the Ages (302) installs without Spell Revisions, where SCS's own
+Since v0.8.10: Flail of the Ages (302) installs without Spell Revisions, where SCS's own
 Haste and Slow system is in place, and its +5 version now also lets Potion of Haste and Haste
 rings work, with and without Spell Revisions. The Slow saving throws are unchanged.
+New in v0.8.11: every component writes the result it chose even when a player or another mod
+changed the old spell, item, kit or table. This covers the Tempus, Spell Revisions, SCS, Hope,
+cloud, Flail, weapon, bard, dragon, arrow and potion work; real game, EEex and component
+requirements remain.
 Kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.
+
+## Installation policy
+
+Under [We overwrite](AGENTS.md#we-overwrite), this mod writes its decided result
+regardless of old values, descriptions, effect counts or another mod's edits.
+SCS and Spell Revisions are optional unless a feature truly needs them; mod
+versions are never prerequisites. Missing optional targets or unreadable files
+are logged individually, while the remaining changes continue. EEex requirements,
+native hook signatures and choices between our own components stay.
+
+This policy supersedes older compatibility instructions throughout the repository,
+including dated plans, handovers and research. Historical test and playtest results
+describe those builds only; they do not establish acceptance of this policy update.
 
 ## Credits — stand on the shoulders of giants
 
@@ -100,8 +117,8 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 
 ### Components 210–211 — SR anti-magic
 
-Requires **SR main component 0**; component 210 also requires **EEex** and launching
-through InfinityLoader. These are independent choices. Pierce Magic halves current
+Component 210 requires **EEex** and launching through InfinityLoader; Spell Revisions
+is optional. These are independent choices. Pierce Magic halves current
 MR, reducing it by at least 10 and at most 40 percentage points, with a zero floor
 and rounding the reduction up. The reduction lasts five rounds; recasts renew the
 same amount. It combines with Lower Resistance. Spellstrike causes 15% arcane/divine
@@ -115,7 +132,8 @@ Each also writes the spell's description in Spell Revisions' layout (header, int
 removed protections, mechanic) and brings every text that still shows the old mechanic up to
 date: scrolls that learn or cast the spell, the Pierce Magic charge line of the Wand of Spell
 Striking, and other spells that cast the same payload (Artisan's Kitpack's monk Spellstrike).
-An item with its own text keeps it, and the installer names it. The tail patch's components
+Owned descriptions are written in full; other languages retain their text with a log
+line until a translation exists. The tail patch's components
 212 and 213 do only this, for an installation that already has the mechanic.
 
 Build the full mod, the separate tail patches and the standalone True Time Stop package with
@@ -133,18 +151,17 @@ Other special arrows, original saving throws and SCS troll helpers are unchanged
 Only each arrow's bow-fired hit changes: other abilities, other damage riders and
 their description text stay as they are, in the male and female strings. If
 another ability shares the hit's damage effect, the hit gets its own copy first.
-This fills the EET gap in SCS's own elemental-arrow option; requires EET and
-SCS general spell tweaks (2000). Install after other arrow/item changes.
+This fills the EET gap in SCS's own elemental-arrow option; it requires EET.
+Install after other arrow/item changes, including SCS when present.
 
 ### Component 220 — SR Bracers of Blinding Strike
 
 The bracers grant **SR Improved Haste (+1 APR)**, still self-only and once per day,
 for as long as their own activation lasts (20 seconds on the stock item). The
-effective SR bonuses and existing Tempus bridge are retained. Other mods' changes
-to the bracers or to SR's Improved Haste are kept; a change a self-only copy
-cannot represent stops the installation with a message instead.
+effective bonuses and existing Tempus bridge are retained. The installer follows
+delivery links and writes the private self-only copy and owned haste protections.
 Ordinary/Improved Haste cannot stack with the bracers by changing cast order.
-Requires SR main component 0; install after other Haste/item changes.
+Spell Revisions is optional; install after other Haste/item changes.
 Wish's mechanics are not changed by this component.
 
 ### Components 330–332 — Potion uniqueness and the Heroism family
@@ -168,9 +185,8 @@ separately. Song of Heroism, Aid and the Potion of Power stay separate. Greater
 Heroism's description is updated. Works with or without 330/331.
 
 Potions are recognised by what they do, not by file name, so potions from other
-mods are included. A potion whose second dose cannot be blocked cleanly (for
-example one that also deals damage) is left as it is and named during
-installation. No EEex is needed. Effects already active in an existing save can
+mods are included. The installer owns the dose-blocking behavior; changed or mixed
+payloads are not grounds to omit it. No EEex is needed. Effects already active in an existing save can
 stack one more time; new doses behave as described.
 [Design and limits](research/2026-10-14-potion-uniqueness-heroism-family.md).
 
@@ -201,10 +217,10 @@ Spell Revisions, the same final values apply.
   Chant still stack with everything.
 
 Each part finds its spells through SPELL.IDS and is skipped when they are not
-installed. A part that cannot be changed safely is left unchanged with an
-installation warning; the other parts still apply. English descriptions of the
-spells and their scrolls are updated; other wording stays as it is, with a
-warning. No EEex is needed. Effects already active in a save keep their old
+installed. Missing optional targets or unreadable resources are logged individually;
+the other parts still apply. Complete English descriptions of the spells and their
+scrolls are written; other languages retain their text with a log line.
+No EEex is needed. Effects already active in a save keep their old
 values until they end. Existing druids should receive Chaotic Commands and
 Bless at their next level-up; this is not yet checked in the game.
 [Aid, Luck and Chaotic Commands](research/2026-10-23-aid-luck-chaotic-commands.md),
@@ -288,16 +304,14 @@ Regeneration, duration, poison immunity and AI remain unchanged. Supported forms
 the known EE/SoD combat clouds, Ascension Bodhi's combat form and SCS vampire
 tactical mist. Scripted death escapes and quest protections stay intact.
 
-Lower resistances stay as they are, including other mods' partial values and
-vulnerabilities; no protection is added to open channels.
+Each combat form receives its decided resistance profile, including when an old
+effect is missing, duplicated or edited. Channels outside that profile stay open.
 Cloud-added MR100 is neutralized; SCS tactical mist has MR0 while transformed.
 Normal-form data is unchanged, but a cloud's flat-set values can temporarily
 replace stronger natural resistance. Install after the cloud-form providers.
-No EEex is required. English SR summon descriptions are updated when the genie
-form ends up exactly 75% on its nine damage channels with poison immunity; other
-wording or values keep the text, with a warning. Resistances the component cannot
-attribute to the cloud, further immunities and malformed resources stop the
-installation without changes.
+No EEex is required. Complete English summon descriptions accompany the owned
+profiles; other languages retain their text with a log line. An unreadable resource
+costs only that resource; changed resistance values do not veto the profile.
 See [scope and exclusions](research/2026-10-06-damageable-cloud-forms.md).
 
 ### Component 310 — Party physical resistance
@@ -327,7 +341,7 @@ CEBG selections are maintained separately by the collection.
 [Design and engine evidence](research/2026-10-06-physical-resistance-softcap.md).
 ### Components 200–202 — SR Hardiness
 
-Requires **Spell Revisions #65, Revised Warrior HLAs**, on BG2:EE/EET. Both normal
+Works on BG2:EE/EET with or without Spell Revisions. Both normal
 Hardiness and Wish-granted Hardiness receive the same resistance profile:
 
 - **200 (recommended): 40% physical resistance only.** Removes SR's extra resistances.
@@ -367,11 +381,10 @@ Revisions and other changes to these items or their descriptions. The base-game
 items and CEBG's English EET/SR/SCS/Artisan/UB items are covered by automated checks.
 The pending compatibility update also handles multiple melee abilities/Slow effects,
 extra and shared effect records, reordered layouts and changed descriptions.
-Simple single-target Slow-only SPL/EFF helpers retain their original identity:
-only the weapon's delivery gains the save. Mixed helpers (such as Slow plus
-damage), area delivery and additional inner saves need a specific adapter; gating
-their entire payload would change other behavior. No global spell is rewritten.
-Missing Slow is reported explicitly without inventing one or claiming it was nerfed.
+Linked helpers keep their public identity. The owned Slow path receives the
+save through a private copy where needed, while unrelated damage and public
+helper resources stay separate.
+The owned Slow behavior is written even when its old effects are missing.
 This is not a universal item-overhaul or translation compatibility claim.
 
 This component is included in v0.7.0 and intended as a CEBG default.
@@ -390,13 +403,12 @@ get more weapons.
 and use them; fighter/druids may also train long bows and specialize (two pips) in all three.
 A limit another mod already raised higher stays. Kits are found through KITLIST's class
 column; a kit that uses a class's own WEAPPROF column follows that class, and a kit that
-shares its column with a kit of another class is left unchanged with a line in the log.
+shares its column with another kit must receive its decided allocation as well.
 
 - **With Artisan's Kitpack's EEex weapon permissions**, the component adds the class grants
   for these weapons to `C0PR#CL.SPL`, in every ability, right after the Kitpack's own grants
   (kit chains and `C0PR#KG` keep running last). Items with the Kitpack's permission check
-  keep it. If `C0PR#CL.SPL` exists but its grant table or the permission spells are not the
-  layout this component knows, it stops before changing anything.
+  keep it. The grant writes do not require a particular prior layout or cell value.
 - **Without the Kitpack**, it removes the druid and fighter/druid restrictions (usability
   flags and opcode 319 "not usable by" for these two classes) from every axe and short bow a
   fighter may use, and the fighter/druid restriction from long bows. Other classes'
@@ -437,8 +449,7 @@ limit (the cleric limit where fighter/clerics have none), the axe at its fighter
 limit or else the highest fighter/cleric limit of a cleric weapon, every other weapon 0.
 Every other row, the fighting styles among them, takes the fighter/cleric value, so
 Yeslick's styles stay as they are. It adds the kit's axe grant to `C0PR#CL.SPL` and names
-the axes in the kit's English description. It refuses a kit column that is a class column
-or shared with another kit.
+the axes in the kit's English description. Shared columns do not veto the decided kit allocation.
 
 The engine takes a kit's own column only when the kit's KITLIST class is the character's
 class, so a fighter/cleric with this cleric kit trains from FIGHTER_CLERIC
@@ -544,7 +555,7 @@ Full diagnosis: `research/01-telekinetic-storm-save-bug.md`.
 
 ### Component 110 — Apex Dragons: lethal claws and bites
 
-**Optional difficulty increase. Requires SCS Smarter Dragons (6540) and EEex.**
+**Optional difficulty increase. Requires EEex.** Install after SCS when present.
 
 **A failed saving throw can cause permanent death (chunking). A chunked companion cannot
 be raised or resurrected through normal gameplay.** The native engine still honors its
@@ -576,8 +587,8 @@ shares his identity. The separate SR Death Ward correction is not a prerequisite
 
 Runtime additions are five patched BCS scripts, four private SPLs, three EFFs and one
 autoload Lua module in `override`; WeiDU also maintains its normal installation records.
-The component recognizes the current SCS configuration-based difficulty scripts and rejects
-unsupported variants before publishing. Script reload may reach already-spawned dragons,
+The component writes its owned script behavior even when previous blocks differ.
+Script reload may reach already-spawned dragons,
 but saved-encounter and combat acceptance remain pending. Do not install into an active
 playthrough on the strength of fixture tests alone.
 
@@ -608,8 +619,8 @@ their reachable opcode-120 effects, and repairs only three proven SCS contexts: 
 first-round and renewal choices are removed, while Chain Contingency keeps its generated
 helper and substitutes the closest lower genuine protection. Only the exact false metadata
 markers are removed; Moment of Prescience's real AC, saving-throw, duration, school, text,
-and other gameplay effects remain unchanged. Unknown script shapes are reported and left
-byte-identical.
+and other gameplay effects remain unchanged. If its owned block is missing, the
+installer supplies it; old script shapes do not veto the repair.
 
 This is a compatibility repair, not a redesign of Moment of Prescience. If a later Spell
 Revisions version restores a genuine Improved Mantle at that mapping, the semantic
@@ -621,20 +632,20 @@ and the Gibberlings3 team.
 ### Component 121 — EEex ambient readiness bridge
 
 This is an interim bridge for SCS casters, not the eventual full EEex AI overhaul. At install
-time it resolves the final `SPELL.IDS`, validates the installed spell effects, and imports
+time it resolves the final `SPELL.IDS`, reads installed spell effects, and imports
 SCS's own cosmetic-free prebuff mapping. It then ships one stamped `M_CBRRDY.lua`; it does
-not patch SCS combat scripts or spell mechanics. It requires BG2:EE/EET, SCS Smarter Mages
-6030, EEex's `M_*.lua` autoload bootstrap, and the final SCS prebuff map. EEex v1.2.0 is the
-primary target. It uses one deferred lists-resolved callback as the sole scheduler and one
+not patch SCS combat scripts or spell mechanics. It requires BG2:EE/EET and EEex's
+`M_*.lua` autoload bootstrap. Available SCS mappings enrich the manifest without
+being an installation prerequisite. It uses one deferred lists-resolved callback as the sole scheduler and one
 synchronous lists-resolved callback as an ambient pending-confirmation observer; the latter
 does no classification, scheduling, or urgent work. Legacy EEex instead uses one synchronous
 callback as the full scheduler. The expected listener counts are therefore `1 deferred + 1
 synchronous = 2` on v1.2 and `0 + 1 = 1` on legacy. If the synchronous observer API is
-missing on the current path, ambient readiness fails closed while the urgent layer may keep
+missing on the current path, ambient readiness cannot run while the urgent layer may keep
 using the deferred scheduler. Both modes read the direct `m_worldTime.m_gameTime` field used
 by EEex itself as raw 15-Hz engine ticks. The component does not hardcode EEex WeiDU
 component numbers or impose a component-specific LuaJIT requirement. Missing prerequisites
-skip cleanly; malformed recognized data fails before the override transaction is retained.
+omit only the affected feature; unreadable resources are logged individually.
 Component 120 is independent, but installing 120 first is recommended on the currently
 researched SR setup.
 
@@ -663,7 +674,8 @@ The ambient layer considers only recognized, settled SCS casters and conservativ
 self-buffs lasting at least 2,400 seconds. A caster must really have the spell memorized. The
 deferred scheduler requests delivery once and retains only an exact primitive spellbook
 locator, original flags/count, and deadline. When the child marker resolves, the synchronous
-observer revalidates those baselines before spending one copy and committing the ledger.
+observer locates an available memorized copy before spending it and committing the ledger.
+Changed unrelated slot flags and spell-level metadata do not veto that transaction.
 Only an actual engine spellbook reset (normally rest) opens that charge again. Natural expiry
 may be maintained for free while the caster is safe, out of combat, and cannot see the party.
 Dispel, early removal, or suspicious early loss suppresses maintenance until the next real
@@ -711,7 +723,7 @@ The two layers can be retired independently without uninstalling the component:
 - `CBR_RDY_EXTERNAL_OWNER` is a bitmask for a replacement AI: bit 1 claims ambient, bit 2
   claims urgent, and value 3 claims both.
 
-Each callback layer also has its own fail-closed fuse. Offensive AI, target selection,
+Callback faults are logged locally and later callbacks remain usable. Offensive AI, target selection,
 sequencers, later-round defense choices, non-caster potion logic, and the future full EEex AI
 are deliberately out of scope.
 ### Component 301 — Emotion, Courage / Emotion, Hope
@@ -743,9 +755,8 @@ separate opcode-147 learning ability.
 The dynamically discovered Enchanted Weapon and Emotion, Hopelessness scrolls are distribution
 anchors only; their item abilities, icons, and other bytes are not cloned. Component 301 mirrors
 their store entries while preserving each store's quantities, charges, flags, and ordering.
-Those donor scrolls remain guarded requirements for the initial standalone distribution path;
-a missing or ambiguous donor aborts the WeiDU transaction. An existing spell with no
-discoverable learn-scroll is left without one in this initial compatibility pass. The component
+Missing distribution anchors are logged without blocking the spells or private scrolls.
+Existing spell slots without a resource are supplied as well. The component
 does not add fixed area, creature, save, or spellbook edits, so a store already cached in an
 active save may not acquire a new entry without separate save work.
 
@@ -763,27 +774,20 @@ the controlled-test boundary are in
 
 These mutually exclusive choices install the same five-tier Holy Power redesign. Component 401
 uses automatic semantic detection and is the recommended choice. Components 402 and 403 are
-advanced overrides that force true-doubling or additive Improved Haste compatibility; they still
-validate the final spell before changing it.
+advanced overrides that force true-doubling or additive Improved Haste compatibility.
 
 Spell Revisions and SCS are optional. Install after either when present, and after The Artisan's
 Kitpack and other mods that change spells or cleric kits. The installer resolves Divine Power
 and Improved Haste through `SPELL.IDS`,
 materializes the six effective input resources at their canonical `override` paths inside the
-WeiDU transaction, and then runs the same preflight-first transformation the fixture harness
-tests. WeiDU itself backs up, rolls back on failure, and exactly removes or restores every
-touched file on uninstall. It adds no game-facing strings and performs no `dialog.tlk` write.
-Artisan may pack its exact per-level cleric permission grant `AP_C0PR#CL` into otherwise empty
-`ABILITY1` cells; the validator recognizes and preserves that one known layout while keeping
-the Holy Power and level-25 cells strict. See `research/13-tempus-artisan-clab-packing.md`.
+WeiDU transaction, and writes its owned result. WeiDU itself backs up and restores
+touched files on uninstall. It adds no game-facing strings and performs no `dialog.tlk` write.
+Artisan's cleric permission grants remain separate from the owned Holy Power grants.
+Historical layout evidence is in `research/13-tempus-artisan-clab-packing.md`.
 
-Improved Haste supports direct additive APR (SR), direct doubling, and a validated single
-opcode-146 hop to a doubling spell. Every caster-level header must agree. SCS conditional
-message helpers are checked to contain only display-string effects; missing, malformed,
-conditional haste, nested, or ambiguous delivery still aborts. Delegated additive effects are
-unsupported because their APR bridge needs a different transformation. The original non-SR
-Divine Power exclusion is recognized and upgraded to the same cleanup used by the SR branch.
-See `research/14-tempus-delegated-haste.md` for captured inputs and isolated test evidence.
+Haste delivery is read to locate the owned transformation; changed values, helper
+contents or ability counts are not installation prerequisites. See
+`research/14-tempus-delegated-haste.md` for historical captures and isolated test evidence.
 
 Existing characters automatically use the patched `OHTMPS1` resource. Branwen at level 13
 already has the intended three uses, so this component needs no save edit for her. Characters
@@ -806,7 +810,7 @@ folder. It includes `Setup-chriz-bg-rebalance.exe`; run it to choose components,
 Use `100`, `101`, optional `110`/`111`, `120`, `121`, `301`, or exactly one of
 `401`/`402`/`403` as appropriate; the example selects the recommended Tempus mode and installs
 component 301 last, after every spell overhaul. The two dragon options
-require SCS Smarter Dragons (6540) first; 110 also requires EEex. They can be selected
+apply to available target encounters; 110 requires EEex. They can be selected
 independently and in either order (the normal menu order is 110 then 111).
 Install component 120 after the final Spell Revisions
 and SCS Smarter Mages components so it sees the effective spell and generated-script shapes.

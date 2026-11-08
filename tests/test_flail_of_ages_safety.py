@@ -39,18 +39,19 @@ class FlailSafetyTests(unittest.TestCase):
         expected[0x6E:0x72] = after.header_raw[0x6E:0x72]
         self.assertEqual(bytes(expected), after.header_raw)
 
-    def assert_rollback(self, game, diagnostic):
-        process, output = game.run()
-        self.assertNotEqual(0, process.returncode, output)
-        self.assertIn(diagnostic, output)
-        self.assertIn("NOT INSTALLED DUE TO ERRORS", output)
-        self.assertNotIn("SUCCESSFULLY INSTALLED", output)
-        self.assertEqual(game.original, {p.name.upper(): p.read_bytes() for p in game.override.iterdir() if p.is_file()})
-        # WeiDU can retain appended, unreferenced strings after rollback; original
-        # strings and restored item strrefs, rather than TLK length, are owned.
-        self.assertEqual(game.texts, baseline.strings(game.lang_tlk)[:len(game.texts)])
+    def assert_private_slow(self, game, item="BLUN14", penalty=2):
+        from tests.ie_formats import SplFile
+        self.assert_installed(game)
+        effects = read_itm(game.override / (item + ".ITM")).abilities[0].effects
+        links = [e for e in effects if e.resource.startswith("CF")]
+        self.assertTrue(links)
+        for link in links:
+            self.assertEqual(0, link.save_type & 31)
+            spell = SplFile.from_bytes((game.override / (link.resource + ".SPL")).read_bytes())
+            slow = [e for a in spell.abilities for e in a.effects if e.opcode == 40]
+            self.assertTrue(slow)
+            self.assertTrue(all(e.save_type & 31 == 2 and e.save_bonus == -penalty for e in slow))
         self.assert_foreign_and_sources_unchanged(game)
-        return output
 
     def test_shared_melee_and_magic_slice_keeps_magic_effects_unchanged(self):
         game = self.game("vanilla")
@@ -103,7 +104,7 @@ class FlailSafetyTests(unittest.TestCase):
         self.assertEqual(expected.to_bytes() + padding, actual)
         self.assert_foreign_and_sources_unchanged(game)
 
-    def test_malformed_bounds_roll_back_previously_patched_tiers(self):
+    def test_malformed_bounds_leave_only_that_file_untouched(self):
         for malformed in ("ability_table", "effect_table", "ability_slice", "equipped_slice"):
             with self.subTest(malformed=malformed):
                 game = self.game("vanilla")
@@ -118,8 +119,12 @@ class FlailSafetyTests(unittest.TestCase):
                 else:
                     struct.pack_into("<H", raw, 0x6E, 0xFFFF)
                 self.put(game, "BLUN30.ITM", bytes(raw))
-                output = self.assert_rollback(game, "outside the resource")
-                self.assertIn("BLUN30", output)
+                self.assert_installed(game)
+                self.assertEqual(bytes(raw), (game.override / "BLUN30.ITM").read_bytes())
+                for name, penalty in baseline.TIERS.items():
+                    if name != "BLUN30":
+                        slow = next(e for e in read_itm(game.override / (name + ".ITM")).abilities[0].effects if e.opcode == 40)
+                        self.assertEqual((2, -penalty), (slow.save_type, slow.save_bonus))
 
     def test_separate_eff_slow_feedback_and_sr_companions_gate_same_window_only(self):
         game = self.game()
@@ -164,7 +169,7 @@ class FlailSafetyTests(unittest.TestCase):
         self.assert_foreign_and_sources_unchanged(game, "FXLOOPA.SPL", "FXLOOPB.SPL")
         self.assert_no_helpers_created(game)
 
-    def test_mixed_payload_rolls_back_even_when_another_tier_was_patched(self):
+    def test_mixed_payload_is_copied_after_other_tiers_are_patched(self):
         game = self.game("vanilla")
         slow = SplEffect(opcode=40, target=2, duration=23)
         damage = SplEffect(opcode=12, target=2, parameter1=31, timing=1)
@@ -172,10 +177,10 @@ class FlailSafetyTests(unittest.TestCase):
         self.put(game, "FXMIXED.SPL", helper.to_bytes())
         link = SplEffect(opcode=146, target=2, timing=1, resource="FXMIXED")
         self.with_abilities(game, (variants.ability(1, (link,)),), "BLUN30C.ITM")
-        output = self.assert_rollback(game, "mixes Slow with other effects")
-        self.assertIn("FXMIXED", output)
+        self.assert_private_slow(game, "BLUN30C", 4)
+        self.assertEqual(helper.to_bytes(), (game.override / "FXMIXED.SPL").read_bytes())
 
-    def test_aoe_or_additional_inner_save_rejects_without_mutating_originals(self):
+    def test_aoe_or_additional_inner_save_is_normalized_in_private_copy(self):
         cases = (
             ("area_projectile", 94, 0, 0),
             ("different_inner_save", 0, 4, 0),
@@ -190,8 +195,8 @@ class FlailSafetyTests(unittest.TestCase):
                 link = SplEffect(opcode=146, target=2, timing=1, resource="FXUNSAFE", save_type=0x1000004, save_bonus=7)
                 self.with_abilities(game, (variants.ability(1, (link,)),))
                 self.with_abilities(game, (variants.ability(1, (link,)),), "FOREIGN.ITM")
-                output = self.assert_rollback(game, "mixes Slow with other effects")
-                self.assertIn("FXUNSAFE", output)
+                self.assert_private_slow(game)
+                self.assertEqual(helper.to_bytes(), (game.override / "FXUNSAFE.SPL").read_bytes())
 
 
 if __name__ == "__main__":

@@ -1,13 +1,13 @@
 BACKUP ~weidu_external/backup/chriz-bg-rebalance~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.8.10~
+VERSION ~v0.8.11~
 
 // Load the tested transformation library and define one installer wrapper for
 // all Tempus Holy Power compatibility choices. WeiDU's backup namespace is
 // basename-flat, so staging and later publishing the same resource basename
 // would make exact uninstall unsafe. Instead, materialize the six file-backed
 // inputs at their canonical override paths inside the component transaction,
-// then let the shared preflight-first transformation operate there directly.
+// then let the shared transformation operate there directly.
 ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/tempus_holy_power.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/tempus_weapon_training.tpa~
@@ -33,32 +33,57 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/time_stop_haste_clocks.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/class_weapon_access.tpa~
 
+
+  DEFINE_ACTION_FUNCTION cbr_setup_spell
+    STR_VAR symbol = ~~
+    RET resref
+  BEGIN
+    OUTER_SPRINT resref ~~
+    OUTER_SET cbr_setup_id = IDS_OF_SYMBOL (~spell~ ~%symbol%~)
+    ACTION_IF (cbr_setup_id >= 1000 AND cbr_setup_id < 5000) BEGIN
+      OUTER_SET cbr_setup_type = cbr_setup_id / 1000
+      OUTER_SET cbr_setup_slot = cbr_setup_id MODULO 1000
+      OUTER_SPRINT cbr_setup_prefix ~SPPR~
+      ACTION_IF cbr_setup_type = 2 BEGIN OUTER_SPRINT cbr_setup_prefix ~SPWI~ END
+      ACTION_IF cbr_setup_type = 3 BEGIN OUTER_SPRINT cbr_setup_prefix ~SPIN~ END
+      ACTION_IF cbr_setup_type = 4 BEGIN OUTER_SPRINT cbr_setup_prefix ~SPCL~ END
+      OUTER_SPRINT cbr_setup_digits ~%cbr_setup_slot%~
+      ACTION_IF cbr_setup_slot < 100 BEGIN OUTER_SPRINT cbr_setup_digits ~0%cbr_setup_digits%~ END
+      ACTION_IF cbr_setup_slot < 10 BEGIN OUTER_SPRINT cbr_setup_digits ~0%cbr_setup_digits%~ END
+      OUTER_SPRINT resref ~%cbr_setup_prefix%%cbr_setup_digits%~
+    END
+  END
+
+  DEFINE_ACTION_FUNCTION cbr_setup_stage
+    STR_VAR file = ~~
+  BEGIN
+    OUTER_SPRINT file EVALUATE_BUFFER ~%file%~
+    ACTION_IF FILE_EXISTS_IN_GAME ~%file%~ BEGIN
+      COPY_EXISTING ~%file%~ ~override/%file%~
+    END ELSE BEGIN PRINT ~CBR: optional target %file% is absent; continuing.~ END
+  END
+
+  DEFINE_ACTION_FUNCTION cbr_setup_ids
+    STR_VAR file = ~~
+  BEGIN
+    OUTER_SPRINT file EVALUATE_BUFFER ~%file%~
+    ACTION_IF FILE_EXISTS ~override/%file%~ BEGIN
+      // Already available to file-backed writers.
+    END ELSE ACTION_IF FILE_EXISTS_IN_GAME ~%file%~ BEGIN
+      COPY_EXISTING ~%file%~ ~override/%file%~
+    END ELSE BEGIN
+      COPY ~chriz-bg-rebalance/data/ambient_readiness_spells.2da~ ~override/%file%~
+        DELETE_BYTES 0 BUFFER_LENGTH
+        INSERT_BYTES 0 10
+        WRITE_ASCII 0 ~IDS V1.0~
+        WRITE_BYTE 8 13 WRITE_BYTE 9 10
+    END
+  END
+
   DEFINE_ACTION_MACRO cbr_install_tempus_holy_power_component
   BEGIN
-    // Both floors match cbr_validate_spell_ids' require-mode contract:
-    // symbolic ids below 1100/2100 would denote a level-0 spell no EE game
-    // defines, so the slot arithmetic below always yields the engine's
-    // three-digit SPPR###/SPWI### form and needs no zero padding.
-    OUTER_SET cbr_tempus_divine_id = IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~)
-    ACTION_IF (cbr_tempus_divine_id < 1100 OR cbr_tempus_divine_id > 1999) BEGIN
-      FAIL @9403
-    END
-    OUTER_SET cbr_tempus_divine_slot = cbr_tempus_divine_id - 1000
-    OUTER_SPRINT cbr_tempus_divine_resref ~SPPR%cbr_tempus_divine_slot%~
-
-    OUTER_SET cbr_tempus_haste_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~)
-    ACTION_IF (cbr_tempus_haste_id < 2100 OR cbr_tempus_haste_id > 2999) BEGIN
-      FAIL @9404
-    END
-    OUTER_SET cbr_tempus_haste_slot = cbr_tempus_haste_id - 2000
-    OUTER_SPRINT cbr_tempus_haste_resref ~SPWI%cbr_tempus_haste_slot%~
-
-    ACTION_IF !(FILE_EXISTS_IN_GAME ~%cbr_tempus_divine_resref%.SPL~) BEGIN
-      FAIL @9405
-    END
-    ACTION_IF !(FILE_EXISTS_IN_GAME ~%cbr_tempus_haste_resref%.SPL~) BEGIN
-      FAIL @9406
-    END
+    LAF cbr_setup_spell STR_VAR symbol = ~CLERIC_HOLY_POWER~ RET cbr_tempus_divine_resref = resref END
+    LAF cbr_setup_spell STR_VAR symbol = ~WIZARD_IMPROVED_HASTE~ RET cbr_tempus_haste_resref = resref END
 
     // Materialize the six file-backed inputs at their canonical override
     // paths. Do not add BUT_ONLY: an unchanged BIFF-only input still has to
@@ -70,12 +95,12 @@ ALWAYS
     // SPELL.IDS into override would trigger WeiDU's IDS-tracking side file
     // (SPELL.IDS.INSTALLED); the library skips only that one re-validation
     // via spell_ids=skip.
-    COPY_EXISTING ~OHTEMPUS.2DA~ ~override/OHTEMPUS.2DA~
-    COPY_EXISTING ~OHTMPS1.SPL~ ~override/OHTMPS1.SPL~
-    COPY_EXISTING ~%cbr_tempus_divine_resref%.SPL~ ~override/%cbr_tempus_divine_resref%.SPL~
-    COPY_EXISTING ~%cbr_tempus_haste_resref%.SPL~ ~override/%cbr_tempus_haste_resref%.SPL~
-    COPY_EXISTING ~SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
-    COPY_EXISTING ~SPLPROT.2DA~ ~override/SPLPROT.2DA~
+    LAF cbr_setup_stage STR_VAR file = ~OHTEMPUS.2DA~ END
+    LAF cbr_setup_stage STR_VAR file = ~OHTMPS1.SPL~ END
+    LAF cbr_setup_stage STR_VAR file = ~%cbr_tempus_divine_resref%.SPL~ END
+    LAF cbr_setup_stage STR_VAR file = ~%cbr_tempus_haste_resref%.SPL~ END
+    LAF cbr_setup_ids STR_VAR file = ~SPLSTATE.IDS~ END
+    LAF cbr_setup_stage STR_VAR file = ~SPLPROT.2DA~ END
 
     LAF cbr_apply_tempus_holy_power
       STR_VAR
@@ -97,7 +122,7 @@ ALWAYS
   DEFINE_ACTION_MACRO cbr_install_tempus_spec_apr_eeex_component
   BEGIN
     OUTER_SET cbr_sae_resolved_kit_id = IDS_OF_SYMBOL (~kit~ ~OHTEMPUS~)
-    COPY_EXISTING ~SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
+    LAF cbr_setup_ids STR_VAR file = ~SPLSTATE.IDS~ END
     LAF cbr_allocate_tempus_spec_apr_state
       INT_VAR planned_value = 242
       STR_VAR resource_dir = ~override~
@@ -132,17 +157,12 @@ LANGUAGE ~English~ ~english~ ~chriz-bg-rebalance/languages/english/setup.tra~
 // ============================================================
 
 BEGIN @100 DESIGNATED 100 GROUP @1100 LABEL ~cbr_scs_telekinetic_storm_save_fix~
-REQUIRE_PREDICATE (IDS_OF_SYMBOL (~spell~ ~WIZARD_TELEKINETIC_STORM~) > 2000) @9100
-
 // SCS allocates the spell slot at install time — resolve the resref via spell.ids.
 // spell.ids value 2LNN (2=wizard, L=level, NN=number) maps to SPWI(LNN).spl.
 OUTER_SET cbr_tks_num = (IDS_OF_SYMBOL (~spell~ ~WIZARD_TELEKINETIC_STORM~)) - 2000
-OUTER_SPRINT cbr_tks_res ~SPWI%cbr_tks_num%~
+LAF cbr_setup_spell STR_VAR symbol = ~WIZARD_TELEKINETIC_STORM~ RET cbr_tks_res = resref END
 
-ACTION_IF NOT (FILE_EXISTS_IN_GAME ~%cbr_tks_res%.spl~) BEGIN
-  FAIL ~spell.ids maps WIZARD_TELEKINETIC_STORM to %cbr_tks_res%.spl, but that file does not exist in the game.~
-END
-
+ACTION_IF FILE_EXISTS_IN_GAME ~%cbr_tks_res%.spl~ BEGIN
 // Upstream bug (SCS stratagems/newspell/extra_arcane_spells.tpa, telekinetic_storm):
 // the op12 damage effect sets s_save_for_half=1 but omits s_save_vs_spell=1 and
 // s_bypass_mirror_image=1 (sibling spells stormbolts/icy_ray in the same file have both).
@@ -151,84 +171,106 @@ END
 // ("Saving Throw: 1/2"). Fix: OR save-vs-spell (bit 0) + EE bypass-mirror-image (bit 24)
 // into the savetype dword of every save-for-half op12 effect, in all scaled ability headers.
 COPY_EXISTING ~%cbr_tks_res%.spl~ ~override~
-  READ_LONG  0x64 ext_off
-  READ_SHORT 0x68 ext_cnt
-  READ_LONG  0x6a fx_off
+  LPF cbr_em_validate_spl RET readable ext_off = ability_offset ext_cnt = ability_count fx_off = effect_offset END
+  // ADD_SPELL_EFFECT does not move the casting index when inserting before
+  // that slice. Give each ability its own slice after the casting effects.
+  PATCH_IF readable BEGIN
+    LPF cbr_em_prepare_spl END
+  END
+  LPF cbr_em_validate_spl RET readable ext_off = ability_offset ext_cnt = ability_count fx_off = effect_offset END
   FOR (a = 0; a < ext_cnt; ++a) BEGIN
     // empirical ability layout: 0x1e = nFx, 0x20 = first fx index (IESDP documents these
     // two bytes earlier; the empirical layout is what shipping engines/WeiDU use)
     READ_SHORT (ext_off + a * 0x28 + 0x1e) nfx
     READ_SHORT (ext_off + a * 0x28 + 0x20) first
+    SET cbr_tks_damage = 0
     FOR (e = 0; e < nfx; ++e) BEGIN
       SET eo = fx_off + ((first + e) * 0x30)
       READ_SHORT eo fx_opcode
       PATCH_IF (fx_opcode = 12) BEGIN
+        SET cbr_tks_damage = 1
         READ_LONG (eo + 0x2c) fx_special
-        PATCH_IF ((fx_special BAND 0x100) = 0x100) BEGIN   // save-for-half flag present
-          READ_LONG (eo + 0x24) fx_savetype
-          WRITE_LONG (eo + 0x24) (fx_savetype BOR 0x1000001)
-        END
+        WRITE_LONG (eo + 0x2c) (fx_special BOR 0x100)
+        READ_LONG (eo + 0x24) fx_savetype
+        WRITE_LONG (eo + 0x24) (fx_savetype BOR 0x1000001)
       END
+    END
+    PATCH_IF NOT cbr_tks_damage BEGIN
+      // SCS's authored damage when an edited ability has no damage effect.
+      READ_SHORT (ext_off + a * 0x28 + 0x10) cbr_tks_level
+      SET cbr_tks_dice = (cbr_tks_level <= 1 ? 16 : cbr_tks_level)
+      LPF ADD_SPELL_EFFECT INT_VAR header = a + 1 opcode = 12 target = 2 power = 8
+        parameter2 = 4194304 timing = 1 resist_dispel = 1 dicenumber = cbr_tks_dice
+        dicesize = 6 savingthrow = 16777217 special = 256 END
+      READ_LONG 0x64 ext_off READ_LONG 0x6a fx_off
     END
   END
   BUT_ONLY
 
+END ELSE BEGIN PRINT ~CBR 100: Telekinetic Storm is absent; continuing.~ END
+
 BEGIN @101 DESIGNATED 101 GROUP @1100 LABEL ~cbr_scs_freedom_scrolls~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9101
-// The tweak belongs to SCS's spell-tweak family, but its rationale (liches love
-// Imprisonment) also holds for AI-only installs — accept either footprint.
-REQUIRE_PREDICATE ((MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 2000)
-                OR (MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 5900)) @9102
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~ribald.sto~) @9103
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~scrl9z.itm~) @9103
-
 // Upstream: SCS v34.3 spell tweak `freedom_scrolls` put 5 Scrolls of Freedom (scrl9z,
 // teaches WIZARD_FREEDOM/SPWI917) into shop08 (Galoomp's Books) AND ribald (Adventurer's
 // Mart). The v35 reorganization dropped the tweak's dispatch row from
 // spell/data/spelltweaks.2da (so it never runs) and dropped ribald from the dead code too.
 // Confirmed unintentional. Restore the Adventurer's Mart half with upstream's own item
-// parameters, only if the store doesn't already offer the scroll (idempotent over a
-// re-run, a v34 install, or a future fixed SCS). See research/03.
+// parameters, including an edited, depleted or duplicated sale row. See research/03.
+ACTION_IF FILE_EXISTS_IN_GAME ~ribald.sto~ AND FILE_EXISTS_IN_GAME ~scrl9z.itm~ BEGIN
 COPY_EXISTING ~ribald.sto~ ~override~
+  SET cbr_st_readable = BUFFER_LENGTH >= 0x9c
+  PATCH_IF cbr_st_readable BEGIN
   READ_LONG 0x34 sale_off
   READ_LONG 0x38 sale_cnt
+  PATCH_IF sale_cnt = 0 AND sale_off = 0 BEGIN
+    SET sale_off = BUFFER_LENGTH
+    WRITE_LONG 0x34 sale_off
+  END
+  SET cbr_st_readable = sale_off >= 0x9c AND sale_off + sale_cnt * 0x1c <= BUFFER_LENGTH
+  END
+  PATCH_IF cbr_st_readable BEGIN
   SET cbr_found = 0 - 1
-  SET cbr_avail = 0
   FOR (i = 0; i < sale_cnt; ++i) BEGIN
-    READ_ASCII (sale_off + i * 0x1c) cbr_res (8)
-    PATCH_IF (~%cbr_res%~ STRING_EQUAL_CASE ~scrl9z~) AND (cbr_found < 0) BEGIN
-      SET cbr_found = i
-      READ_LONG (sale_off + i * 0x1c + 0x14) cbr_qty   // amount in stock
-      READ_LONG (sale_off + i * 0x1c + 0x18) cbr_inf   // infinite-supply flag
-      PATCH_IF (cbr_qty > 0) OR (cbr_inf > 0) BEGIN
-        SET cbr_avail = 1
+    READ_ASCII (sale_off + i * 0x1c) cbr_res (8) NULL
+    PATCH_IF ~%cbr_res%~ STRING_EQUAL_CASE ~scrl9z~ BEGIN
+      SET at = sale_off + i * 0x1c
+      PATCH_IF cbr_found < 0 BEGIN
+        SET cbr_found = i
+        WRITE_ASCII at ~SCRL9Z~ #8
+        WRITE_SHORT (at + 8) 0
+        WRITE_SHORT (at + 10) 1
+        WRITE_SHORT (at + 12) 0
+        WRITE_SHORT (at + 14) 0
+        WRITE_LONG (at + 16) 1
+        WRITE_LONG (at + 20) 5
+        WRITE_LONG (at + 24) 0
+      END ELSE BEGIN
+        DELETE_BYTES at 0x1c
+        --sale_cnt --i
+        WRITE_LONG 0x38 sale_cnt
+        PATCH_FOR_EACH field IN 0x2c 0x4c 0x70 BEGIN
+          READ_LONG field offset
+          PATCH_IF offset >= at + 0x1c BEGIN WRITE_LONG field (offset - 0x1c) END
+        END
       END
     END
   END
-  PATCH_IF (cbr_found < 0) BEGIN
+  PATCH_IF cbr_found < 0 BEGIN
     ADD_STORE_ITEM ~scrl9z~ AFTER ~scrla5~ #1 #0 #0 ~IDENTIFIED~ #5
-    PATCH_PRINT ~cbr 101: added 5x scrl9z (Scroll of Freedom) to the Adventurer's Mart.~
-  END ELSE PATCH_IF (cbr_avail = 0) BEGIN
-    WRITE_LONG (sale_off + cbr_found * 0x1c + 0x14) 5
-    PATCH_PRINT ~cbr 101: Adventurer's Mart lists scrl9z at zero stock - restocked to 5.~
-  END ELSE BEGIN
-    PATCH_PRINT ~cbr 101: Adventurer's Mart already sells scrl9z - nothing to do.~
   END
+  END ELSE BEGIN PATCH_PRINT ~CBR 101: unreadable store tables; continuing.~ END
   BUT_ONLY
+
+END ELSE BEGIN PRINT ~CBR 101: the store or Freedom scroll is absent; continuing.~ END
 
 BEGIN @110 DESIGNATED 110 GROUP @1100 LABEL ~cbr_scs_dragon_vorpal~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9110
-REQUIRE_PREDICATE (MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 6540) @9111
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9112
 
 PRINT @1110
-// Every existing encounter and reserved payload is validated before publishing
-// the first runtime file. Native death handling retains anti-chunking settings.
-LAF cbr_apply_dragon_vorpal_scripts INT_VAR apply = 0 END
-LAF cbr_apply_dragon_vorpal_effects
-  STR_VAR phase = ~preflight~ resource_dir = ~override~
-          template_file = ~chriz-bg-rebalance/lua/M_CBRDVG.lua~
-END
+// Apply the decided resources and scripts. Native death handling retains
+// anti-chunking settings; no separate content preflight gates these writers.
 LAF cbr_apply_dragon_vorpal_effects
   STR_VAR phase = ~full~ resource_dir = ~override~
           template_file = ~chriz-bg-rebalance/lua/M_CBRDVG.lua~
@@ -237,7 +279,6 @@ LAF cbr_apply_dragon_vorpal_scripts INT_VAR apply = 1 END
 
 BEGIN @111 DESIGNATED 111 GROUP @1100 LABEL ~cbr_scs_dragon_wing_buffet~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9110
-REQUIRE_PREDICATE (MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 6540) @9111
 LAF cbr_apply_dragon_wing_buffet END
 
 BEGIN @120
@@ -246,78 +287,18 @@ GROUP @1100
 LABEL ~cbr_scs_sr_weapon_protection_semantics~
 
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9120
-REQUIRE_PREDICATE
-  (MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 6030)
-  @9121
 // SCS necessarily publishes its final SPELL.IDS to override. The production
 // library takes an explicit path so its exact parser is shared with the
 // hermetic fixture harness and never relies on a hardcoded SR resref.
-REQUIRE_PREDICATE
-  ((FILE_EXISTS_IN_GAME ~SPELL.IDS~) AND (FILE_EXISTS ~override/SPELL.IDS~))
-  @9122
-REQUIRE_PREDICATE
-  ((IDS_OF_SYMBOL (~spell~ ~WIZARD_PROTECTION_FROM_MAGIC_WEAPONS~) >= 2000)
-   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_PROTECTION_FROM_MAGIC_WEAPONS~) <= 2999)
-   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_MANTLE~) >= 2000)
-   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_MANTLE~) <= 2999)
-   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_MANTLE~) >= 2000)
-   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_MANTLE~) <= 2999)
-   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_MOMENT_OF_PRESCIENCE~) >= 2000)
-   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_MOMENT_OF_PRESCIENCE~) <= 2999)
-   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_ABSOLUTE_IMMUNITY~) >= 2000)
-   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_ABSOLUTE_IMMUNITY~) <= 2999)
-   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_BREACH~) >= 2000)
-   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_BREACH~) <= 2999)
-   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_DISPEL_MAGIC~) >= 2000)
-   AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_DISPEL_MAGIC~) <= 2999))
-  @9123
-REQUIRE_PREDICATE
-  (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_MANTLE~)
-   = IDS_OF_SYMBOL (~spell~ ~WIZARD_MOMENT_OF_PRESCIENCE~))
-  @9125
-
-OUTER_SET cbr_120_pfmw_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_PROTECTION_FROM_MAGIC_WEAPONS~)
-OUTER_SET cbr_120_mantle_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_MANTLE~)
-OUTER_SET cbr_120_improved_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_MANTLE~)
-OUTER_SET cbr_120_mop_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_MOMENT_OF_PRESCIENCE~)
-OUTER_SET cbr_120_absolute_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_ABSOLUTE_IMMUNITY~)
-OUTER_SET cbr_120_breach_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_BREACH~)
-OUTER_SET cbr_120_dispel_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_DISPEL_MAGIC~)
-OUTER_SET cbr_120_pfmw_slot = cbr_120_pfmw_id - 2000
-OUTER_SET cbr_120_mantle_slot = cbr_120_mantle_id - 2000
-OUTER_SET cbr_120_improved_slot = cbr_120_improved_id - 2000
-OUTER_SET cbr_120_absolute_slot = cbr_120_absolute_id - 2000
-OUTER_SET cbr_120_breach_slot = cbr_120_breach_id - 2000
-OUTER_SET cbr_120_dispel_slot = cbr_120_dispel_id - 2000
-OUTER_SPRINT cbr_120_pfmw_resref ~SPWI%cbr_120_pfmw_slot%~
-OUTER_SPRINT cbr_120_mantle_resref ~SPWI%cbr_120_mantle_slot%~
-OUTER_SPRINT cbr_120_improved_resref ~SPWI%cbr_120_improved_slot%~
-OUTER_SPRINT cbr_120_absolute_resref ~SPWI%cbr_120_absolute_slot%~
-OUTER_SPRINT cbr_120_breach_resref ~SPWI%cbr_120_breach_slot%~
-OUTER_SPRINT cbr_120_dispel_resref ~SPWI%cbr_120_dispel_slot%~
-
-ACTION_IF !((FILE_EXISTS_IN_GAME ~%cbr_120_pfmw_resref%.SPL~)
-         AND (FILE_EXISTS_IN_GAME ~%cbr_120_mantle_resref%.SPL~)
-         AND (FILE_EXISTS_IN_GAME ~%cbr_120_improved_resref%.SPL~)
-         AND (FILE_EXISTS_IN_GAME ~%cbr_120_absolute_resref%.SPL~)
-         AND (FILE_EXISTS_IN_GAME ~%cbr_120_breach_resref%.SPL~)
-         AND (FILE_EXISTS_IN_GAME ~%cbr_120_dispel_resref%.SPL~)) BEGIN
-  FAIL @9124
-END
-
-// Materialize only the six classifier/counter roots. They are normally
-// already loose final resources after SR/SCS; COPY_EXISTING also makes the
-// public component work when one originates in a BIFF, while retaining
-// normal WeiDU backup and rollback behavior.
-ACTION_FOR_EACH cbr_120_root IN
-  ~%cbr_120_pfmw_resref%~
-  ~%cbr_120_mantle_resref%~
-  ~%cbr_120_improved_resref%~
-  ~%cbr_120_absolute_resref%~
-  ~%cbr_120_breach_resref%~
-  ~%cbr_120_dispel_resref%~
+LAF cbr_setup_ids STR_VAR file = ~SPELL.IDS~ END
+ACTION_FOR_EACH cbr_120_symbol IN
+  WIZARD_PROTECTION_FROM_MAGIC_WEAPONS WIZARD_MANTLE WIZARD_IMPROVED_MANTLE
+  WIZARD_MOMENT_OF_PRESCIENCE WIZARD_ABSOLUTE_IMMUNITY WIZARD_BREACH WIZARD_DISPEL_MAGIC
 BEGIN
-  COPY_EXISTING ~%cbr_120_root%.SPL~ ~override/%cbr_120_root%.SPL~
+  LAF cbr_setup_spell STR_VAR symbol = EVAL ~%cbr_120_symbol%~ RET cbr_120_root = resref END
+  ACTION_IF NOT (~%cbr_120_root%~ STR_EQ ~~) BEGIN
+    LAF cbr_setup_stage STR_VAR file = EVAL ~%cbr_120_root%.SPL~ END
+  END
 END
 
 LAF cbr_apply_scs_weapon_protection_semantics
@@ -347,21 +328,22 @@ REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9130
 REQUIRE_PREDICATE
   (FILE_EXISTS_IN_GAME ~M___EEex.lua~)
   @9134
-REQUIRE_PREDICATE
-  (MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 6030)
-  @9131
-REQUIRE_PREDICATE
-  ((FILE_EXISTS_IN_GAME ~SPELL.IDS~) AND (FILE_EXISTS ~override/SPELL.IDS~))
-  @9135
-REQUIRE_PREDICATE
-  (FILE_EXISTS ~weidu_external/data/stratagems/instant_prebuff_spells.2da~)
-  @9136
-
 // The install-time compiler resolves every candidate from the final SPELL.IDS,
 // validates the installed SPL semantics and SCS cosmetic-free delivery map,
 // then stamps exactly one backup-aware M_ autoload module. It does not patch
 // SCS scripts or any spell resource, and it remains independent of component
 // 120 while importing the same semantic classifier.
+LAF cbr_setup_ids STR_VAR file = ~SPELL.IDS~ END
+ACTION_FOR_EACH cbr_121_symbol IN
+  CLERIC_IMPERVIOUS_SANCTITY_OF_MIND CLERIC_IRONSKIN WIZARD_ARMOR WIZARD_MIND_BLANK
+  WIZARD_NON_DETECTION WIZARD_STONE_SKIN WIZARD_ABSOLUTE_IMMUNITY
+  WIZARD_IMPROVED_MANTLE WIZARD_MANTLE WIZARD_PROTECTION_FROM_MAGIC_WEAPONS WIZARD_PROJECT_IMAGE
+BEGIN
+  LAF cbr_setup_spell STR_VAR symbol = EVAL ~%cbr_121_symbol%~ RET cbr_121_root = resref END
+  ACTION_IF NOT (~%cbr_121_root%~ STR_EQ ~~) BEGIN
+    LAF cbr_setup_stage STR_VAR file = EVAL ~%cbr_121_root%.SPL~ END
+  END
+END
 LAF cbr_install_ambient_readiness_runtime
   STR_VAR
     spell_table = ~chriz-bg-rebalance/data/ambient_readiness_spells.2da~
@@ -383,8 +365,6 @@ PRINT ~cbr 121: shipped M_CBRRDY.lua (ambient=%cbr_121_ambient_count%; urgent=%c
 
 BEGIN @200 DESIGNATED 200 SUBCOMPONENT @1201 GROUP @1200 LABEL ~cbr_sr_hardiness_40~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9200
-REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 65) @9201
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~spcl907.spl~ AND FILE_EXISTS_IN_GAME ~spwish12.spl~) @9202
 REQUIRE_PREDICATE NOT ((MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 200)
   OR (MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 201)
   OR (MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 202)) @9203
@@ -392,8 +372,6 @@ LAF cbr_install_sr_hardiness INT_VAR physical = 40 extra_resistance = 0 END
 
 BEGIN @201 DESIGNATED 201 SUBCOMPONENT @1201 GROUP @1200 LABEL ~cbr_sr_hardiness_30~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9200
-REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 65) @9201
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~spcl907.spl~ AND FILE_EXISTS_IN_GAME ~spwish12.spl~) @9202
 REQUIRE_PREDICATE NOT ((MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 200)
   OR (MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 201)
   OR (MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 202)) @9203
@@ -401,8 +379,6 @@ LAF cbr_install_sr_hardiness INT_VAR physical = 30 extra_resistance = 0 END
 
 BEGIN @202 DESIGNATED 202 GROUP @1200 LABEL ~cbr_sr_hardiness_extra_resistance~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9200
-REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 65) @9201
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~spcl907.spl~ AND FILE_EXISTS_IN_GAME ~spwish12.spl~) @9202
 REQUIRE_PREDICATE ((MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 200)
   OR (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 201)) @9204
 REQUIRE_PREDICATE NOT ((MOD_IS_INSTALLED ~cbr_sr_hardiness/setup-cbr_sr_hardiness.tp2~ 200)
@@ -418,14 +394,12 @@ END
 // SR anti-magic: independent choices; Spellstrike does not require EEex.
 BEGIN @210 DESIGNATED 210 GROUP @1200 LABEL ~cbr_sr_pierce_magic~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9210
-REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 0) @9211
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9212
 REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~cbr_sr_antimagic/setup-cbr_sr_antimagic.tp2~ 210) @9213
 LAF cbr_install_sr_antimagic INT_VAR component = 210 END
 
 BEGIN @211 DESIGNATED 211 GROUP @1200 LABEL ~cbr_sr_spellstrike~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9210
-REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 0) @9211
 REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~cbr_sr_antimagic/setup-cbr_sr_antimagic.tp2~ 211) @9213
 LAF cbr_install_sr_antimagic INT_VAR component = 211 END
 
@@ -438,78 +412,52 @@ GROUP @1300
 LABEL ~cbr_emotion_hope_courage_exclusion~
 
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9300
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPELL.IDS~)
-               AND (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~)
-               AND (FILE_EXISTS_IN_GAME ~MISSILE.IDS~)
-               AND (FILE_EXISTS_IN_GAME ~PROJECTL.IDS~)
-               AND (FILE_EXISTS_IN_GAME ~STATDESC.2DA~)) @9301
+ACTION_FOR_EACH cbr_em_ids IN SPELL.IDS SPLSTATE.IDS MISSILE.IDS PROJECTL.IDS BEGIN
+  ACTION_IF NOT FILE_EXISTS_IN_GAME ~%cbr_em_ids%~ BEGIN
+    LAF cbr_setup_ids STR_VAR file = EVAL ~%cbr_em_ids%~ END
+  END
+END
+ACTION_IF NOT FILE_EXISTS_IN_GAME ~STATDESC.2DA~ BEGIN
+  <<<<<<<< .../cbr-statdesc.2da
+2DA V1.0
+-1
+DESCRIPTION BAM_FILE
+>>>>>>>>
+  COPY ~.../cbr-statdesc.2da~ ~override/STATDESC.2DA~
+END
 
 // A one-process --force-uninstall/--force-install run can retain the IDS map
 // loaded by the just-uninstalled component.  Refresh it before classifying
 // symbols so stale ADD_SPELL rows cannot masquerade as missing resources.
 CLEAR_IDS_MAP
 
-// Resolve every role through its installed symbol.  Existing beneficial
-// symbols must already occupy wizard level-four slots; rejecting a bad
-// mapping before ADD_SPELL prevents WeiDU from silently relocating it.
-OUTER_SET cbr_em_courage_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_EMOTION_COURAGE~)
-OUTER_SET cbr_em_hope_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_EMOTION_HOPE~)
-OUTER_SET cbr_em_courage_existing = (cbr_em_courage_id >= 2400 && cbr_em_courage_id <= 2499)
-OUTER_SET cbr_em_hope_existing = (cbr_em_hope_id >= 2400 && cbr_em_hope_id <= 2499)
-ACTION_IF ((cbr_em_courage_id >= 0) && (cbr_em_courage_existing = 0))
-       OR ((cbr_em_hope_id >= 0) && (cbr_em_hope_existing = 0)) BEGIN
-  FAIL @9302
-END
+// Existing symbol slots are kept regardless of spell level or prior mechanics.
+LAF cbr_setup_spell STR_VAR symbol = ~WIZARD_EMOTION_COURAGE~ RET cbr_em_courage_resref = resref END
+LAF cbr_setup_spell STR_VAR symbol = ~WIZARD_EMOTION_HOPE~ RET cbr_em_hope_resref = resref END
+OUTER_SET cbr_em_courage_existing = FILE_EXISTS_IN_GAME ~%cbr_em_courage_resref%.SPL~
+OUTER_SET cbr_em_hope_existing = FILE_EXISTS_IN_GAME ~%cbr_em_hope_resref%.SPL~
 
-OUTER_SPRINT cbr_em_courage_resref ~~
-OUTER_SPRINT cbr_em_hope_resref ~~
-ACTION_IF (cbr_em_courage_existing = 1) BEGIN
-  LAF RES_NUM_OF_SPELL_NAME
-    STR_VAR spell_name = ~WIZARD_EMOTION_COURAGE~
-    RET cbr_em_courage_resref = spell_res
-  END
-  ACTION_IF !(FILE_EXISTS_IN_GAME ~%cbr_em_courage_resref%.SPL~) BEGIN
-    FAIL @9303
-  END
-  COPY_EXISTING - ~%cbr_em_courage_resref%.SPL~ nowhere
-    LPF cbr_em_validate_beneficial END
-  BUT_ONLY
-END
-ACTION_IF (cbr_em_hope_existing = 1) BEGIN
-  LAF RES_NUM_OF_SPELL_NAME
-    STR_VAR spell_name = ~WIZARD_EMOTION_HOPE~
-    RET cbr_em_hope_resref = spell_res
-  END
-  ACTION_IF !(FILE_EXISTS_IN_GAME ~%cbr_em_hope_resref%.SPL~) BEGIN
-    FAIL @9303
-  END
-  COPY_EXISTING - ~%cbr_em_hope_resref%.SPL~ nowhere
-    LPF cbr_em_validate_beneficial END
-  BUT_ONLY
-END
-
-// Standalone donors and adverse counterparts are optional unless a missing
-// beneficial spell needs them.  RES_NUM_OF_SPELL_NAME is called only for a
-// symbol which IDS_OF_SYMBOL proved present.
+// Distribution anchors and adverse counterparts are optional. Resolve their
+// addresses through the final symbol table.
 OUTER_SPRINT cbr_em_enchanted_resref ~~
 OUTER_SET cbr_em_enchanted_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_ENCHANTED_WEAPON~)
 ACTION_IF (cbr_em_enchanted_id >= 0) BEGIN
-  LAF RES_NUM_OF_SPELL_NAME STR_VAR spell_name = ~WIZARD_ENCHANTED_WEAPON~
-    RET cbr_em_enchanted_resref = spell_res END
+  LAF cbr_setup_spell STR_VAR symbol = ~WIZARD_ENCHANTED_WEAPON~
+    RET cbr_em_enchanted_resref = resref END
 END
 
 OUTER_SPRINT cbr_em_fear_resref ~~
 OUTER_SET cbr_em_fear_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_EMOTION_FEAR~)
 ACTION_IF (cbr_em_fear_id >= 0) BEGIN
-  LAF RES_NUM_OF_SPELL_NAME STR_VAR spell_name = ~WIZARD_EMOTION_FEAR~
-    RET cbr_em_fear_resref = spell_res END
+  LAF cbr_setup_spell STR_VAR symbol = ~WIZARD_EMOTION_FEAR~
+    RET cbr_em_fear_resref = resref END
 END
 
 OUTER_SPRINT cbr_em_horror_resref ~~
 OUTER_SET cbr_em_horror_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_HORROR~)
 ACTION_IF (cbr_em_horror_id >= 0) BEGIN
-  LAF RES_NUM_OF_SPELL_NAME STR_VAR spell_name = ~WIZARD_HORROR~
-    RET cbr_em_horror_resref = spell_res END
+  LAF cbr_setup_spell STR_VAR symbol = ~WIZARD_HORROR~
+    RET cbr_em_horror_resref = resref END
 END
 
 OUTER_SPRINT cbr_em_innate_horror_resref ~~
@@ -517,8 +465,8 @@ OUTER_SET cbr_em_innate_horror_id = IDS_OF_SYMBOL (~spell~ ~INNATE_HORROR~)
 ACTION_IF (cbr_em_innate_horror_id >= 3000 && cbr_em_innate_horror_id <= 3999) BEGIN
   // The standard spell namespace encodes SPIN### with a leading 3.  Let
   // WeiDU perform the symbolic conversion without fixing a resref here.
-  LAF RES_NUM_OF_SPELL_NAME STR_VAR spell_name = ~INNATE_HORROR~
-    RET cbr_em_innate_horror_resref = spell_res END
+  LAF cbr_setup_spell STR_VAR symbol = ~INNATE_HORROR~
+    RET cbr_em_innate_horror_resref = resref END
 END ELSE ACTION_IF (cbr_em_innate_horror_id >= 100 && cbr_em_innate_horror_id <= 999) BEGIN
   // Retain compatibility with older nonstandard IDS rows that store the
   // three-digit SPIN suffix directly.
@@ -528,15 +476,15 @@ END
 OUTER_SPRINT cbr_em_hopeless_resref ~~
 OUTER_SET cbr_em_hopeless_id = IDS_OF_SYMBOL (~spell~ ~WIZARD_EMOTION_HOPELESSNESS~)
 ACTION_IF (cbr_em_hopeless_id >= 0) BEGIN
-  LAF RES_NUM_OF_SPELL_NAME STR_VAR spell_name = ~WIZARD_EMOTION_HOPELESSNESS~
-    RET cbr_em_hopeless_resref = spell_res END
+  LAF cbr_setup_spell STR_VAR symbol = ~WIZARD_EMOTION_HOPELESSNESS~
+    RET cbr_em_hopeless_resref = resref END
 END
 
 OUTER_SPRINT cbr_em_symbol_resref ~~
 OUTER_SET cbr_em_symbol_id = IDS_OF_SYMBOL (~spell~ ~CLERIC_SYMBOL_HOPELESSNESS~)
 ACTION_IF (cbr_em_symbol_id >= 0) BEGIN
-  LAF RES_NUM_OF_SPELL_NAME STR_VAR spell_name = ~CLERIC_SYMBOL_HOPELESSNESS~
-    RET cbr_em_symbol_resref = spell_res END
+  LAF cbr_setup_spell STR_VAR symbol = ~CLERIC_SYMBOL_HOPELESSNESS~
+    RET cbr_em_symbol_resref = resref END
 END
 
 OUTER_SET cbr_em_have_fear = !(~%cbr_em_fear_resref%~ STR_EQ ~~)
@@ -550,9 +498,8 @@ OUTER_SET cbr_em_have_hopeless = !(~%cbr_em_hopeless_resref%~ STR_EQ ~~)
 OUTER_SET cbr_em_have_symbol = !(~%cbr_em_symbol_resref%~ STR_EQ ~~)
                              && FILE_EXISTS_IN_GAME ~%cbr_em_symbol_resref%.SPL~
 
-// Validate every resource that this component will rewrite before allocating
-// a spell slot or resolving a new TLK string.  Horror and Innate Horror are
-// cleanse-only: their presence is recorded, but BIF-only files stay BIF-only.
+// Read bounded tables. Horror and Innate Horror are cleanse-only: their
+// presence is recorded, but BIF-only files stay BIF-only.
 ACTION_IF (cbr_em_have_fear = 1) BEGIN
   COPY_EXISTING - ~%cbr_em_fear_resref%.SPL~ nowhere
     LPF cbr_em_validate_adverse
@@ -580,83 +527,23 @@ END
 
 OUTER_SET cbr_em_need_courage = 1 - cbr_em_courage_existing
 OUTER_SET cbr_em_need_hope = 1 - cbr_em_hope_existing
-// Validate the complete status-table shape before ADD_SPELL or any TLK
-// allocation. WeiDU rolls file mutations back on failure, but deliberately
-// retains appended TLK strings, so this must remain an early read-only check.
-ACTION_IF (cbr_em_need_courage = 1 || cbr_em_need_hope = 1) BEGIN
-  COPY_EXISTING - ~STATDESC.2DA~ nowhere
-    COUNT_2DA_COLS cbr_em_sd_pre_cols
-    PATCH_IF (cbr_em_sd_pre_cols != 3) BEGIN
-      PATCH_FAIL @9313
-    END
-    READ_2DA_ENTRIES_NOW cbr_em_sd_pre_rows cbr_em_sd_pre_cols
-  BUT_ONLY
-END
-ACTION_IF ((cbr_em_need_courage = 1) OR (cbr_em_need_hope = 1))
-       && (cbr_em_have_hopeless = 0) BEGIN
-  FAIL @9304
-END
-ACTION_IF (cbr_em_need_courage = 1) && (FILE_EXISTS_IN_GAME ~CBRCRGSC.ITM~) BEGIN
-  FAIL @9308
-END
-ACTION_IF (cbr_em_need_hope = 1) && (FILE_EXISTS_IN_GAME ~CBRHOPSC.ITM~) BEGIN
-  FAIL @9308
-END
-ACTION_IF (cbr_em_need_courage = 1 || cbr_em_need_hope = 1) BEGIN
-  ACTION_IF (IDS_OF_SYMBOL (~projectl~ ~CBR301P~) >= 0)
-         || FILE_EXISTS_IN_GAME ~CBR301P.PRO~
-         || FILE_EXISTS_IN_GAME ~CBR301V.VVC~
-         || FILE_EXISTS_IN_GAME ~CBR301A.BAM~
-         || FILE_EXISTS_IN_GAME ~CBR301W.WAV~
-         || FILE_EXISTS_IN_GAME ~CBR301E.WAV~ BEGIN
-    FAIL @9311
-  END
-END
-
-// Read-only KEY/override scroll discovery.  Unrelated or malformed ITMs are
-// ignored after proving exact one-owner coverage of every effect.  Existing
-// learning scrolls need opcode 147; standalone donors additionally need a
-// matching opcode 146/148 cast path.  Because the patch is read-only,
-// BUT_ONLY_IF_IT_CHANGES publishes no unrelated item.
+// Read-only KEY/override scroll discovery by learn target. Shared/reordered
+// slices and extra trailing bytes do not affect discovery. Every donor counts.
 OUTER_SET cbr_em_courage_scroll_count = 0
 OUTER_SET cbr_em_hope_scroll_count = 0
 OUTER_SET cbr_em_enchanted_donor_count = 0
 OUTER_SET cbr_em_hopeless_donor_count = 0
 OUTER_SPRINT cbr_em_enchanted_donor_scroll ~~
 OUTER_SPRINT cbr_em_hopeless_donor_scroll ~~
+OUTER_SET cbr_em_private_courage = 0
+OUTER_SET cbr_em_private_hope = 0
+ACTION_PHP_EACH cbr_em_enchanted_donors AS res => value BEGIN OUTER_SET $cbr_em_enchanted_donors(~%res%~) = 0 END
+ACTION_PHP_EACH cbr_em_hopeless_donors AS res => value BEGIN OUTER_SET $cbr_em_hopeless_donors(~%res%~) = 0 END
 COPY_EXISTING_REGEXP GLOB ~^.*\.[iI][tT][mM]$~ ~override~
-  SET cbr_em_si_valid = 0
-  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
-    READ_ASCII 0 cbr_em_si_signature (8)
-    PATCH_IF (~%cbr_em_si_signature%~ STRING_EQUAL ~ITM V1  ~) BEGIN
-      READ_LONG 0x64 cbr_em_si_ability_offset
-      READ_SHORT 0x68 cbr_em_si_ability_count
-      READ_LONG 0x6a cbr_em_si_effect_offset
-      READ_SHORT 0x6e cbr_em_si_global_first
-      READ_SHORT 0x70 cbr_em_si_global_count
-      SET cbr_em_si_ability_end = cbr_em_si_ability_offset + cbr_em_si_ability_count * 0x38
-      PATCH_IF (cbr_em_si_ability_offset >= 0x72
-             && cbr_em_si_ability_end <= BUFFER_LENGTH
-             && cbr_em_si_effect_offset >= cbr_em_si_ability_end
-             && cbr_em_si_effect_offset <= BUFFER_LENGTH
-             && ((BUFFER_LENGTH - cbr_em_si_effect_offset) MODULO 0x30) = 0) BEGIN
-        SET cbr_em_si_effect_count = (BUFFER_LENGTH - cbr_em_si_effect_offset) / 0x30
-        PATCH_IF (cbr_em_si_global_first + cbr_em_si_global_count
-               <= cbr_em_si_effect_count) BEGIN
-          SET cbr_em_si_valid = 1
-          FOR (cbr_em_si_i = 0; cbr_em_si_i < cbr_em_si_effect_count; ++cbr_em_si_i) BEGIN
-            SET $cbr_em_si_coverage(~%cbr_em_si_i%~) = 0
-          END
-          FOR (cbr_em_si_i = cbr_em_si_global_first;
-               cbr_em_si_i < cbr_em_si_global_first + cbr_em_si_global_count;
-               ++cbr_em_si_i) BEGIN
-            SET $cbr_em_si_coverage(~%cbr_em_si_i%~) =
-              $cbr_em_si_coverage(~%cbr_em_si_i%~) + 1
-          END
-        END
-      END
-    END
-  END
+  LPF cbr_em_validate_v1_partition INT_VAR ability_size = 0x38
+    RET cbr_em_si_valid = readable cbr_em_si_ability_offset = ability_offset
+      cbr_em_si_ability_count = ability_count cbr_em_si_effect_offset = effect_offset
+      cbr_em_si_effect_count = effect_count END
   SET cbr_em_si_courage = 0
   SET cbr_em_si_hope = 0
   SET cbr_em_si_enchanted = 0
@@ -672,12 +559,6 @@ COPY_EXISTING_REGEXP GLOB ~^.*\.[iI][tT][mM]$~ ~override~
         SET cbr_em_si_valid = 0
       END
       PATCH_IF (cbr_em_si_valid = 1) BEGIN
-        FOR (cbr_em_si_i = cbr_em_si_first;
-             cbr_em_si_i < cbr_em_si_first + cbr_em_si_count;
-             ++cbr_em_si_i) BEGIN
-          SET $cbr_em_si_coverage(~%cbr_em_si_i%~) =
-            $cbr_em_si_coverage(~%cbr_em_si_i%~) + 1
-        END
         FOR (cbr_em_si_i = 0; cbr_em_si_i < cbr_em_si_count; ++cbr_em_si_i) BEGIN
           SET cbr_em_si_fx = cbr_em_si_effect_offset + (cbr_em_si_first + cbr_em_si_i) * 0x30
           READ_SHORT cbr_em_si_fx cbr_em_si_opcode
@@ -687,11 +568,11 @@ COPY_EXISTING_REGEXP GLOB ~^.*\.[iI][tT][mM]$~ ~override~
             READ_ASCII (cbr_em_si_fx + 0x14) cbr_em_si_resource (8) NULL
           END
           PATCH_IF (cbr_em_si_opcode = 147) BEGIN
-            PATCH_IF (cbr_em_courage_existing = 1
+            PATCH_IF (!(~%cbr_em_courage_resref%~ STR_EQ ~~)
                    && ~%cbr_em_si_resource%~ STRING_EQUAL_CASE ~%cbr_em_courage_resref%~) BEGIN
               SET cbr_em_si_courage = 1
             END
-            PATCH_IF (cbr_em_hope_existing = 1
+            PATCH_IF (!(~%cbr_em_hope_resref%~ STR_EQ ~~)
                    && ~%cbr_em_si_resource%~ STRING_EQUAL_CASE ~%cbr_em_hope_resref%~) BEGIN
               SET cbr_em_si_hope = 1
             END
@@ -717,51 +598,35 @@ COPY_EXISTING_REGEXP GLOB ~^.*\.[iI][tT][mM]$~ ~override~
         END
       END
     END
-    PATCH_IF (cbr_em_si_valid = 1) BEGIN
-      FOR (cbr_em_si_i = 0; cbr_em_si_i < cbr_em_si_effect_count; ++cbr_em_si_i) BEGIN
-        PATCH_IF ($cbr_em_si_coverage(~%cbr_em_si_i%~) != 1) BEGIN
-          SET cbr_em_si_valid = 0
-        END
-      END
-    END
-  END
-  PATCH_IF (cbr_em_si_valid = 1 && cbr_em_si_courage = 1 && cbr_em_si_hope = 1) BEGIN
-    PATCH_FAIL ~CBR_EM_ERR_SCROLL_AMBIGUOUS~
   END
   PATCH_IF (cbr_em_si_valid = 1 && cbr_em_si_courage = 1) BEGIN
     SPRINT $cbr_em_courage_scroll(~%cbr_em_courage_scroll_count%~) ~%SOURCE_RES%~
     SET cbr_em_courage_scroll_count += 1
+    PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~CBRCRGSC~ BEGIN SET cbr_em_private_courage = 1 END
   END
   PATCH_IF (cbr_em_si_valid = 1 && cbr_em_si_hope = 1) BEGIN
     SPRINT $cbr_em_hope_scroll(~%cbr_em_hope_scroll_count%~) ~%SOURCE_RES%~
     SET cbr_em_hope_scroll_count += 1
+    PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~CBRHOPSC~ BEGIN SET cbr_em_private_hope = 1 END
   END
-  PATCH_IF (cbr_em_si_valid = 1
-         && cbr_em_si_enchanted = 1
-         && cbr_em_si_enchanted_cast = 1) BEGIN
+  PATCH_IF (cbr_em_si_valid = 1 && cbr_em_si_enchanted = 1) BEGIN
     SPRINT cbr_em_enchanted_donor_scroll ~%SOURCE_RES%~
+    TO_UPPER cbr_em_enchanted_donor_scroll
+    SET $cbr_em_enchanted_donors(~%cbr_em_enchanted_donor_scroll%~) = 1
     SET cbr_em_enchanted_donor_count += 1
   END
-  PATCH_IF (cbr_em_si_valid = 1
-         && cbr_em_si_hopeless = 1
-         && cbr_em_si_hopeless_cast = 1) BEGIN
+  PATCH_IF (cbr_em_si_valid = 1 && cbr_em_si_hopeless = 1) BEGIN
     SPRINT cbr_em_hopeless_donor_scroll ~%SOURCE_RES%~
+    TO_UPPER cbr_em_hopeless_donor_scroll
+    SET $cbr_em_hopeless_donors(~%cbr_em_hopeless_donor_scroll%~) = 1
     SET cbr_em_hopeless_donor_count += 1
   END
   BUT_ONLY_IF_IT_CHANGES
 
-ACTION_IF (cbr_em_need_courage = 1) && (cbr_em_enchanted_donor_count < 1) BEGIN
-  FAIL @9305
-END
-ACTION_IF (cbr_em_need_hope = 1) && (cbr_em_hopeless_donor_count < 1) BEGIN
-  FAIL @9306
-END
-ACTION_IF (cbr_em_need_courage = 1) && (cbr_em_enchanted_donor_count > 1) BEGIN
-  FAIL @9309
-END
-ACTION_IF (cbr_em_need_hope = 1) && (cbr_em_hopeless_donor_count > 1) BEGIN
-  FAIL @9310
-END
+OUTER_SET cbr_em_make_courage_scroll = cbr_em_need_courage OR cbr_em_courage_scroll_count = 0 OR cbr_em_private_courage
+OUTER_SET cbr_em_make_hope_scroll = cbr_em_need_hope OR cbr_em_hope_scroll_count = 0 OR cbr_em_private_hope
+ACTION_IF cbr_em_enchanted_donor_count = 0 BEGIN PRINT ~CBR Emotion: Courage distribution anchor is absent; continuing.~ END
+ACTION_IF cbr_em_hopeless_donor_count = 0 BEGIN PRINT ~CBR Emotion: Hope distribution anchor is absent; continuing.~ END
 
 // Publish the IWDEE Emotion delivery graph under private names.  IDPRO407 is
 // the party-capable area projectile used by the original spells; its linked
@@ -769,14 +634,8 @@ END
 // IWDification's public resource names or overwrites another provider.
 ACTION_IF (cbr_em_need_courage = 1 || cbr_em_need_hope = 1) BEGIN
   COPY ~chriz-bg-rebalance/resources/emotion_iwdee/IDPRO407.PRO~ ~override/CBR301P.PRO~
-    PATCH_IF (BUFFER_LENGTH < 0x224) BEGIN
-      PATCH_FAIL ~CBR_EM_ERR_IWD_PROJECTILE~
-    END
     WRITE_ASCII 0x21c ~CBR301V~ #8
   COPY ~chriz-bg-rebalance/resources/emotion_iwdee/#GENENCH.VVC~ ~override/CBR301V.VVC~
-    PATCH_IF (BUFFER_LENGTH < 0x80) BEGIN
-      PATCH_FAIL ~CBR_EM_ERR_IWD_VVC~
-    END
     WRITE_ASCII 0x08 ~CBR301A~ #8
     WRITE_ASCII 0x78 ~CBR301W~ #8
   COPY ~chriz-bg-rebalance/resources/emotion_iwdee/ENCHANX.BAM~ ~override/CBR301A.BAM~
@@ -786,52 +645,37 @@ ACTION_IF (cbr_em_need_courage = 1 || cbr_em_need_hope = 1) BEGIN
   OUTER_SET cbr_em_stored_projectile = CBR301P
 END
 
-// ADD_SPELL is always invoked with IF_EXISTING.  Missing symbols receive a
-// canonical inline seed; installed symbols use an inline copy of their own
-// current SPL and retain their slot.
 ACTION_IF (cbr_em_need_courage = 1) BEGIN
-  COPY_EXISTING - ~%cbr_em_hopeless_resref%.SPL~ ~.../cbr-emotion/courage-seed.spl~
+  COPY - ~chriz-bg-rebalance/resources/emotion_iwdee/IDPRO407.PRO~ ~.../cbr-emotion/courage-seed.spl~
     LPF cbr_em_make_native_seed
       INT_VAR is_courage = 1 stored_projectile = cbr_em_stored_projectile
     END
-  ADD_SPELL ~.../cbr-emotion/courage-seed.spl~ 2 4 ~WIZARD_EMOTION_COURAGE~
-    LPF cbr_em_validate_beneficial END
-  IF_EXISTING
-    LPF cbr_em_validate_beneficial END
-  END
-END ELSE BEGIN
-  COPY_EXISTING - ~%cbr_em_courage_resref%.SPL~ ~.../cbr-emotion/courage-existing.spl~
-  ADD_SPELL ~.../cbr-emotion/courage-existing.spl~ 2 4 ~WIZARD_EMOTION_COURAGE~
-    LPF cbr_em_validate_beneficial END
-  IF_EXISTING
-    LPF cbr_em_validate_beneficial END
+  ACTION_IF ~%cbr_em_courage_resref%~ STR_EQ ~~ BEGIN
+    ADD_SPELL ~.../cbr-emotion/courage-seed.spl~ 2 4 ~WIZARD_EMOTION_COURAGE~
+    IF_EXISTING
+      LPF cbr_em_make_native_seed INT_VAR is_courage = 1 stored_projectile = cbr_em_stored_projectile END
+    END
+    LAF cbr_setup_spell STR_VAR symbol = ~WIZARD_EMOTION_COURAGE~ RET cbr_em_courage_resref = resref END
+  END ELSE BEGIN
+    COPY ~.../cbr-emotion/courage-seed.spl~ ~override/%cbr_em_courage_resref%.SPL~
   END
 END
 
 ACTION_IF (cbr_em_need_hope = 1) BEGIN
-  COPY_EXISTING - ~%cbr_em_hopeless_resref%.SPL~ ~.../cbr-emotion/hope-seed.spl~
+  COPY - ~chriz-bg-rebalance/resources/emotion_iwdee/IDPRO407.PRO~ ~.../cbr-emotion/hope-seed.spl~
     LPF cbr_em_make_native_seed
       INT_VAR is_courage = 0 stored_projectile = cbr_em_stored_projectile
     END
-  ADD_SPELL ~.../cbr-emotion/hope-seed.spl~ 2 4 ~WIZARD_EMOTION_HOPE~
-    LPF cbr_em_validate_beneficial END
-  IF_EXISTING
-    LPF cbr_em_validate_beneficial END
-  END
-END ELSE BEGIN
-  COPY_EXISTING - ~%cbr_em_hope_resref%.SPL~ ~.../cbr-emotion/hope-existing.spl~
-  ADD_SPELL ~.../cbr-emotion/hope-existing.spl~ 2 4 ~WIZARD_EMOTION_HOPE~
-    LPF cbr_em_validate_beneficial END
-  IF_EXISTING
-    LPF cbr_em_validate_beneficial END
+  ACTION_IF ~%cbr_em_hope_resref%~ STR_EQ ~~ BEGIN
+    ADD_SPELL ~.../cbr-emotion/hope-seed.spl~ 2 4 ~WIZARD_EMOTION_HOPE~
+    IF_EXISTING
+      LPF cbr_em_make_native_seed INT_VAR is_courage = 0 stored_projectile = cbr_em_stored_projectile END
+    END
+    LAF cbr_setup_spell STR_VAR symbol = ~WIZARD_EMOTION_HOPE~ RET cbr_em_hope_resref = resref END
+  END ELSE BEGIN
+    COPY ~.../cbr-emotion/hope-seed.spl~ ~override/%cbr_em_hope_resref%.SPL~
   END
 END
-
-// Refresh the two symbolic mappings immediately after allocation.
-LAF RES_NUM_OF_SPELL_NAME STR_VAR spell_name = ~WIZARD_EMOTION_COURAGE~
-  RET cbr_em_courage_resref = spell_res cbr_em_courage_id = spell_num END
-LAF RES_NUM_OF_SPELL_NAME STR_VAR spell_name = ~WIZARD_EMOTION_HOPE~
-  RET cbr_em_hope_resref = spell_res cbr_em_hope_id = spell_num END
 
 // Describe each spell from its own final header, read after allocation and
 // before any string is resolved: school, spell level, and the first ability
@@ -878,12 +722,8 @@ BEGIN
     END
     PATCH_IF (~%cbr_em_dd_school_name%~ STR_EQ ~~) BEGIN
       SPRINT cbr_em_desc_school_line ~~
-      PATCH_WARN @9307
     END ELSE BEGIN
       SPRINT cbr_em_desc_school_line ~(%cbr_em_dd_school_name%)%LNL%~
-    END
-    PATCH_IF (cbr_em_dd_agree = 0) BEGIN
-      PATCH_WARN @9319
     END
     SPRINT cbr_em_desc_level ~%cbr_em_dd_level%~
     SPRINT cbr_em_desc_range ~%cbr_em_dd_range%~
@@ -907,51 +747,15 @@ LAF cbr_em_describe_spell
   RET cbr_em_hope_desc_text = description
 END
 
-// ADD_SPELL has now selected the final dynamic resrefs, but no new strings
-// have been resolved. Reject a pre-owned D-name before TLK mutation; a forced
-// reinstall restores this component's previous STATDESC rows before reaching
-// this point, so any row still present belongs to another installation layer.
-ACTION_IF (cbr_em_need_courage = 1 || cbr_em_need_hope = 1) BEGIN
-  COPY_EXISTING - ~STATDESC.2DA~ nowhere
-    COUNT_2DA_COLS cbr_em_sd_pre_cols
-    READ_2DA_ENTRIES_NOW cbr_em_sd_pre_rows cbr_em_sd_pre_cols
-    FOR (cbr_em_sd_pre_i = 0;
-         cbr_em_sd_pre_i < cbr_em_sd_pre_rows;
-         ++cbr_em_sd_pre_i) BEGIN
-      READ_2DA_ENTRY_FORMER cbr_em_sd_pre_rows cbr_em_sd_pre_i 2 cbr_em_sd_pre_bam
-      PATCH_IF (cbr_em_need_courage = 1
-             && ~%cbr_em_sd_pre_bam%~ STRING_EQUAL_CASE ~%cbr_em_courage_resref%D~) BEGIN
-        PATCH_FAIL @9314
-      END
-      PATCH_IF (cbr_em_need_hope = 1
-             && ~%cbr_em_sd_pre_bam%~ STRING_EQUAL_CASE ~%cbr_em_hope_resref%D~) BEGIN
-        PATCH_FAIL @9314
-      END
-    END
-  BUT_ONLY
-END
-
 // Publish the original blue IWDEE spell icons and independently extracted
 // 13x13 IWDEE heart status sprites under each dynamically allocated name.
 ACTION_IF (cbr_em_need_courage = 1) BEGIN
-  ACTION_IF FILE_EXISTS_IN_GAME ~%cbr_em_courage_resref%A.BAM~
-         || FILE_EXISTS_IN_GAME ~%cbr_em_courage_resref%B.BAM~
-         || FILE_EXISTS_IN_GAME ~%cbr_em_courage_resref%C.BAM~
-         || FILE_EXISTS_IN_GAME ~%cbr_em_courage_resref%D.BAM~ BEGIN
-    FAIL @9312
-  END
   COPY ~chriz-bg-rebalance/resources/emotion_iwdee/SPWI427A.BAM~ ~override/%cbr_em_courage_resref%A.BAM~
   COPY ~chriz-bg-rebalance/resources/emotion_iwdee/SPWI427B.BAM~ ~override/%cbr_em_courage_resref%B.BAM~
   COPY ~chriz-bg-rebalance/resources/emotion_iwdee/SPWI427C.BAM~ ~override/%cbr_em_courage_resref%C.BAM~
   COPY ~chriz-bg-rebalance/resources/emotion_iwdee/SPWI427D.BAM~ ~override/%cbr_em_courage_resref%D.BAM~
 END
 ACTION_IF (cbr_em_need_hope = 1) BEGIN
-  ACTION_IF FILE_EXISTS_IN_GAME ~%cbr_em_hope_resref%A.BAM~
-         || FILE_EXISTS_IN_GAME ~%cbr_em_hope_resref%B.BAM~
-         || FILE_EXISTS_IN_GAME ~%cbr_em_hope_resref%C.BAM~
-         || FILE_EXISTS_IN_GAME ~%cbr_em_hope_resref%D.BAM~ BEGIN
-    FAIL @9312
-  END
   COPY ~chriz-bg-rebalance/resources/emotion_iwdee/SPWI429A.BAM~ ~override/%cbr_em_hope_resref%A.BAM~
   COPY ~chriz-bg-rebalance/resources/emotion_iwdee/SPWI429B.BAM~ ~override/%cbr_em_hope_resref%B.BAM~
   COPY ~chriz-bg-rebalance/resources/emotion_iwdee/SPWI429C.BAM~ ~override/%cbr_em_hope_resref%C.BAM~
@@ -979,12 +783,66 @@ END
 OUTER_SET cbr_em_courage_portrait = "-1"
 OUTER_SET cbr_em_hope_portrait = "-1"
 ACTION_IF (cbr_em_need_courage = 1 || cbr_em_need_hope = 1) BEGIN
+  ACTION_PHP_EACH cbr_em_sd_used AS label => value BEGIN OUTER_SET $cbr_em_sd_used(~%label%~) = 0 END
   ACTION_CLEAR_ARRAY cbr_em_sd_used
   COPY_EXISTING ~STATDESC.2DA~ ~override~
-    COUNT_2DA_COLS cbr_em_sd_cols
-    PATCH_IF (cbr_em_sd_cols != 3) BEGIN
-      PATCH_FAIL @9313
+    READ_ASCII 0 cbr_em_sd_text (BUFFER_LENGTH)
+    SET cbr_em_sd_line = 0 SET cbr_em_sd_desc_col = 0 SET cbr_em_sd_bam_col = 0
+    SET cbr_em_sd_cols = 1
+    SPRINT cbr_em_sd_header ~~ SPRINT cbr_em_sd_body ~~
+    INNER_PATCH ~%cbr_em_sd_text%~ BEGIN
+      REPLACE_EVALUATE ~[^%LNL%%MNL%]+~ BEGIN
+        SPRINT cbr_em_sd_content ~%MATCH0%~
+        SET cbr_em_sd_token = 0
+        INNER_PATCH ~%cbr_em_sd_content%~ BEGIN
+          REPLACE_EVALUATE ~[^ %TAB%]+~ BEGIN
+            PATCH_IF cbr_em_sd_line = 2 BEGIN
+              PATCH_IF ~%MATCH0%~ STRING_EQUAL_CASE ~DESCRIPTION~ BEGIN SET cbr_em_sd_desc_col = cbr_em_sd_token + 1 END
+              PATCH_IF ~%MATCH0%~ STRING_EQUAL_CASE ~BAM_FILE~ BEGIN SET cbr_em_sd_bam_col = cbr_em_sd_token + 1 END
+              SPRINT cbr_em_sd_header ~%cbr_em_sd_header% %MATCH0%~
+            END ELSE PATCH_IF cbr_em_sd_line > 2 BEGIN
+              SPRINT $cbr_em_sd_cell(~%cbr_em_sd_token%~) ~%MATCH0%~
+            END
+            ++cbr_em_sd_token
+          END ~~
+        END
+        PATCH_IF cbr_em_sd_line = 2 BEGIN
+          SET cbr_em_sd_cols = cbr_em_sd_token + 1
+          PATCH_IF cbr_em_sd_desc_col = 0 BEGIN
+            SET cbr_em_sd_desc_col = cbr_em_sd_cols ++cbr_em_sd_cols
+            SPRINT cbr_em_sd_header ~%cbr_em_sd_header% DESCRIPTION~
+          END
+          PATCH_IF cbr_em_sd_bam_col = 0 BEGIN
+            SET cbr_em_sd_bam_col = cbr_em_sd_cols ++cbr_em_sd_cols
+            SPRINT cbr_em_sd_header ~%cbr_em_sd_header% BAM_FILE~
+          END
+        END ELSE PATCH_IF cbr_em_sd_line > 2 AND cbr_em_sd_token > 0 BEGIN
+          FOR (cbr_em_sd_c = 0; cbr_em_sd_c < cbr_em_sd_cols; ++cbr_em_sd_c) BEGIN
+            SPRINT cbr_em_sd_value ~****~
+            PATCH_IF cbr_em_sd_c = cbr_em_sd_desc_col BEGIN SPRINT cbr_em_sd_value ~-1~ END
+            PATCH_IF cbr_em_sd_c < cbr_em_sd_token BEGIN SPRINT cbr_em_sd_value $cbr_em_sd_cell(~%cbr_em_sd_c%~) END
+            // SET_2DA_ENTRY counts a leading blank as column zero. Keep
+            // row labels flush left so its columns match READ_2DA_ENTRY.
+            PATCH_IF cbr_em_sd_c > 0 BEGIN SPRINT cbr_em_sd_body ~%cbr_em_sd_body% ~ END
+            SPRINT cbr_em_sd_body ~%cbr_em_sd_body%%cbr_em_sd_value%~
+          END
+          SPRINT cbr_em_sd_body ~%cbr_em_sd_body%%WNL%~
+        END
+        ++cbr_em_sd_line
+      END ~~
     END
+    PATCH_IF cbr_em_sd_desc_col = 0 BEGIN
+      SET cbr_em_sd_desc_col = cbr_em_sd_cols ++cbr_em_sd_cols
+      SPRINT cbr_em_sd_header ~%cbr_em_sd_header% DESCRIPTION~
+    END
+    PATCH_IF cbr_em_sd_bam_col = 0 BEGIN
+      SET cbr_em_sd_bam_col = cbr_em_sd_cols ++cbr_em_sd_cols
+      SPRINT cbr_em_sd_header ~%cbr_em_sd_header% BAM_FILE~
+    END
+    SPRINT cbr_em_sd_text ~2DA V1.0%WNL%-1%WNL%%cbr_em_sd_header%%WNL%%cbr_em_sd_body%~
+    DELETE_BYTES 0 BUFFER_LENGTH
+    INSERT_BYTES 0 (STRING_LENGTH ~%cbr_em_sd_text%~)
+    WRITE_ASCIIE 0 ~%cbr_em_sd_text%~
     READ_2DA_ENTRIES_NOW cbr_em_sd_rows cbr_em_sd_cols
     FOR (cbr_em_sd_i = 0; cbr_em_sd_i < cbr_em_sd_rows; ++cbr_em_sd_i) BEGIN
       READ_2DA_ENTRY_FORMER cbr_em_sd_rows cbr_em_sd_i 0 cbr_em_sd_label
@@ -992,23 +850,65 @@ ACTION_IF (cbr_em_need_courage = 1 || cbr_em_need_hope = 1) BEGIN
         SET $cbr_em_sd_used(~%cbr_em_sd_label%~) = 1
       END
     END
+    FOR (cbr_em_sd_i = 0; cbr_em_sd_i < cbr_em_sd_rows; ++cbr_em_sd_i) BEGIN
+      READ_2DA_ENTRY_FORMER cbr_em_sd_rows cbr_em_sd_i 0 cbr_em_sd_label
+      READ_2DA_ENTRY_FORMER cbr_em_sd_rows cbr_em_sd_i cbr_em_sd_bam_col cbr_em_sd_bam
+      PATCH_IF (~%cbr_em_sd_bam%~ STRING_EQUAL_CASE ~%cbr_em_courage_resref%D~)
+        OR (~%cbr_em_sd_bam%~ STRING_EQUAL_CASE ~%cbr_em_hope_resref%D~) BEGIN
+        SET cbr_em_sd_number = (0 - 1)
+        PATCH_IF IS_AN_INT ~%cbr_em_sd_label%~ BEGIN SET cbr_em_sd_number = cbr_em_sd_label END
+        PATCH_IF cbr_em_sd_number < 0 BEGIN
+          SET cbr_em_sd_number = 200
+          WHILE (VARIABLE_IS_SET $cbr_em_sd_used(~%cbr_em_sd_number%~)
+            AND $cbr_em_sd_used(~%cbr_em_sd_number%~) = 1) BEGIN ++cbr_em_sd_number END
+          SPRINT cbr_em_sd_label ~%cbr_em_sd_number%~
+          SET_2DA_ENTRY cbr_em_sd_i 0 cbr_em_sd_cols ~%cbr_em_sd_label%~
+          SET $cbr_em_sd_used(~%cbr_em_sd_label%~) = 1
+        END
+      END
+      PATCH_IF ~%cbr_em_sd_bam%~ STRING_EQUAL_CASE ~%cbr_em_courage_resref%D~ BEGIN
+        SET cbr_em_courage_portrait = cbr_em_sd_label
+        SET_2DA_ENTRY cbr_em_sd_i cbr_em_sd_desc_col cbr_em_sd_cols ~%cbr_em_courage_status_name%~
+      END
+      PATCH_IF ~%cbr_em_sd_bam%~ STRING_EQUAL_CASE ~%cbr_em_hope_resref%D~ BEGIN
+        SET cbr_em_hope_portrait = cbr_em_sd_label
+        SET_2DA_ENTRY cbr_em_sd_i cbr_em_sd_desc_col cbr_em_sd_cols ~%cbr_em_hope_status_name%~
+      END
+      PATCH_IF (IS_AN_INT ~%cbr_em_sd_label%~) BEGIN
+        SET $cbr_em_sd_used(~%cbr_em_sd_label%~) = 1
+      END
+    END
     PATCH_IF (cbr_em_need_courage = 1 && cbr_em_courage_portrait < 0) BEGIN
       SET cbr_em_courage_portrait = 200
-      WHILE (VARIABLE_IS_SET $cbr_em_sd_used(~%cbr_em_courage_portrait%~)) BEGIN
+      WHILE (VARIABLE_IS_SET $cbr_em_sd_used(~%cbr_em_courage_portrait%~)
+        AND $cbr_em_sd_used(~%cbr_em_courage_portrait%~) = 1) BEGIN
         ++cbr_em_courage_portrait
       END
-      INSERT_2DA_ROW cbr_em_sd_rows cbr_em_sd_cols
-        ~%cbr_em_courage_portrait% %cbr_em_courage_status_name% %cbr_em_courage_resref%D~
+      SPRINT cbr_em_sd_row ~%cbr_em_courage_portrait%~
+      FOR (cbr_em_sd_c = 1; cbr_em_sd_c < cbr_em_sd_cols; ++cbr_em_sd_c) BEGIN
+        SPRINT cbr_em_sd_value ~****~
+        PATCH_IF cbr_em_sd_c = cbr_em_sd_desc_col BEGIN SPRINT cbr_em_sd_value ~%cbr_em_courage_status_name%~ END
+        PATCH_IF cbr_em_sd_c = cbr_em_sd_bam_col BEGIN SPRINT cbr_em_sd_value ~%cbr_em_courage_resref%D~ END
+        SPRINT cbr_em_sd_row ~%cbr_em_sd_row% %cbr_em_sd_value%~
+      END
+      INSERT_2DA_ROW cbr_em_sd_rows cbr_em_sd_cols ~%cbr_em_sd_row%~
       SET $cbr_em_sd_used(~%cbr_em_courage_portrait%~) = 1
       ++cbr_em_sd_rows
     END
     PATCH_IF (cbr_em_need_hope = 1 && cbr_em_hope_portrait < 0) BEGIN
       SET cbr_em_hope_portrait = 200
-      WHILE (VARIABLE_IS_SET $cbr_em_sd_used(~%cbr_em_hope_portrait%~)) BEGIN
+      WHILE (VARIABLE_IS_SET $cbr_em_sd_used(~%cbr_em_hope_portrait%~)
+        AND $cbr_em_sd_used(~%cbr_em_hope_portrait%~) = 1) BEGIN
         ++cbr_em_hope_portrait
       END
-      INSERT_2DA_ROW cbr_em_sd_rows cbr_em_sd_cols
-        ~%cbr_em_hope_portrait% %cbr_em_hope_status_name% %cbr_em_hope_resref%D~
+      SPRINT cbr_em_sd_row ~%cbr_em_hope_portrait%~
+      FOR (cbr_em_sd_c = 1; cbr_em_sd_c < cbr_em_sd_cols; ++cbr_em_sd_c) BEGIN
+        SPRINT cbr_em_sd_value ~****~
+        PATCH_IF cbr_em_sd_c = cbr_em_sd_desc_col BEGIN SPRINT cbr_em_sd_value ~%cbr_em_hope_status_name%~ END
+        PATCH_IF cbr_em_sd_c = cbr_em_sd_bam_col BEGIN SPRINT cbr_em_sd_value ~%cbr_em_hope_resref%D~ END
+        SPRINT cbr_em_sd_row ~%cbr_em_sd_row% %cbr_em_sd_value%~
+      END
+      INSERT_2DA_ROW cbr_em_sd_rows cbr_em_sd_cols ~%cbr_em_sd_row%~
       SET $cbr_em_sd_used(~%cbr_em_hope_portrait%~) = 1
       ++cbr_em_sd_rows
     END
@@ -1030,13 +930,13 @@ COPY_EXISTING ~%cbr_em_hope_resref%.SPL~ ~override/%cbr_em_hope_resref%.SPL~
     WRITE_ASCIIE (cbr_em_hi_ability_offset + 0x04) ~%cbr_em_hope_resref%B~ #8
   END
 ACTION_IF (cbr_em_have_fear = 1) BEGIN
-  COPY_EXISTING ~%cbr_em_fear_resref%.SPL~ ~override/%cbr_em_fear_resref%.SPL~
+  LAF cbr_setup_stage STR_VAR file = ~%cbr_em_fear_resref%.SPL~ END
 END
 ACTION_IF (cbr_em_have_hopeless = 1) BEGIN
-  COPY_EXISTING ~%cbr_em_hopeless_resref%.SPL~ ~override/%cbr_em_hopeless_resref%.SPL~
+  LAF cbr_setup_stage STR_VAR file = ~%cbr_em_hopeless_resref%.SPL~ END
 END
 ACTION_IF (cbr_em_have_symbol = 1) BEGIN
-  COPY_EXISTING ~%cbr_em_symbol_resref%.SPL~ ~override/%cbr_em_symbol_resref%.SPL~
+  LAF cbr_setup_stage STR_VAR file = ~%cbr_em_symbol_resref%.SPL~ END
 END
 
 LAF cbr_apply_emotion_hope_courage
@@ -1066,7 +966,7 @@ END
 // Reuse installed provider scrolls.  Standalone spells receive clean
 // IWDification-style scrolls; the discovered donor names are retained only as
 // distribution anchors when mirroring existing store rows below.
-ACTION_IF (cbr_em_need_courage = 1) BEGIN
+ACTION_IF (cbr_em_make_courage_scroll = 1) BEGIN
   COPY ~chriz-bg-rebalance/resources/emotion_iwdee/IDPRO407.PRO~ ~override/CBRCRGSC.ITM~
     LPF cbr_em_make_wizard_scroll
       INT_VAR name_strref = cbr_em_courage_name desc_strref = cbr_em_courage_desc
@@ -1075,8 +975,11 @@ ACTION_IF (cbr_em_need_courage = 1) BEGIN
     END
   OUTER_SPRINT $cbr_em_courage_scroll(~%cbr_em_courage_scroll_count%~) ~CBRCRGSC~
   OUTER_SET cbr_em_courage_scroll_count += 1
+  ACTION_IF NOT FILE_EXISTS_IN_GAME ~%cbr_em_courage_resref%A.BAM~ BEGIN
+    COPY ~chriz-bg-rebalance/resources/emotion_iwdee/SPWI427A.BAM~ ~override/%cbr_em_courage_resref%A.BAM~
+  END
 END
-ACTION_IF (cbr_em_need_hope = 1) BEGIN
+ACTION_IF (cbr_em_make_hope_scroll = 1) BEGIN
   COPY ~chriz-bg-rebalance/resources/emotion_iwdee/IDPRO407.PRO~ ~override/CBRHOPSC.ITM~
     LPF cbr_em_make_wizard_scroll
       INT_VAR name_strref = cbr_em_hope_name desc_strref = cbr_em_hope_desc
@@ -1085,6 +988,9 @@ ACTION_IF (cbr_em_need_hope = 1) BEGIN
     END
   OUTER_SPRINT $cbr_em_hope_scroll(~%cbr_em_hope_scroll_count%~) ~CBRHOPSC~
   OUTER_SET cbr_em_hope_scroll_count += 1
+  ACTION_IF NOT FILE_EXISTS_IN_GAME ~%cbr_em_hope_resref%A.BAM~ BEGIN
+    COPY ~chriz-bg-rebalance/resources/emotion_iwdee/SPWI429A.BAM~ ~override/%cbr_em_hope_resref%A.BAM~
+  END
 END
 
 OUTER_FOR (cbr_em_scroll_i = 0; cbr_em_scroll_i < cbr_em_courage_scroll_count; ++cbr_em_scroll_i) BEGIN
@@ -1092,8 +998,8 @@ OUTER_FOR (cbr_em_scroll_i = 0; cbr_em_scroll_i < cbr_em_courage_scroll_count; +
   OUTER_SPRINT cbr_em_scroll_resref EVAL ~%%cbr_em_scroll_slot%%~
   COPY_EXISTING ~%cbr_em_scroll_resref%.ITM~ ~override/%cbr_em_scroll_resref%.ITM~
     // Normalize both operational references as well as the two owned strings.
-    READ_LONG 0x6a cbr_em_ts_effect_offset
-    SET cbr_em_ts_effect_count = (BUFFER_LENGTH - cbr_em_ts_effect_offset) / 0x30
+    LPF cbr_em_validate_v1_partition INT_VAR ability_size = 0x38
+      RET cbr_em_ts_effect_offset = effect_offset cbr_em_ts_effect_count = effect_count END
     FOR (cbr_em_ts_i = 0; cbr_em_ts_i < cbr_em_ts_effect_count; ++cbr_em_ts_i) BEGIN
       SET cbr_em_ts_fx = cbr_em_ts_effect_offset + cbr_em_ts_i * 0x30
       READ_SHORT cbr_em_ts_fx cbr_em_ts_opcode
@@ -1115,8 +1021,8 @@ OUTER_FOR (cbr_em_scroll_i = 0; cbr_em_scroll_i < cbr_em_hope_scroll_count; ++cb
   OUTER_SPRINT cbr_em_scroll_slot ~cbr_em_hope_scroll_%cbr_em_scroll_i%~
   OUTER_SPRINT cbr_em_scroll_resref EVAL ~%%cbr_em_scroll_slot%%~
   COPY_EXISTING ~%cbr_em_scroll_resref%.ITM~ ~override/%cbr_em_scroll_resref%.ITM~
-    READ_LONG 0x6a cbr_em_ts_effect_offset
-    SET cbr_em_ts_effect_count = (BUFFER_LENGTH - cbr_em_ts_effect_offset) / 0x30
+    LPF cbr_em_validate_v1_partition INT_VAR ability_size = 0x38
+      RET cbr_em_ts_effect_offset = effect_offset cbr_em_ts_effect_count = effect_count END
     FOR (cbr_em_ts_i = 0; cbr_em_ts_i < cbr_em_ts_effect_count; ++cbr_em_ts_i) BEGIN
       SET cbr_em_ts_fx = cbr_em_ts_effect_offset + cbr_em_ts_i * 0x30
       READ_SHORT cbr_em_ts_fx cbr_em_ts_opcode
@@ -1138,7 +1044,7 @@ END
 // Mirror every donor-store entry, including duplicate rows and all raw stock,
 // charge, flag, and expiry fields.  Reverse insertion preserves the original
 // row indices while each downstream STO section offset is shifted exactly.
-ACTION_IF (cbr_em_need_courage = 1 || cbr_em_need_hope = 1) BEGIN
+ACTION_IF (cbr_em_make_courage_scroll = 1 || cbr_em_make_hope_scroll = 1) BEGIN
   COPY_EXISTING_REGEXP GLOB ~^.*\.[sS][tT][oO]$~ ~override~
     PATCH_IF (BUFFER_LENGTH >= 0x9c) BEGIN
       READ_ASCII 0 cbr_em_st_signature (8)
@@ -1151,30 +1057,40 @@ ACTION_IF (cbr_em_need_courage = 1 || cbr_em_need_hope = 1) BEGIN
         FOR (cbr_em_st_i = cbr_em_st_sale_count - 1; cbr_em_st_i >= 0; --cbr_em_st_i) BEGIN
           SET cbr_em_st_row = cbr_em_st_sale_offset + cbr_em_st_i * 0x1c
           READ_ASCII cbr_em_st_row cbr_em_st_item (8) NULL
+          TO_UPPER cbr_em_st_item
           SPRINT cbr_em_st_output ~~
-          PATCH_IF (cbr_em_need_courage = 1
-                 && ~%cbr_em_st_item%~ STRING_EQUAL_CASE ~%cbr_em_enchanted_donor_scroll%~) BEGIN
+          SET cbr_em_st_courage = 0 SET cbr_em_st_hope = 0
+          PATCH_IF VARIABLE_IS_SET $cbr_em_enchanted_donors(~%cbr_em_st_item%~) BEGIN
+            SET cbr_em_st_courage = $cbr_em_enchanted_donors(~%cbr_em_st_item%~)
+          END
+          PATCH_IF VARIABLE_IS_SET $cbr_em_hopeless_donors(~%cbr_em_st_item%~) BEGIN
+            SET cbr_em_st_hope = $cbr_em_hopeless_donors(~%cbr_em_st_item%~)
+          END
+          FOR (cbr_em_st_kind = 0; cbr_em_st_kind < 2; ++cbr_em_st_kind) BEGIN
+          SPRINT cbr_em_st_output ~~
+          PATCH_IF (cbr_em_st_kind = 0 && cbr_em_make_courage_scroll = 1 && cbr_em_st_courage = 1) BEGIN
             SPRINT cbr_em_st_output ~CBRCRGSC~
-          END ELSE PATCH_IF (cbr_em_need_hope = 1
-                          && ~%cbr_em_st_item%~ STRING_EQUAL_CASE ~%cbr_em_hopeless_donor_scroll%~) BEGIN
+          END ELSE PATCH_IF (cbr_em_st_kind = 1 && cbr_em_make_hope_scroll = 1 && cbr_em_st_hope = 1) BEGIN
             SPRINT cbr_em_st_output ~CBRHOPSC~
           END
           PATCH_IF !(~%cbr_em_st_output%~ STR_EQ ~~) BEGIN
             SET cbr_em_st_insert = cbr_em_st_row + 0x1c
             SET cbr_em_st_already = 0
-            PATCH_IF (cbr_em_st_i + 1 < cbr_em_st_sale_count) BEGIN
-              READ_ASCII cbr_em_st_insert cbr_em_st_next (8) NULL
+            FOR (cbr_em_st_child = 1; cbr_em_st_child <= 2
+              && cbr_em_st_i + cbr_em_st_child < cbr_em_st_sale_count; ++cbr_em_st_child) BEGIN
+              SET cbr_em_st_child_at = cbr_em_st_row + cbr_em_st_child * 0x1c
+              READ_ASCII cbr_em_st_child_at cbr_em_st_next (8) NULL
               PATCH_IF (~%cbr_em_st_next%~ STRING_EQUAL_CASE ~%cbr_em_st_output%~) BEGIN
                 SET cbr_em_st_already = 1
+                SET cbr_em_st_insert = cbr_em_st_child_at
+                SET cbr_em_st_child = 2
+              END ELSE PATCH_IF NOT ((~%cbr_em_st_next%~ STRING_EQUAL_CASE ~CBRCRGSC~)
+                OR (~%cbr_em_st_next%~ STRING_EQUAL_CASE ~CBRHOPSC~)) BEGIN
+                SET cbr_em_st_child = 2
               END
             END
             PATCH_IF (cbr_em_st_already = 0) BEGIN
               INSERT_BYTES cbr_em_st_insert 0x1c
-              WRITE_ASCIIE cbr_em_st_insert ~%cbr_em_st_output%~ #8
-              FOR (cbr_em_st_b = 0; cbr_em_st_b < 0x14; ++cbr_em_st_b) BEGIN
-                READ_BYTE (cbr_em_st_row + 0x08 + cbr_em_st_b) cbr_em_st_value
-                WRITE_BYTE (cbr_em_st_insert + 0x08 + cbr_em_st_b) cbr_em_st_value
-              END
               SET cbr_em_st_sale_count += 1
               WRITE_LONG 0x38 cbr_em_st_sale_count
               READ_LONG 0x2c cbr_em_st_section
@@ -1190,10 +1106,16 @@ ACTION_IF (cbr_em_need_courage = 1 || cbr_em_need_hope = 1) BEGIN
                 WRITE_LONG 0x70 (cbr_em_st_section + 0x1c)
               END
             END
+            WRITE_ASCIIE cbr_em_st_insert ~%cbr_em_st_output%~ #8
+            FOR (cbr_em_st_b = 0; cbr_em_st_b < 0x14; ++cbr_em_st_b) BEGIN
+              READ_BYTE (cbr_em_st_row + 0x08 + cbr_em_st_b) cbr_em_st_value
+              WRITE_BYTE (cbr_em_st_insert + 0x08 + cbr_em_st_b) cbr_em_st_value
+            END
+          END
           END
         END
-      END
-    END
+      END ELSE BEGIN PATCH_PRINT ~CBR Emotion: %SOURCE_FILE% has an unreadable store table; continuing.~ END
+    END ELSE BEGIN PATCH_PRINT ~CBR Emotion: %SOURCE_FILE% has an unreadable store header; continuing.~ END
     BUT_ONLY
 END
 
@@ -1207,13 +1129,11 @@ GROUP @1400
 LABEL ~cbr_cleric_tempus_weapon_training~
 
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9410
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~WEAPPROF.2DA~) @9411
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9412
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~C0PR#C4.SPL~) @9413
 REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~C0PR#90.SPL~)
                AND (FILE_EXISTS_IN_GAME ~C0PR#92.SPL~)
                AND (FILE_EXISTS_IN_GAME ~C0PR#103.SPL~)) @9414
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~) @9415
 // Artisan's custom permission stat for longswords must exist in the live
 // STATS.IDS; the resolved value parameterizes the migration helper's gate.
 REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~stats~ ~C0_PROFICIENCYLONGSWORD~) > 0)
@@ -1223,9 +1143,9 @@ OUTER_SET cbr_wt_resolved_ls_perm_stat = IDS_OF_SYMBOL (~stats~ ~C0_PROFICIENCYL
 
 // Materialize the three file-backed inputs at their canonical override
 // paths (same transactional pattern as the Holy Power components).
-COPY_EXISTING ~WEAPPROF.2DA~ ~override/WEAPPROF.2DA~
-COPY_EXISTING ~C0PR#C4.SPL~ ~override/C0PR#C4.SPL~
-COPY_EXISTING ~SPLPROT.2DA~ ~override/SPLPROT.2DA~
+LAF cbr_setup_stage STR_VAR file = ~WEAPPROF.2DA~ END
+LAF cbr_setup_stage STR_VAR file = ~C0PR#C4.SPL~ END
+LAF cbr_setup_stage STR_VAR file = ~SPLPROT.2DA~ END
 
 LAF cbr_apply_tempus_weapon_training
   INT_VAR ls_perm_stat = cbr_wt_resolved_ls_perm_stat
@@ -1240,11 +1160,6 @@ LABEL ~cbr_cleric_tempus_holy_power_auto~
 
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9400
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9401
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTMPS1.SPL~) @9402
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPELL.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9407
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) >= 1100) AND (IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) <= 1999)) @9403
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) >= 2100) AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) <= 2999)) @9404
-
 OUTER_SPRINT cbr_tempus_compatibility_mode ~auto~
 LAM cbr_install_tempus_holy_power_component
 
@@ -1256,11 +1171,6 @@ LABEL ~cbr_cleric_tempus_holy_power_force_double~
 
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9400
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9401
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTMPS1.SPL~) @9402
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPELL.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9407
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) >= 1100) AND (IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) <= 1999)) @9403
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) >= 2100) AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) <= 2999)) @9404
-
 OUTER_SPRINT cbr_tempus_compatibility_mode ~force_double~
 LAM cbr_install_tempus_holy_power_component
 
@@ -1272,11 +1182,6 @@ LABEL ~cbr_cleric_tempus_holy_power_force_additive~
 
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9400
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9401
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTMPS1.SPL~) @9402
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPELL.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9407
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) >= 1100) AND (IDS_OF_SYMBOL (~spell~ ~CLERIC_HOLY_POWER~) <= 1999)) @9403
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) >= 2100) AND (IDS_OF_SYMBOL (~spell~ ~WIZARD_IMPROVED_HASTE~) <= 2999)) @9404
-
 OUTER_SPRINT cbr_tempus_compatibility_mode ~force_additive~
 LAM cbr_install_tempus_holy_power_component
 
@@ -1287,10 +1192,6 @@ LABEL ~cbr_cleric_tempus_chaos_tides~
 
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9430
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9431
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~OHTMPS2.SPL~)
-               AND (FILE_EXISTS_IN_GAME ~OHTMPS2D.SPL~)
-               AND (FILE_EXISTS_IN_GAME ~OHTMPS2E.SPL~)) @9432
-
 // The three announce lines are this mod's only game-facing strings:
 // dialog.tlk grows append-only by at most three entries (WeiDU reuses an
 // existing identical string, so a reinstall resolves to the same strrefs).
@@ -1298,9 +1199,9 @@ OUTER_SET cbr_ct_resolved_onslaught = RESOLVE_STR_REF (@4041)
 OUTER_SET cbr_ct_resolved_bulwark   = RESOLVE_STR_REF (@4042)
 OUTER_SET cbr_ct_resolved_fortune   = RESOLVE_STR_REF (@4043)
 
-COPY_EXISTING ~OHTMPS2.SPL~ ~override/OHTMPS2.SPL~
-COPY_EXISTING ~OHTMPS2D.SPL~ ~override/OHTMPS2D.SPL~
-COPY_EXISTING ~OHTMPS2E.SPL~ ~override/OHTMPS2E.SPL~
+LAF cbr_setup_stage STR_VAR file = ~OHTMPS2.SPL~ END
+LAF cbr_setup_stage STR_VAR file = ~OHTMPS2D.SPL~ END
+LAF cbr_setup_stage STR_VAR file = ~OHTMPS2E.SPL~ END
 
 LAF cbr_apply_tempus_chaos_tides
   INT_VAR
@@ -1334,11 +1235,8 @@ COPY_EXISTING_REGEXP GLOB ~^sppr[1-7][0-9][0-9]\.spl$~ ~override~
   END
   BUT_ONLY
 
-ACTION_IF (cbr_divtoll_count = 0) BEGIN
-  FAIL @9422
-END
 
-COPY_EXISTING ~OHTEMPUS.2DA~ ~override/OHTEMPUS.2DA~
+LAF cbr_setup_stage STR_VAR file = ~OHTEMPUS.2DA~ END
 
 LAF cbr_apply_tempus_divination_toll
   INT_VAR divination_count = cbr_divtoll_count
@@ -1358,10 +1256,9 @@ GROUP @1400
 LABEL ~cbr_cleric_tempus_spec_apr~
 
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9440
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~CLSWPBON.2DA~) @9441
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9442
 
-COPY_EXISTING ~CLSWPBON.2DA~ ~override/CLSWPBON.2DA~
+LAF cbr_setup_stage STR_VAR file = ~CLSWPBON.2DA~ END
 
 LAF cbr_apply_tempus_spec_apr
   STR_VAR resource_dir = ~override~
@@ -1377,8 +1274,6 @@ REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9440
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9442
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9450
 REQUIRE_PREDICATE (IDS_OF_SYMBOL (~kit~ ~OHTEMPUS~) > 0) @9451
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) @9453
-
 OUTER_SPRINT cbr_sae_component_tag ~407~
 LAM cbr_install_tempus_spec_apr_eeex_component
 
@@ -1391,14 +1286,13 @@ BEGIN @409
 DESIGNATED 409
 GROUP @1400
 LABEL ~cbr_cleric_tempus_spec_apr_eeex_refresh~
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 407) @9452
 
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M_CBRAPR.lua~) @9452
+
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9440
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~OHTEMPUS.2DA~) @9442
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9450
 REQUIRE_PREDICATE (IDS_OF_SYMBOL (~kit~ ~OHTEMPUS~) > 0) @9451
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) @9453
-
 OUTER_SPRINT cbr_sae_component_tag ~409~
 LAM cbr_install_tempus_spec_apr_eeex_component
 
@@ -1406,28 +1300,28 @@ BEGIN @408
 DESIGNATED 408
 GROUP @1400
 LABEL ~cbr_cleric_tempus_descriptions~
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 400) @9462
+
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 404) @9462
+
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 405) @9462
+
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 407) @9462
+
 
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9460
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~KITLIST.2DA~)
-               AND (FILE_EXISTS_IN_GAME ~OHTMPS1.SPL~)
-               AND (FILE_EXISTS_IN_GAME ~OHTMPS2.SPL~)) @9461
 // The text describes the full rework - gate on each sibling's artifact.
 // The 401-403 Holy Power family has no unique artifact in auto/doubling
 // mode; its presence is assumed and documented, not enforced.
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~CBRTMG2.SPL~) @9462
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~CBRCHT1D.SPL~) @9463
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~CBRTMDV.SPL~) @9464
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M_CBRAPR.lua~) @9465
-
 // Append the three new strings (WeiDU reuses identical strings on
 // reinstall, so dialog.tlk stays append-stable - the 404 precedent).
 OUTER_SET cbr_ds_resolved_kit_help = RESOLVE_STR_REF (@4081)
 OUTER_SET cbr_ds_resolved_hp_desc  = RESOLVE_STR_REF (@4082)
 OUTER_SET cbr_ds_resolved_cob_desc = RESOLVE_STR_REF (@4083)
 
-COPY_EXISTING ~KITLIST.2DA~ ~override/KITLIST.2DA~
-COPY_EXISTING ~OHTMPS1.SPL~ ~override/OHTMPS1.SPL~
-COPY_EXISTING ~OHTMPS2.SPL~ ~override/OHTMPS2.SPL~
+LAF cbr_setup_stage STR_VAR file = ~KITLIST.2DA~ END
+LAF cbr_setup_stage STR_VAR file = ~OHTMPS1.SPL~ END
+LAF cbr_setup_stage STR_VAR file = ~OHTMPS2.SPL~ END
 
 LAF cbr_apply_tempus_descriptions
   INT_VAR
@@ -1439,12 +1333,6 @@ END
 
 BEGIN @302 DESIGNATED 302 GROUP @1300 LABEL ~cbr_flail_of_ages_rebalance~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9480
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~BLUN14.ITM~)
-  AND (FILE_EXISTS_IN_GAME ~BLUN30.ITM~)
-  AND (FILE_EXISTS_IN_GAME ~BLUN30C.ITM~)
-  AND (FILE_EXISTS_IN_GAME ~BLUN30D.ITM~)
-  AND (FILE_EXISTS_IN_GAME ~SPELL.IDS~)) @9481
-
 CLEAR_IDS_MAP
 OUTER_SPRINT cbr_f_haste ~~
 OUTER_SPRINT cbr_f_improved ~~
@@ -1511,6 +1399,7 @@ ACTION_FOR_EACH cbr_f_item IN BLUN14 BLUN30C BLUN30D BLUN30 BEGIN
     OUTER_SPRINT cbr_f_save_note @3023
   END
   OUTER_SPRINT cbr_f_haste_note @3024
+  ACTION_IF FILE_EXISTS_IN_GAME ~%cbr_f_item%.ITM~ BEGIN
   COPY_EXISTING ~%cbr_f_item%.ITM~ ~override~
     LPF cbr_foa_patch
       INT_VAR save_penalty = cbr_f_penalty allow_haste = cbr_f_allow haste_movement = cbr_f_haste_movement
@@ -1525,15 +1414,13 @@ ACTION_FOR_EACH cbr_f_item IN BLUN14 BLUN30C BLUN30D BLUN30 BEGIN
       STR_VAR save_note = EVAL ~%cbr_f_save_note%~ haste_note = EVAL ~%cbr_f_haste_note%~
     END
   BUT_ONLY
+  END ELSE BEGIN PRINT ~CBR 302: %cbr_f_item%.ITM is absent; continuing.~ END
 END
 
 // Druids train and wield axes and short bows, fighter/druids also long
 // bows. Works with and without Artisan's Kitpack permission system.
 BEGIN @410 DESIGNATED 410 GROUP @1400 LABEL ~cbr_druid_weapon_access~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9490
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~WEAPPROF.2DA~) AND (FILE_EXISTS_IN_GAME ~KITLIST.2DA~)) @9491
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~class~ ~DRUID~) > 0) AND (IDS_OF_SYMBOL (~class~ ~FIGHTER_DRUID~) > 0)) @9492
-
 OUTER_SET cbr_cwa_druid_class = IDS_OF_SYMBOL (~class~ ~DRUID~)
 OUTER_SET cbr_cwa_fighter_druid_class = IDS_OF_SYMBOL (~class~ ~FIGHTER_DRUID~)
 OUTER_SPRINT cbr_cwa_axe_word @4101
@@ -1556,11 +1443,9 @@ END
 // kit's own column (lib/class_weapon_access.tpa).
 BEGIN @411 DESIGNATED 411 GROUP @1400 LABEL ~cbr_alaghor_weapon_access~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9490
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~WEAPPROF.2DA~) AND (FILE_EXISTS_IN_GAME ~KITLIST.2DA~)) @9491
 REQUIRE_PREDICATE (IDS_OF_SYMBOL (~kit~ ~LK_ALAGHOR~) > 0) @9493
 REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~C0PR#CL.SPL~) AND (FILE_EXISTS_IN_GAME ~C0PR#92.SPL~)
                AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9494
-REQUIRE_PREDICATE ((IDS_OF_SYMBOL (~stats~ ~KIT~) > 0) AND (IDS_OF_SYMBOL (~class~ ~FIGHTER_CLERIC~) > 0)) @9495
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9496
 REQUIRE_PREDICATE ((DIRECTORY_EXISTS ~EEex_scripts/extra_pattern_dbs~)
   AND (FILE_CONTAINS_EVALUATED (~EEex_scripts/EEex_Assembly_x86-64.lua~ ~^function[ %TAB%]+EEex_HookConditionalJumpOnSuccess[ %TAB%]*(~))
@@ -1581,12 +1466,6 @@ LAF cbr_cwa_preflight_kit_column_hook STR_VAR executable_path = EVAL ~%cbr_cwa_e
 OUTER_SET cbr_cwa_alaghor_kit = IDS_OF_SYMBOL (~kit~ ~LK_ALAGHOR~)
 OUTER_SET cbr_cwa_kit_stat = IDS_OF_SYMBOL (~stats~ ~KIT~)
 OUTER_SET cbr_cwa_fighter_cleric_class = IDS_OF_SYMBOL (~class~ ~FIGHTER_CLERIC~)
-LAF cbr_cwa_install_kit_column
-  INT_VAR
-    class_value = cbr_cwa_fighter_cleric_class
-    kit_value   = cbr_cwa_alaghor_kit
-    verify_only = 1
-END
 OUTER_SPRINT cbr_cwa_alaghor_line @4111
 LAF cbr_apply_alaghor_weapon_access
   INT_VAR
@@ -1626,18 +1505,13 @@ LAF cbr_sp_preflight_executable STR_VAR executable_path = EVAL ~%cbr_sp_executab
 
 // A valid API 1 registry can contain registrations from independent adapters.
 // Preserve it; never replace it with the shipped blank table during a refresh.
-ACTION_IF (FILE_EXISTS_IN_GAME ~CBRSPVER.2DA~) BEGIN
-  LAF cbr_sp_validate_provider END
-END ELSE ACTION_IF (FILE_EXISTS_IN_GAME ~CBRSPKIT.2DA~) BEGIN
-  FAIL @9474
-END
 ACTION_IF (NOT FILE_EXISTS_IN_GAME ~CBRSPKIT.2DA~) BEGIN
-  COPY ~chriz-bg-rebalance/bard/CBRSPKIT.2DA~ ~override/CBRSPKIT.2DA~
+  COPY ~chriz-bg-rebalance/bard/CBRSPKIT.2da~ ~override/CBRSPKIT.2DA~
 END
-COPY ~chriz-bg-rebalance/bard/CBRSPVER.2DA~ ~override/CBRSPVER.2DA~
-COPY ~chriz-bg-rebalance/bard/CBRBG6.2DA~ ~override/CBRBG6.2DA~
-COPY ~chriz-bg-rebalance/bard/CBRIWD7.2DA~ ~override/CBRIWD7.2DA~
-COPY ~chriz-bg-rebalance/bard/CBRIWD8.2DA~ ~override/CBRIWD8.2DA~
+COPY ~chriz-bg-rebalance/bard/CBRSPVER.2da~ ~override/CBRSPVER.2DA~
+COPY ~chriz-bg-rebalance/bard/CBRBG6.2da~ ~override/CBRBG6.2DA~
+COPY ~chriz-bg-rebalance/bard/CBRIWD7.2da~ ~override/CBRIWD7.2DA~
+COPY ~chriz-bg-rebalance/bard/CBRIWD8.2da~ ~override/CBRIWD8.2DA~
 COPY ~chriz-bg-rebalance/lua/M_CBRSP.lua~ ~override/M_CBRSP.lua~
 COPY ~chriz-bg-rebalance/lib/bard_progression.tpa~ ~override/CBRSPAPI.TPA~
 COPY ~chriz-bg-rebalance/bard/CBRSP.db~ ~EEex_scripts/extra_pattern_dbs/CBRSP.db~
@@ -1646,11 +1520,6 @@ PRINT @9475
 BEGIN @421 DESIGNATED 421 GROUP @1400 LABEL ~cbr_bard_default_progression~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet iwdee~) @9470
 REQUIRE_PREDICATE (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 420) @9476
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~KITLIST.2DA~)
-               AND (FILE_EXISTS_IN_GAME ~CLASTEXT.2DA~)
-               AND (FILE_EXISTS_IN_GAME ~KIT.IDS~)) @9477
-
-LAF cbr_sp_validate_provider END
 OUTER_SPRINT cbr_sp_iwd7_text @4211
 OUTER_SPRINT cbr_sp_bg6_text @4212
 LAF cbr_sp_register INT_VAR class_id = 5 kit_id = 0 STR_VAR slot_table = ~CBRIWD7~ END
@@ -1667,48 +1536,34 @@ END
 BEGIN @310 DESIGNATED 310 GROUP @1300 LABEL ~cbr_party_physical_resistance_90~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9315
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9316
-REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) @9317
-
-COPY_EXISTING ~SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
-LAF cbr_apply_physical_resistance END
-PRINT @9318
+LAF cbr_setup_ids STR_VAR file = ~SPLSTATE.IDS~ END
+LAF cbr_apply_physical_resistance RET cbr_res_installed = installed END
+ACTION_IF cbr_res_installed BEGIN PRINT @9318 END
 
 BEGIN @130 DESIGNATED 130 GROUP @1100 LABEL ~cbr_eet_elemental_arrows~
 REQUIRE_PREDICATE (GAME_IS ~eet~) @9140
-REQUIRE_PREDICATE (MOD_IS_INSTALLED ~stratagems/setup-stratagems.tp2~ 2000) @9141
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~AROW04.ITM~) AND (FILE_EXISTS_IN_GAME ~AROW09.ITM~)
-  AND (FILE_EXISTS_IN_GAME ~AROW08.ITM~) AND (FILE_EXISTS_IN_GAME ~AROWKC.ITM~)) @9142
 INCLUDE ~chriz-bg-rebalance/lib/elemental_arrows.tpa~
 
 BEGIN @220 DESIGNATED 220 GROUP @1200 LABEL ~cbr_sr_bracers_improved_haste~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9220
-REQUIRE_PREDICATE (MOD_IS_INSTALLED ~spell_rev/setup-spell_rev.tp2~ 0) @9221
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~BRAC16.ITM~) AND (FILE_EXISTS_IN_GAME ~SPELL.IDS~)) @9222
 INCLUDE ~chriz-bg-rebalance/lib/sr_bracers.tpa~
 LAF cbr_apply_sr_bracers END
 
 BEGIN @320 DESIGNATED 320 GROUP @1300 LABEL ~cbr_damageable_combat_clouds~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9320
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~DVGASFRM.ITM~)
-  OR (FILE_EXISTS_IN_GAME ~OHBEGASF.SPL~) OR (FILE_EXISTS_IN_GAME ~BDGASFOR.SPL~)
-  OR (FILE_EXISTS_IN_GAME ~OHGASFRM.SPL~) OR (FILE_EXISTS_IN_GAME ~FINBODGF.ITM~)
-  OR (FILE_EXISTS_IN_GAME ~DW#VMGAS.SPL~)) @9321
 INCLUDE ~chriz-bg-rebalance/lib/cloud_forms.tpa~
 LAF cbr_install_cloud_forms END
 
 BEGIN @330 DESIGNATED 330 SUBCOMPONENT @1330 GROUP @1300 LABEL ~cbr_potion_uniqueness~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9330
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9331
 LAF cbr_install_potion_uniqueness INT_VAR potions = 1 END
 
 BEGIN @331 DESIGNATED 331 SUBCOMPONENT @1330 GROUP @1300 LABEL ~cbr_potion_uniqueness_genius_exempt~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9330
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9331
 LAF cbr_install_potion_uniqueness INT_VAR potions = 1 genius_exempt = 1 END
 
 BEGIN @332 DESIGNATED 332 GROUP @1300 LABEL ~cbr_heroism_family~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9330
-REQUIRE_PREDICATE ((FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~) AND (FILE_EXISTS_IN_GAME ~SPLPROT.2DA~)) @9331
 LAF cbr_install_potion_uniqueness INT_VAR heroism = 1 END
 
 // Chris Revisions: research/2026-10-23-aid-luck-chaotic-commands.md and
@@ -1723,8 +1578,6 @@ LAF cbr_install_chris_revisions END
 BEGIN @360 DESIGNATED 360 GROUP @1300 LABEL ~cbr_time_stop_haste_clocks~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9360
 REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9361
-// EEex's own 2.7.3.0 marker; earlier versions run another executable.
-REQUIRE_PREDICATE (FILE_EXISTS ~data/PATCH27.BIF~) @9362
 REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~cbr_true_timestop/setup-cbr_true_timestop.tp2~ 360) @9366
 LAF cbr_install_time_stop_haste_component END
 PRINT @9365

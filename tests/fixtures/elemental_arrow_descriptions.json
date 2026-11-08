@@ -1,0 +1,14 @@
+{
+  "descriptions": {
+    "AROW04": "This arrow is coated in acid. When it strikes an enemy, it not only pierces flesh but also eats it away, enlarging and deepening the wound.\n\nSTATISTICS:\n\nTHAC0: +1\nDamage: 1d6+1, +1d3 acid damage\nDamage type: Missile\nLauncher: Bow\n\nWeight: 0",
+    "AROW09": "This arrow is magically enhanced so as to burst into a rolling ball of ice and cold when fired. When the arrow strikes its victim, a shock of cold will travel through its body, both burning and numbing to the very core.\n\nSTATISTICS:\n\nDamage: 1d6, +1d2 cold damage\nDamage type: Missile\nLauncher: Bow\n\nWeight: 0",
+    "AROW08": "This is a magical arrow that will burst into flames as it is fired at an enemy. The effect is similar to an arrow doused in oil and set to flame.\n\nSTATISTICS:\n\nTHAC0: +0\nDamage: 1d6, +1d2 fire damage (Save vs. Spell for none)\nDamage type: Missile\nLauncher: Bow\n\nWeight: 0",
+    "AROWKC": "This is a magical arrow that will burst into flames as it is fired at an enemy. The effect is similar to an arrow doused in oil and set to flame.\n\nSTATISTICS:\n\nDamage: 1d6, +1d2 fire damage (Save vs. Breath for none)\nDamage type: Missile\nLauncher: Bow\n\nWeight: 0"
+  },
+  "names": {
+    "AROW04": "Acid Arrow +1",
+    "AROW09": "Arrow of Ice",
+    "AROW08": "Arrow of Fire",
+    "AROWKC": "Arrow of Fire"
+  }
+}

@@ -17,12 +17,11 @@ from tests.ie_formats import SplAbility, SplEffect, SplFile
 ROOT = Path(__file__).resolve().parents[1]
 LIBRARY = ROOT / "chriz-bg-rebalance/lib/sr_spellstrike.tpa"
 HARNESS = ROOT / "tests/weidu/sr_spellstrike_harness.tp2"
-WEIDU = ROOT / "weidu.exe"
+WEIDU = Path(__import__("os").environ.get("WEIDU", ROOT / "weidu.exe"))
 
 
 def _owned(effect: SplEffect) -> bool:
-    return (effect.opcode == 60 and effect.target == 2 and effect.timing == 0
-            and effect.parameter2 in (0, 1) and not effect.save_type & 0x1F)
+    return effect.opcode == 60 and effect.parameter2 in (0, 1)
 
 
 def _refresh(resref: str) -> SplEffect:
@@ -93,10 +92,12 @@ def _mutate(data: bytes, callback) -> bytes:
 
 class SpellstrikeTransformationTests(unittest.TestCase):
     def transform(self, payload: bytes, resref: str = "SPWI903B", *, error: str | None = None) -> bytes | None:
-        with tempfile.TemporaryDirectory(prefix="cbr-spellstrike-") as temporary:
+        (ROOT / "work").mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="cbr-spellstrike-", dir=ROOT / "work") as temporary:
             folder = Path(temporary)
             source, destination = folder / "input.spl", folder / "output.spl"
             source.write_bytes(payload)
+            (folder / "weidu.log").write_text("", encoding="ascii")
             command = [str(WEIDU), str(HARNESS), "--nogame", "--force-install-list", "0",
                        "--no-exit-pause", "--quick-log"]
             for argument in (LIBRARY, source, destination, resref):
@@ -111,6 +112,7 @@ class SpellstrikeTransformationTests(unittest.TestCase):
                 self.assertFalse(destination.exists())
                 return None
             self.assertEqual(0, result.returncode, transcript)
+            self.assertNotIn("WARNING", transcript)
             self.assertIn("SUCCESSFULLY INSTALLED", transcript)
             self.assertTrue(destination.exists(), transcript)
             return destination.read_bytes()
@@ -118,7 +120,8 @@ class SpellstrikeTransformationTests(unittest.TestCase):
     def assert_preserved(self, before: bytes, after: bytes, resref: str) -> None:
         old, new = SplFile.from_bytes(before), SplFile.from_bytes(after)
         old_header, new_header = bytearray(old.header_raw), bytearray(new.header_raw)
-        old_header[0x6E:0x70] = new_header[0x6E:0x70]
+        old_header[0x64:0x68] = new_header[0x64:0x68]
+        old_header[0x6A:0x70] = new_header[0x6A:0x70]
         self.assertEqual(old_header, new_header)
         self.assertEqual([fx.to_bytes() for fx in old.casting_effects],
                          [fx.to_bytes() for fx in new.casting_effects])
@@ -129,13 +132,27 @@ class SpellstrikeTransformationTests(unittest.TestCase):
             self.assertEqual(old_raw, new_raw)
             self.assertEqual(_refresh(resref).to_bytes(), output.effects[0].to_bytes())
             for mode in (0, 1):
-                donors = [fx for fx in original.effects if _owned(fx) and fx.parameter2 == mode]
                 failures = [fx for fx in output.effects if _owned(fx) and fx.parameter2 == mode]
                 self.assertEqual(1, len(failures))
-                expected = dataclasses.replace(donors[0], parameter1=15, duration=12)
+                donor = next((fx for fx in original.effects if _owned(fx)), SplEffect(resist_dispel=2))
+                expected = dataclasses.replace(donor, opcode=60, target=2, timing=0,
+                                               parameter1=15, parameter2=mode, duration=12,
+                                               probability1=100, probability2=0,
+                                               save_type=donor.save_type & ~31)
                 self.assertEqual(expected.to_bytes(), failures[0].to_bytes())
-            retained = [fx.to_bytes() for fx in original.effects if not _owned(fx)]
-            actual = [fx.to_bytes() for fx in output.effects[1:] if not _owned(fx)]
+            def retained_effect(fx):
+                return not (_owned(fx) or (fx.opcode == 221 and fx.parameter2 == 1)
+                            or (fx.opcode == 321 and fx.resource.upper() == resref.upper()))
+            strips = [fx for fx in output.effects if fx.opcode == 221 and fx.parameter2 == 1]
+            strip = next((fx for fx in original.effects if fx.opcode == 221 and fx.parameter2 == 1),
+                         SplEffect(resist_dispel=2))
+            self.assertEqual([dataclasses.replace(strip, opcode=221, target=2, parameter1=9,
+                                                 parameter2=1, timing=1, resist_dispel=2, duration=0,
+                                                 probability1=100, probability2=0,
+                                                 save_type=strip.save_type & ~31).to_bytes()],
+                             [fx.to_bytes() for fx in strips])
+            retained = [fx.to_bytes() for fx in original.effects if retained_effect(fx)]
+            actual = [fx.to_bytes() for fx in output.effects[1:] if retained_effect(fx)]
             self.assertEqual(retained, actual, "stripping, feedback or foreign effects changed")
 
     def test_direct_and_wrapped_payloads_preserve_all_other_fields(self):
@@ -182,7 +199,7 @@ class SpellstrikeTransformationTests(unittest.TestCase):
         after = self.transform(before)
         self.assert_preserved(before, after, "SPWI903B")
 
-    def test_no_save_extension_flags_and_opaque_metadata_survive(self):
+    def test_edited_failure_metadata_is_overwritten(self):
         before = _mutate(_fixture(), lambda effects: [
             dataclasses.replace(fx, save_type=0x01000000, save_bonus=3, special=0x11223344,
                                 resource="OPAQUE", dice_number=2, dice_size=7)
@@ -190,67 +207,51 @@ class SpellstrikeTransformationTests(unittest.TestCase):
         after = self.transform(before)
         self.assert_preserved(before, after, "SPWI903B")
 
-    def test_missing_or_duplicate_stripping_fails_without_output(self):
-        for duplicate in (False, True):
-            with self.subTest(duplicate=duplicate):
-                before = _mutate(_fixture(), lambda effects:
-                                 effects + [effects[0]] if duplicate else effects[1:])
-                self.transform(before, error="expected one level-9 spell-protection removal")
+    def test_missing_duplicate_and_edited_packages_are_rebuilt(self):
+        variants = (
+            lambda effects: [fx for fx in effects if fx.opcode not in (60, 221)],
+            lambda effects: effects + effects,
+            lambda effects: [dataclasses.replace(fx, parameter1=432, target=1, timing=4,
+                                                 resist_dispel=3, probability1=12, save_type=31)
+                             if _owned(fx) or fx.opcode == 221 and fx.parameter2 == 1 else fx
+                             for fx in effects],
+            lambda effects: effects + [dataclasses.replace(_refresh("SPWI903B"), parameter2=0)],
+            lambda effects: [],
+        )
+        for index, mutation in enumerate(variants):
+            with self.subTest(index=index):
+                before = _mutate(_fixture(), mutation)
+                after = self.transform(before)
+                self.assert_preserved(before, after, "SPWI903B")
+                self.assertEqual(after, self.transform(after))
 
-    def test_missing_or_excess_failure_modes_fail_without_output(self):
-        for mode in (0, 1):
-            for duplicate in (False, True):
-                with self.subTest(mode=mode, duplicate=duplicate):
-                    def change(effects):
-                        donors = [fx for fx in effects if _owned(fx) and fx.parameter2 == mode]
-                        return effects + [donors[0]] if duplicate else [fx for fx in effects if fx not in donors]
-                    self.transform(_mutate(_fixture(), change), error="expected arcane and divine failure donors")
+    def test_empty_spell_receives_an_ability(self):
+        before = dataclasses.replace(SplFile.from_bytes(_fixture()), abilities=()).to_bytes()
+        after = SplFile.from_bytes(self.transform(before))
+        self.assertEqual(1, len(after.abilities))
+        self.assertEqual([321, 221, 60, 60], [fx.opcode for fx in after.abilities[0].effects])
 
-    def test_incoherent_delivery_fails_without_erasing_conditional_effects(self):
-        for field, value in (("probability1", 50), ("resist_dispel", 3), ("power", 7)):
-            with self.subTest(field=field):
-                def change(effects):
-                    effects[3] = dataclasses.replace(effects[3], **{field: value})
-                    return effects
-                self.transform(_mutate(_fixture(), change), error="failure donors have inconsistent delivery metadata")
+    def test_shared_slices_and_unreferenced_effects_do_not_block_installation(self):
+        raw = bytearray(_fixture())
+        first = struct.unpack_from("<H", raw, 0x72 + 0x20)[0]
+        struct.pack_into("<H", raw, 0x9A + 0x20, first)
+        raw.extend(bytes(0x30))
+        before = bytes(raw)
+        self.assert_preserved(before, self.transform(before), "SPWI903B")
 
-    def test_incompatible_same_source_removal_fails_closed(self):
-        for marker in (dataclasses.replace(_refresh("SPWI903B"), parameter2=0),
-                       dataclasses.replace(_refresh("SPWI903B"), target=1)):
-            with self.subTest(marker=marker):
-                before = _mutate(_fixture(), lambda effects: effects + [marker])
-                self.transform(before, error="incompatible existing self-refresh effect")
-
-    def test_invalid_resource_identity_fails_closed(self):
-        self.transform(_fixture(), "TOOLONGREF", error="expected a payload resref")
-
-    def test_malformed_partitions_fail_without_output(self):
-        for case in ("truncated_header", "signature", "empty", "ability_bounds", "effect_bounds",
-                     "partial_effect", "overlap", "casting_overlap", "casting_bounds", "unowned"):
+    def test_unreadable_tables_are_left_unchanged_without_warnings(self):
+        for case in ("header", "abilities", "effects", "truncated"):
             with self.subTest(case=case):
                 raw = bytearray(_fixture())
-                if case == "truncated_header":
+                if case == "header":
                     del raw[40:]
-                elif case == "signature":
-                    raw[:8] = b"SPL V2  "
-                elif case == "empty":
-                    struct.pack_into("<H", raw, 0x68, 0)
-                elif case == "ability_bounds":
+                elif case == "abilities":
                     struct.pack_into("<I", raw, 0x64, len(raw))
-                elif case == "effect_bounds":
+                elif case == "effects":
                     struct.pack_into("<H", raw, 0x72 + 0x20, 65535)
-                elif case == "partial_effect":
+                else:
                     del raw[-1:]
-                elif case == "overlap":
-                    first = struct.unpack_from("<H", raw, 0x72 + 0x20)[0]
-                    struct.pack_into("<H", raw, 0x9A + 0x20, first)
-                elif case == "casting_overlap":
-                    struct.pack_into("<H", raw, 0x6E, 2)
-                elif case == "casting_bounds":
-                    struct.pack_into("<H", raw, 0x6E, 65535)
-                elif case == "unowned":
-                    raw.extend(bytes(0x30))
-                self.transform(bytes(raw), error="CBR Spellstrike:")
+                self.assertEqual(bytes(raw), self.transform(bytes(raw)))
 
 
 if __name__ == "__main__":

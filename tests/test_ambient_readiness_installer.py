@@ -143,7 +143,7 @@ def _build_fixture(
     unsupported: str | None = None,
     duplicate_override: bool = False,
     duplicate_required_symbol: bool = False,
-    future_improved_mantle: bool = False,
+    genuine_improved_mantle: bool = False,
     project_image_number: int = PROJECT_IMAGE[1],
     missing_project_image_symbol: bool = False,
     missing_project_image_resource: bool = False,
@@ -215,7 +215,7 @@ def _build_fixture(
         write_spl(
             root / f"{resref}.SPL",
             _urgent_spell(
-                genuine=(True if symbol == "WIZARD_IMPROVED_MANTLE" and future_improved_mantle else genuine)
+                genuine=(True if symbol == "WIZARD_IMPROVED_MANTLE" and genuine_improved_mantle else genuine)
             ),
         )
 
@@ -482,6 +482,7 @@ class AmbientReadinessManifestTests(unittest.TestCase):
         transcript = _transcript(process)
         self.assertEqual(process.returncode, 0, transcript)
         self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+        self.assertNotIn("INSTALLED WITH WARNINGS", transcript)
         self.assertTrue(fixture.output.is_file(), transcript)
         return process
 
@@ -529,73 +530,105 @@ class AmbientReadinessManifestTests(unittest.TestCase):
             self._read_with_lua(fixture, "m.project_image_resref"), "spwi903"
         )
 
-    def test_missing_project_image_identity_fails_before_output(self) -> None:
-        for kwargs, diagnostic in (
-            ({"missing_project_image_symbol": True}, "WIZARD_PROJECT_IMAGE"),
-            ({"missing_project_image_resource": True}, "SPWI703.SPL"),
-        ):
+    def test_missing_project_image_identity_does_not_block_manifest(self):
+        for kwargs in ({"missing_project_image_symbol": True}, {"missing_project_image_resource": True}):
             with self.subTest(kwargs=kwargs):
                 fixture = self._fixture(**kwargs)
-                fixture.output.write_bytes(b"sentinel-before-project-image-preflight")
-                process = _run_harness(fixture)
-                self.assertNotEqual(process.returncode, 0, _transcript(process))
-                self.assertIn(diagnostic, _transcript(process))
-                self.assertEqual(
-                    fixture.output.read_bytes(),
-                    b"sentinel-before-project-image-preflight",
-                )
+                self._run_success(fixture)
+                self.assertEqual("6", self._read_with_lua(fixture, "#m.ambient_spells"))
+                expected = "" if kwargs.get("missing_project_image_symbol") else "spwi703"
+                self.assertEqual(expected, self._read_with_lua(fixture, "m.project_image_resref"))
 
-    def test_missing_optional_symbol_or_delivery_is_skipped_with_diagnostic(self) -> None:
-        cases = (
-            ({"missing_symbol": "WIZARD_ARMOR"}, "missing SPELL.IDS symbol"),
-            ({"missing_delivery": "DWSW102"}, "missing prebuff delivery resource"),
-        )
-        for kwargs, diagnostic in cases:
-            with self.subTest(kwargs=kwargs):
-                fixture = self._fixture(**kwargs)
-                process = self._run_success(fixture)
-                self.assertIn(diagnostic, _transcript(process))
-                self.assertEqual(
-                    self._read_with_lua(fixture, "#m.ambient_spells"), "5"
-                )
+    def test_missing_symbol_is_logged_and_missing_delivery_uses_source(self):
+        fixture = self._fixture(missing_symbol="WIZARD_ARMOR")
+        process = self._run_success(fixture)
+        self.assertIn("missing SPELL.IDS symbol", _transcript(process))
+        self.assertEqual("5", self._read_with_lua(fixture, "#m.ambient_spells"))
+        fixture = self._fixture(missing_delivery="DWSW102")
+        process = self._run_success(fixture)
+        self.assertEqual("6", self._read_with_lua(fixture, "#m.ambient_spells"))
+        self.assertEqual("SPWI102", self._read_with_lua(fixture, "m.ambient_spells[3].delivery"))
 
-    def test_unsupported_optional_ambient_semantics_are_skipped(self) -> None:
-        for unsupported in (
-            "short_duration",
-            "non_self",
-            "non_defensive",
-            "no_memorized_delivery",
-        ):
-            with self.subTest(unsupported=unsupported):
-                fixture = self._fixture(unsupported=unsupported)
-                process = self._run_success(fixture)
-                self.assertIn("unsupported ambient semantics", _transcript(process))
-                self.assertEqual(
-                    self._read_with_lua(fixture, "#m.ambient_spells"), "5"
-                )
+    def test_edited_spell_mechanics_do_not_drop_decided_candidates(self):
+        baseline = self._fixture()
+        self._run_success(baseline)
+        expected = baseline.output.read_bytes()
+        for variant in ("short_duration", "non_self", "non_defensive", "no_memorized_delivery"):
+            with self.subTest(variant=variant):
+                fixture = self._fixture(unsupported=variant)
+                self._run_success(fixture)
+                self.assertEqual(expected, fixture.output.read_bytes())
 
-    def test_duplicate_override_or_required_symbol_fails_before_output(self) -> None:
-        for kwargs, diagnostic in (
-            ({"duplicate_override": True}, "duplicate override"),
-            ({"duplicate_required_symbol": True}, "maps more than once"),
-        ):
-            with self.subTest(kwargs=kwargs):
-                fixture = self._fixture(**kwargs)
-                fixture.output.write_bytes(b"sentinel-before-preflight")
-                process = _run_harness(fixture)
-                self.assertNotEqual(process.returncode, 0, _transcript(process))
-                self.assertIn(diagnostic, _transcript(process))
-                self.assertEqual(fixture.output.read_bytes(), b"sentinel-before-preflight")
-
-    def test_future_restored_improved_mantle_is_truthfully_enabled(self) -> None:
-        fixture = self._fixture(future_improved_mantle=True)
+    def test_duplicate_override_and_symbol_use_last_definition(self):
+        fixture = self._fixture(duplicate_override=True)
         self._run_success(fixture)
-        self.assertEqual(
-            self._read_with_lua(
-                fixture, "m.urgent_candidates[2].genuine_weapon_immunity"
-            ),
-            "1",
-        )
+        self.assertEqual("0", self._read_with_lua(fixture, "m.overrides.CBRTEST.grade"))
+        fixture = self._fixture(duplicate_required_symbol=True)
+        shutil.copy2(fixture.root / "SPWI611.SPL", fixture.root / "SPWI612.SPL")
+        self._run_success(fixture)
+        self.assertEqual("SPWI612", self._read_with_lua(fixture, "m.urgent_candidates[4].resref"))
+
+    def test_genuine_improved_mantle_is_an_urgent_candidate(self) -> None:
+        for scs_hooks in (False, True):
+            with self.subTest(scs_hooks=scs_hooks):
+                fixture = self._fixture(genuine_improved_mantle=True)
+                if scs_hooks:
+                    spell = _urgent_spell(genuine=True)
+                    ability = dataclasses.replace(spell.abilities[0], effects=(
+                        SplEffect(opcode=139, parameter1=71),
+                        dataclasses.replace(spell.abilities[0].effects[0], duration=36, parameter1=4),
+                        SplEffect(opcode=328, parameter2=64),
+                    ))
+                    write_spl(fixture.root / "SPWI808.SPL", dataclasses.replace(
+                        spell, abilities=(ability,),
+                        casting_effects=(SplEffect(opcode=146, target=1, resource="DW#BLHDA"),),
+                    ))
+                original = (fixture.root / "SPWI808.SPL").read_bytes()
+                self._run_success(fixture)
+                self.assertEqual("1", self._read_with_lua(
+                    fixture, "m.urgent_candidates[2].genuine_weapon_immunity"))
+                self.assertEqual(original, (fixture.root / "SPWI808.SPL").read_bytes())
+                first = fixture.output.read_bytes()
+                self._run_success(fixture)
+                self.assertEqual(first, fixture.output.read_bytes())
+
+    def test_missing_extra_effects_and_empty_abilities_keep_manifest_identical(self):
+        fixture = self._fixture()
+        self._run_success(fixture)
+        expected = fixture.output.read_bytes()
+        for symbol, _, resref, delivery, _, _, _ in AMBIENT:
+            empty = SplFile(abilities=(), header_raw=make_spl_header(spell_type=1, level=1))
+            write_spl(fixture.root / f"{resref}.SPL", empty)
+            spell = _urgent_spell(genuine=False)
+            extra = dataclasses.replace(spell.abilities[0], effects=spell.abilities[0].effects * 4)
+            write_spl(fixture.root / f"{delivery}.SPL", dataclasses.replace(spell, abilities=(extra,)))
+        self._run_success(fixture)
+        self.assertEqual(expected, fixture.output.read_bytes())
+
+    def test_absent_tables_and_urgent_targets_keep_other_records(self):
+        fixture = self._fixture()
+        fixture.prebuff_map.unlink()
+        for _, _, resref, _ in URGENT:
+            (fixture.root / f"{resref}.SPL").unlink()
+        self._run_success(fixture)
+        self.assertEqual("6\t0", self._read_with_lua(fixture, "#m.ambient_spells, '\\t', #m.urgent_candidates"))
+        fixture.spell_ids.unlink()
+        self._run_success(fixture)
+        self.assertEqual("0", self._read_with_lua(fixture, "#m.ambient_spells"))
+
+    def test_bundled_template_and_tables_are_valid_offline(self):
+        template = (ROOT / "chriz-bg-rebalance/lua/M_CBRRDY.lua").read_text(encoding="ascii")
+        self.assertEqual(1, template.count("%CBR_RDY_MANIFEST%"))
+        for forbidden in ("CBR_TEST", "RDY_PROBE", "C:\\", "/mnt/"):
+            self.assertNotIn(forbidden, template)
+        rows = [line.split() for line in SPELL_TABLE.read_text().splitlines()[3:] if line.strip()]
+        self.assertEqual(6, len(rows))
+        self.assertEqual(len(rows), len({row[0] for row in rows}))
+        for row in rows:
+            self.assertEqual(6, len(row))
+            self.assertGreaterEqual(int(row[2]), 2400)
+            self.assertIn(int(row[1]), (1, 2, 3))
+            self.assertIn(int(row[5]), (0, 1))
 
     def test_second_application_is_byte_identical(self) -> None:
         fixture = self._fixture()
@@ -705,13 +738,27 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
         self._install(game)
         self._runtime(game)
 
-    def test_future_genuine_improved_mantle_is_enabled_semantically(self) -> None:
-        game = self._game(future_improved_mantle=True)
-        self._install(game)
-        source = self._runtime(game)
-        self.assertEqual(
-            self._urgent_genuine(source, "WIZARD_IMPROVED_MANTLE"), 1
-        )
+    def test_public_genuine_improved_mantle_is_selected_with_or_without_scs(self) -> None:
+        for scs_installed in (False, True):
+            with self.subTest(scs_installed=scs_installed):
+                game = self._game(genuine_improved_mantle=True, scs_installed=scs_installed)
+                self._install(game)
+                source = self._runtime(game)
+                self.assertEqual(1, self._urgent_genuine(source, "WIZARD_IMPROVED_MANTLE"))
+                lua = _find_lua()
+                if lua is None:
+                    self.skipTest("no Lua interpreter found")
+                process = subprocess.run(
+                    [lua, str(ROOT / "tests/lua/ambient_readiness_sim.lua"),
+                     str(game.override / "M_CBRRDY.lua"), "urgent_candidates"],
+                    capture_output=True, text=True, timeout=30, check=False,
+                )
+                self.assertEqual(0, process.returncode, process.stdout + process.stderr)
+                seen = dict(line.split("\t", 1) for line in process.stdout.splitlines() if "\t" in line)
+                self.assertEqual("spwi907", seen["all_available"])
+                self.assertEqual("spwi808", seen["without_absolute"])
+                # This scenario still has Improved Mantle memorized alongside PFMW.
+                self.assertEqual("spwi808", seen["pfmw_fallback"])
 
     def test_missing_optional_ambient_candidate_still_installs(self) -> None:
         game = self._game(missing_symbol="WIZARD_ARMOR")
@@ -721,9 +768,15 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
         self.assertIn("ambient=5", transcript)
         self.assertNotIn('key = "WIZARD_ARMOR"', source)
 
+    def test_no_scs_and_no_prebuff_map_still_ship_the_runtime(self):
+        game = self._game(scs_installed=False, prebuff_map=False)
+        transcript = self._install(game)
+        self.assertNotIn("INSTALLED WITH WARNINGS", transcript)
+        source = self._runtime(game)
+        self.assertIn('delivery = "SPWI102"', source)
+
     def test_missing_prerequisites_skip_without_override_mutation(self) -> None:
         cases = (
-            ("scs", {"scs_installed": False}, "Smarter Mages"),
             (
                 "eeex",
                 {
@@ -734,7 +787,6 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
                 "EEex",
             ),
             ("autoload", {"autoload_marker": False}, "autoload"),
-            ("mapping", {"prebuff_map": False}, "prebuff"),
         )
         for name, kwargs, diagnostic in cases:
             with self.subTest(name=name):
@@ -747,28 +799,16 @@ class AmbientReadinessPublicInstallerTests(unittest.TestCase):
                 self.assertNotRegex(game.active_weidu_log(), r"(?m)#0\s+#121\b")
                 self.assertEqual(_tree(game.override), game.before_override)
 
-    def test_malformed_recognized_mapping_fails_before_override_mutation(self) -> None:
-        for name, kwargs, diagnostic in (
-            ("duplicate", {"malformed_mapping": True}, "maps more than once"),
-            (
-                "missing_required",
-                {"missing_required_mapping": True},
-                "required candidate WIZARD_STONE_SKIN has no unique SCS prebuff mapping",
-            ),
-            (
-                "missing_project_image",
-                {"missing_project_image_resource": True},
-                "required Project Image resource SPWI703.SPL is missing",
-            ),
-        ):
-            with self.subTest(name=name):
+    def test_edited_mapping_and_missing_project_image_do_not_block_runtime(self):
+        for kwargs in ({"malformed_mapping": True}, {"missing_required_mapping": True},
+                       {"missing_project_image_resource": True}):
+            with self.subTest(kwargs=kwargs):
                 game = self._game(**kwargs)
-                process = game.run("--force-install-list", "121")
-                transcript = game.transcript(process)
-                self.assertNotEqual(process.returncode, 0, transcript)
-                self.assertIn(diagnostic, transcript)
-                self.assertNotRegex(game.active_weidu_log(), r"(?m)#0\s+#121\b")
-                self.assertEqual(_tree(game.override), game.before_override)
+                self._install(game)
+                source = self._runtime(game)
+                self.assertEqual(6, source.count("self_target = 1,"))
+                if not kwargs.get("missing_project_image_resource"):
+                    self.assertRegex(source, r'key = "WIZARD_STONE_SKIN"[\s\S]*?delivery = "SPWI408"')
 
     def test_reinstall_is_deterministic_and_uninstall_restores_every_byte(self) -> None:
         game = self._game(existing_runtime=True)

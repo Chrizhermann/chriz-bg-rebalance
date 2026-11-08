@@ -1,26 +1,36 @@
 // Component 302: patch the weapon's own behavior, never global Slow/Haste.
 DEFINE_PATCH_FUNCTION cbr_foa_layout
-  INT_VAR stride = 0x38
-  RET ab na fx eq_first eq_count
+  INT_VAR stride = 0x38 log_errors = 1
+  RET ab na fx eq_first eq_count readable
 BEGIN
-  PATCH_IF BUFFER_LENGTH < 0x72 BEGIN PATCH_FAIL ~Flail of Ages: truncated resource header.~ END
-  READ_LONG 0x64 ab READ_SHORT 0x68 na READ_LONG 0x6a fx
-  READ_SHORT 0x6e eq_first READ_SHORT 0x70 eq_count
-  PATCH_IF (na > 0 AND (ab < 0x72 OR ab > BUFFER_LENGTH OR na > (BUFFER_LENGTH - ab) / stride
-    OR fx < ab + na * stride)) OR fx < 0x72 OR fx > BUFFER_LENGTH BEGIN
-    PATCH_FAIL ~Flail of Ages: ability/effect table is outside the resource.~
-  END
-  // Padding and unused records are legitimate. Validate referenced slices only.
-  SET available = (BUFFER_LENGTH - fx) / 0x30
-  PATCH_IF eq_count > 0 AND eq_first + eq_count > available BEGIN
-    PATCH_FAIL ~Flail of Ages: global effect slice is outside the resource.~
-  END
-  FOR (a = 0; a < na; ++a) BEGIN
-    READ_SHORT (ab + a * stride + 0x1e) n
-    READ_SHORT (ab + a * stride + 0x20) first
-    PATCH_IF n > 0 AND first + n > available BEGIN
-      PATCH_FAIL ~Flail of Ages: ability effect slice is outside the resource.~
+  SET ab = 0 SET na = 0 SET fx = 0 SET eq_first = 0 SET eq_count = 0
+  SET readable = BUFFER_LENGTH >= 0x72
+  PATCH_IF readable BEGIN
+    READ_LONG 0x64 ab READ_SHORT 0x68 na READ_LONG 0x6a fx
+    READ_SHORT 0x6e eq_first READ_SHORT 0x70 eq_count
+    SET readable = (na = 0 OR (ab >= 0x72 AND ab <= BUFFER_LENGTH
+      AND na <= (BUFFER_LENGTH - ab) / stride)) AND fx >= 0x72 AND fx <= BUFFER_LENGTH
+    PATCH_IF readable BEGIN
+      SET available = (BUFFER_LENGTH - fx) / 0x30
+      PATCH_IF eq_count > 0 AND eq_first + eq_count > available BEGIN SET readable = 0 END
+      FOR (a = 0; a < na; ++a) BEGIN
+        READ_SHORT (ab + a * stride + 0x1e) n
+        READ_SHORT (ab + a * stride + 0x20) first
+        PATCH_IF n > 0 AND first + n > available BEGIN SET readable = 0 END
+      END
+      // Tables may be in either order, but referenced records cannot overlap.
+      PATCH_IF na > 0 AND fx >= ab AND fx < ab + na * stride BEGIN SET readable = 0 END
+      PATCH_IF na > 0 AND fx < ab BEGIN
+        PATCH_IF eq_count > 0 AND fx + (eq_first + eq_count) * 0x30 > ab BEGIN SET readable = 0 END
+        FOR (a = 0; a < na; ++a) BEGIN
+          READ_SHORT (ab + a * stride + 0x1e) n READ_SHORT (ab + a * stride + 0x20) first
+          PATCH_IF n > 0 AND fx + (first + n) * 0x30 > ab BEGIN SET readable = 0 END
+        END
+      END
     END
+  END
+  PATCH_IF NOT readable AND log_errors BEGIN
+    PATCH_PRINT ~Flail of Ages: %SOURCE_FILE% has unreadable resource bounds; leaving this file alone.~
   END
 END
 
@@ -28,15 +38,19 @@ END
 // original records; trailing padding and unused data are preserved as well.
 DEFINE_PATCH_FUNCTION cbr_foa_copy_slice
   INT_VAR fx = 0 first = 0 count = 0
-  RET copied_first
+  RET copied_first copy_ok
 BEGIN
-  SET copied_first = (BUFFER_LENGTH - fx) / 0x30
-  PATCH_IF copied_first + count > 0x10000 BEGIN
-    PATCH_FAIL ~Flail of Ages: separating shared effects would exceed the format's effect-index limit.~
-  END
+  LPF cbr_foa_effect_end RET copied_first = effect_end END
+  READ_LONG 0x64 table READ_SHORT 0x68 abilities
+  SET copy_ok = copied_first <= 0xffff AND count <= 0xffff
+  PATCH_IF copy_ok BEGIN
   READ_ASCII (fx + first * 0x30) slice (count * 0x30)
   INSERT_BYTES (fx + copied_first * 0x30) (count * 0x30)
   WRITE_ASCIIE (fx + copied_first * 0x30) ~%slice%~ (count * 0x30)
+  PATCH_IF abilities > 0 AND table >= fx + copied_first * 0x30 BEGIN
+    WRITE_LONG 0x64 (table + count * 0x30)
+  END
+  END ELSE BEGIN SET copied_first = first END
 END
 
 // Haste/Slow secondary types and Slow penalties are sets written as ~|a|b|~.
@@ -65,7 +79,7 @@ END
 
 // The effective implementation of a spell: the spell plus the spells its
 // abilities cast on the same target with opcode 146 (SCS moves Haste/Slow into
-// such payloads), bounded and visiting each resource once. Casting features
+// such payloads), visiting each resource once. Casting features
 // act on the caster and are not part of it. Returns, as ~|...|~ sets:
 //   types     secondary types it carries (own header bytes, 0 = none)
 //   removed   secondary types it removes from its target (opcode 221)
@@ -80,14 +94,12 @@ DEFINE_ACTION_FUNCTION cbr_foa_spell_profile
 BEGIN
   OUTER_SPRINT types ~|~ OUTER_SPRINT removed ~|~ OUTER_SPRINT penalties ~|~ OUTER_SPRINT checks ~|~
   ACTION_TO_UPPER source
-  ACTION_IF depth < 32 AND NOT (~%source%~ STRING_EQUAL ~~) AND FILE_EXISTS_IN_GAME ~%source%.SPL~
+  ACTION_IF NOT (~%source%~ STRING_EQUAL ~~) AND FILE_EXISTS_IN_GAME ~%source%.SPL~
     AND (~%seen%~ STRING_CONTAINS_REGEXP ~|%source%|~) != 0 BEGIN
     OUTER_SPRINT seen ~%seen%%source%|~
     COPY_EXISTING ~%source%.SPL~ ~~
-      PATCH_IF BUFFER_LENGTH < 8 BEGIN PATCH_FAIL ~Flail of Ages: %SOURCE_FILE% is truncated.~ END
-      READ_ASCII 0 sig (8)
-      PATCH_IF NOT (~%sig%~ STRING_EQUAL ~SPL V1  ~) BEGIN PATCH_FAIL ~Flail of Ages: %SOURCE_FILE% is not SPL V1.~ END
-      LPF cbr_foa_layout INT_VAR stride = 0x28 RET ab na fx eq_first eq_count END
+      LPF cbr_foa_layout INT_VAR stride = 0x28 RET ab na fx eq_first eq_count readable END
+      PATCH_IF readable BEGIN
       READ_BYTE 0x27 own
       PATCH_IF own > 0 BEGIN SPRINT types ~%types%%own%|~ END
       FOR (a = 0; a < na; ++a) BEGIN
@@ -125,6 +137,7 @@ BEGIN
             END
           END
         END
+      END
       END
     BUT_ONLY
     // Merged child sets meet at ~||~; keep one separator.
@@ -192,7 +205,8 @@ BEGIN
       PATCH_IF BUFFER_LENGTH >= 0x72 BEGIN
         READ_ASCII 0 sig (8)
         PATCH_IF ~%sig%~ STRING_EQUAL ~SPL V1  ~ BEGIN
-          LPF cbr_foa_layout INT_VAR stride = 0x28 RET ab na fx eq_first eq_count END
+          LPF cbr_foa_layout INT_VAR stride = 0x28 RET ab na fx eq_first eq_count readable END
+          PATCH_IF readable BEGIN
           SET feedback = 1
           FOR (a = (0 - 1); a < na; ++a) BEGIN
             SET n = eq_count SET first = eq_first
@@ -209,6 +223,7 @@ BEGIN
           END
         END
       END
+          END
     BUT_ONLY
   END
 END
@@ -282,17 +297,13 @@ DEFINE_ACTION_FUNCTION cbr_foa_classify_resource
 BEGIN
   OUTER_SET kind = 4
   ACTION_IF FILE_EXISTS_IN_GAME ~%source%.%extension%~ BEGIN
-    // Cyclic/very deep foreign helpers are opaque, not install fingerprints.
-    // They remain untouched unless a Slow-containing mixed delivery is found.
-    ACTION_IF depth < 32 AND (~%chain%~ STRING_CONTAINS_REGEXP ~|%source%[.]%extension%|~) != 0 BEGIN
+    // End cycles. The result chooses where to write the save, never whether
+    // the item's decided Slow is installed.
+    ACTION_IF (~%chain%~ STRING_CONTAINS_REGEXP ~|%source%[.]%extension%|~) != 0 BEGIN
       COPY_EXISTING ~%source%.%extension%~ ~~
-        PATCH_IF BUFFER_LENGTH < 8 BEGIN PATCH_FAIL ~Flail of Ages: truncated linked effect resource.~ END
-        READ_ASCII 0 sig (8)
         SET kind = 0
         PATCH_IF ~%extension%~ STRING_EQUAL ~EFF~ BEGIN
-          PATCH_IF BUFFER_LENGTH < 0x110 OR NOT (~%sig%~ STRING_EQUAL ~EFF V2.0~) BEGIN
-            PATCH_FAIL ~Flail of Ages: linked EFF has an invalid header or is truncated.~
-          END
+          PATCH_IF BUFFER_LENGTH >= 0x110 BEGIN
           READ_LONG 0x10 op READ_LONG 0x14 target READ_LONG 0x1c p1 READ_LONG 0x20 p2
           READ_LONG 0x24 timing READ_LONG 0x28 duration
           READ_ASCII 0x30 resource (8) NULL READ_LONG 0x40 save READ_LONG 0x44 bonus
@@ -300,9 +311,12 @@ BEGIN
             STR_VAR resource = EVAL ~%resource%~ owner = EVAL ~%source%~ chain = EVAL ~%chain%%source%.%extension%|~
               haste_types = EVAL ~%haste_types%~ slow_types = EVAL ~%slow_types%~ slow_penalties = EVAL ~%slow_penalties%~
             RET kind END
+          END ELSE BEGIN
+            PATCH_PRINT ~Flail of Ages: %SOURCE_FILE% is truncated; ending this effect branch.~
+          END
         END ELSE BEGIN
-          PATCH_IF NOT (~%sig%~ STRING_EQUAL ~SPL V1  ~) BEGIN PATCH_FAIL ~Flail of Ages: linked spell is not SPL V1.~ END
-          LPF cbr_foa_layout INT_VAR stride = 0x28 RET ab na fx eq_first eq_count END
+          LPF cbr_foa_layout INT_VAR stride = 0x28 RET ab na fx eq_first eq_count readable END
+          PATCH_IF readable BEGIN
           // Casting features belong to the caster rather than the struck actor.
           PATCH_IF eq_count > 0 AND search_opcode < 0 BEGIN SET kind = 4 END
           FOR (a = (0 - 1); a < na; ++a) BEGIN
@@ -341,6 +355,7 @@ BEGIN
             END
           END
         END
+          END
       BUT_ONLY
     END
   END
@@ -349,9 +364,9 @@ END
 // bit 3 marks an installed Slow penalty; it shares a direct Slow's save only
 // when it also has that Slow's timing and duration.
 DEFINE_PATCH_FUNCTION cbr_foa_slow_slice
-  INT_VAR start = 0 count = 0 save_penalty = 2
-  STR_VAR haste_types = ~|~ slow_types = ~|~ slow_penalties = ~|~
-  RET found
+  INT_VAR start = 0 count = 0 save_penalty = 2 next_copy = 300000 any_target = 0
+  STR_VAR haste_types = ~|~ slow_types = ~|~ slow_penalties = ~|~ copies = ~|~
+  RET found next_copy copies
 BEGIN
   SET found = 0
   FOR (i = 0; i < count; ++i) BEGIN
@@ -365,13 +380,10 @@ BEGIN
     PATCH_IF (op = 0 OR op = 54) AND p1 < 0 BEGIN
       LPF cbr_foa_in_set STR_VAR set = EVAL ~%slow_penalties%~ item = EVAL ~%op%:%p2%~ RET penalty = found END
     END
-    PATCH_IF target = 2 BEGIN
+    PATCH_IF target = 2 OR any_target BEGIN
       PATCH_IF op = 40 BEGIN SET kind = 1 END
       ELSE PATCH_IF (op = 139 AND p1 = 14000) OR (op = 142 AND p2 = 41) OR removal BEGIN SET kind = 2 END
       ELSE PATCH_IF penalty BEGIN SET kind = 8 END
-      ELSE PATCH_IF op = 221 AND (~%haste_types%~ STRING_EQUAL ~|~) BEGIN
-        PATCH_PRINT ~Flail of Ages: %SOURCE_RES% removes secondary type %p2% on hit. Haste's secondary type is unknown in this game, so that removal was left unchanged and has no save.~
-      END
       ELSE PATCH_IF op = 146 OR op = 177 OR op = 326 BEGIN
         READ_ASCII (at + 0x14) child (8) NULL
         SPRINT extension ~SPL~
@@ -383,7 +395,17 @@ BEGIN
             RET kind END
         END
         PATCH_IF (kind BAND 1) != 0 AND (kind BAND 4) != 0 BEGIN
-          PATCH_FAIL ~Flail of Ages: %child%.%extension% mixes Slow with other effects, additional saves, or a different recipient/projectile. Saving the whole helper would change those effects; an adapter is needed.~
+          INNER_ACTION BEGIN
+            LAF cbr_foa_private_slow INT_VAR save_penalty next_copy
+              STR_VAR source = EVAL ~%child%~ extension = EVAL ~%extension%~ copies = EVAL ~%copies%~
+                haste_types = EVAL ~%haste_types%~ slow_types = EVAL ~%slow_types%~ slow_penalties = EVAL ~%slow_penalties%~
+              RET private next_copy copies END
+          END
+          WRITE_ASCIIE (at + 0x14) ~%private%~ #8
+          READ_LONG (at + 0x24) outer_save
+          WRITE_LONG (at + 0x24) (outer_save BAND 0xffffffe0)
+          WRITE_LONG (at + 0x28) 0
+          SET kind = 17
         END
       END
     END
@@ -402,7 +424,8 @@ BEGIN
         READ_BYTE (at + 0xc) tm READ_LONG (at + 0xe) dur
         SET companion = (($foa_kind(~%j%~) BAND 3) != 0 AND ($foa_kind(~%j%~) BAND 4) = 0)
           OR ($foa_kind(~%j%~) = 8 AND donor_op = 40 AND tm = donor_timing AND dur = donor_duration)
-        PATCH_IF t = target AND hi = probability1 AND lo = probability2 AND companion BEGIN
+        PATCH_IF t = target AND hi = probability1 AND lo = probability2 AND companion
+          AND ($foa_kind(~%j%~) BAND 16) = 0 BEGIN
           READ_LONG (at + 0x24) save
           WRITE_LONG (at + 0x24) ((save BAND 0xffffffe0) BOR 2)
           WRITE_LONG (at + 0x28) (0 - save_penalty)
@@ -412,19 +435,11 @@ BEGIN
   END
 END
 
-// For noncanonical immunity resources, a stray Haste record is not enough:
-// only a referenced payload of Haste and its normal companions establishes
-// identity. Those companions are feedback/visuals, the post-Haste fatigue,
-// removal of Slow or an earlier Haste by secondary type (SR), and guards
-// against stacking the same resource. Vanilla and SR innate Haste spells carry
-// them. Anything else, such as damage, keeps the flail's immunity.
-// A spell cast by opcode 146 is part of the same Haste and is judged as a
-// whole with it (SCS's SPIN572 casts its op16 payload SPIN572A); each resource
-// is its own owner for self-guards and SCS's paired "Slow cancelled by Haste"
-// feedback branch. A missing, malformed or too-deep payload is unknown and
-// counts as foreign (opcode 146). Traversal is bounded; each resource once.
-// checks: its opcode 318/324 conditions on its own resources, as
-// ~|RESREF:SPLPROT row:parameter 1|~ (see cbr_foa_checked_splstates).
+// Follow the effective Haste payload when removing resource immunities. Other
+// effects in that spell do not veto the Haste allowance. Referenced records,
+// including casting effects, count; padding and unused records do not.
+// checks: opcode 318/324 conditions on each resource's own identity, resolved
+// through SPLPROT.2DA to remove spell states that would still block that Haste.
 DEFINE_ACTION_FUNCTION cbr_foa_native_haste
   INT_VAR depth = 0
   STR_VAR source = ~~ seen = ~|~ haste_types = ~|~ slow_types = ~|~
@@ -435,13 +450,14 @@ BEGIN
   ACTION_IF (~%seen%~ STRING_CONTAINS_REGEXP ~|%source%|~) != 0 BEGIN
     OUTER_SPRINT seen ~%seen%%source%|~
     OUTER_SET foreign_op = 146
-    ACTION_IF depth < 32 AND FILE_EXISTS_IN_GAME ~%source%.SPL~ BEGIN
+    ACTION_IF FILE_EXISTS_IN_GAME ~%source%.SPL~ BEGIN
       COPY_EXISTING ~%source%.SPL~ ~~
         PATCH_IF BUFFER_LENGTH >= 0x72 BEGIN
           READ_ASCII 0 signature (8)
           PATCH_IF ~%signature%~ STRING_EQUAL ~SPL V1  ~ BEGIN
             SET foreign_op = (0 - 1)
-            LPF cbr_foa_layout INT_VAR stride = 0x28 RET ab na fx eq_first eq_count END
+            LPF cbr_foa_layout INT_VAR stride = 0x28 RET ab na fx eq_first eq_count readable END
+          PATCH_IF readable BEGIN
             FOR (a = (0 - 1); a < na; ++a) BEGIN
               SET n = eq_count SET first = eq_first
               PATCH_IF a >= 0 BEGIN
@@ -491,10 +507,11 @@ BEGIN
             END
           END
         END
+          END
       BUT_ONLY
     END
   END
-  OUTER_SET is_haste = (has_haste AND (foreign_op < 0))
+  OUTER_SET is_haste = has_haste
 END
 
 // haste_splstates: spell states the installed Haste and Improved Haste check
@@ -507,12 +524,18 @@ DEFINE_PATCH_FUNCTION cbr_foa_patch
     slow_penalties = ~|~ haste_splstates = ~|~
   RET slow_found
 BEGIN
-  PATCH_IF BUFFER_LENGTH < 0x72 BEGIN PATCH_FAIL ~Flail of Ages: truncated ITM.~ END
-  READ_ASCII 0 sig (8)
-  PATCH_IF NOT (~%sig%~ STRING_EQUAL ~ITM V1  ~) BEGIN
-    PATCH_FAIL ~Flail of Ages: unsupported ITM format.~
-  END
+  SET slow_found = 0
+  LPF cbr_foa_layout RET ab na fx eq_first eq_count readable END
+  PATCH_IF readable BEGIN
+  READ_ASCII 0 original_item (BUFFER_LENGTH)
+  SET writable = 1
+  LPF cbr_foa_ensure_melee END
   LPF cbr_foa_layout RET ab na fx eq_first eq_count END
+  SET next_copy = 300000
+  PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~BLUN30C~ BEGIN SET next_copy = 400000 END
+  PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~BLUN30D~ BEGIN SET next_copy = 500000 END
+  PATCH_IF allow_haste BEGIN SET next_copy = 600000 END
+  SPRINT copies ~|~
   PATCH_IF allow_haste AND eq_count > 0 BEGIN
     SET shared = 0
     FOR (a = 0; a < na; ++a) BEGIN
@@ -520,8 +543,10 @@ BEGIN
       PATCH_IF n > 0 AND first < eq_first + eq_count AND eq_first < first + n BEGIN SET shared = 1 END
     END
     PATCH_IF shared BEGIN
-      LPF cbr_foa_copy_slice INT_VAR fx first = eq_first count = eq_count RET eq_first = copied_first END
+      LPF cbr_foa_copy_slice INT_VAR fx first = eq_first count = eq_count RET eq_first = copied_first copy_ok END
+      SET writable = writable AND copy_ok
       WRITE_SHORT 0x6e eq_first
+      READ_LONG 0x64 ab
     END
   END
   SET slow_found = 0
@@ -544,24 +569,30 @@ BEGIN
         END
       END
       PATCH_IF shared BEGIN
-        LPF cbr_foa_copy_slice INT_VAR fx first count = n RET first = copied_first END
+        LPF cbr_foa_copy_slice INT_VAR fx first count = n RET first = copied_first copy_ok END
+        SET writable = writable AND copy_ok
+        READ_LONG 0x64 ab
+        SET header = ab + a * 0x38
         WRITE_SHORT (header + 0x20) first
       END
-      LPF cbr_foa_slow_slice INT_VAR start = fx + first * 0x30 count = n save_penalty
+      LPF cbr_foa_slow_slice INT_VAR start = fx + first * 0x30 count = n save_penalty next_copy
         STR_VAR haste_types = EVAL ~%haste_types%~ slow_types = EVAL ~%slow_types%~
-          slow_penalties = EVAL ~%slow_penalties%~
-        RET found END
+          slow_penalties = EVAL ~%slow_penalties%~ copies = EVAL ~%copies%~
+        RET found next_copy copies END
+      PATCH_IF found = 0 BEGIN
+        LPF cbr_foa_supply_slow INT_VAR header save_penalty RET supplied END
+        SET writable = writable AND supplied
+        READ_LONG 0x64 ab
+        SET found = 1
+      END
       SET slow_found += found
     END
-  END
-  PATCH_IF slow_found = 0 BEGIN
-    PATCH_PRINT ~Flail of Ages: %SOURCE_RES% has no recognized on-hit Slow; its on-hit effects were left unchanged.~
   END
 
   PATCH_IF allow_haste BEGIN
     // Before anything is removed: the spell states every Haste this item will
     // let through refuses itself under. That is the wizard Haste and Improved
-    // Haste (haste_splstates) and each pure innate Haste whose op206 immunity is
+    // Haste (haste_splstates) and each innate Haste whose op206 immunity is
     // lifted below (SPIN572: Potion of Haste, Haste rings). Keeping such a state
     // would leave that Haste blocked after its immunity is gone.
     SPRINT unblocked_states ~%haste_splstates%~
@@ -589,15 +620,7 @@ BEGIN
       READ_ASCII (at + 0x14) res (8) NULL
       SET remove = 0
       PATCH_IF target = 1 BEGIN
-        // Removing immunity to all movement-rate changes would also remove
-        // protection from harmful movement changes, outside this component.
-        PATCH_IF op = 101 AND p2 = 176 AND haste_movement BEGIN
-          PATCH_IF (haste_movement BAND 4) != 0 BEGIN
-            PATCH_FAIL ~Flail of Ages: movement-rate immunity may block a Haste helper that could not be resolved; removing it would also lose protection against harmful movement changes.~
-          END
-          PATCH_FAIL ~Flail of Ages: movement-rate immunity blocks revised Haste as well as harmful movement changes; cannot remove it without losing that protection.~
-        END
-        SET remove = (((op = 101) OR (op = 337)) AND (p2 = 16))
+        SET remove = (((op = 101) OR (op = 337)) AND (p2 = 16 OR (p2 = 176 AND haste_movement != 0)))
           OR (((op = 169) OR (op = 240)) AND (p2 = 38))
           OR ((op = 267) AND (p1 = 14023))
           OR ((op = 126) AND (p1 = 100) AND (p2 = 2))
@@ -605,12 +628,7 @@ BEGIN
         READ_LONG (at + 0x2c) special
         PATCH_IF op = 328 AND special = 1 BEGIN
           LPF cbr_foa_in_set STR_VAR set = EVAL ~%unblocked_states%~ item = EVAL ~%p2%~ RET checked = found END
-          PATCH_IF checked AND p2 = haste_immunity_state BEGIN SET remove = 1 END
-          ELSE PATCH_IF checked BEGIN
-            PATCH_FAIL ~Flail of Ages: %SOURCE_RES% sets spell state %p2%, which a Haste it allows (Haste, Improved Haste or an innate Haste) checks to refuse itself, but SPLSTATE.IDS does not name it HASTE_IMMUNITY. Removing it could also remove another protection, so Haste cannot be allowed safely.~
-          END ELSE PATCH_IF p2 = haste_immunity_state BEGIN
-            PATCH_PRINT ~Flail of Ages: %SOURCE_RES% keeps spell state HASTE_IMMUNITY (%p2%): no Haste it allows checks it, so it does not block them.~
-          END
+          SET remove = checked OR p2 = haste_immunity_state
         END
         PATCH_IF op = 206 BEGIN
           PATCH_IF (((NOT (~%haste_resref%~ STRING_EQUAL ~~)) AND (~%res%~ STRING_EQUAL_CASE ~%haste_resref%~))
@@ -623,16 +641,13 @@ BEGIN
                 RET is_haste has_haste foreign_op END
             END
             PATCH_IF is_haste BEGIN SET remove = 1 END
-            ELSE PATCH_IF has_haste BEGIN
-              PATCH_PRINT ~Flail of Ages: %SOURCE_RES% keeps its immunity to %res%. That spell combines Haste with another effect (opcode %foreign_op%), and removing the immunity would expose the wielder to that effect too.~
-            END ELSE PATCH_IF foreign_op = 146 BEGIN
-              PATCH_PRINT ~Flail of Ages: %SOURCE_RES% keeps its immunity to %res%. That spell casts a spell that is missing or cannot be read, so whether it is Haste is unknown.~
-            END
+
           END
         END
       END
       PATCH_IF remove BEGIN
         DELETE_BYTES at 0x30
+        PATCH_IF ab > at BEGIN SET ab -= 0x30 WRITE_LONG 0x64 ab END
         --eq_count
         WRITE_SHORT 0x70 eq_count
         FOR (a = 0; a < na; ++a) BEGIN
@@ -642,66 +657,318 @@ BEGIN
       END
     END
   END
+  PATCH_IF NOT writable BEGIN
+    DELETE_BYTES 0 BUFFER_LENGTH
+    INSERT_BYTES 0 (STRING_LENGTH ~%original_item%~)
+    WRITE_ASCIIE 0 ~%original_item%~
+    SET slow_found = (0 - 1)
+    PATCH_PRINT ~Flail of Ages: %SOURCE_FILE% has no representable effect index for this write; leaving this file alone.~
+  END
+  END
 END
 
+// Supply the decided 33% / 20-second Slow when its owned delivery is absent.
+// An appended independent slice also handles shared effect lists without changing
+// the other abilities. Existing proc windows and durations remain unowned.
+DEFINE_PATCH_FUNCTION cbr_foa_supply_slow
+  INT_VAR header = 0 save_penalty = 2
+  RET supplied
+BEGIN
+  READ_LONG 0x6a fx READ_LONG 0x64 table READ_SHORT 0x68 abilities
+  READ_SHORT (header + 0x1e) n READ_SHORT (header + 0x20) first
+  LPF cbr_foa_effect_end RET new_first = effect_end END
+  SET at = fx + new_first * 0x30
+  SPRINT old ~~ SET kept = 0
+  FOR (i = 0; i < n; ++i) BEGIN
+    SET pos = fx + (first + i) * 0x30
+    READ_SHORT pos op READ_LONG (pos + 4) p1 READ_LONG (pos + 8) p2
+    // Replace orphaned Slow feedback with the feedback for our new delivery.
+    PATCH_IF NOT ((op = 139 AND p1 = 14000) OR (op = 142 AND p2 = 41)) BEGIN
+      READ_ASCII pos record (0x30)
+      SPRINT old ~%old%%record%~
+      SET kept += 1
+    END
+  END
+  SET n = kept
+  SET supplied = n + 2 <= 0xffff AND new_first <= 0xffff
+  PATCH_IF supplied BEGIN
+  INSERT_BYTES at ((n + 2) * 0x30)
+  PATCH_IF n > 0 BEGIN WRITE_ASCIIE at ~%old%~ (n * 0x30) END
+  PATCH_IF table >= at BEGIN
+    WRITE_LONG 0x64 (table + (n + 2) * 0x30)
+    SET header += (n + 2) * 0x30
+  END
+  WRITE_SHORT (header + 0x20) new_first
+  WRITE_SHORT (header + 0x1e) (n + 2)
+  SET at += n * 0x30
+  WRITE_SHORT at 40 WRITE_BYTE (at + 2) 2
+  WRITE_LONG (at + 0xe) 20 WRITE_BYTE (at + 0x12) 32
+  WRITE_LONG (at + 0x24) 2 WRITE_LONG (at + 0x28) (0 - save_penalty)
+  SET at += 0x30
+  WRITE_SHORT at 139 WRITE_BYTE (at + 2) 2 WRITE_LONG (at + 4) 14000
+  WRITE_BYTE (at + 0xc) 9 WRITE_BYTE (at + 0x12) 32
+  WRITE_LONG (at + 0x24) 2 WRITE_LONG (at + 0x28) (0 - save_penalty)
+  END
+END
+
+// Only mixed deliveries need a private resource: saving the parent would also
+// save its damage or other riders. Cache by source within this traversal so a
+// loop ends at the already assigned copy. Reapplication uses our reserved names.
+DEFINE_ACTION_FUNCTION cbr_foa_private_slow
+  INT_VAR save_penalty = 2 next_copy = 300000
+  STR_VAR source = ~~ extension = ~SPL~ copies = ~|~
+    haste_types = ~|~ slow_types = ~|~ slow_penalties = ~|~
+  RET private next_copy copies
+BEGIN
+  ACTION_TO_UPPER source
+  OUTER_SPRINT private ~~
+  OUTER_PATCH ~%copies%~ BEGIN
+    REPLACE_EVALUATE ~|\([^|:]+\):\([^|]+\)~ BEGIN
+      PATCH_IF ~%MATCH1%~ STRING_EQUAL_CASE ~%source%.%extension%~ BEGIN SPRINT private ~%MATCH2%~ END
+    END ~|%MATCH1%:%MATCH2%~
+  END
+  ACTION_IF ~%private%~ STRING_EQUAL ~~ BEGIN
+    ACTION_IF (~%source%~ STRING_MATCHES_REGEXP ~^CF[3456][0-9][0-9][0-9][0-9][0-9]$~) = 0 BEGIN
+      OUTER_SPRINT private ~%source%~
+    END ELSE BEGIN
+      OUTER_SET next_copy += 1
+      OUTER_SPRINT private ~CF%next_copy%~
+    END
+    OUTER_SPRINT copies ~%copies%%source%.%extension%:%private%|~
+    COPY_EXISTING ~%source%.%extension%~ ~override/%private%.%extension%~
+      PATCH_IF ~%extension%~ STRING_EQUAL ~EFF~ BEGIN
+        PATCH_IF BUFFER_LENGTH >= 0x110 BEGIN
+          READ_LONG 0x10 op READ_ASCII 0x30 child (8) NULL
+          PATCH_IF op = 146 OR op = 177 OR op = 326 OR op = 148 BEGIN
+            SPRINT child_extension ~SPL~
+            PATCH_IF op = 177 BEGIN SPRINT child_extension ~EFF~ END
+            PATCH_IF FILE_EXISTS_IN_GAME ~%child%.%child_extension%~ BEGIN
+              INNER_ACTION BEGIN
+                LAF cbr_foa_private_slow INT_VAR save_penalty next_copy
+                  STR_VAR source = EVAL ~%child%~ extension = EVAL ~%child_extension%~ copies = EVAL ~%copies%~
+                    haste_types = EVAL ~%haste_types%~ slow_types = EVAL ~%slow_types%~ slow_penalties = EVAL ~%slow_penalties%~
+                  RET child_private = private next_copy copies END
+              END
+              WRITE_ASCIIE 0x30 ~%child_private%~ #8
+              READ_LONG 0x40 save WRITE_LONG 0x40 (save BAND 0xffffffe0) WRITE_LONG 0x44 0
+            END
+          END ELSE BEGIN
+            READ_LONG 0x40 save
+            WRITE_LONG 0x40 ((save BAND 0xffffffe0) BOR 2)
+            WRITE_LONG 0x44 (0 - save_penalty)
+          END
+        END
+      END ELSE BEGIN
+        LPF cbr_foa_layout INT_VAR stride = 0x28 RET ab na fx eq_first eq_count readable END
+        PATCH_IF readable BEGIN
+          FOR (list = (0 - 1); list < na; ++list) BEGIN
+            SET n = eq_count SET first = eq_first
+            PATCH_IF list >= 0 BEGIN
+              READ_SHORT (ab + list * 0x28 + 0x1e) n READ_SHORT (ab + list * 0x28 + 0x20) first
+            END
+            LPF cbr_foa_slow_slice INT_VAR start = fx + first * 0x30 count = n save_penalty next_copy any_target = 1
+              STR_VAR haste_types = EVAL ~%haste_types%~ slow_types = EVAL ~%slow_types%~
+                slow_penalties = EVAL ~%slow_penalties%~ copies = EVAL ~%copies%~
+              RET next_copy copies END
+            FOR (i = 0; i < n; ++i) BEGIN
+              SET at = fx + (first + i) * 0x30
+              READ_SHORT at op READ_ASCII (at + 0x14) res (8) NULL
+              PATCH_IF (op = 206 OR op = 318 OR op = 321 OR op = 324)
+                AND (~%res%~ STRING_EQUAL_CASE ~%source%~) BEGIN
+                WRITE_ASCIIE (at + 0x14) ~%private%~ #8
+              END
+            END
+          END
+        END
+      END
+  END
+END
+
+// Complete English descriptions, taken from component 302's existing output on
+// the reference items. Other game languages retain their text until translated.
 DEFINE_PATCH_FUNCTION cbr_foa_description
   INT_VAR allow_haste = 0 slow_found = 1
   STR_VAR save_note = ~~ haste_note = ~~
 BEGIN
-  READ_STRREF 0x54 desc
-  INNER_PATCH_SAVE new_desc ~%desc%~ BEGIN
-    PATCH_IF slow_found BEGIN
-      COUNT_REGEXP_INSTANCES ~[^%WNL%%LNL%%MNL%]*[Ss]low[^%WNL%%LNL%%MNL%]*~ lines
-      SET annotated = 0
-      PATCH_IF lines > 0 BEGIN
-        REPLACE_EVALUATE ~[^%WNL%%LNL%%MNL%]*[Ss]low[^%WNL%%LNL%%MNL%]*~ BEGIN
-          INNER_PATCH_SAVE line ~%MATCH0%~ BEGIN
-            COUNT_REGEXP_INSTANCES ~([Nn]o [Ss]ave)~ no_save
-            COUNT_REGEXP_INSTANCES ~([Nn]o [Ss]aving [Tt]hrow)~ no_throw
-            COUNT_REGEXP_INSTANCES ~(Save vs. Breath at -[246] negates)~ old_note
-            SET annotate = (lines = 1 OR no_save > 0 OR no_throw > 0 OR old_note > 0)
-            PATCH_IF annotate BEGIN
-            REPLACE_TEXTUALLY CASE_INSENSITIVE ~[ ]*(No Save)~ ~~
-            REPLACE_TEXTUALLY CASE_INSENSITIVE ~[ ]*(no saving throw)~ ~~
-            REPLACE_TEXTUALLY ~[ ]*(Save vs. Breath at -[246] negates)~ ~~
-            REPLACE_TEXTUALLY ~[ %TAB%]+$~ ~~
-            END
-          END
-          PATCH_IF annotate BEGIN
-            SPRINT line ~%line% %save_note%~
-            SET annotated += 1
-          END
-        END ~%line%~
+  LPF cbr_foa_layout INT_VAR log_errors = 0 RET readable END
+  PATCH_IF readable AND slow_found >= 0 BEGIN
+    PATCH_IF ~%EE_LANGUAGE%~ STRING_EQUAL_CASE ~en_us~ BEGIN
+      PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~BLUN14~ BEGIN
+        SAY 0x54 ~This flail has been in the care of Lord de'Arnise for some time, a relic of his adventuring youth. It has been kept disassembled, the individual pieces stored in separate locations, and only used in the direst of emergencies. Lord de'Arnise was likely concerned about the powerful magic that the weapon radiated when compiled, and rightfully so. A trail of destruction has followed it through history, leading straight back to the original owners. The flail was the creation of the warlike rakshasa, a race of vengeful spirits that crave human meat, and used as an adaptable weapon that could suit any battle. During a particularly violent hunt, the flail was lost, only to be returned when they used their affinity for magic to locate its powerful aura. They discovered that the weapon had found its way into the hands of a great human warrior, and the battle that followed was truly splendid. They have since used the item as bait countless times, "losing" it again and again. Powerful items gravitate toward powerful people, and powerful people yield the most glorious battles.
+
+STATISTICS:
+
+Combat abilities:
+– 33% chance of slowing target for 20 seconds (Save vs. Breath at -2 negates)
+
+THAC0: +3
+Damage: 1d6+4, +1 acid damage, +1 cold damage, +1 fire damage
+Damage type: Crushing
+Speed Factor: 4
+Proficiency Type: Flail/Morning Star
+Type: One-handed
+Requires:
+ 13 Strength
+
+Weight: 10~
+      END ELSE PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~BLUN30C~ BEGIN
+        SAY 0x54 ~This flail has been in the care of Lord de'Arnise for some time, a relic of his adventuring youth. It has been kept disassembled, the individual pieces stored in separate locations, and only used in the direst of emergencies. Lord Arnise was likely concerned about the powerful magic that the weapon radiated when compiled, and rightfully so. A trail of destruction has followed it through history, leading straight back to the original owners. The flail was the creation of the warlike Rakshasa, a race of vengeful spirits that crave human meat, and used as an adaptable weapon that could suit any battle. During a particularly violent hunt the flail was lost, only to be returned when they used their affinity for magic to locate its powerful aura. They discovered that the weapon had found its way into the hands of a great human warrior, and the battle that followed was truly splendid. They have since used the item as bait countless times, 'losing' it again and again. Powerful items gravitate towards powerful people, and powerful people yield the most glorious battles.
+
+This four-headed flail causes fire, cold, acid and poison damage.  If the fifth head for the Flail of Ages could be found, it would make this awesome weapon even more powerful.
+
+STATISTICS:
+
+Combat Abilities:
+   33% chance with each successful attack that the target is slowed (Save vs. Breath at -4 negates)
+
+THAC0: +4
+Damage:  1D6 + 5, +1 Fire Damage, +1 Cold Damage, +1 Acid Damage, +1 Poison Damage
+Damage type:  crushing
+Weight: 9
+Speed Factor: 3
+Proficiency Type: Flail/Morningstar
+Type:  1-handed
+Requires: 13 Strength
+~
+      END ELSE PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~BLUN30D~ BEGIN
+        SAY 0x54 ~This flail has been in the care of Lord de'Arnise for some time, a relic of his adventuring youth. It has been kept disassembled, the individual pieces stored in separate locations, and only used in the direst of emergencies. Lord Arnise was likely concerned about the powerful magic that the weapon radiated when compiled, and rightfully so. A trail of destruction has followed it through history, leading straight back to the original owners. The flail was the creation of the warlike Rakshasa, a race of vengeful spirits that crave human meat, and used as an adaptable weapon that could suit any battle. During a particularly violent hunt the flail was lost, only to be returned when they used their affinity for magic to locate its powerful aura. They discovered that the weapon had found its way into the hands of a great human warrior, and the battle that followed was truly splendid. They have since used the item as bait countless times, 'losing' it again and again. Powerful items gravitate towards powerful people, and powerful people yield the most glorious battles.
+
+This four-headed flail causes fire, cold, acid and electrical damage.  If the fifth head for the Flail of Ages could be found, it would make this awesome weapon even more powerful.
+
+STATISTICS:
+
+Combat Abilities:
+   33% chance with each successful attack that the target is slowed (Save vs. Breath at -4 negates)
+
+THAC0: +4
+Damage:  1D6 + 5, +1 Fire Damage, +1 Cold Damage, +1 Acid Damage, +1 Electrical Damage
+Damage type:  crushing
+Weight: 9
+Speed Factor: 3
+Proficiency Type: Flail/Morningstar
+Type:  1-handed
+Requires: 13 Strength
+~
+      END ELSE PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~BLUN30~ BEGIN
+        SAY 0x54 ~This flail has been in the care of Lord de'Arnise for some time, a relic of his adventuring youth. It has been kept disassembled, the individual pieces stored in separate locations, and only used in the direst of emergencies. Lord Arnise was likely concerned about the powerful magic that the weapon radiated when compiled, and rightfully so. A trail of destruction has followed it through history, leading straight back to the original owners. The flail was the creation of the warlike Rakshasa, a race of vengeful spirits that crave human meat, and used as an adaptable weapon that could suit any battle. During a particularly violent hunt the flail was lost, only to be returned when they used their affinity for magic to locate its powerful aura. They discovered that the weapon had found its way into the hands of a great human warrior, and the battle that followed was truly splendid. They have since used the item as bait countless times, 'losing' it again and again. Powerful items gravitate towards powerful people, and powerful people yield the most glorious battles.
+
+With the addition of the fifth and final head to this weapon created by the evil Rakshasa race the true potential of the Flail of Ages is finally realized.
+
+STATISTICS:
+
+Equipped Abilities:
+   Free Action (allows Haste and Improved Haste)
+   5% bonus to Magic Resistance
+
+Combat Abilities:
+   33% chance each hit that target will be slowed (Save vs. Breath at -6 negates)
+
+THAC0:  +5 bonus
+Damage:  1D6 + 6, +2 Acid Damage, +2 Cold Damage, +2 Fire Damage, +2 Poison Damage,  +2 Electrical Damage
+Damage type:  crushing
+Weight: 8
+Speed Factor: 2
+Proficiency Type: Flail/Morningstar
+Type:  1-handed
+Requires: 13 Strength
+~
       END
-      PATCH_IF annotated = 0 BEGIN
-        // Do not rewrite lore or require English text for valid mechanics.
-        // This explicit override note takes precedence over an older description.
-        COUNT_REGEXP_INSTANCES ~CBR on-hit Slow:~ notes
-        PATCH_IF notes = 0 BEGIN
-          INSERT_BYTES BUFFER_LENGTH (STRING_LENGTH ~%LNL%CBR on-hit Slow: %save_note%~)
-          WRITE_ASCIIE (BUFFER_LENGTH - STRING_LENGTH ~%LNL%CBR on-hit Slow: %save_note%~) ~%LNL%CBR on-hit Slow: %save_note%~
-        END
-      END
-    END
-    PATCH_IF allow_haste BEGIN
-      COUNT_REGEXP_INSTANCES ~[^%WNL%%LNL%%MNL%]*[Ff]ree [Aa]ction[^%WNL%%LNL%%MNL%]*~ lines
-      PATCH_IF lines = 1 BEGIN
-        REPLACE_EVALUATE ~[^%WNL%%LNL%%MNL%]*[Ff]ree [Aa]ction[^%WNL%%LNL%%MNL%]*~ BEGIN
-          INNER_PATCH_SAVE line ~%MATCH0%~ BEGIN
-            REPLACE_TEXTUALLY ~[ ]*(allows Haste and Improved Haste)~ ~~
-            REPLACE_TEXTUALLY ~[ %TAB%]+$~ ~~
-          END
-        END ~%line% %haste_note%~
-      END ELSE BEGIN
-        COUNT_REGEXP_INSTANCES ~CBR Free Action:~ notes
-        PATCH_IF notes = 0 BEGIN
-          INSERT_BYTES BUFFER_LENGTH (STRING_LENGTH ~%LNL%CBR Free Action: %haste_note%~)
-          WRITE_ASCIIE (BUFFER_LENGTH - STRING_LENGTH ~%LNL%CBR Free Action: %haste_note%~) ~%LNL%CBR Free Action: %haste_note%~
-        END
-      END
+    END ELSE BEGIN
+      PATCH_PRINT ~Flail of Ages: no complete translation for %EE_LANGUAGE%; keeping this description.~
     END
   END
-  PATCH_IF NOT (~%new_desc%~ STRING_EQUAL ~%desc%~) BEGIN
-    WRITE_LONG 0x54 (RESOLVE_STR_REF (~%new_desc%~))
+END
+
+// The weapon still gets its decided on-hit behavior if its melee header was
+// removed. These headers are the reference items' existing melee statistics.
+DEFINE_PATCH_FUNCTION cbr_foa_ensure_melee
+BEGIN
+  READ_LONG 0x64 ab READ_SHORT 0x68 na READ_LONG 0x6a fx
+  SET melee = 0
+  FOR (i = 0; i < na; ++i) BEGIN
+    READ_BYTE (ab + i * 0x38) type
+    PATCH_IF type = 1 BEGIN SET melee = 1 END
+  END
+  PATCH_IF NOT melee BEGIN
+    PATCH_IF na = 0 BEGIN SET ab = 0x72 WRITE_LONG 0x64 ab END
+    SET at = ab + na * 0x38
+    INSERT_BYTES at 0x38
+    PATCH_IF fx >= at BEGIN WRITE_LONG 0x6a (fx + 0x38) END
+    WRITE_SHORT 0x68 (na + 1)
+    PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~BLUN14~ BEGIN
+      WRITE_LONG (at + 0x0) 0x00010001
+      WRITE_LONG (at + 0x4) 0x554c4249
+      WRITE_LONG (at + 0x8) 0x0034314e
+      WRITE_LONG (at + 0xc) 0x00010001
+      WRITE_LONG (at + 0x10) 0x00040000
+      WRITE_LONG (at + 0x14) 0x00060003
+      WRITE_LONG (at + 0x18) 0x00041501
+      WRITE_LONG (at + 0x1c) 0x00000002
+      WRITE_LONG (at + 0x20) 0x00000000
+      WRITE_LONG (at + 0x24) 0x00010001
+      WRITE_LONG (at + 0x28) 0x00010000
+      WRITE_LONG (at + 0x2c) 0x00320032
+      WRITE_LONG (at + 0x30) 0x00000000
+      WRITE_LONG (at + 0x34) 0x00000000
+    END ELSE PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~BLUN30C~ BEGIN
+      WRITE_LONG (at + 0x0) 0x00010001
+      WRITE_LONG (at + 0x4) 0x554c4249
+      WRITE_LONG (at + 0x8) 0x4330334e
+      WRITE_LONG (at + 0xc) 0x00010001
+      WRITE_LONG (at + 0x10) 0x00030000
+      WRITE_LONG (at + 0x14) 0x00060004
+      WRITE_LONG (at + 0x18) 0x00051501
+      WRITE_LONG (at + 0x1c) 0x00000002
+      WRITE_LONG (at + 0x20) 0x00000000
+      WRITE_LONG (at + 0x24) 0x00010001
+      WRITE_LONG (at + 0x28) 0x00010000
+      WRITE_LONG (at + 0x2c) 0x00320032
+      WRITE_LONG (at + 0x30) 0x00000000
+      WRITE_LONG (at + 0x34) 0x00000000
+    END ELSE PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~BLUN30D~ BEGIN
+      WRITE_LONG (at + 0x0) 0x00010001
+      WRITE_LONG (at + 0x4) 0x756c6269
+      WRITE_LONG (at + 0x8) 0x6430336e
+      WRITE_LONG (at + 0xc) 0x00010001
+      WRITE_LONG (at + 0x10) 0x00030000
+      WRITE_LONG (at + 0x14) 0x00060004
+      WRITE_LONG (at + 0x18) 0x00051501
+      WRITE_LONG (at + 0x1c) 0x00000002
+      WRITE_LONG (at + 0x20) 0x00000000
+      WRITE_LONG (at + 0x24) 0x00010001
+      WRITE_LONG (at + 0x28) 0x00010000
+      WRITE_LONG (at + 0x2c) 0x00320032
+      WRITE_LONG (at + 0x30) 0x00000000
+      WRITE_LONG (at + 0x34) 0x00000000
+    END ELSE PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~BLUN30~ BEGIN
+      WRITE_LONG (at + 0x0) 0x00010001
+      WRITE_LONG (at + 0x4) 0x554c4249
+      WRITE_LONG (at + 0x8) 0x0030334e
+      WRITE_LONG (at + 0xc) 0x00010001
+      WRITE_LONG (at + 0x10) 0x00020000
+      WRITE_LONG (at + 0x14) 0x00060005
+      WRITE_LONG (at + 0x18) 0x00061501
+      WRITE_LONG (at + 0x1c) 0x00000002
+      WRITE_LONG (at + 0x20) 0x00000000
+      WRITE_LONG (at + 0x24) 0x00010001
+      WRITE_LONG (at + 0x28) 0x00010000
+      WRITE_LONG (at + 0x2c) 0x00320032
+      WRITE_LONG (at + 0x30) 0x00000000
+      WRITE_LONG (at + 0x34) 0x00000000
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_foa_effect_end
+  RET effect_end
+BEGIN
+  READ_LONG 0x64 table READ_SHORT 0x68 abilities
+  READ_SHORT 0x6e first READ_SHORT 0x70 count
+  SET effect_end = 0
+  PATCH_IF count > 0 BEGIN SET effect_end = first + count END
+  FOR (i = 0; i < abilities; ++i) BEGIN
+    READ_SHORT (table + i * 0x38 + 0x1e) count
+    READ_SHORT (table + i * 0x38 + 0x20) first
+    PATCH_IF count > 0 AND first + count > effect_end BEGIN SET effect_end = first + count END
   END
 END

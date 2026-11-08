@@ -347,11 +347,7 @@ class ReferenceDonorTests(ChaosTidesVariantTestCase):
                 run = self.build(shape=shape, rerun_on_output=True)
                 self.assertEqual(_digests(run.output), REFERENCE_DIGESTS[shape])
                 self.assert_matches_model(run)
-                self.assertIn(
-                    "cbr 404: ally donor OHTMPS2D: 5 tiers, 0 unowned records carried, "
-                    "0 tiers with synthesized resets.",
-                    run.transcript,
-                )
+
 
 
 class CarriedRecordTests(ChaosTidesVariantTestCase):
@@ -386,7 +382,6 @@ class CarriedRecordTests(ChaosTidesVariantTestCase):
                 raws = [e.raw for e in ability.effects]
                 self.assertIn(SOUND.to_bytes(), raws)
                 self.assertIn(STATE_MARKER.to_bytes(), raws)
-        self.assertIn("ally donor OHTMPS2D: 5 tiers, 10 unowned records carried", run.transcript)
 
     def test_foreign_resets_and_protections_are_carried(self) -> None:
         def add_foreign(spell: SplFile) -> SplFile:
@@ -525,11 +520,6 @@ class RecipientResetTests(ChaosTidesVariantTestCase):
                     for name in names:
                         for ability in read_spl(run.output / f"{name}.SPL").abilities:
                             self.assertIn(SOUND.to_bytes(), [e.raw for e in ability.effects])
-                self.assertIn(
-                    "ally donor OHTMPS2D: 5 tiers, 10 unowned records carried, "
-                    "0 tiers with synthesized resets.",
-                    run.transcript,
-                )
 
     def test_caster_side_self_remover_after_recipient_reset(self) -> None:
         remover = caster_self_remover("OHTMPS2D", target=9)
@@ -567,10 +557,6 @@ class RecipientResetTests(ChaosTidesVariantTestCase):
             for tier in (0, 2, 3, 4):
                 self.assertNotIn(remover.to_bytes(), [e.raw for e in tiers[tier].effects])
         self.assert_recipient_trio(run, TIDE_ENEMY, read_spl(run.fixture / "OHTMPS2E.SPL"), "OHTMPS2E")
-        self.assertIn(
-            "enemy donor OHTMPS2E: 5 tiers, 1 unowned records carried, 1 tiers with synthesized resets.",
-            run.transcript,
-        )
 
     def test_group_aimed_self_remover_is_not_the_template(self) -> None:
         # A self-remover aimed at a group target (3 = party) reaches other
@@ -619,7 +605,6 @@ class TierShapeTests(ChaosTidesVariantTestCase):
                             effect.parameter1, want[self.LEVELS.index(level)] * sign,
                             f"{name} level {level}",
                         )
-        self.assertIn("ally donor OHTMPS2D: 6 tiers", run.transcript)
 
     def test_tier_without_icon_and_pulse_still_builds(self) -> None:
         def strip(spell: SplFile) -> SplFile:
@@ -647,7 +632,6 @@ class TierShapeTests(ChaosTidesVariantTestCase):
                     (321, 2, 1, 0, 0, 1, 3, 0, 100, 0, resref, 0, 0, 0, 0, 0),
                     "synthesized reset: target 2, power/resist from the tier's op54, timing 1",
                 )
-        self.assertIn("enemy donor OHTMPS2E: 5 tiers, 0 unowned records carried, 1 tiers with synthesized resets.", run.transcript)
 
     def test_tier_without_thac0_uses_the_donor_template(self) -> None:
         def reshape(spell: SplFile) -> SplFile:
@@ -671,41 +655,99 @@ class TierShapeTests(ChaosTidesVariantTestCase):
             self.assertEqual(fields, {(7, 2)} if tier in (0, 1) else {(1, 3)}, f"tier {tier}")
 
 
-class RejectionTests(ChaosTidesVariantTestCase):
-    def test_donor_without_any_thac0_template_fails(self) -> None:
-        run = self.build(
-            ally=lambda spell: map_tiers(spell, lambda _i, fx: without(fx, 54)),
-            expect_success=False,
-        )
-        self.assertIn("OHTMPS2D.SPL carries no opcode 54 (THAC0) record in any tier", run.transcript)
-        self.assertFalse(list(run.output.glob("CBRCHT*")), "preflight fails before any tide exists")
+class ChangedDonorTests(ChaosTidesVariantTestCase):
+    def test_donor_without_thac0_uses_decided_delivery(self):
+        run = self.build(ally=lambda spell: map_tiers(spell, lambda _i, fx: without(fx, 54)), rerun_on_output=True)
+        for name in TIDE_ALLY:
+            for ability in read_spl(run.output / f"{name}.SPL").abilities:
+                stats = [e for e in ability.effects if e.opcode in STAT_OPS]
+                self.assertTrue(stats)
+                self.assertTrue(all((e.power, e.resist_dispel, e.duration) == (1, 3, 30) for e in stats))
 
-    def test_protection_against_a_tide_spell_fails(self) -> None:
+    def test_foreign_protection_does_not_block_the_decided_tide(self):
         guard = SplEffect(opcode=206, target=2, power=1, duration=60, resource="CBRCHT2D")
-        run = self.build(
-            ally=lambda spell: map_tiers(spell, lambda i, fx: fx + (guard,) if i == 1 else fx),
-            expect_success=False,
-        )
-        self.assertIn(
-            "OHTMPS2D.SPL tier 1 record 15: opcode 206 protects against the tide spell CBRCHT2D",
-            run.transcript,
-        )
+        run = self.build(ally=lambda spell: map_tiers(spell, lambda i, fx: fx + (guard,) if i == 1 else fx), rerun_on_output=True)
+        for name in TIDE_ALLY:
+            effects = read_spl(run.output / f"{name}.SPL").abilities[1].effects
+            self.assertFalse(any(e.opcode == 206 and e.resource in TIDE_ALLY for e in effects))
+            self.assertEqual(list(TIDE_ALLY), [e.resource for e in effects[:3]])
 
-    def test_donor_without_ability_headers_fails(self) -> None:
-        run = self.build(
-            enemy=lambda spell: dataclasses.replace(spell, abilities=()), expect_success=False
-        )
-        self.assertIn("OHTMPS2E.SPL has no ability header", run.transcript)
+    def test_empty_donor_receives_the_defined_five_tiers(self):
+        run = self.build(enemy=lambda spell: dataclasses.replace(spell, abilities=()), rerun_on_output=True)
+        for name in TIDE_ENEMY:
+            spell = read_spl(run.output / f"{name}.SPL")
+            self.assertEqual([1, 7, 13, 19, 25], [a.required_level for a in spell.abilities])
+            self.assertTrue(all(a.projectile == 171 for a in spell.abilities))
 
-    def test_out_of_bounds_tier_slice_fails(self) -> None:
-        def build(root: Path) -> None:
+    def test_unreadable_and_missing_donors_use_owned_definitions(self):
+        for absent in (False, True):
+            with self.subTest(absent=absent):
+                def build(root):
+                    build_tides_fixture(root)
+                    path = root / "OHTMPS2D.SPL"
+                    if absent:
+                        path.unlink()
+                    else:
+                        data = bytearray(path.read_bytes())
+                        struct.pack_into("<H", data, 0x72 + 2 * 0x28 + 0x1e, 400)
+                        path.write_bytes(data)
+                run = self.run_component("tides", build, extra_args=TIDE_STRREFS, rerun_on_output=True)
+                for name in TIDE_ALLY + TIDE_ENEMY:
+                    self.assertEqual(REFERENCE_DIGESTS["vanilla"][f"{name}.SPL"], _digests(run.output)[f"{name}.SPL"])
+                self.assertNotIn("WITH WARNINGS", run.transcript)
+
+    def test_dispatcher_is_rebuilt_despite_values_effects_and_text(self):
+        for shape in ("extra", "empty", "truncated"):
+            with self.subTest(shape=shape):
+                def build(root):
+                    build_tides_fixture(root)
+                    path = root / "OHTMPS2.SPL"
+                    if shape == "truncated":
+                        path.write_bytes(b"damaged")
+                    else:
+                        spell = read_spl(path)
+                        header = bytearray(spell.header_raw)
+                        struct.pack_into("<I", header, 0x50, 7654321)
+                        abilities = () if shape == "empty" else (dataclasses.replace(spell.abilities[0], effects=(SOUND,)),) * 3
+                        path.write_bytes(spl_bytes(dataclasses.replace(spell, header_raw=bytes(header), abilities=abilities, casting_effects=(STATE_MARKER,))))
+                run = self.run_component("tides", build, extra_args=TIDE_STRREFS, rerun_on_output=True)
+                spell = read_spl(run.output / "OHTMPS2.SPL")
+                self.assertEqual(1, len(spell.abilities))
+                self.assertEqual([139,146,146]*3, [e.opcode for e in spell.abilities[0].effects])
+                self.assertEqual((), spell.casting_effects)
+                if shape != "truncated":
+                    self.assertEqual(7654321, struct.unpack_from("<I", spell.header_raw, 0x50)[0])
+                self.assertNotIn("WITH WARNINGS", run.transcript)
+
+    def test_missing_dispatcher_only_skips_that_target(self):
+        def build(root):
             build_tides_fixture(root)
-            data = bytearray((root / "OHTMPS2D.SPL").read_bytes())
-            struct.pack_into("<H", data, 0x72 + 2 * 0x28 + 0x1E, 400)
-            (root / "OHTMPS2D.SPL").write_bytes(bytes(data))
+            (root / "OHTMPS2.SPL").unlink()
+        run = self.run_component("tides", build, extra_args=TIDE_STRREFS, rerun_on_output=True)
+        self.assertFalse((run.output / "OHTMPS2.SPL").exists())
+        self.assertTrue(all((run.output / f"{n}.SPL").exists() for n in TIDE_FILES))
+        self.assertNotIn("WITH WARNINGS", run.transcript)
 
-        run = self.run_component("tides", build, extra_args=TIDE_STRREFS, expect_success=False)
-        self.assertIn("OHTMPS2D.SPL: header 2 opcode slice is out of bounds", run.transcript)
+    def test_shared_reordered_donor_storage_and_owned_casting_are_rebuilt(self):
+        def build(root):
+            build_tides_fixture(root)
+            path = root / "OHTMPS2D.SPL"
+            spell = read_spl(path)
+            spell = dataclasses.replace(spell, casting_effects=(SOUND, SplEffect(opcode=54, parameter1=1000)))
+            raw = spl_bytes(spell)
+            ab, count, fx = struct.unpack_from("<IHI", raw, 0x64)
+            headers = bytearray(raw[ab:fx])
+            struct.pack_into("<H", headers, 0x28 + 0x20, struct.unpack_from("<H", headers, 0x20)[0])
+            header = bytearray(raw[:0x72])
+            struct.pack_into("<I", header, 0x64, 0x72 + len(raw[fx:]))
+            struct.pack_into("<I", header, 0x6a, 0x72)
+            path.write_bytes(header + raw[fx:] + headers)
+        run = self.run_component("tides", build, extra_args=TIDE_STRREFS, rerun_on_output=True)
+        for name in TIDE_ALLY:
+            spell = read_spl(run.output / f"{name}.SPL")
+            self.assertEqual((SOUND,), spell.casting_effects)
+            self.assertEqual(5, len(spell.abilities))
+            self.assertTrue(all([e.resource for e in a.effects[:3]] == list(TIDE_ALLY) for a in spell.abilities))
 
 
 class VerifyHarnessRun:

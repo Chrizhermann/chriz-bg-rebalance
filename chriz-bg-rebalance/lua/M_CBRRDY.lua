@@ -1,5 +1,5 @@
 -- EEex ambient-readiness bridge for component 121.
--- The installer replaces the single placeholder below with a validated table.
+-- The installer replaces the single placeholder below with the authored candidate table.
 
 local manifest = %CBR_RDY_MANIFEST%
 local unpack_args = unpack or table.unpack
@@ -14,9 +14,6 @@ local function flag(value, fallback)
 end
 
 local project_image_resref = normalize(manifest.project_image_resref)
-local project_image_identity_supported = #project_image_resref >= 1
-    and #project_image_resref <= 8
-    and string.match(project_image_resref, "^[a-z0-9_#]+$") ~= nil
 
 if CBR_RDY_AMBIENT_ENABLED == nil then
     CBR_RDY_AMBIENT_ENABLED = flag(manifest.defaults.ambient_enabled, 1)
@@ -37,6 +34,9 @@ _G.CBR_RDY_STATE = _G.CBR_RDY_STATE or {
 }
 local state = _G.CBR_RDY_STATE
 state.generation = flag(state.generation, 0) + 1
+-- A reload also retires old content-validation fuses. Capability checks below
+-- decide which features this EEex process can currently provide.
+state.ambient_faulted, state.urgent_faulted = 0, 0
 
 -- EEex v1.2 coalesces scheduling through the deferred listener.  Its legacy
 -- synchronous listener is retained as a confirmation-only boundary for child
@@ -128,26 +128,19 @@ for _, source in ipairs(manifest.ambient_spells or {}) do
     local record = {
         key = normalize(source.key),
         resref = normalize(source.resref),
-        spell_number = tonumber(source.spell_number),
-        delivery = normalize(source.delivery),
-        duration = tonumber(source.duration),
-        minimum_grade = tonumber(source.minimum_grade),
-        detection_opcode = tonumber(source.detection_opcode),
-        detection_parameter2 = tonumber(source.detection_parameter2),
+        spell_number = flag(source.spell_number, 0),
+        delivery = normalize(source.delivery or source.resref),
+        duration = math.max(flag(manifest.minimum_duration, 2400), flag(source.duration, 2400)),
+        minimum_grade = flag(source.minimum_grade, 1),
+        detection_opcode = flag(source.detection_opcode, 0),
+        detection_parameter2 = flag(source.detection_parameter2, 0),
         self_target = tonumber(source.self_target),
         defensive = tonumber(source.defensive),
     }
-    if record.key ~= "" and record.resref ~= "" and record.delivery ~= ""
-            and record.spell_number and record.duration
-            and record.duration >= flag(manifest.minimum_duration, 2400)
-            and record.minimum_grade and record.minimum_grade >= 1
-            and record.detection_opcode and record.detection_parameter2
-            and record.self_target == 1 and record.defensive == 1 then
         ambient_records[#ambient_records + 1] = record
         ambient_by_resref[record.resref] = record
         ambient_by_delivery[record.delivery] = record
         ambient_by_number[record.spell_number] = record
-    end
 end
 
 local urgent_records = {}
@@ -156,13 +149,11 @@ for _, source in ipairs(manifest.urgent_candidates or {}) do
     local record = {
         key = normalize(source.key),
         resref = normalize(source.resref),
-        spell_number = tonumber(source.spell_number),
+        spell_number = flag(source.spell_number, 0),
         genuine = flag(source.genuine_weapon_immunity, 0),
     }
-    if record.key ~= "" and record.resref ~= "" and record.spell_number then
         urgent_records[#urgent_records + 1] = record
         urgent_by_resref[record.resref] = record
-    end
 end
 
 local function value_set(value)
@@ -239,6 +230,8 @@ local function game_time_ticks()
     end)
     local ticks = ok and tonumber(value) or nil
     if not ticks or ticks < 0 then
+        -- This is an unavailable native clock binding, not spell/save data.
+        state.ambient_faulted, state.urgent_faulted = 1, 1
         error("selected EEex world-time binding is unavailable")
     end
     return ticks
@@ -322,13 +315,6 @@ local function classification_allows(classification, record)
     return classification.grade >= record.minimum_grade
 end
 
-local function spell_level(resref)
-    local resource = EEex_Resource_Demand(resref, "SPL")
-    local level = resource and tonumber(resource.spellLevel)
-    if not level or level < 1 then return nil end
-    return level
-end
-
 local function spellbook_field(resref)
     local prefix = string.sub(resref, 1, 4)
     if prefix == "spwi" then return "m_memorizedSpellsMage" end
@@ -343,30 +329,31 @@ local function available(flags)
     return flags % 2 == 1
 end
 
+local function last_spellbook_level(field)
+    -- Native arrays have seven priest levels and nine mage levels. These are
+    -- memory bounds, independent of any spell resource's level field.
+    return field == "m_memorizedSpellsPriest" and 6 or 8
+end
+
 local function find_available_record(sprite, resref)
     local field = spellbook_field(resref)
-    local level = spell_level(resref)
-    if not field or not level then return nil, nil end
-    local lists = sprite[field]
-    local list = lists and lists:getReference(level - 1)
-    if not list then return nil, nil end
-    local found = nil
-    local ordinal = 0
-    EEex_Utility_IterateCPtrList(list, function(candidate)
-        ordinal = ordinal + 1
-        if normalize(candidate.m_spellId:get()) == resref
-                and available(candidate.m_flags) then
-            found = candidate
-            return true
+    local lists = field and sprite[field]
+    if not lists then return nil, nil end
+    for level = 0, last_spellbook_level(field) do
+        local list = lists:getReference(level)
+        local found, ordinal = nil, 0
+        if list then
+            EEex_Utility_IterateCPtrList(list, function(candidate)
+                ordinal = ordinal + 1
+                if normalize(candidate.m_spellId:get()) == resref and available(candidate.m_flags) then
+                    found = candidate
+                    return true
+                end
+            end)
         end
-    end)
-    if not found then return nil, nil end
-    return found, {
-        field = field,
-        level = level - 1,
-        ordinal = ordinal,
-        resref = resref,
-    }
+        if found then return found, {field = field, level = level, ordinal = ordinal, resref = resref} end
+    end
+    return nil, nil
 end
 
 local function resolve_record(sprite, token)
@@ -388,18 +375,19 @@ end
 
 local function available_count(sprite, resref)
     local field = spellbook_field(resref)
-    local level = spell_level(resref)
-    if not field or not level then return nil end
-    local lists = sprite[field]
-    local list = lists and lists:getReference(level - 1)
+    local lists = field and sprite[field]
+    if not lists then return nil end
     local count = 0
-    if not list then return count end
-    EEex_Utility_IterateCPtrList(list, function(candidate)
-        if normalize(candidate.m_spellId:get()) == resref
-                and available(candidate.m_flags) then
-            count = count + 1
+    for level = 0, last_spellbook_level(field) do
+        local list = lists:getReference(level)
+        if list then
+            EEex_Utility_IterateCPtrList(list, function(candidate)
+                if normalize(candidate.m_spellId:get()) == resref and available(candidate.m_flags) then
+                    count = count + 1
+                end
+            end)
         end
-    end)
+    end
     return count
 end
 
@@ -465,19 +453,12 @@ local function new_ledger()
 end
 
 local function migrate_v1_record(resref, record)
-    if type(record) ~= "table" or record.version ~= 1
-            or normalize(record.resref) ~= resref
-            or record.charged ~= 1
-            or not finite_nonnegative(record.expected_expiry)
-            or (record.suppressed ~= 0 and record.suppressed ~= 1) then
-        return nil
-    end
+    if type(record) ~= "table" then return nil end
     local result = {
-        version = LEDGER_VERSION,
-        resref = resref,
-        charged = record.charged,
-        expected_expiry = record.expected_expiry,
-        suppressed = record.suppressed,
+        version = LEDGER_VERSION, resref = resref,
+        charged = flag(record.charged, 0) == 1 and 1 or 0,
+        expected_expiry = finite_nonnegative(record.expected_expiry) and record.expected_expiry or 0,
+        suppressed = flag(record.suppressed, 0) == 1 and 1 or 0,
     }
     clear_reimbursement(result)
     return result
@@ -486,7 +467,7 @@ end
 local function get_ledger(sprite)
     local aux = EEex_GetUDAux(sprite)
     local ledger = aux.CBR_RDY_LEDGER
-    if type(ledger) == "table" and ledger.version == 1
+    if type(ledger) == "table" and ledger.version ~= LEDGER_VERSION
             and type(ledger.spells) == "table" then
         local migrated = new_ledger()
         for key, record in pairs(ledger.spells) do
@@ -507,12 +488,13 @@ local function get_ledger(sprite)
 end
 
 local function failure_for(sprite, id, resref)
-    local nonce = sprite_nonce(sprite)
-    local actor = state.ambient_failures[id]
-    return actor and actor.nonce == nonce and actor.spells[resref] or nil
+    -- Transaction diagnostics never become an eligibility gate.
+    return nil
 end
 
 local function disable_spell(sprite, id, record, reason)
+    local session = state.ambient_sessions[id]
+    if session then session.checked[record.resref] = nil end
     local nonce = sprite_nonce(sprite)
     local actor = state.ambient_failures[id]
     if not actor or actor.nonce ~= nonce then
@@ -520,13 +502,8 @@ local function disable_spell(sprite, id, record, reason)
         state.ambient_failures[id] = actor
     end
     if not actor.spells[record.resref] then
-        actor.spells[record.resref] = {
-            disabled = 1,
-            attempts = 1,
-            reason = tostring(reason),
-        }
-        print("[CBR Ready] ambient spell disabled for this session: "
-            .. record.resref .. " (" .. tostring(reason) .. ")")
+        actor.spells[record.resref] = { attempts = 1, reason = tostring(reason) }
+        print("[CBR Ready] retrying ambient spell: " .. record.resref .. " (" .. tostring(reason) .. ")")
     end
 end
 
@@ -562,12 +539,12 @@ local function make_ledger_record(record, requested_at)
 end
 
 local function reimbursement_token(ledger_record, resref)
-    local level = spell_level(resref)
     if type(ledger_record) ~= "table"
             or ledger_record.reimbursement_eligible ~= 1
             or ledger_record.token_field ~= spellbook_field(resref)
             or not integer(ledger_record.token_level)
-            or not level or ledger_record.token_level ~= level - 1
+            or ledger_record.token_level < 0
+            or ledger_record.token_level > last_spellbook_level(ledger_record.token_field)
             or not integer(ledger_record.token_ordinal)
             or ledger_record.token_ordinal < 1
             or normalize(ledger_record.token_resref) ~= resref
@@ -609,23 +586,21 @@ local function valid_v2_record(resref, record)
 end
 
 local function debit_confirmed_delivery(sprite, id, record, ledger, pending)
-    if ledger.spells[record.resref] then
-        disable_spell(sprite, id, record,
-            "ledger changed before delivery confirmation")
-        return false
-    end
+    if ledger.spells[record.resref] and ledger.spells[record.resref].charged == 1 then return true end
     local spell_record = resolve_record(sprite, pending.token)
-    local current_flags = spell_record and tonumber(spell_record.m_flags) or nil
-    local before = available_count(sprite, record.resref)
-    if not current_flags or current_flags ~= pending.original_flags
-            or not available(current_flags)
-            or before ~= pending.available_before then
-        disable_spell(sprite, id, record,
-            "spell slot changed before delivery confirmation")
-        return false
+    local token = pending.token
+    if not spell_record or not available(spell_record.m_flags) then
+        spell_record, token = find_available_record(sprite, record.resref)
     end
-
-    local debited_flags = pending.original_flags - 1
+    if not spell_record then
+        -- A native action already spent the last slot while delivery resolved.
+        ledger.spells[record.resref] = make_ledger_record(record, pending.requested_at)
+        return true
+    end
+    local current_flags = tonumber(spell_record.m_flags)
+    local before = available_count(sprite, record.resref)
+    pending.token, pending.original_flags, pending.available_before = token, current_flags, before
+    local debited_flags = current_flags - 1
     spell_record.m_flags = debited_flags
     local quick_ok, quick_result = pcall(
         update_quick_lists, sprite, record.resref, -1)
@@ -677,7 +652,9 @@ local function confirm_pending_delivery(sprite, id, record, ledger, session,
         end
         session.delivery_pending[record.resref] = nil
         if pending.kind == "first" then
-            debit_confirmed_delivery(sprite, id, record, ledger, pending)
+            if not debit_confirmed_delivery(sprite, id, record, ledger, pending) then
+                session.delivery_pending[record.resref] = pending
+            end
         elseif pending.kind == "maintenance" then
             local ledger_record = ledger.spells[record.resref]
             if ledger_record and ledger_record.charged == 1
@@ -757,21 +734,21 @@ local function strict_restore_component_record(sprite, ledger_record, resref,
         expected_before)
     local token = reimbursement_token(ledger_record, resref)
     local spell_record = token and resolve_record(sprite, token) or nil
-    if not spell_record
-            or tonumber(spell_record.m_flags) ~= ledger_record.debited_flags then
-        return false
-    end
-    spell_record.m_flags = ledger_record.original_flags
+    if not spell_record then return false end
+    local current_flags = tonumber(spell_record.m_flags)
+    if not current_flags then return false end
+    if available(current_flags) then return true end
+    -- Only availability belongs to this transaction. Preserve other flag bits.
+    spell_record.m_flags = current_flags + 1
     local quick_ok, quick_result = pcall(
         update_quick_lists, sprite, resref, 1)
     if quick_ok and quick_result
-            and tonumber(spell_record.m_flags) == ledger_record.original_flags
-            and available_count(sprite, resref) == expected_before then
+            and available(spell_record.m_flags) then
         return true
     end
 
-    if tonumber(spell_record.m_flags) == ledger_record.original_flags then
-        spell_record.m_flags = ledger_record.debited_flags
+    if available(spell_record.m_flags) then
+        spell_record.m_flags = current_flags
         pcall(update_quick_lists, sprite, resref, -1)
     end
     return false
@@ -963,8 +940,7 @@ local function recover_reimbursement_session(sprite, id, record)
 
     local token = reimbursement_token(ledger_record, record.resref)
     local spell_record = token and resolve_record(sprite, token) or nil
-    if not spell_record
-            or tonumber(spell_record.m_flags) ~= ledger_record.debited_flags then
+    if not spell_record or available(spell_record.m_flags) then
         return nil, nil
     end
 
@@ -1073,8 +1049,7 @@ local function ambient_action(sprite, action)
     local component_record = token and resolve_record(current, token) or nil
     if not (ledger_record and ledger_record.charged == 1 and token
             and component_record
-            and tonumber(component_record.m_flags)
-                == ledger_record.debited_flags
+            and not available(component_record.m_flags)
             and managed_effect_active(current, record)) then
         return
     end
@@ -1097,28 +1072,19 @@ local function ambient_reset(sprite)
 end
 
 local function copy_v2_record(resref, record)
-    if not valid_v2_record(resref, record) then return nil end
-    return {
-        version = LEDGER_VERSION,
-        resref = resref,
-        charged = record.charged,
-        expected_expiry = record.expected_expiry,
-        suppressed = record.suppressed,
-        reimbursement_eligible = record.reimbursement_eligible,
-        token_field = record.token_field,
-        token_level = record.token_level,
-        token_ordinal = record.token_ordinal,
-        token_resref = record.token_resref,
-        original_flags = record.original_flags,
-        debited_flags = record.debited_flags,
-    }
+    if type(record) ~= "table" then return nil end
+    local result = migrate_v1_record(resref, record)
+    if reimbursement_token(record, resref) then
+        for _, key in ipairs({"reimbursement_eligible", "token_field", "token_level", "token_ordinal",
+                "token_resref", "original_flags", "debited_flags"}) do result[key] = record[key] end
+    end
+    return result
 end
 
 local function copy_ledger(sprite)
     local aux = EEex_TryGetUDAux(sprite)
     local source = aux and aux.CBR_RDY_LEDGER or nil
     if type(source) ~= "table"
-            or (source.version ~= 1 and source.version ~= LEDGER_VERSION)
             or type(source.spells) ~= "table" then
         return nil
     end
@@ -1141,7 +1107,6 @@ local function import_ledger(sprite, saved)
     state.ambient_sessions[id] = nil
     local result = new_ledger()
     if type(saved) == "table"
-            and (saved.version == 1 or saved.version == LEDGER_VERSION)
             and type(saved.spells) == "table" then
         for key, record in pairs(saved.spells) do
             local resref = normalize(key)
@@ -1151,8 +1116,6 @@ local function import_ledger(sprite, saved)
                 or copy_v2_record(resref, record))
             if copied then
                 result.spells[resref] = copied
-            elseif ambient_by_resref[resref] then
-                disable_spell(current, id, ambient_by_resref[resref], "malformed saved ledger")
             end
         end
     end
@@ -1208,10 +1171,10 @@ local function project_image_safe(sprite)
         if opcode == 237 and parameter2 == 2 then
             clone_markers = clone_markers + 1
             clone_owner = tonumber(effect.m_sourceId)
-        elseif source == project_image_resref and opcode == 233
+        elseif project_image_resref ~= "" and source == project_image_resref and opcode == 233
                 and parameter1 == 2 and parameter2 == 127 then
             owner_lock_233 = true
-        elseif source == project_image_resref and opcode == 20 then
+        elseif project_image_resref ~= "" and source == project_image_resref and opcode == 20 then
             owner_lock_20 = true
         end
     end)
@@ -1367,11 +1330,10 @@ local function layer_enabled(layer)
 end
 
 local function disable_layer(layer, traceback)
-    state[layer .. "_faulted"] = 1
     local logged = layer .. "_fault_logged"
     if flag(state[logged], 0) == 0 then
         state[logged] = 1
-        print("[CBR Ready] " .. layer .. " disabled after callback error:\n"
+        print("[CBR Ready] " .. layer .. " callback could not run; continuing on the next callback:\n"
             .. tostring(traceback))
     end
 end
@@ -1467,7 +1429,6 @@ local bookkeeping_supported = apis_available({
     { "EEex_TryGetUDAux", EEex_TryGetUDAux },
     { "EEex_Sprite_AddQuickListCountsResetListener", EEex_Sprite_AddQuickListCountsResetListener },
     { "EEex_Sprite_AddMarshalHandlers", EEex_Sprite_AddMarshalHandlers },
-    { "EEex_Resource_Demand", EEex_Resource_Demand },
 })
 state.bookkeeping_supported = bookkeeping_supported and 1 or 0
 local ambient_supported = shared_supported and confirmation_supported
@@ -1475,7 +1436,7 @@ local ambient_supported = shared_supported and confirmation_supported
     { "EEex_GameObject_ApplyEffect", EEex_GameObject_ApplyEffect },
     { "EEex_RunWithStackManager", EEex_RunWithStackManager },
 })
-local urgent_supported = shared_supported and project_image_identity_supported
+local urgent_supported = shared_supported
     and apis_available({
     { "EEex_Sprite_GetState", EEex_Sprite_GetState },
     { "EEex_Action_QueueResponseStringOnAIBase", EEex_Action_QueueResponseStringOnAIBase },
@@ -1498,7 +1459,7 @@ if not ambient_supported then
 end
 if not urgent_supported then
     retire_unsupported("urgent",
-        "required EEex API or Project Image manifest identity is unavailable")
+        "required EEex API is unavailable")
 end
 
 if shared_supported and (ambient_supported or urgent_supported)

@@ -44,7 +44,8 @@ BEGIN
   OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
   OUTER_SPRINT eff_resref EVALUATE_BUFFER ~%eff_resref%~
   OUTER_SPRINT removed_resref EVALUATE_BUFFER ~%removed_resref%~
-  CREATE EFF ~%eff_resref%~
+  COPY ~cbr-toll-empty~ ~%resource_dir%/%eff_resref%.eff~
+    LPF cbr_tempus_blank INT_VAR size = 0x110 STR_VAR signature = ~EFF V2.0~ END
     FOR (cbr_toll_byte = 0x10; cbr_toll_byte < 0x110; ++cbr_toll_byte) BEGIN
       WRITE_BYTE cbr_toll_byte 0
     END
@@ -59,148 +60,104 @@ BEGIN
     WRITE_SHORT 0x2e 0
     WRITE_ASCIIE 0x30 ~%removed_resref%~ #8
     WRITE_LONG 0x5c 2
-  ACTION_IF !(~%resource_dir%~ STR_EQ ~override~) BEGIN
-    ACTION_IF !(FILE_EXISTS ~%resource_dir%/%eff_resref%.eff~) BEGIN
-      MOVE ~override/%eff_resref%.eff~ ~%resource_dir%/%eff_resref%.eff~
-    END
-  END
 END
 
-// Append the CBR_DIVTOLL row (AP_CBRTMDV at every level 1..50). An existing
-// identical row is accepted unchanged; an existing different row is a hard
-// failure — this library completes exactly one recognized shape.
-DEFINE_PATCH_FUNCTION cbr_toll_ensure_clab_row
-  STR_VAR
-    toll_spell = ~~
-  RET
-    appended_row
-BEGIN
-  SET appended_row = 0
-  COUNT_2DA_COLS cbr_toll_clab_cols
-  PATCH_IF (cbr_toll_clab_cols != 51) BEGIN
-    PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: expected row label plus levels 1 through 50.~
-  END
-  READ_2DA_ENTRIES_NOW cbr_toll_clab_rows 51
-  SET cbr_toll_existing_row = "-1"
-  FOR (cbr_toll_row = 0; cbr_toll_row < cbr_toll_clab_rows; ++cbr_toll_row) BEGIN
-    READ_2DA_ENTRY_FORMER cbr_toll_clab_rows cbr_toll_row 0 cbr_toll_label
-    PATCH_IF (~%cbr_toll_label%~ STR_EQ ~CBR_DIVTOLL~) BEGIN
-      PATCH_IF (cbr_toll_existing_row >= 0) BEGIN
-        PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: duplicate CBR_DIVTOLL rows.~
-      END
-      SET cbr_toll_existing_row = cbr_toll_row
+// Own the application row by name and level labels, preserving unrelated rows.
+DEFINE_PATCH_FUNCTION cbr_toll_ensure_clab_row STR_VAR toll_spell = ~~ BEGIN
+  LPM cbr_tempus_read_table
+  FOR (cbr_toll_level = 1; cbr_toll_level <= 50; ++cbr_toll_level) BEGIN
+    SET cbr_toll_found = 0
+    FOR (cbr_toll_c = 0; cbr_toll_c < cbr_t_cols; ++cbr_toll_c) BEGIN
+      SPRINT cbr_toll_column $cbr_t_cell(2 ~%cbr_toll_c%~)
+      PATCH_IF ~%cbr_toll_column%~ STRING_EQUAL ~%cbr_toll_level%~ BEGIN SET cbr_toll_found = 1 END
     END
-  END
-  PATCH_IF (cbr_toll_existing_row >= 0) BEGIN
-    FOR (cbr_toll_level = 1; cbr_toll_level <= 50; ++cbr_toll_level) BEGIN
-      READ_2DA_ENTRY_FORMER cbr_toll_clab_rows cbr_toll_existing_row cbr_toll_level cbr_toll_cell
-      PATCH_IF !(~%cbr_toll_cell%~ STR_EQ ~AP_%toll_spell%~) BEGIN
-        PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA validation failed: CBR_DIVTOLL level %cbr_toll_level% holds %cbr_toll_cell% instead of AP_%toll_spell%.~
+    PATCH_IF NOT cbr_toll_found BEGIN
+      SPRINT $cbr_t_cell(2 ~%cbr_t_cols%~) ~%cbr_toll_level%~ ++cbr_t_cols
+      FOR (cbr_toll_r = 3; cbr_toll_r < cbr_t_lines; ++cbr_toll_r) BEGIN
+        SPRINT $cbr_t_cell(~%cbr_toll_r%~ ~%cbr_t_cols%~) ~%cbr_t_default%~
       END
     END
-  END ELSE BEGIN
-    SPRINT cbr_toll_new_row ~CBR_DIVTOLL~
-    FOR (cbr_toll_level = 1; cbr_toll_level <= 50; ++cbr_toll_level) BEGIN
-      SPRINT cbr_toll_new_row ~%cbr_toll_new_row% AP_%toll_spell%~
-    END
-    INSERT_2DA_ROW cbr_toll_clab_rows 51 ~%cbr_toll_new_row%~
-    SET appended_row = 1
   END
+  SET cbr_toll_found = 0
+  FOR (cbr_toll_r = 3; cbr_toll_r < cbr_t_lines; ++cbr_toll_r) BEGIN
+    SPRINT cbr_toll_row $cbr_t_cell(~%cbr_toll_r%~ 0)
+    PATCH_IF ~%cbr_toll_row%~ STRING_EQUAL_CASE ~CBR_DIVTOLL~ BEGIN SET cbr_toll_found = 1 END
+  END
+  PATCH_IF NOT cbr_toll_found BEGIN
+    SPRINT $cbr_t_cell(~%cbr_t_lines%~ 0) ~CBR_DIVTOLL~
+    FOR (cbr_toll_c = 1; cbr_toll_c <= cbr_t_cols; ++cbr_toll_c) BEGIN
+      SPRINT $cbr_t_cell(~%cbr_t_lines%~ ~%cbr_toll_c%~) ~%cbr_t_default%~
+    END
+    ++cbr_t_lines
+  END
+  FOR (cbr_toll_r = 3; cbr_toll_r < cbr_t_lines; ++cbr_toll_r) BEGIN
+    SPRINT cbr_toll_row $cbr_t_cell(~%cbr_toll_r%~ 0)
+    PATCH_IF ~%cbr_toll_row%~ STRING_EQUAL_CASE ~CBR_DIVTOLL~ BEGIN
+      FOR (cbr_toll_c = 0; cbr_toll_c < cbr_t_cols; ++cbr_toll_c) BEGIN
+        SPRINT cbr_toll_column $cbr_t_cell(2 ~%cbr_toll_c%~)
+        PATCH_IF IS_AN_INT ~%cbr_toll_column%~ BEGIN
+          PATCH_IF cbr_toll_column > 0 BEGIN
+            SET cbr_toll_col = cbr_toll_c + 1 SPRINT $cbr_t_cell(~%cbr_toll_r%~ ~%cbr_toll_col%~) ~AP_%toll_spell%~
+          END
+        END
+      END
+    END
+  END
+  LPM cbr_tempus_write_table
 END
 
 DEFINE_ACTION_FUNCTION cbr_apply_tempus_divination_toll
-  INT_VAR
-    divination_count = 0
-  STR_VAR
-    resource_dir = ~~
+  INT_VAR divination_count = 0
+  STR_VAR resource_dir = ~~
 BEGIN
   OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
-  ACTION_IF (~%resource_dir%~ STR_EQ ~~) BEGIN
-    FAIL ~CBR Tempus Divination toll requires resource_dir.~
+  ACTION_IF ~%resource_dir%~ STRING_EQUAL ~~ BEGIN FAIL ~CBR Tempus Divination toll requires resource_dir.~ END
+  <<<<<<<< cbr-toll-empty
+>>>>>>>>
+  ACTION_IF NOT FILE_EXISTS ~%resource_dir%/OHTEMPUS.2DA~ BEGIN
+    <<<<<<<< cbr-toll-clab
+2DA V1.0
+****
+1
+>>>>>>>>
+    COPY ~cbr-toll-clab~ ~%resource_dir%/OHTEMPUS.2DA~
   END
-  // CBRTMD0..CBRTMD99 all fit the 8-character resref limit; a three-digit
-  // count would not, and a game with zero Divination priest spells has
-  // nothing to toll — the wrapper refuses to install the component then.
-  ACTION_IF (divination_count < 1 || divination_count > 99) BEGIN
-    FAIL ~CBR Tempus Divination toll requires between 1 and 99 discovered Divination spells, got %divination_count%.~
-  END
-  ACTION_IF !(FILE_EXISTS ~%resource_dir%/OHTEMPUS.2DA~) BEGIN
-    FAIL ~CBR Tempus Divination toll requires %resource_dir%/OHTEMPUS.2DA.~
-  END
-  LAF cbr_define_tempus_toll_resrefs
-    RET
-      cbr_toll_spell_resref = cbr_toll_spell
-      cbr_toll_prefix       = cbr_toll_eff_prefix
-  END
-  OUTER_FOR (cbr_toll_index = 0; cbr_toll_index < divination_count; ++cbr_toll_index) BEGIN
-    // $cbr_divtoll_res(~N~) mangles to the variable cbr_divtoll_res_N; read
-    // it through the canonical nested-percent double evaluation.
-    OUTER_SPRINT cbr_toll_slot ~cbr_divtoll_res_%cbr_toll_index%~
-    OUTER_SPRINT cbr_toll_target EVAL ~%%cbr_toll_slot%%~
-    OUTER_SET cbr_toll_target_length = STRING_LENGTH ~%cbr_toll_target%~
-    ACTION_IF (cbr_toll_target_length < 1 || cbr_toll_target_length > 8) BEGIN
-      FAIL ~CBR Tempus Divination toll: list entry %cbr_toll_index% (%cbr_toll_target%) is not a valid resref.~
+  LAF cbr_define_tempus_toll_resrefs RET cbr_toll_spell_resref = cbr_toll_spell cbr_toll_prefix = cbr_toll_eff_prefix END
+  OUTER_SET cbr_toll_count = 0
+  OUTER_FOR (cbr_toll_i = 0; cbr_toll_i < divination_count; ++cbr_toll_i) BEGIN
+    OUTER_SPRINT cbr_toll_target $cbr_divtoll_res(~%cbr_toll_i%~)
+    // Engine resrefs have at most eight bytes. An unaddressable input costs
+    // only that entry, never the table or the remaining removal effects.
+    ACTION_IF (STRING_LENGTH ~%cbr_toll_target%~) > 0 AND (STRING_LENGTH ~%cbr_toll_target%~) <= 8 BEGIN
+      OUTER_SPRINT $cbr_toll_target(~%cbr_toll_count%~) ~%cbr_toll_target%~
+      OUTER_SPRINT cbr_toll_eff ~%cbr_toll_prefix%%cbr_toll_count%~
+      ACTION_IF cbr_toll_count >= 100 BEGIN OUTER_SPRINT cbr_toll_eff ~CBRD%cbr_toll_count%~ END
+      OUTER_SPRINT $cbr_toll_eff(~%cbr_toll_count%~) ~%cbr_toll_eff%~
+      LAF cbr_toll_create_removal_eff STR_VAR resource_dir = EVAL ~%resource_dir%~
+        eff_resref = EVAL ~%cbr_toll_eff%~ removed_resref = EVAL ~%cbr_toll_target%~ END
+      OUTER_SET cbr_toll_count += 1
+    END ELSE BEGIN
+      PRINT ~CBR: cannot address Divination list entry %cbr_toll_i% as an engine resref; the remaining toll applies.~
     END
   END
-
-  // The CLAB pass validates shape (51 columns, no conflicting CBR_DIVTOLL
-  // row) before its own INSERT_2DA_ROW, so a malformed table fails before
-  // any write. A second pass re-validates that the row now exists in
-  // exactly the recognized shape (appended_row returns 0).
   COPY ~%resource_dir%/OHTEMPUS.2DA~ ~%resource_dir%/OHTEMPUS.2DA~
-    LPF cbr_toll_ensure_clab_row
-      STR_VAR toll_spell = EVAL ~%cbr_toll_spell_resref%~
-    END
+    LPF cbr_toll_ensure_clab_row STR_VAR toll_spell = EVAL ~%cbr_toll_spell_resref%~ END
   BUT_ONLY
-
-  COPY ~%resource_dir%/OHTEMPUS.2DA~ ~%resource_dir%/OHTEMPUS.2DA~
-    LPF cbr_toll_ensure_clab_row
-      STR_VAR toll_spell = EVAL ~%cbr_toll_spell_resref%~
-      RET cbr_toll_second_pass = appended_row
-    END
-    PATCH_IF (cbr_toll_second_pass != 0) BEGIN
-      PATCH_FAIL ~CBR Tempus CLAB OHTEMPUS.2DA verification failed: CBR_DIVTOLL row still missing after append.~
-    END
-  BUT_ONLY
-
-  OUTER_FOR (cbr_toll_index = 0; cbr_toll_index < divination_count; ++cbr_toll_index) BEGIN
-    OUTER_SPRINT cbr_toll_slot ~cbr_divtoll_res_%cbr_toll_index%~
-    OUTER_SPRINT cbr_toll_target EVAL ~%%cbr_toll_slot%%~
-    LAF cbr_toll_create_removal_eff
-      STR_VAR
-        resource_dir = EVAL ~%resource_dir%~
-        eff_resref = EVAL ~%cbr_toll_prefix%%cbr_toll_index%~
-        removed_resref = EVAL ~%cbr_toll_target%~
-    END
-  END
-
-  CREATE SPL ~%cbr_toll_spell_resref%~
+  COPY ~cbr-toll-empty~ ~%resource_dir%/%cbr_toll_spell_resref%.spl~
+    LPF cbr_tempus_blank END
     LPF cbr_add_basic_self_ability END
-    // Self-reset first: a repeated CLAB application (every level-up) replaces
-    // the previous permanent pulse set instead of stacking a new one.
-    LPF cbr_append_spl_effect_record
-      INT_VAR opcode = 321 target = 1 power = 0 parameter1 = 0 parameter2 = 0 timing = 1
-      STR_VAR resource = EVAL ~%cbr_toll_spell_resref%~
+    LPF cbr_append_spl_effect_record INT_VAR opcode = 321 target = 1 timing = 1
+      STR_VAR resource = EVAL ~%cbr_toll_spell_resref%~ END
+    FOR (cbr_toll_i = 0; cbr_toll_i < cbr_toll_count; ++cbr_toll_i) BEGIN
+      SPRINT cbr_toll_target $cbr_toll_target(~%cbr_toll_i%~)
+      LPF cbr_append_spl_effect_record INT_VAR opcode = 172 target = 1 timing = 1
+        STR_VAR resource = EVAL ~%cbr_toll_target%~ END
     END
-    FOR (cbr_toll_index = 0; cbr_toll_index < divination_count; ++cbr_toll_index) BEGIN
-      SPRINT cbr_toll_slot ~cbr_divtoll_res_%cbr_toll_index%~
-      SPRINT cbr_toll_target EVAL ~%%cbr_toll_slot%%~
-      LPF cbr_append_spl_effect_record
-        INT_VAR opcode = 172 target = 1 power = 0 timing = 1
-        STR_VAR resource = EVAL ~%cbr_toll_target%~
-      END
+    FOR (cbr_toll_i = 0; cbr_toll_i < cbr_toll_count; ++cbr_toll_i) BEGIN
+      SPRINT cbr_toll_eff $cbr_toll_eff(~%cbr_toll_i%~)
+      LPF cbr_append_spl_effect_record INT_VAR opcode = 272 target = 1 parameter1 = 1 parameter2 = 3 timing = 9
+        STR_VAR resource = EVAL ~%cbr_toll_eff%~ END
     END
-    FOR (cbr_toll_index = 0; cbr_toll_index < divination_count; ++cbr_toll_index) BEGIN
-      LPF cbr_append_spl_effect_record
-        INT_VAR opcode = 272 target = 1 power = 0 parameter1 = 1 parameter2 = 3 timing = 9
-        STR_VAR resource = EVAL ~%cbr_toll_prefix%%cbr_toll_index%~
-      END
-    END
-    WRITE_SHORT 0x90 (1 + (2 * divination_count))
-  ACTION_IF !(~%resource_dir%~ STR_EQ ~override~) BEGIN
-    ACTION_IF !(FILE_EXISTS ~%resource_dir%/%cbr_toll_spell_resref%.spl~) BEGIN
-      MOVE ~override/%cbr_toll_spell_resref%.spl~ ~%resource_dir%/%cbr_toll_spell_resref%.spl~
-    END
-  END
-  PRINT ~cbr 405: Divination toll covers %divination_count% priest spells.~
+    WRITE_SHORT 0x90 (1 + 2 * cbr_toll_count)
+  ACTION_IF cbr_toll_count = 0 BEGIN PRINT ~CBR: no addressable Divination spells; the toll has no spells to remove.~ END
 END

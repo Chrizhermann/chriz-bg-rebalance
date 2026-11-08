@@ -43,6 +43,7 @@ class DragonVorpalEffectsTests(unittest.TestCase):
         self.run_number += 1
         run = self.root / f"run-{self.run_number}"
         run.mkdir()
+        (run / "WeiDU.log").write_text("", encoding="ascii")
         result = subprocess.run([
             str(WEIDU), str(HARNESS), "--nogame", "--force-install-list", "1",
             "--args", str(LIB), "--args", str(self.fixture),
@@ -53,6 +54,8 @@ class DragonVorpalEffectsTests(unittest.TestCase):
         if success:
             self.assertEqual(result.returncode, 0, transcript)
             self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+            self.assertNotIn("WARNING", transcript.upper())
+            self.assertNotIn("ERROR", transcript.upper())
         else:
             self.assertIn("NOT INSTALLED DUE TO ERRORS", transcript)
         return transcript
@@ -108,29 +111,24 @@ class DragonVorpalEffectsTests(unittest.TestCase):
         self.assertEqual(snapshot(self.fixture), once)
         self.assertEqual(once["foreign.SPL"], b"unrelated")
 
-    def test_each_reserved_collision_fails_before_any_resource_is_published(self) -> None:
+    def test_each_owned_resource_is_replaced_without_checking_old_contents(self) -> None:
+        self.run_library()
+        expected = snapshot(self.fixture)
         for filename in sorted(FILES):
             with self.subTest(filename=filename):
-                collision = self.fixture / filename
-                collision.write_bytes(b"foreign resource")
-                before = snapshot(self.fixture)
-                transcript = self.run_library(success=False)
-                self.assertIn("reserved resource collision", transcript)
-                self.assertRegex(transcript, r"Will uninstall\s+0 files")
-                self.assertEqual(snapshot(self.fixture), before)
-                collision.unlink()
+                (self.fixture / filename).write_bytes(b"foreign resource")
+                self.run_library()
+                self.assertEqual(snapshot(self.fixture), expected)
 
-    def test_same_resref_items_cannot_lose_foreign_effects_to_cleanup(self) -> None:
+    def test_same_resref_items_do_not_veto_our_spell_resources(self) -> None:
+        self.run_library()
+        expected = snapshot(self.fixture)
         for profile in PROFILES:
-            with self.subTest(profile=profile):
-                item = self.fixture / f"CBRDV{profile}.ITM"
-                item.write_bytes(b"foreign item with same source resref")
-                before = snapshot(self.fixture)
-                transcript = self.run_library(success=False)
-                self.assertIn("cross-type resource collision", transcript)
-                self.assertRegex(transcript, r"Will uninstall\s+0 files")
-                self.assertEqual(snapshot(self.fixture), before)
-                item.unlink()
+            item = self.fixture / f"CBRDV{profile}.ITM"
+            item.write_bytes(b"foreign item with same source resref")
+            expected[item.name] = item.read_bytes()
+        self.run_library()
+        self.assertEqual(snapshot(self.fixture), expected)
 
     def test_reserved_directory_fails_before_any_resource_is_published(self) -> None:
         (self.fixture / "M_CBRDVG.lua").mkdir()
@@ -139,7 +137,7 @@ class DragonVorpalEffectsTests(unittest.TestCase):
         self.assertRegex(transcript, r"Will uninstall\s+0 files")
         self.assertEqual(snapshot(self.fixture), {})
 
-    def test_modified_owned_bytes_and_truncation_are_not_overwritten(self) -> None:
+    def test_modified_owned_bytes_and_truncation_are_overwritten(self) -> None:
         self.run_library()
         target = self.fixture / "CBRDVE15.EFF"
         original = target.read_bytes()
@@ -147,26 +145,28 @@ class DragonVorpalEffectsTests(unittest.TestCase):
         for changed in variants:
             with self.subTest(length=len(changed)):
                 target.write_bytes(changed)
-                before = snapshot(self.fixture)
-                self.run_library(success=False)
-                self.assertEqual(snapshot(self.fixture), before)
+                self.run_library()
+                self.assertEqual(target.read_bytes(), original)
 
-    def test_full_revalidates_after_an_earlier_preflight(self) -> None:
+    def test_full_writes_over_changes_after_an_earlier_preflight(self) -> None:
         self.run_library("preflight")
         (self.fixture / "M_CBRDVG.lua").write_bytes(b"late namespace collision")
-        before = snapshot(self.fixture)
-        self.run_library(success=False)
-        self.assertEqual(snapshot(self.fixture), before)
+        self.run_library()
+        self.assertEqual((self.fixture / "M_CBRDVG.lua").read_bytes(), LUA.read_bytes())
 
-    def test_bad_inputs_do_not_publish(self) -> None:
+    def test_unknown_phase_is_a_caller_error(self) -> None:
         self.assertIn("unknown resource phase", self.run_library("unknown", success=False))
-        self.assertIn("runtime template is missing", self.run_library(
-            template=self.root / "missing.lua", success=False))
-        bad = self.root / "bad.lua"
-        bad.write_text("-- not a CBR template\n", encoding="ascii")
-        self.assertIn("unrecognized dragon vorpal runtime template",
-                      self.run_library(template=bad, success=False))
         self.assertEqual(snapshot(self.fixture), {})
+
+    def test_bundled_runtime_contract_is_checked_offline(self) -> None:
+        source = LUA.read_text(encoding="ascii")
+        self.assertIn("CBR_DRAGON_VORPAL_RUNTIME_V1", source)
+        self.assertIn("function CBRDVGO", source)
+
+    def test_missing_output_directory_is_created(self) -> None:
+        self.fixture.rmdir()
+        self.run_library()
+        self.assertEqual(set(snapshot(self.fixture)), FILES)
 
 
 class DragonVorpalLuaTests(unittest.TestCase):
@@ -239,7 +239,7 @@ assert(#calls == 0 and #messages == 1)
 assert(messages[1]:find("[CBR 110]", 1, true))
 ''', setup=setup)
 
-    def test_unreadable_guard_or_source_metadata_fails_closed(self) -> None:
+    def test_unreadable_guard_is_local_and_missing_metadata_uses_native_defaults(self) -> None:
         self.run_lua(r'''
 target.minimum_hp = nil
 CBRDVGO(source, target)
@@ -247,8 +247,12 @@ target.minimum_hp = 0 / 0
 CBRDVGO(source, target)
 target.minimum_hp = 0
 source.m_sourceRes = nil
+source.m_sourceId = nil
+source.m_sourceFlags = nil
 CBRDVGO(source, target)
-assert(#calls == 0 and #messages == 2)
+assert(#calls == 1 and #messages == 1)
+assert(calls[1].args.m_sourceRes == "")
+assert(calls[1].args.sourceID == -1 and calls[1].args.m_sourceFlags == 0)
 ''')
 
     def test_application_failure_does_not_retry_or_change_protections(self) -> None:

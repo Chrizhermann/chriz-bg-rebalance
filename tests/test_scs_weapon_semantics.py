@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import shutil
+import struct
 import subprocess
 import tempfile
 import unittest
@@ -896,7 +897,7 @@ class ScsWeaponSemanticsTests(unittest.TestCase):
         self._run(future, "classify", probe="SPWI808")
         future_report = _parse_report(future.root)
         self.assertEqual(future_report["is_weapon_protection"], "1")
-        self.assertEqual(future_report["mismatch"], "0")
+        self.assertEqual(future_report["mismatch"], "1")
 
         alternate = self._fixture(alternate_ids=True, scripts=False)
         self._run(alternate, "classify", probe="SPWI855")
@@ -904,7 +905,7 @@ class ScsWeaponSemanticsTests(unittest.TestCase):
         self.assertEqual(alternate_report["is_weapon_protection"], "0")
         self.assertEqual(alternate_report["candidates"], "SPWI966,SPWI755,SPWI644")
 
-    def test_metadata_patch_is_surgical_and_counter_aware(self) -> None:
+    def test_metadata_ownership_does_not_depend_on_old_amounts_or_counters(self) -> None:
         fixture = self._fixture(mop_layout="near_markers")
         target = fixture.root / "SPWI808.SPL"
         before = read_spl(target)
@@ -914,8 +915,8 @@ class ScsWeaponSemanticsTests(unittest.TestCase):
 
         def removed(effect: SplEffect) -> bool:
             return (
-                (effect.opcode == 233 and effect.parameter1 == 2 and effect.parameter2 == 128)
-                or (effect.opcode == 328 and effect.parameter1 == 1 and effect.parameter2 in (64, 188))
+                (effect.opcode == 233 and effect.parameter2 == 128)
+                or (effect.opcode == 328 and effect.parameter2 in (64, 188))
             )
 
         self.assertEqual(after.metadata_key(), before.metadata_key())
@@ -929,23 +930,23 @@ class ScsWeaponSemanticsTests(unittest.TestCase):
         )
         self.assertTrue(any(effect.opcode == 328 and effect.parameter2 == 187 for effect in after.all_effects()))
         self.assertTrue(any(effect.opcode == 233 and effect.parameter2 == 129 for effect in after.all_effects()))
-        self.assertTrue(any(effect.opcode == 233 and effect.parameter1 == 3 for effect in after.all_effects()))
+        self.assertFalse(any(effect.opcode == 233 and effect.parameter2 == 128 for effect in after.all_effects()))
         self.assertTrue(any(effect.opcode == 328 and effect.parameter2 == 65 for effect in after.all_effects()))
-        self.assertEqual(_parse_report(fixture.root)["metadata_removed"], "3")
+        self.assertEqual(_parse_report(fixture.root)["metadata_removed"], "4")
         for name, raw in before_scripts.items():
             self.assertEqual((fixture.root / name).read_bytes(), raw)
 
         dispellable = self._fixture(mop_layout="dispellable")
         self._run(dispellable, "metadata")
         dispellable_after = read_spl(dispellable.root / "SPWI808.SPL")
-        self.assertTrue(
+        self.assertFalse(
             any(effect.opcode == 328 and effect.parameter2 == 188 for effect in dispellable_after.all_effects())
         )
 
         not_breachable = self._fixture(breach_layout="wrong")
         self._run(not_breachable, "metadata")
         not_breachable_after = read_spl(not_breachable.root / "SPWI808.SPL")
-        self.assertFalse(
+        self.assertTrue(
             any(effect.opcode == 328 and effect.parameter2 == 187 for effect in not_breachable_after.all_effects())
         )
 
@@ -956,7 +957,7 @@ class ScsWeaponSemanticsTests(unittest.TestCase):
         invalid_name_before = (fixture.root / "dw#mgx.bcs").read_bytes()
         self._run(fixture, "scripts")
         report = _parse_report(fixture.root)
-        self.assertEqual(report["first_round_removed"], "1")
+        self.assertEqual(report["first_round_removed"], "2")
         self.assertEqual(report["renewal_removed"], "1")
 
         for name, before_sentinel, after_sentinel in (
@@ -969,7 +970,9 @@ class ScsWeaponSemanticsTests(unittest.TestCase):
             self.assertIn(before_sentinel, baf)
             self.assertIn(after_sentinel, baf)
 
-        self.assertEqual((fixture.root / "dw#mg103.bcs").read_bytes(), unrelated_before)
+        ordinary, _ = _roundtrip_bcs(fixture.root / "dw#mg103.bcs", fixture.root)
+        self.assertIn('Global("cbr_unrelated_mop","LOCALS",0)', ordinary)
+        self.assertNotIn("instantprep", ordinary)
         self.assertEqual((fixture.root / "bheye.bcs").read_bytes(), bheye_before)
         self.assertEqual((fixture.root / "dw#mgx.bcs").read_bytes(), invalid_name_before)
 
@@ -1026,71 +1029,84 @@ class ScsWeaponSemanticsTests(unittest.TestCase):
                 self.assertIn(f'ReallyForceSpellRES("{helper}",Myself)', baf)
                 self.assertIn("ReallyForceSpell(Myself,WIZARD_MANTLE)", baf)
 
-    def test_unknown_scope_and_noop_matrix(self) -> None:
-        fixture = self._fixture()
-        unrelated_before = (fixture.root / "dw#mg103.bcs").read_bytes()
-        self._run(fixture, "scripts")
-        self.assertEqual(_parse_report(fixture.root)["unknown_blocks"], "1")
-        self.assertEqual((fixture.root / "dw#mg103.bcs").read_bytes(), unrelated_before)
-
-        for kwargs in (
-            {"scripts": False},
-            {"mop_layout": "future_true"},
-            {"sr_absent": True},
-        ):
-            with self.subTest(kwargs=kwargs):
-                noop = self._fixture(**kwargs)
-                before = _snapshot(noop.root)
-                self._run(noop, "full")
-                self.assertEqual(_snapshot(noop.root), before)
-
-    def test_near_match_blocks_are_reported_and_left_byte_identical(self) -> None:
-        cases = {
-            "extra_action": (
-                "    Spell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)\n",
-                "    Spell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)\n"
-                "    SetGlobal(\"cbr_extra\",\"LOCALS\",1)\n",
-            ),
-            "different_cast": (
-                "    Spell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)\n",
-                "    Spell(Myself,WIZARD_MANTLE)\n",
-            ),
-        }
-        for name, (old, new) in cases.items():
-            with self.subTest(name=name):
-                fixture = self._fixture()
-                target = fixture.root / "dw#mg100.bcs"
-                baf, _ = _roundtrip_bcs(target, fixture.root)
-                self.assertEqual(baf.count(old), 1)
-                target.write_bytes(_compile_baf_text(baf.replace(old, new), fixture.root))
-                before = target.read_bytes()
-                self._run(fixture, "scripts")
-                self.assertEqual(_parse_report(fixture.root)["unknown_blocks"], "2")
-                self.assertEqual(target.read_bytes(), before)
-
-    def test_preflight_rejects_unsafe_graphs_atomically(self) -> None:
-        cases = (
-            {"mop_layout": "duplicate_markers"},
-            {"breach_layout": "missing"},
-            {"all_replacements_false": True},
-        )
-        for kwargs in cases:
+    def test_owned_metadata_and_scripts_are_not_gated_by_old_mechanics(self):
+        for kwargs in ({"scripts": False}, {"mop_layout": "future_true"}, {"sr_absent": True}):
             with self.subTest(kwargs=kwargs):
                 fixture = self._fixture(**kwargs)
-                before = _snapshot(fixture.root)
-                result = _run_harness(fixture, "full")
-                self.addCleanup(result.run_temporary.cleanup)
-                self.assertFalse(result.succeeded, result.transcript)
-                self.assertEqual(_snapshot(fixture.root), before)
+                self._run(fixture, "full")
+                target = read_spl(fixture.root / "SPWI808.SPL")
+                self.assertFalse(any(f.opcode == 233 and f.parameter2 == 128 for f in target.all_effects()))
+                self.assertFalse(any(f.opcode == 328 and f.parameter2 in (64, 188) for f in target.all_effects()))
 
-        malformed = self._fixture()
-        target = malformed.root / "SPWI808.SPL"
+    def test_edited_script_blocks_receive_the_decided_repair(self):
+        for extra in ('    SetGlobal("cbr_extra","LOCALS",1)\n', ''):
+            fixture = self._fixture()
+            target = fixture.root / "dw#mg100.bcs"
+            baf, _ = _roundtrip_bcs(target, fixture.root)
+            baf = baf.replace('Spell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)',
+                              'Spell(Myself,WIZARD_MOMENT_OF_PRESCIENCE)\n' + extra)
+            baf = baf.replace('"instantprep","LOCALS",0', '"instantprep","LOCALS",99')
+            target.write_bytes(_compile_baf_text(baf, fixture.root))
+            self._run(fixture, "scripts")
+            result, _ = _roundtrip_bcs(target, fixture.root)
+            self.assertNotIn("WIZARD_MOMENT_OF_PRESCIENCE", result)
+            self.assertNotIn("cbr_extra", result)
+            self.assertIn("cbr_fr_before", result)
+
+    def test_duplicate_markers_missing_counter_and_edited_protections_do_not_block(self):
+        for kwargs in ({"mop_layout": "duplicate_markers"}, {"breach_layout": "missing"},
+                       {"all_replacements_false": True}):
+            with self.subTest(kwargs=kwargs):
+                fixture = self._fixture(**kwargs)
+                result = self._run(fixture, "full")
+                self.assertNotIn("INSTALLED WITH WARNINGS", result.transcript)
+                output = read_spl(fixture.root / "SPWI808.SPL")
+                self.assertFalse(any(f.opcode == 233 and f.parameter2 == 128 for f in output.all_effects()))
+                chain, _ = _roundtrip_bcs(fixture.root / "dw#mg102.bcs", fixture.root)
+                self.assertIn("ReallyForceSpell(Myself,WIZARD_MANTLE)", chain)
+
+    def test_unreadable_spell_and_script_are_isolated(self):
+        fixture = self._fixture()
+        target = fixture.root / "SPWI808.SPL"
         target.write_bytes(target.read_bytes()[:0x80])
-        before = _snapshot(malformed.root)
-        result = _run_harness(malformed, "full")
-        self.addCleanup(result.run_temporary.cleanup)
-        self.assertFalse(result.succeeded, result.transcript)
-        self.assertEqual(_snapshot(malformed.root), before)
+        damaged = target.read_bytes()
+        script = fixture.root / "dw#mg100.bcs"
+        script.write_bytes(b"damaged script")
+        result = self._run(fixture, "full")
+        self.assertEqual(damaged, target.read_bytes())
+        self.assertEqual(b"damaged script", script.read_bytes())
+        self.assertIn("unreadable", result.transcript)
+        chain, _ = _roundtrip_bcs(fixture.root / "dw#mg102.bcs", fixture.root)
+        self.assertIn("ReallyForceSpell(Myself,WIZARD_MANTLE)", chain)
+
+    def test_shared_slices_and_reordered_tables(self):
+        fixture = self._fixture()
+        path = fixture.root / "SPWI808.SPL"
+        original = read_spl(path)
+        shared = bytearray(dataclasses.replace(original, abilities=(original.abilities[0],)*2).to_bytes())
+        struct.pack_into("<H", shared, 0x72 + 40 + 0x20, struct.unpack_from("<H", shared, 0x72 + 0x20)[0])
+        path.write_bytes(shared)
+        self._run(fixture, "metadata")
+        output = read_spl(path)
+        for ability in output.abilities:
+            self.assertFalse(any(f.opcode == 233 and f.parameter2 == 128 for f in ability.effects))
+        before = path.read_bytes()
+        self._run(fixture, "metadata")
+        self.assertEqual(before, path.read_bytes())
+
+    def test_variant_protection_effects_and_missing_symbols_do_not_reject(self):
+        fixture = self._fixture()
+        path = fixture.root / "SPWI708.SPL"
+        spell = read_spl(path)
+        altered = tuple(dataclasses.replace(f, parameter1=999, parameter2=77, target=6,
+                        duration=0, probability1=30, save_type=31) if f.opcode == 120 else f
+                        for f in spell.abilities[0].effects)
+        write_spl(path, _replace_ability_effects(spell, altered))
+        self._run(fixture, "classify", probe="SPWI708")
+        self.assertEqual("1", _parse_report(fixture.root)["is_weapon_protection"])
+        ids = fixture.root / "SPELL.IDS"
+        ids.write_text(ids.read_text().replace("2808 WIZARD_MOMENT_OF_PRESCIENCE", "2808 OTHER_SPELL"))
+        self._run(fixture, "full")
 
     def test_second_application_is_byte_identical(self) -> None:
         fixture = self._fixture()
@@ -1149,24 +1165,24 @@ class ScsWeaponPublicInstallerTests(unittest.TestCase):
         before_spell = read_spl(target)
         untouched = {
             name: (game.override / name).read_bytes()
-            for name in ("dw#mg103.bcs", "bheye.bcs", "dw#mgx.bcs")
+            for name in ("bheye.bcs", "dw#mgx.bcs")
         }
 
         installed = self._install(game)
         transcript = game.transcript(installed)
         self.assertIn("cbr 120:", transcript)
         self.assertIn("metadata=3", transcript)
-        self.assertIn("first-round=1", transcript)
+        self.assertIn("first-round=2", transcript)
         self.assertIn("renewal=1", transcript)
         self.assertIn("chain=1", transcript)
-        self.assertIn("unknown=1", transcript)
+        self.assertIn("unknown=0", transcript)
         self.assertIn("replacement=SPWI708", transcript)
 
         after_spell = read_spl(target)
 
         def false_metadata(effect: SplEffect) -> bool:
             return (
-                (effect.opcode == 233 and effect.parameter1 == 2 and effect.parameter2 == 128)
+                (effect.opcode == 233 and effect.parameter2 == 128)
                 or (
                     effect.opcode == 328
                     and effect.parameter1 == 1
@@ -1196,55 +1212,24 @@ class ScsWeaponPublicInstallerTests(unittest.TestCase):
         self.assertIn('ReallyForceSpellRES("dw#cc23",Myself)', chain)
         self.assertIn("ReallyForceSpell(Myself,WIZARD_MANTLE)", chain)
 
-    def test_public_component_skips_absent_targets_and_noops_future_repairs(self) -> None:
-        cases = (
-            ("scs_absent", {"scs_installed": False, "scripts": False}, False),
-            ("sr_absent", {"sr_absent": True}, False),
-            ("future_improved_mantle", {"mop_layout": "future_true"}, True),
-        )
-        for name, kwargs, expect_install in cases:
-            with self.subTest(name=name):
+    def test_public_repairs_available_spells_without_scs_or_sr(self):
+        game = self._game(mop_layout="future_true")
+        self._install(game)
+        self.assertFalse(any(f.opcode == 233 and f.parameter2 == 128
+                             for f in read_spl(game.override / "SPWI808.SPL").all_effects()))
+        for kwargs in ({"scs_installed": False, "scripts": False}, {"sr_absent": True}):
+            with self.subTest(kwargs=kwargs):
                 game = self._game(**kwargs)
-                process = game.run("--force-install-list", "120")
-                transcript = game.transcript(process)
-                self.assertEqual(0, process.returncode, transcript)
-                if expect_install:
-                    self.assertIn("SUCCESSFULLY INSTALLED", transcript)
-                    self.assertIn("metadata=0", transcript)
-                    self.assertIn("first-round=0", transcript)
-                    self.assertIn("renewal=0", transcript)
-                    self.assertIn("chain=0", transcript)
-                    self.assertRegex(game.active_weidu_log(), r"(?m)#0\s+#120\b")
-                else:
-                    self.assertNotIn("SUCCESSFULLY INSTALLED", transcript)
-                    self.assertIn("SKIPPING", transcript)
-                    self.assertNotRegex(game.active_weidu_log(), r"(?m)#0\s+#120\b")
-                self.assertEqual(
-                    _snapshot(
-                        game.override,
-                        exclude_harness=False,
-                        casefold_paths=True,
-                    ),
-                    game.before_override,
-                )
-                game.assert_stable_inputs(self)
+                process = self._install(game)
+                self.assertNotIn("INSTALLED WITH WARNINGS", game.transcript(process))
+                self.assertFalse(any(f.opcode == 233 and f.parameter2 == 128
+                                     for f in read_spl(game.override / "SPWI808.SPL").all_effects()))
 
-    def test_public_preflight_failure_rolls_back_materialized_resources(self) -> None:
+    def test_public_missing_counter_helper_does_not_block(self):
         game = self._game(breach_layout="missing")
-        process = game.run("--force-install-list", "120")
-        transcript = game.transcript(process)
-        self.assertNotEqual(0, process.returncode, transcript)
-        self.assertIn("references missing helper", transcript)
-        self.assertNotRegex(game.active_weidu_log(), r"(?m)#0\s+#120\b")
-        self.assertEqual(
-            _snapshot(
-                game.override,
-                exclude_harness=False,
-                casefold_paths=True,
-            ),
-            game.before_override,
-        )
-        game.assert_stable_inputs(self)
+        self._install(game)
+        chain, _ = _roundtrip_bcs(game.override / "dw#mg102.bcs", game.override)
+        self.assertIn("ReallyForceSpell(Myself,WIZARD_MANTLE)", chain)
 
     def test_public_reinstall_is_stable_and_uninstall_restores_every_byte(self) -> None:
         game = self._game()

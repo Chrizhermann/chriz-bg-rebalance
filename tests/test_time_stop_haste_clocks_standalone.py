@@ -158,21 +158,20 @@ class PackageTests(unittest.TestCase):
             packager.ROOT = original
         self.assertFalse((root / "dist").exists())
 
-    def test_installers_make_the_same_checks(self) -> None:
+    def test_installers_share_native_requirements_and_own_exclusions(self) -> None:
         main = component((ROOT / TP2).read_text(encoding="utf-8"), 360)
         package = component((PACKAGE / "setup-cbr_true_timestop.tp2").read_text(encoding="utf-8"), 360)
         def predicates(lines: list[str]) -> list[str]:
             return [line for line in lines if line.startswith("REQUIRE_PREDICATE")]
-        self.assertEqual(predicates(main)[:3], predicates(package)[:3])
-        self.assertEqual([GUARD], predicates(main)[3:])
+        self.assertEqual(predicates(main)[:2], predicates(package)[:2])
+        self.assertEqual([GUARD], predicates(main)[2:])
         self.assertEqual(["REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 360) @9366"],
-                         predicates(package)[3:])
+                         predicates(package)[-1:])
         self.assertEqual(["LAF cbr_install_time_stop_haste_component END", "PRINT @9365"], main[-2:])
         self.assertEqual(["LAF cbr_install_time_stop_haste_component STR_VAR source_dir = ~CBR_TRUE_TIMESTOP/lua~ END",
                           "PRINT @9365"], package[-2:])
-        # BEGIN, the three shared predicates, the guard, LAF and PRINT: nothing else in either.
-        self.assertEqual(7, len(main))
-        self.assertEqual(7, len(package))
+        self.assertEqual(6, len(main))
+        self.assertEqual(6, len(package))
 
     def test_weidu_logs_the_package_by_its_folder(self) -> None:
         # A double-click on Setup-cbr_true_timestop.exe finds CBR_TRUE_TIMESTOP/setup-cbr_true_timestop.tp2.

@@ -222,42 +222,33 @@ class DragonWingBuffetTests(unittest.TestCase):
         self.assertEqual(data.count(b'3795 0 0 0 0""'), 4)
         self.assertNotIn(b'3695 0 0 0 0""', data)
 
-    def test_foreign_and_partial_shapes_fail_before_any_publication(self) -> None:
-        path = self.fixture / "draggree.bcs"  # last target catches partial-install mistakes
+    def test_foreign_and_partial_shapes_receive_our_pair(self) -> None:
+        path = self.fixture / "draggree.bcs"
         original = path.read_bytes()
-        variants = {
-            "timer": original.replace(b'6 0 0 0 0"LOCALSBuffet"', b'12 0 0 0 0"LOCALSBuffet"', 1),
-            "partial": original.replace(b'6 0 0 0 0"LOCALSBuffet"', b'18 0 0 0 0"LOCALSBuffet"', 1),
-            "range": original.replace(b"16408 12 ", b"16408 13 "),
-            "weight": original.replace(b"100AC", b"99AC", 1),
-            "missing": b"SC\nSC\n",
-            "duplicate": b"SC\n" + original[3:-3] * 2 + b"SC\n",
-        }
-        for label, data in variants.items():
-            with self.subTest(label=label):
-                path.write_bytes(data)
-                before = snapshot(self.fixture)
-                result = self.run_library(success=False)
-                self.assertIn("wing-buffet", result.stdout + result.stderr)
-                self.assertEqual(snapshot(self.fixture), before)
+        variants = [original.replace(b'6 0 0 0 0"LOCALSBuffet"', b'12 0 0 0 0"LOCALSBuffet"', 1),
+                    original.replace(b"16408 12 ", b"16408 13 "), b"SC\nSC\n",
+                    b"SC\n" + original[3:-3] * 2 + b"SC\n"]
+        for data in variants:
+            path.write_bytes(data)
+            self.run_library()
+            self.assertEqual(simulate_buffet_paths(path.read_bytes(), "FSdragon", cloud=True, response=0), (18, 3, 1))
+            self.assertEqual(path.read_bytes().count(b'18 0 0 0 0"LOCALSBuffet"'), 3)
 
-    def test_foreign_cre_identity_and_script_assignment_fail_closed(self) -> None:
+    def test_current_cre_identity_and_script_assignment_are_addresses(self) -> None:
         path = self.fixture / "fsdragon.cre"
-        original = path.read_bytes()
-        for offset, replacement in ((0x280, b"OtherDra"), (0x250, b"dragred\0")):
-            with self.subTest(offset=offset):
-                data = bytearray(original)
-                data[offset:offset + 8] = replacement
-                path.write_bytes(data)
-                before = snapshot(self.fixture)
-                self.run_library(success=False)
-                self.assertEqual(snapshot(self.fixture), before)
+        data = bytearray(path.read_bytes())
+        data[0x280:0x2a0] = b"OtherDra".ljust(32, b"\0")
+        data[0x250:0x258] = b"dragred\0"
+        path.write_bytes(data)
+        self.run_library()
+        self.assertEqual(simulate_buffet_paths((self.fixture / "dragred.bcs").read_bytes(), "OtherDra", cloud=True, response=0), (18, 3, 1))
 
-    def test_missing_last_target_fails_before_first_script_changes(self) -> None:
+    def test_missing_last_target_leaves_other_dragons_updated(self) -> None:
         (self.fixture / "fsdragon.cre").unlink()
-        before = snapshot(self.fixture)
-        self.run_library(success=False)
-        self.assertEqual(snapshot(self.fixture), before)
+        before = (self.fixture / "draggree.bcs").read_bytes()
+        self.run_library()
+        self.assertEqual(before, (self.fixture / "draggree.bcs").read_bytes())
+        self.assertIn(b'18 0 0 0 0"LOCALSBuffet"', (self.fixture / "dragred.bcs").read_bytes())
 
     def build_game(self, *, foreign_last: bool = False) -> tuple[Path, dict[str, bytes]]:
         game = self.root / "game"
@@ -310,12 +301,12 @@ class DragonWingBuffetTests(unittest.TestCase):
         for name, data in stable.items():
             self.assertEqual((game / name).read_bytes(), data)
 
-    def test_game_path_rejects_last_foreign_target_without_materialization(self) -> None:
+    def test_game_path_writes_last_foreign_target(self) -> None:
         game, stable = self.build_game(foreign_last=True)
-        before = snapshot(game / "override")
         result = self.run_game(game, "--force-install-list", "2")
-        self.assertIn("NOT INSTALLED DUE TO ERRORS", result.stdout + result.stderr)
-        self.assertEqual(snapshot(game / "override"), before)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        data = (game / "override/draggree.bcs").read_bytes()
+        self.assertEqual(simulate_buffet_paths(data, "FSdragon", cloud=True, response=0), (18, 3, 1))
         for name, data in stable.items():
             self.assertEqual((game / name).read_bytes(), data)
 

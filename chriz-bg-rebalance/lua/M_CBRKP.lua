@@ -22,20 +22,27 @@ end
 
 local function initialize()
     local registry = EEex_Resource_Load2DA("CBRKPKIT")
-    requireValue(registry:findColumnLabel("CLASS") == 0
-        and registry:findColumnLabel("KIT") == 1, "invalid CBRKPKIT registry")
+    if not registry then
+        state.Status = "registry resource is absent"
+        print("CBR kit weapon lists: " .. state.Status)
+        return
+    end
+    local classColumn, kitColumn = registry:findColumnLabel("CLASS"), registry:findColumnLabel("KIT")
+    classColumn = classColumn >= 0 and classColumn + 1 or 1
+    kitColumn = kitColumn >= 0 and kitColumn + 1 or 2
     local entries, seen = {}, {}
     for row in EEex_Resource_Get2DARowTableIterator(registry, false) do
-        local class, kit = tonumber(row[1]), tonumber(row[2])
-        requireValue(class and class == math.floor(class) and class >= 1 and class <= 255,
-            "invalid class identifier")
-        -- Only kits of the 0x4000 range take the native kit branch.
-        requireValue(kit and kit == math.floor(kit) and kit > 0x4000 and kit < 0x8000,
-            "invalid kit identifier")
-        local key = class .. ":" .. kit
-        if not seen[key] then
-            seen[key] = true
-            entries[#entries + 1] = { class = class, index = kit - 0x4000 }
+        local class, kit = tonumber(row[classColumn]), tonumber(row[kitColumn])
+        if class and kit and class == class and kit == kit
+                and math.abs(class) ~= math.huge and math.abs(kit) ~= math.huge then
+            class, kit = math.floor(class) % 4294967296, math.floor(kit) % 4294967296
+            local key = class .. ":" .. kit
+            if not seen[key] then
+                seen[key] = true
+                entries[#entries + 1] = { class = class, index = (kit - 0x4000) % 4294967296 }
+            end
+        else
+            print("CBR kit weapon lists: unreadable class/kit row; continuing")
         end
     end
     if #entries == 0 then

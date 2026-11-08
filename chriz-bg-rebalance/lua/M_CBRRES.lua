@@ -12,6 +12,14 @@ local markerState = %CBR_RES_STATE%
 
 CBRPhysRes = CBRPhysRes or {apiVersion = 1, failed = false, registered = false}
 local state = CBRPhysRes
+state.apiVersion, state.failed = 1, false
+state.logged = state.logged or {}
+local function report(reason)
+    reason = tostring(reason)
+    if state.logged[reason] then return end
+    state.logged[reason] = true
+    print("CBR physical resistance: unavailable sprite field; continuing. " .. reason)
+end
 local function fail(reason)
     if state.failed then return end
     state.failed = true
@@ -24,19 +32,15 @@ local function integer(value)
         and value == math.floor(value)
 end
 
-if state.apiVersion ~= 1 or not integer(cap) or (cap ~= 90 and cap ~= 95)
+if not integer(cap) or (cap ~= 90 and cap ~= 95)
         or not integer(markerState) or markerState < 0 or markerState > 255 then
     fail("Invalid component configuration.")
-    return
-end
-if state.cap and (state.cap ~= cap or state.markerState ~= markerState) then
-    fail("Component configuration changed during play; restart the game.")
     return
 end
 state.cap, state.markerState = cap, markerState
 
 function state.Transform(value)
-    assert(integer(value), "Resistance is not a finite integer.")
+    if not integer(value) then return value end
     if value <= 80 then return value end
     return math.min(cap, 80 + math.floor((value - 80) / 2))
 end
@@ -73,15 +77,11 @@ local function immunityWindows(sprite)
     local windows = {}
     EEex_Utility_IterateCPtrList(list, function(effect)
         local opcode = effect.m_effectId
-        assert(integer(opcode), "Invalid effect opcode.")
         local index = fieldOfOpcode[opcode]
         if index == nil or windows[index] then return end
         local amount, mode = effect.m_effectAmount, effect.m_dWFlags
         local timing, done = effect.m_durationType, effect.m_done
-        assert(integer(amount) and integer(mode) and integer(timing)
-            and (integer(done) or type(done) == "boolean"),
-            "Invalid resistance effect fields.")
-        if (mode == 0 or mode == 1) and amount >= 100
+        if integer(amount) and (mode == 0 or mode == 1) and amount >= 100
                 and timing == ABSOLUTE_EXPIRY and (done == 0 or done == false) then
             windows[index] = true
             return windows[1] and windows[2] and windows[3] and windows[4]
@@ -94,8 +94,7 @@ local function apply(sprite)
     -- Allegiance is not party membership: allies/summons are excluded, while
     -- a charmed roster member remains subject to the same player rule.
     local portrait = EEex_Sprite_GetPortraitIndex(sprite)
-    assert(integer(portrait) and portrait >= -1 and portrait <= 5, "Invalid party index.")
-    if portrait == -1 then return end
+    if not integer(portrait) or portrait < 0 or portrait > 5 then return end
 
     -- Write the block being rebuilt, not getActiveStats(): during effect
     -- processing that helper can return the PREVIOUS snapshot (m_tempStats).
@@ -105,12 +104,16 @@ local function apply(sprite)
     assert(integer(word), "Invalid spell-state word.")
     if EEex_BAnd(word, markerMask) ~= 0 then return end
 
-    -- Read/validate every field before modifying any resistance.
+    -- Read each channel before applying the curve to the readable values.
     local before, after, lowered = {}, {}, false
     for i, field in ipairs(fields) do
         before[i] = stats[field]
         after[i] = state.Transform(before[i])
-        lowered = lowered or after[i] ~= before[i]
+        if integer(before[i]) then
+            lowered = lowered or after[i] ~= before[i]
+        else
+            report(field)
+        end
     end
     -- Only a value the curve would lower needs the effect-list scan.
     if lowered then
@@ -128,13 +131,13 @@ local function apply(sprite)
         "Rebuild marker did not persist.")
     local ok, reason = pcall(function()
         for i, field in ipairs(fields) do
-            if before[i] ~= after[i] then stats[field] = after[i] end
+            if integer(after[i]) and before[i] ~= after[i] then stats[field] = after[i] end
         end
     end)
     if not ok then
         -- Defensive recovery if a binding rejects a write mid-update. Try
-        -- every field even if one setter remains broken; retire the listener
-        -- afterwards. Never leave the marker claiming a successful update.
+        -- every field even if one setter remains broken. Later callbacks retry;
+        -- never leave the marker claiming a successful update.
         local restored = true
         for i, field in ipairs(fields) do
             local reset = pcall(function() stats[field] = before[i] end)
@@ -151,11 +154,10 @@ end
 function state.Apply(sprite)
     if state.failed then return end
     local ok, reason = pcall(apply, sprite)
-    if not ok then fail(reason) end
+    if not ok then report(reason) end
 end
 
--- Reloading the same module must neither register another callback nor reset
--- its failure fuse. The closure always calls the current implementation.
+-- Reloading the module keeps one callback calling the current implementation.
 if not state.registered and not state.failed then
     local ok, reason = pcall(EEex_Opcode_AddListsResolvedListener, function(sprite)
         state.Apply(sprite)

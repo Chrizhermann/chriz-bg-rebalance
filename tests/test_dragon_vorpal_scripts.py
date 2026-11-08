@@ -100,6 +100,7 @@ class DragonVorpalScriptTests(unittest.TestCase):
 
     def run_patch(self, expected_success: bool = True, *, component: str = "1") -> bytes:
         self.counter += 1
+        self.out.unlink(missing_ok=True)
         run = self.root / f"run-{self.counter}"
         run.mkdir()
         process = subprocess.run([
@@ -112,7 +113,8 @@ class DragonVorpalScriptTests(unittest.TestCase):
         if expected_success:
             self.assertEqual(process.returncode, 0, transcript)
             self.assertIn("SUCCESSFULLY INSTALLED", transcript)
-            return self.out.read_bytes()
+            self.assertNotIn("INSTALLED WITH WARNINGS", transcript)
+            return self.out.read_bytes() if self.out.exists() else self.source.read_bytes()
         self.assertIn("NOT INSTALLED DUE TO ERRORS", transcript)
         return b""
 
@@ -150,42 +152,66 @@ class DragonVorpalScriptTests(unittest.TestCase):
         self.source.write_bytes(once)
         self.assertEqual(self.run_patch(), once)
 
-    def test_foreign_or_duplicate_prefix_is_rejected(self) -> None:
+    def test_foreign_or_duplicate_prefix_is_overwritten(self) -> None:
         once = self.run_patch()
-        for bad in (once.replace(b'"CBRDV15"', b'"FOREIGN1"'),
-                    b"SC\n" + blocks(once)[0] + once[3:]):
-            self.source.write_bytes(bad)
-            before = self.out.read_bytes()
-            self.run_patch(False)
-            self.assertEqual(self.out.read_bytes(), before)
+        for edited in (once.replace(b'"CBRDV15"', b'"FOREIGN1"'),
+                       b"SC\n" + blocks(once)[0] + once[3:]):
+            self.source.write_bytes(edited)
+            self.assertEqual(self.run_patch(), once)
 
-    def test_invalid_script_is_rejected(self) -> None:
+    def test_damaged_script_costs_only_this_file(self) -> None:
         self.source.write_bytes(b"not a compiled script")
-        self.run_patch(False)
-        self.assertFalse(self.out.exists())
+        self.assertEqual(self.run_patch(), self.source.read_bytes())
 
-    def test_wrong_variable_scope_is_rejected(self) -> None:
-        original = self.source.read_bytes()
-        name = (b'DMWW_dragon_difficulty' if self.family == "ini" else
-                b'GLOBALDMWW_dragon_difficulty')
-        self.source.write_bytes(original.replace(name, b'LOCALSDMWW_dragon_difficulty'))
-        self.run_patch(False)
-        self.assertFalse(self.out.exists())
+    def test_missing_difficulty_uses_ini_fallback(self) -> None:
+        self.source.write_bytes(b"SC\nSC\n")
+        result = self.run_patch()
+        self.assertEqual(4, len(blocks(result)))
+        self.assertIn(b'"DMWW_dragon_difficulty"', result)
+        self.assertEqual(result.count(b'"CBRDV15"'), 2)
 
-    def test_mixed_difficulty_backends_are_rejected(self) -> None:
+    def test_mixed_difficulty_backends_choose_global(self) -> None:
         original = self.source.read_bytes()
         other = self.compile_donor("global" if self.family == "ini" else "ini")
         self.source.write_bytes(original[:-3] + other[3:])
-        self.run_patch(False)
-        self.assertFalse(self.out.exists())
+        result = self.run_patch()
+        self.assertIn(b'"GLOBALDMWW_dragon_difficulty"', b"".join(blocks(result)[:4]))
+        self.assertEqual(blocks(result)[4:], blocks(self.source.read_bytes()))
 
-    def test_own_prefix_cannot_supply_missing_donor_difficulty(self) -> None:
+    def test_own_prefix_is_rewritten_without_donor_difficulty(self) -> None:
         patched = self.run_patch()
         prefix_only = b"SC\n" + b"".join(blocks(patched)[:4]) + b"SC\n"
         self.source.write_bytes(prefix_only)
-        before = self.out.read_bytes()
-        self.run_patch(False)
-        self.assertEqual(self.out.read_bytes(), before)
+        self.assertEqual(self.run_patch(), prefix_only)
+
+    def test_game_roster_uses_current_addresses_and_creates_missing_script(self) -> None:
+        from tests.test_cloud_forms import Game
+        from tests.test_dragon_wing_buffet import ROSTER
+        resources = {}
+        for cre, (script, actor, slot) in ROSTER.items():
+            if cre == "shadra01":
+                continue
+            raw = bytearray(0x2d4); raw[:8] = b"CRE V1.0"
+            if cre == "fsdragon":
+                actor, script = "EditedDragon", "custom"
+            raw[0x280:0x2a0] = actor.encode().ljust(32, b"\0")
+            raw[slot:slot+8] = script.encode().ljust(8, b"\0")
+            resources[cre+".CRE"] = bytes(raw)
+            if script != "custom":
+                resources[script+".BCS"] = self.source.read_bytes()
+        game = Game(self.root / "game", resources, public=True, texts=[""])
+        write_ids(game.override)
+        tp2 = game.root / "test.tp2"
+        tp2.write_text(f'BACKUP ~backup~\nAUTHOR ~test~\nBEGIN ~roster~\nINCLUDE ~{LIB.as_posix()}~\nLAF cbr_apply_dragon_vorpal_scripts INT_VAR apply = 1 END\n')
+        process = subprocess.run([str(WEIDU), str(tp2), "--force-install-list", "0", "--use-lang", "en_us", "--no-exit-pause", "--quick-log"],
+                                 cwd=game.root, capture_output=True, text=True, timeout=60)
+        self.assertEqual(0, process.returncode, process.stdout+process.stderr)
+        self.assertNotIn("INSTALLED WITH WARNINGS", process.stdout+process.stderr)
+        self.assertIn("optional creature shadra01 is absent", process.stdout)
+        current = (game.override / "custom.BCS").read_bytes()
+        self.assertIn(b'"EditedDragon"', current)
+        self.assertEqual(4, len(blocks(current)))
+        self.assertEqual(2, current.count(b'"CBRDV05"'))
 
     @unittest.skipUnless(CAPTURE_AVAILABLE, CAPTURE_REQUIRED)
     def test_full_captured_script_is_preserved(self) -> None:

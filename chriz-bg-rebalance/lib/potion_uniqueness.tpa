@@ -1,3 +1,142 @@
+DEFINE_PATCH_FUNCTION cbr_pu_read_layout
+  INT_VAR stride = 0x38 log_errors = 1
+  RET ab na fx eq_first eq_count readable
+BEGIN
+  SET ab = 0 SET na = 0 SET fx = 0 SET eq_first = 0 SET eq_count = 0
+  SET readable = BUFFER_LENGTH >= 0x72
+  PATCH_IF readable BEGIN
+    READ_LONG 0x64 ab READ_SHORT 0x68 na READ_LONG 0x6a fx
+    READ_SHORT 0x6e eq_first READ_SHORT 0x70 eq_count
+    SET readable = (na = 0 OR (ab >= 0x72 AND ab <= BUFFER_LENGTH
+      AND na <= (BUFFER_LENGTH - ab) / stride)) AND fx >= 0x72 AND fx <= BUFFER_LENGTH
+    PATCH_IF readable BEGIN
+      SET available = (BUFFER_LENGTH - fx) / 0x30
+      PATCH_IF eq_count > 0 AND eq_first + eq_count > available BEGIN SET readable = 0 END
+      FOR (a = 0; a < na; ++a) BEGIN
+        READ_SHORT (ab + a * stride + 0x1e) n
+        READ_SHORT (ab + a * stride + 0x20) first
+        PATCH_IF n > 0 AND first + n > available BEGIN SET readable = 0 END
+      END
+      // Tables may be in either order, but referenced records cannot overlap.
+      PATCH_IF na > 0 AND fx >= ab AND fx < ab + na * stride BEGIN SET readable = 0 END
+      PATCH_IF na > 0 AND fx < ab BEGIN
+        PATCH_IF eq_count > 0 AND fx + (eq_first + eq_count) * 0x30 > ab BEGIN SET readable = 0 END
+        FOR (a = 0; a < na; ++a) BEGIN
+          READ_SHORT (ab + a * stride + 0x1e) n READ_SHORT (ab + a * stride + 0x20) first
+          PATCH_IF n > 0 AND fx + (first + n) * 0x30 > ab BEGIN SET readable = 0 END
+        END
+      END
+    END
+  END
+  PATCH_IF NOT readable AND log_errors BEGIN
+    PATCH_PRINT ~Potion uniqueness: %SOURCE_FILE% has unreadable resource bounds; leaving this file alone.~
+  END
+END
+
+
+DEFINE_PATCH_FUNCTION cbr_pu_table_read
+  RET cbr_t_cols cbr_t_rows cbr_t_default
+  RET_ARRAY cbr_t_head cbr_t_cell
+BEGIN
+  CLEAR_ARRAY cbr_t_head CLEAR_ARRAY cbr_t_cell CLEAR_ARRAY cbr_t_line CLEAR_ARRAY cbr_t_width
+  SET line = 0
+  READ_ASCII 0 source (BUFFER_LENGTH)
+  INNER_PATCH ~%source%~ BEGIN
+    REPLACE_EVALUATE ~[^%LNL%%MNL%]+~ BEGIN
+      SPRINT content ~%MATCH0%~
+      SET token = 0
+      INNER_PATCH ~%content%~ BEGIN
+        REPLACE_TEXTUALLY ~//.*~ ~~
+        REPLACE_EVALUATE ~[^ %TAB%%LNL%%MNL%]+~ BEGIN
+          SPRINT $cbr_t_line(~%line%~ ~%token%~) ~%MATCH0%~
+          SET token += 1
+        END ~%MATCH0%~
+      END
+      PATCH_IF token > 0 BEGIN SET $cbr_t_width(~%line%~) = token SET line += 1 END
+    END ~%MATCH0%~
+  END
+  SPRINT cbr_t_default ~0~
+  PATCH_IF line > 1 BEGIN SPRINT cbr_t_default $cbr_t_line(~1~ ~0~) END
+  SET cbr_t_cols = 1 SET cbr_t_rows = 0
+  PATCH_IF line > 2 BEGIN
+    SET cbr_t_cols = $cbr_t_width(~2~) + 1
+    FOR (c = 1; c < cbr_t_cols; ++c) BEGIN
+      SET j = c - 1 SPRINT $cbr_t_head(~%c%~) $cbr_t_line(~2~ ~%j%~)
+    END
+    SET cbr_t_rows = line - 3
+    FOR (r = 0; r < cbr_t_rows; ++r) BEGIN
+      SET l = r + 3
+      PATCH_IF $cbr_t_width(~%l%~) > cbr_t_cols BEGIN
+        FOR (c = cbr_t_cols; c < $cbr_t_width(~%l%~); ++c) BEGIN SPRINT $cbr_t_head(~%c%~) ~CBR_COLUMN_%c%~ END
+        SET cbr_t_cols = $cbr_t_width(~%l%~)
+      END
+    END
+    FOR (r = 0; r < cbr_t_rows; ++r) BEGIN
+      SET l = r + 3
+      FOR (c = 0; c < cbr_t_cols; ++c) BEGIN
+        SPRINT $cbr_t_cell(~%r%~ ~%c%~) ~%cbr_t_default%~
+        PATCH_IF c < $cbr_t_width(~%l%~) BEGIN SPRINT $cbr_t_cell(~%r%~ ~%c%~) $cbr_t_line(~%l%~ ~%c%~) END
+      END
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_pu_table_write
+BEGIN
+  SPRINT output ~2DA V1.0%WNL%%cbr_t_default%%WNL%~
+  FOR (c = 1; c < cbr_t_cols; ++c) BEGIN
+    SPRINT value $cbr_t_head(~%c%~) SPRINT output ~%output% %value%~
+  END
+  SPRINT output ~%output%%WNL%~
+  FOR (r = 0; r < cbr_t_rows; ++r) BEGIN
+    FOR (c = 0; c < cbr_t_cols; ++c) BEGIN
+      SPRINT value $cbr_t_cell(~%r%~ ~%c%~) SPRINT output ~%output%%value% ~
+    END
+    SPRINT output ~%output%%WNL%~
+  END
+  DELETE_BYTES 0 BUFFER_LENGTH INSERT_BYTES 0 (STRING_LENGTH ~%output%~) WRITE_ASCIIE 0 ~%output%~
+END
+
+DEFINE_PATCH_FUNCTION cbr_pu_normalize_2da
+  STR_VAR required = ~~
+BEGIN
+  LPF cbr_pu_table_read RET cbr_t_cols cbr_t_rows cbr_t_default RET_ARRAY cbr_t_head cbr_t_cell END
+  SET changed = 0
+  // Padding short rows and adding named columns makes subsequent address reads safe.
+  COUNT_2DA_COLS width
+  COUNT_2DA_ROWS cbr_t_cols complete_rows
+  PATCH_IF width != cbr_t_cols OR complete_rows != cbr_t_rows BEGIN SET changed = 1 END
+  INNER_PATCH ~%required%~ BEGIN
+    REPLACE_EVALUATE ~[^ ]+~ BEGIN
+      SPRINT required_name ~%MATCH0%~ SET found = 0
+      FOR (c = 1; c < cbr_t_cols; ++c) BEGIN
+        SPRINT name $cbr_t_head(~%c%~)
+        PATCH_IF ~%name%~ STRING_EQUAL_CASE ~%required_name%~ BEGIN SET found = 1 END
+      END
+      PATCH_IF NOT found BEGIN
+        SET c = cbr_t_cols SPRINT $cbr_t_head(~%c%~) ~%required_name%~
+        FOR (r = 0; r < cbr_t_rows; ++r) BEGIN SPRINT $cbr_t_cell(~%r%~ ~%c%~) ~%cbr_t_default%~ END
+        SET cbr_t_cols += 1 SET changed = 1
+      END
+    END ~%MATCH0%~
+  END
+  PATCH_IF changed BEGIN LPF cbr_pu_table_write END END
+END
+
+DEFINE_PATCH_FUNCTION cbr_pu_named_column
+  STR_VAR name = ~~ required = ~~
+  RET data_column
+BEGIN
+  LPF cbr_pu_normalize_2da STR_VAR required = EVAL ~%required% %name%~ END
+  LPF cbr_pu_table_read RET cbr_t_cols cbr_t_rows cbr_t_default RET_ARRAY cbr_t_head cbr_t_cell END
+  SET data_column = 1
+  FOR (c = cbr_t_cols - 1; c >= 1; --c) BEGIN
+    SPRINT header $cbr_t_head(~%c%~)
+    PATCH_IF ~%header%~ STRING_EQUAL_CASE ~%name%~ BEGIN SET data_column = c END
+  END
+END
+
+
 // Components 330/331 (potion uniqueness) and 332 (Heroism family).
 // Design and evidence: research/2026-10-14-potion-uniqueness-heroism-family.md
 //
@@ -5,8 +144,8 @@
 // refreshes (one opcode 321 per type resref, before the dose) or keeps its first
 // dose (opcode 324 guard on a private spell state first in each delivery batch,
 // opcode 328 marker last). Potions are grouped by what their drink abilities do,
-// never by resref or layout; a type that one guard cannot handle correctly is
-// left unchanged with a printed reason.
+// by declared item identity; SCS's named copies share their original's type.
+// Changed payloads never veto the owned control records.
 //
 // WeiDU keeps array variables after CLEAR_ARRAY, and several components can run
 // in one WeiDU session, so membership arrays store the call's generation number
@@ -25,31 +164,16 @@ END
 // Bounds-checked ITM/SPL table layout. Sets pu_ok, pu_absz, pu_ab, pu_nab, pu_fx.
 DEFINE_PATCH_MACRO cbr_pu_layout
 BEGIN
-  SET pu_ok = 0
-  SET pu_absz = 0
-  SET pu_nab = 0
-  PATCH_IF (BUFFER_LENGTH >= 0x72) BEGIN
-    READ_ASCII 0 pu_hdr (8)
-    PATCH_IF (~%pu_hdr%~ STR_EQ ~ITM V1  ~) BEGIN SET pu_absz = 0x38 END
-    PATCH_IF (~%pu_hdr%~ STR_EQ ~SPL V1  ~) BEGIN SET pu_absz = 0x28 END
+  SET pu_absz=(item_mode ? 0x38 : 0x28)
+  PATCH_IF BUFFER_LENGTH>=3 BEGIN
+    READ_ASCII 0 format (3)
+    PATCH_IF ~%format%~ STR_EQ ~SPL~ BEGIN SET pu_absz=0x28 END
+    PATCH_IF ~%format%~ STR_EQ ~ITM~ BEGIN SET pu_absz=0x38 END
   END
-  PATCH_IF (pu_absz > 0) BEGIN
-    READ_LONG  0x64 pu_ab
-    READ_SHORT 0x68 pu_nab
-    READ_LONG  0x6a pu_fx
-    PATCH_IF (((pu_nab = 0) OR (pu_ab >= 0x72)) AND (pu_fx >= 0x72)
-      AND ((pu_ab + pu_nab * pu_absz) <= BUFFER_LENGTH) AND (pu_fx <= BUFFER_LENGTH)) BEGIN
-      SET pu_ok = 1
-    END
-    FOR (pu_la = 0; pu_ok AND (pu_la < pu_nab); ++pu_la) BEGIN
-      READ_SHORT (pu_ab + pu_la * pu_absz + 0x1e) pu_ln
-      READ_SHORT (pu_ab + pu_la * pu_absz + 0x20) pu_lf
-      PATCH_IF ((pu_fx + (pu_lf + pu_ln) * 0x30) > BUFFER_LENGTH) BEGIN SET pu_ok = 0 END
-    END
-  END
+  LPF cbr_pu_read_layout INT_VAR stride=pu_absz RET pu_ab=ab pu_nab=na pu_fx=fx pu_ok=readable END
 END
 
-// pu_member = 1 when res is a potion (cbr_pu_potion) of this call.
+
 DEFINE_PATCH_MACRO cbr_pu_is_potion
 BEGIN
   SET pu_member = 0
@@ -132,69 +256,29 @@ END
 // Facts of one gameplay effect (see cbr_pu_collect_slice).
 DEFINE_PATCH_MACRO cbr_pu_effect_facts
 BEGIN
-  SET counted = 0
-  PATCH_IF (is_link AND follow_links) BEGIN
-    LPM cbr_pu_is_potion
-    PATCH_IF (pu_member AND (FILE_EXISTS_IN_GAME ~%res%.spl~)) BEGIN
-      SET counted = 1
-      PATCH_IF ((INDEX (CASE_INSENSITIVE EXACT_MATCH ~ %res% ~ ~%f_links%~)) < 0) BEGIN
-        SPRINT f_links ~%f_links%%res% ~
-      END
-      // A delayed or repeating cast cannot sit behind one guard.
-      PATCH_IF ((tm != 1) AND (tm != 9) AND (NOT ((tm = 0) AND (du = 0)))) BEGIN SET f_badkf = 1 END
-    END
-  END
-  PATCH_IF (NOT counted) BEGIN
-    PATCH_IF (is_timed AND (NOT is_link)) BEGIN
-      SET f_timed = 1
-      PATCH_IF ((tm != 0) OR (pr1 < 100) OR (pr2 > 0) OR ((sv BAND 0x1f) != 0)) BEGIN SET f_badkf = 1 END
-      PATCH_IF (du > f_dur) BEGIN SET f_dur = du END
-      PATCH_IF (op = 18) BEGIN
-        SET f_hp = 1
-        PATCH_IF (f_rspw < 2) BEGIN SET f_rs = rs SET f_pw = pw SET f_rspw = 2 END
-      END ELSE PATCH_IF (f_rspw < 1) BEGIN
-        SET f_rs = rs SET f_pw = pw SET f_rspw = 1
-      END
-      PATCH_IF ((op = 19) AND (((p2 = 0) AND (p1 > 0)) OR (p2 = 1))) BEGIN SET f_int = 1 END
-    END ELSE BEGIN
-      SET f_instant = 1
-    END
-  END
-  PATCH_IF (check_paths AND (tg != 1) AND (tg != 2)) BEGIN SET f_badkf = 1 END
+  PATCH_IF is_link AND follow_links AND NOT (~%res%~ STR_EQ ~~) BEGIN
+    PATCH_IF FILE_EXISTS_IN_GAME ~%res%.SPL~ BEGIN
+      PATCH_IF (INDEX (CASE_INSENSITIVE EXACT_MATCH ~ %res% ~ ~%f_links%~))<0 BEGIN SPRINT f_links ~%f_links%%res% ~ END
+    END ELSE BEGIN PATCH_PRINT ~Potion uniqueness: optional linked spell %res% is absent; this branch ends.~ END
+  END ELSE PATCH_IF is_timed BEGIN
+    SET f_timed=1 PATCH_IF du>f_dur BEGIN SET f_dur=du END
+    PATCH_IF op=18 BEGIN SET f_hp=1 SET f_rs=rs SET f_pw=pw SET f_rspw=2 END
+    ELSE PATCH_IF f_rspw<1 BEGIN SET f_rs=rs SET f_pw=pw SET f_rspw=1 END
+    PATCH_IF op=19 BEGIN SET f_int=1 END
+  END ELSE BEGIN SET f_instant=1 END
 END
 
-// Facts and the order-free gameplay signature (pu_sigab) of one effect slice
-// (fx_base, fx_n). follow_links: a cast of a spell named like a potion (Item
-// Revisions' POTNxx.SPL, the Red Potion's helper) is payload; that spell's own
-// facts are merged in by the caller.
+
 DEFINE_PATCH_MACRO cbr_pu_collect_slice
 BEGIN
-  PATCH_CLEAR_ARRAY cbr_pu_tok
-  FOR (pu_pass = 0; pu_pass < 2; ++pu_pass) BEGIN
-    FOR (pu_i = 0; pu_i < fx_n; ++pu_i) BEGIN
-      LPM cbr_pu_read_effect
-      PATCH_IF is_game BEGIN
-        SPRINT tok ~%op%.%tg%.%pw%.%p1%.%p2%.%tm%.%rs%.%du%.%pr1%.%pr2%.%res%.%dn%.%ds%.%sv%.%sb%.%sp%~
-        PATCH_IF (pu_pass = 0) BEGIN
-          SET $cbr_pu_tok(~%tok%~) = 0
-        END ELSE BEGIN
-          SET $cbr_pu_tok(~%tok%~) += 1
-          LPM cbr_pu_effect_facts
-        END
-      END ELSE PATCH_IF ((pu_pass = 1) AND is_ctrl AND (op != 321) AND (du > 0)) BEGIN
-        // A lasting ward naming this type is the potion's own non-stacking rule.
-        SPRINT f_wards ~%f_wards%%res% ~
-      END
-    END
-  END
-  SORT_ARRAY_INDICES cbr_pu_tok LEXICOGRAPHICALLY
   SPRINT pu_sigab ~~
-  PHP_EACH cbr_pu_tok AS tok => cnt BEGIN
-    SPRINT pu_sigab ~%pu_sigab%%tok%*%cnt%;~
+  FOR (pu_i=0;pu_i<fx_n;++pu_i) BEGIN
+    LPM cbr_pu_read_effect
+    PATCH_IF is_game BEGIN LPM cbr_pu_effect_facts END
   END
 END
 
-// Signature and facts of every ability of a spell; pu_sig joins the abilities.
+
 DEFINE_PATCH_MACRO cbr_pu_collect_spell
 BEGIN
   LPM cbr_pu_reset_facts
@@ -246,162 +330,289 @@ END
 // after everything. Context: pu_own, item_mode, kf_state, kf_row and, for
 // potions, kf_dur/kf_rs/kf_pw (type-wide, linked spell included). A guard or
 // marker that is already present is not added again.
+
+DEFINE_PATCH_MACRO cbr_pu_rebuild
+BEGIN
+  LPM cbr_pu_layout
+  PATCH_IF pu_ok BEGIN
+    READ_ASCII 0 pu_head (0x72) READ_SHORT 0x6e eq_first READ_SHORT 0x70 eq_count
+    SPRINT pu_output_effects ~~
+    PATCH_IF eq_count>0 BEGIN READ_ASCII (pu_fx+eq_first*0x30) pu_output_effects (eq_count*0x30) END
+    SPRINT pu_output_abilities ~~ SET pu_out=eq_count SET pu_end=0x72
+    PATCH_IF pu_nab>0 BEGIN SET pu_end=pu_ab+pu_nab*pu_absz END
+    PATCH_IF eq_count>0 AND pu_fx+(eq_first+eq_count)*0x30>pu_end BEGIN SET pu_end=pu_fx+(eq_first+eq_count)*0x30 END
+    SET pu_fits=1
+    PATCH_IF pu_nab=0 BEGIN
+      INNER_PATCH_SAVE empty_ability ~........................................................~ BEGIN
+        DELETE_BYTES pu_absz (0x38 - pu_absz)
+        FOR (j=0;j<pu_absz;++j) BEGIN WRITE_BYTE j 0 END
+        WRITE_BYTE 0 (item_mode ? 3 : 1) WRITE_BYTE 0xc (item_mode ? 5 : 1)
+      END
+      SPRINT $pu_ability(~0~) ~%empty_ability%~ SPRINT $pu_slice(~0~) ~~ SET pu_nab=1
+    END ELSE BEGIN
+      FOR (pu_a=0;pu_a<pu_nab;++pu_a) BEGIN
+        READ_ASCII (pu_ab+pu_a*pu_absz) $pu_ability(~%pu_a%~) (pu_absz)
+        READ_SHORT (pu_ab+pu_a*pu_absz+0x1e) count READ_SHORT (pu_ab+pu_a*pu_absz+0x20) first
+        SPRINT $pu_slice(~%pu_a%~) ~~
+        PATCH_IF count>0 BEGIN READ_ASCII (pu_fx+first*0x30) $pu_slice(~%pu_a%~) (count*0x30) END
+        PATCH_IF count>0 AND pu_fx+(first+count)*0x30>pu_end BEGIN SET pu_end=pu_fx+(first+count)*0x30 END
+      END
+    END
+    PATCH_IF item_mode BEGIN
+      SET has_drink=0
+      FOR (pu_a=0;pu_a<pu_nab;++pu_a) BEGIN
+        SPRINT ability $pu_ability(~%pu_a%~)
+        INNER_PATCH ~%ability%~ BEGIN READ_BYTE 0xc target PATCH_IF target=5 OR target=7 BEGIN SET has_drink=1 END END
+      END
+      PATCH_IF NOT has_drink BEGIN
+        SPRINT ability $pu_ability(~0~)
+        INNER_PATCH_SAVE ability ~%ability%~ BEGIN WRITE_BYTE 0 3 WRITE_BYTE 0xc 5 END
+        SPRINT $pu_ability(~%pu_nab%~) ~%ability%~ SPRINT $pu_slice(~%pu_nab%~) $pu_slice(~0~) SET pu_nab+=1
+      END
+    END
+    SPRINT pu_tail ~~ PATCH_IF pu_end<BUFFER_LENGTH BEGIN READ_ASCII pu_end pu_tail (BUFFER_LENGTH - pu_end) END
+    FOR (pu_a=0;pu_a<pu_nab;++pu_a) BEGIN
+      SPRINT ability $pu_ability(~%pu_a%~) SPRINT input $pu_slice(~%pu_a%~) SPRINT result ~~
+      INNER_PATCH ~%ability%~ BEGIN READ_BYTE 0xc ability_target END
+      PATCH_IF NOT item_mode OR ability_target=5 OR ability_target=7 BEGIN
+        PATCH_IF pu_mode=2 BEGIN
+          // No state is available. Retire this family's published state even
+          // if its guard was removed, while preserving native wards and peers.
+          INNER_PATCH_SAVE result ~%input%~ BEGIN
+            FOR (at=BUFFER_LENGTH - 0x30;at>=0;at -= 0x30) BEGIN
+              READ_SHORT at op READ_LONG (at+4) p1 READ_LONG (at+8) p2 READ_ASCII (at+0x14) res (8) NULL
+              SET remove=0
+              PATCH_IF op=324 AND ~%res%~ STRING_EQUAL_CASE ~%pu_own%~ AND p1>=0 AND p1<=255 BEGIN
+                SET remove=$cbr_pu_prior_states(~%p1%~)
+              END
+              PATCH_IF op=328 AND p2>=0 AND p2<=255 BEGIN SET remove=$cbr_pu_prior_states(~%p2%~) END
+              PATCH_IF remove BEGIN DELETE_BYTES at 0x30 END
+            END
+          END
+        END ELSE BEGIN
+          SPRINT before ~~ SPRINT payload ~~ SPRINT always ~~ SET paths=0 SET ab_dur=0 SET ab_rs=1 SET ab_pw=0 SET leading=1
+          INNER_PATCH ~%input%~ BEGIN
+            SET fx_base=0 SET fx_n=BUFFER_LENGTH/0x30
+            FOR (pu_i=0;pu_i<fx_n;++pu_i) BEGIN
+              LPM cbr_pu_read_effect READ_ASCII at record (0x30) SET owned=0
+              PATCH_IF pu_mode=1 BEGIN
+                PATCH_IF op=324 AND ~%res%~ STR_EQ ~%pu_own%~ BEGIN
+                  SET owned=1
+                  PATCH_IF p1>=0 AND p1<=255 BEGIN
+                    PATCH_IF p1!=kf_state AND $cbr_pu_state_used(~%p1%~) AND NOT $cbr_pu_prior_states(~%p1%~) BEGIN SET owned=0 END
+                  END
+                END
+                PATCH_IF op=328 AND p2>=0 AND p2<=255 BEGIN
+                  PATCH_IF p2=kf_state OR $cbr_pu_prior_states(~%p2%~) BEGIN SET owned=1 END
+                END
+              END ELSE PATCH_IF op=321 BEGIN
+                PHP_EACH cbr_pu_refs AS candidate => ignored BEGIN PATCH_IF ~%res%~ STRING_EQUAL_CASE ~%candidate%~ BEGIN SET owned=1 END END
+              END
+              // Our stacking rule replaces lasting native wards. Instant checks
+              // such as Oil of Speed's haste-immunity gate remain independent.
+              PATCH_IF is_ctrl AND du>0 AND (op=206 OR op=318 OR op=324) BEGIN SET owned=1 END
+              PATCH_IF NOT owned BEGIN
+                PATCH_IF is_game BEGIN
+                  PATCH_IF tg>0 AND tg<10 BEGIN SET paths=paths BOR (1 BLSL tg) END
+                  PATCH_IF is_timed BEGIN PATCH_IF du>ab_dur BEGIN SET ab_dur=du END SET ab_rs=rs SET ab_pw=pw END
+                END
+                PATCH_IF pu_mode=1 AND is_game AND NOT is_timed AND NOT is_link BEGIN SPRINT always ~%always%%record%~ END
+                ELSE PATCH_IF pu_mode=0 AND leading AND is_ctrl BEGIN SPRINT before ~%before%%record%~ END ELSE BEGIN SPRINT payload ~%payload%%record%~ END
+                PATCH_IF NOT is_ctrl AND NOT is_cos BEGIN SET leading=0 END
+              END
+            END
+          END
+          PATCH_IF pu_mode=1 BEGIN
+            PATCH_IF item_mode BEGIN SET ab_dur=kf_dur SET ab_rs=kf_rs SET ab_pw=kf_pw END
+            PATCH_IF ab_dur<=0 BEGIN SET ab_dur=600 END
+            PATCH_IF paths=0 BEGIN SET paths=(item_mode ? 2 : 4) END
+            SET last_target=1 SPRINT result ~%always%~
+            FOR (tg=1;tg<10;++tg) BEGIN
+              PATCH_IF (paths BAND (1 BLSL tg))!=0 BEGIN
+                INNER_PATCH_SAVE record ~................................................~ BEGIN
+                  FOR (j=0;j<0x30;++j) BEGIN WRITE_BYTE j 0 END
+                  WRITE_SHORT 0 324 WRITE_BYTE 2 tg WRITE_BYTE 3 ab_pw WRITE_LONG 4 kf_state WRITE_LONG 8 kf_row
+                  WRITE_BYTE 0xd 2 WRITE_BYTE 0x12 100 WRITE_ASCIIE 0x14 ~%pu_own%~ #8
+                END
+                SPRINT result ~%result%%record%~ SET last_target=tg
+              END
+            END
+            SPRINT result ~%result%%payload%~
+            INNER_PATCH_SAVE record ~................................................~ BEGIN
+              FOR (j=0;j<0x30;++j) BEGIN WRITE_BYTE j 0 END
+              WRITE_SHORT 0 328 WRITE_BYTE 2 last_target WRITE_BYTE 3 ab_pw WRITE_LONG 8 kf_state
+              WRITE_LONG 0xe ab_dur WRITE_BYTE 0xd (2 BOR (ab_rs BAND 1)) WRITE_BYTE 0x12 100 WRITE_LONG 0x2c 1
+            END
+            SPRINT result ~%result%%record%~
+          END ELSE BEGIN
+            SPRINT result ~%before%~
+            PHP_EACH cbr_pu_refs AS candidate => ignored BEGIN
+              INNER_PATCH_SAVE record ~................................................~ BEGIN
+                FOR (j=0;j<0x30;++j) BEGIN WRITE_BYTE j 0 END
+                WRITE_SHORT 0 321 WRITE_BYTE 2 1 WRITE_LONG 8 2 WRITE_BYTE 0xc 1 WRITE_BYTE 0xd 2 WRITE_BYTE 0x12 100 WRITE_ASCIIE 0x14 ~%candidate%~ #8
+              END
+              SPRINT result ~%result%%record%~
+            END
+            SPRINT result ~%result%%payload%~
+          END
+        END
+      END ELSE BEGIN SPRINT result ~%input%~ END
+      SET count=STRING_LENGTH ~%result%~/0x30
+      PATCH_IF pu_out>0xffff OR count>0xffff BEGIN SET pu_fits=0 END
+      INNER_PATCH_SAVE ability ~%ability%~ BEGIN WRITE_SHORT 0x1e count WRITE_SHORT 0x20 pu_out END
+      SPRINT pu_output_abilities ~%pu_output_abilities%%ability%~ SPRINT pu_output_effects ~%pu_output_effects%%result%~ SET pu_out+=count
+    END
+    PATCH_IF pu_fits BEGIN
+      SPRINT result ~%pu_head%%pu_output_abilities%%pu_output_effects%%pu_tail%~
+      DELETE_BYTES 0 BUFFER_LENGTH INSERT_BYTES 0 (STRING_LENGTH ~%result%~) WRITE_ASCIIE 0 ~%result%~
+      WRITE_LONG 0x64 0x72 WRITE_SHORT 0x68 pu_nab WRITE_LONG 0x6a (0x72+pu_nab*pu_absz) WRITE_SHORT 0x6e 0
+    END ELSE BEGIN PATCH_PRINT ~Potion uniqueness: %SOURCE_FILE% cannot address the new slices; only this resource is unchanged.~ END
+  END
+END
+
 DEFINE_PATCH_MACRO cbr_pu_patch_keep_first
 BEGIN
-  LPM cbr_pu_layout
-  FOR (pu_a = 0; pu_ok AND (pu_a < pu_nab); ++pu_a) BEGIN
-    SET pu_abase = pu_ab + pu_a * pu_absz
-    READ_BYTE  (pu_abase + 0x0c) pu_at
-    READ_SHORT (pu_abase + 0x1e) fx_n
-    READ_SHORT (pu_abase + 0x20) pu_first
-    SET fx_base = pu_fx + pu_first * 0x30
-    SET self_ability = ((pu_at = 5) OR (pu_at = 7))
-    PATCH_IF (self_ability OR (NOT item_mode)) BEGIN
-      LPM cbr_pu_ability_paths
-      PATCH_IF item_mode BEGIN
-        SET ab_dur = kf_dur
-        SET ab_rs = kf_rs
-        SET ab_pw = kf_pw
-      END
-      SET has_g1 = 0
-      SET has_g2 = 0
-      SET has_marker = 0
-      FOR (pu_i = 0; pu_i < fx_n; ++pu_i) BEGIN
-        LPM cbr_pu_read_effect
-        PATCH_IF ((op = 324) AND (~%res%~ STR_EQ ~%pu_own%~) AND (p1 = kf_state) AND (p2 = kf_row)) BEGIN
-          PATCH_IF (tg = 1) BEGIN SET has_g1 = 1 END
-          PATCH_IF (tg = 2) BEGIN SET has_g2 = 1 END
-        END
-        PATCH_IF ((op = 328) AND (p2 = kf_state) AND (sp = 1)) BEGIN SET has_marker = 1 END
-      END
-      PATCH_IF ((pu_paths > 0) AND (ab_dur > 0)) BEGIN
-        SET pu_last = ((pu_paths BAND 2) = 2) ? 2 : 1
-        SET pu_header = pu_a + 1
-        SET pu_mark_rs = 2 BOR (ab_rs BAND 1)
-        // Target 2 first, so the target-1 guard ends up at index 0.
-        PATCH_FOR_EACH pu_t IN 2 1 BEGIN
-          SET pu_need = 0
-          PATCH_IF ((pu_t = 2) AND ((pu_paths BAND 2) = 2) AND (NOT has_g2)) BEGIN SET pu_need = 1 END
-          PATCH_IF ((pu_t = 1) AND ((pu_paths BAND 1) = 1) AND (NOT has_g1)) BEGIN SET pu_need = 1 END
-          PATCH_IF pu_need BEGIN
-            PATCH_IF item_mode BEGIN
-              LPF ADD_ITEM_EFFECT INT_VAR header = pu_header insert_point = 0 opcode = 324 target = pu_t
-                power = ab_pw parameter1 = kf_state parameter2 = kf_row timing = 0 duration = 0
-                resist_dispel = 2 STR_VAR resource = EVAL ~%pu_own%~ END
-            END ELSE BEGIN
-              LPF ADD_SPELL_EFFECT INT_VAR header = pu_header insert_point = 0 opcode = 324 target = pu_t
-                power = ab_pw parameter1 = kf_state parameter2 = kf_row timing = 0 duration = 0
-                resist_dispel = 2 STR_VAR resource = EVAL ~%pu_own%~ END
-            END
-          END
-        END
-        PATCH_IF (NOT has_marker) BEGIN
-          PATCH_IF item_mode BEGIN
-            LPF ADD_ITEM_EFFECT INT_VAR header = pu_header opcode = 328 target = pu_last power = ab_pw
-              parameter2 = kf_state special = 1 timing = 0 duration = ab_dur resist_dispel = pu_mark_rs END
-          END ELSE BEGIN
-            LPF ADD_SPELL_EFFECT INT_VAR header = pu_header opcode = 328 target = pu_last power = ab_pw
-              parameter2 = kf_state special = 1 timing = 0 duration = ab_dur resist_dispel = pu_mark_rs END
-          END
-        END
-        // Offsets of later abilities may have moved.
-        LPM cbr_pu_layout
-      END
-    END
-  END
+  SET pu_mode=(kf_state>=0 ? 1 : 2) LPM cbr_pu_rebuild
 END
 
-// Refresh: one opcode 321 (timed effects list, instant, bypass MR) per type
-// resref (array cbr_pu_refs), after any leading control so an existing
-// conditional check still rejects a dose before anything is removed.
+
 DEFINE_PATCH_MACRO cbr_pu_patch_refresh
 BEGIN
-  LPM cbr_pu_layout
-  FOR (pu_a = 0; pu_ok AND (pu_a < pu_nab); ++pu_a) BEGIN
-    READ_BYTE (pu_ab + pu_a * pu_absz + 0x0c) pu_at
-    PATCH_IF ((pu_at = 5) OR (pu_at = 7)) BEGIN
-      PHP_EACH cbr_pu_refs AS pu_ref => pu_one BEGIN
-        LPM cbr_pu_layout
-        READ_SHORT (pu_ab + pu_a * pu_absz + 0x1e) fx_n
-        READ_SHORT (pu_ab + pu_a * pu_absz + 0x20) pu_first
-        SET fx_base = pu_fx + pu_first * 0x30
-        SET pu_k = 0
-        SET pu_lead = 1
-        SET pu_have = 0
-        FOR (pu_i = 0; pu_i < fx_n; ++pu_i) BEGIN
-          LPM cbr_pu_read_effect
-          PATCH_IF ((op = 321) AND (~%res%~ STR_EQ ~%pu_ref%~) AND ((p2 = 0) OR (p2 = 2))) BEGIN
-            SET pu_have = 1
-          END
-          PATCH_IF pu_lead BEGIN
-            PATCH_IF is_ctrl BEGIN
-              SET pu_k = pu_i + 1
-            END ELSE PATCH_IF (NOT is_cos) BEGIN
-              SET pu_lead = 0
-            END
-          END
-        END
-        PATCH_IF (NOT pu_have) BEGIN
-          LPF ADD_ITEM_EFFECT INT_VAR header = (pu_a + 1) insert_point = pu_k opcode = 321 target = 1
-            parameter2 = 2 timing = 1 duration = 0 resist_dispel = 2 STR_VAR resource = EVAL ~%pu_ref%~ END
-        END
-      END
-    END
-  END
+  SET pu_mode=0 LPM cbr_pu_rebuild
 END
 
-// One private SPLSTATE (symbol kf_symbol, searched downward from 240) and the
-// shared SPLPROT row "spell state active" (0x112, -1, =). Sets kf_state, kf_row.
+
+<<<<<<<< cbr_pu_empty_ids
+IDS V1.0
+>>>>>>>>
+<<<<<<<< cbr_pu_empty_prot
+2DA V1.0
+0
+ STAT VALUE RELATION
+>>>>>>>>
 DEFINE_ACTION_MACRO cbr_pu_allocate_state
 BEGIN
-  OUTER_SET kf_state = (0 - 1)
-  COPY_EXISTING ~SPLSTATE.IDS~ ~override~
-    LPF cbr_plan_tempus_spec_apr_state
-      INT_VAR planned_value = 240
-      STR_VAR symbol = EVAL ~%kf_symbol%~
-      RET kf_state = state_value
+  ACTION_IF FILE_EXISTS_IN_GAME ~SPLSTATE.IDS~ BEGIN COPY_EXISTING ~SPLSTATE.IDS~ ~override~ END ELSE BEGIN COPY ~cbr_pu_empty_ids~ ~override/SPLSTATE.IDS~ END
+  COPY ~override/SPLSTATE.IDS~ ~override/SPLSTATE.IDS~
+    FOR (i = 0; i < 256; ++i) BEGIN SET $cbr_pu_used(~%i%~) = 0 END
+    SET own_value = (0 - 1)
+    // CLEAR_ARRAY removes the key list, but leaves its scalar values defined.
+    // Reset the bits themselves so a previous family's IDs cannot leak here.
+    FOR (i=0;i<256;++i) BEGIN
+      SET $cbr_pu_state_used(~%i%~)=0
+      SET $cbr_pu_prior_states(~%i%~)=0
     END
-  LAF cbr_find_or_allocate_splstate
-    INT_VAR planned_value = kf_state
-    STR_VAR resource_path = ~override/SPLSTATE.IDS~ symbol = EVAL ~%kf_symbol%~
-  END
-  CLEAR_IDS_MAP
-  OUTER_SET kf_row = (0 - 1)
-  COPY_EXISTING ~SPLPROT.2DA~ ~override~
-    LPF cbr_find_or_append_splprot
-      INT_VAR stat = 0x112 value = "-1" relation = 1
-      STR_VAR row_label = ~CBR_SPLSTATE_ACTIVE~
-      RET kf_row = row_index
+    READ_ASCII 0 contents (BUFFER_LENGTH)
+    INNER_PATCH ~%contents%~ BEGIN
+      REPLACE_EVALUATE
+        ~^[ %TAB%]*\([^ %TAB%%WNL%%MNL%%LNL%]+\)[ %TAB%]+\([^ %TAB%%WNL%%MNL%%LNL%]+\)~
+      BEGIN
+        PATCH_IF IS_AN_INT ~%MATCH1%~ BEGIN
+          SET value = MATCH1
+          PATCH_IF (~%MATCH2%~ STRING_MATCHES_REGEXP ~CBR_POTION_.*\|CBR_HEROISM_FAMILY~)=0 AND value>=0 AND value<=255 BEGIN SET $cbr_pu_state_used(~%value%~)=1 END
+          PATCH_IF value >= 0 AND value <= 255 BEGIN
+            PATCH_IF ~%MATCH2%~ STRING_EQUAL_CASE ~%kf_symbol%~ BEGIN
+              SET $cbr_pu_prior_states(~%value%~)=1
+              PATCH_IF own_value < 0 BEGIN SET own_value = value END
+            END ELSE BEGIN SET $cbr_pu_used(~%value%~) = 1 END
+          END
+        END
+      END ~~
+    END
+    // The marker must be unused by every other family or foreign feature.
+    SET kf_state = (0 - 1)
+    PATCH_IF own_value >= 0 BEGIN
+      PATCH_IF NOT $cbr_pu_used(~%own_value%~) BEGIN SET kf_state = own_value END
+    END
+    FOR (i = 240; i >= 0 AND kf_state < 0; --i) BEGIN
+      PATCH_IF NOT $cbr_pu_used(~%i%~) BEGIN SET kf_state = i END
+    END
+    FOR (i=255;i>240 AND kf_state<0;--i) BEGIN PATCH_IF NOT $cbr_pu_used(~%i%~) BEGIN SET kf_state=i END END
+    PATCH_IF kf_state >= 0 BEGIN
+    SET $cbr_pu_state_used(~%kf_state%~)=1
+    SET written = 0
+    REPLACE_EVALUATE CASE_INSENSITIVE
+      ~^[ %TAB%]*[^ %TAB%%WNL%%MNL%%LNL%]+[ %TAB%]+%kf_symbol%\b[^%WNL%%MNL%%LNL%]*~
+    BEGIN
+      SPRINT row ~~
+      PATCH_IF NOT written BEGIN
+        SPRINT row ~%kf_state% %kf_symbol%~
+        SET written = 1
+      END
+    END ~%row%~
+    PATCH_IF NOT written BEGIN
+      SPRINT row ~%kf_state% %kf_symbol%%LNL%~
+      PATCH_IF BUFFER_LENGTH > 0 BEGIN
+        READ_BYTE (BUFFER_LENGTH - 1) last
+        PATCH_IF last != 10 AND last != 13 BEGIN SPRINT row ~%LNL%%row%~ END
+      END
+      SET at = BUFFER_LENGTH
+      INSERT_BYTES at (STRING_LENGTH ~%row%~)
+      WRITE_ASCIIE at ~%row%~
+    END
     END
   BUT_ONLY
-  ACTION_IF ((kf_state < 0) OR (kf_state > 255) OR (kf_row < 0)) BEGIN
-    FAIL ~CBR potion uniqueness: could not reserve spell state %kf_symbol% or its SPLPROT row.~
+  CLEAR_IDS_MAP
+
+  OUTER_SET kf_row = (0 - 1)
+  ACTION_IF kf_state >= 0 BEGIN
+    ACTION_IF NOT FILE_EXISTS_IN_GAME ~SPLPROT.2DA~ BEGIN COPY ~cbr_pu_empty_prot~ ~override/SPLPROT.2DA~ END
+    COPY_EXISTING ~SPLPROT.2DA~ ~override~
+      LPF cbr_pu_named_column STR_VAR name=~STAT~ required=~VALUE RELATION~ RET sc=data_column END
+      LPF cbr_pu_named_column STR_VAR name=~VALUE~ RET vc=data_column END
+      LPF cbr_pu_named_column STR_VAR name=~RELATION~ RET rc=data_column END
+      LPF cbr_pu_table_read RET cbr_t_cols cbr_t_rows cbr_t_default RET_ARRAY cbr_t_head cbr_t_cell END
+      SET kf_row=(0 - 1)
+      SPRINT result ~2DA V1.0%WNL%0%WNL% STAT VALUE RELATION%WNL%~
+      FOR (r=0;r<cbr_t_rows;++r) BEGIN
+        SPRINT label $cbr_t_cell(~%r%~ ~0~) SPRINT stat $cbr_t_cell(~%r%~ ~%sc%~) SPRINT value $cbr_t_cell(~%r%~ ~%vc%~) SPRINT relation $cbr_t_cell(~%r%~ ~%rc%~)
+        PATCH_IF ~%label%~ STRING_EQUAL_CASE ~CBR_SPLSTATE_ACTIVE~ BEGIN SPRINT stat ~274~ SPRINT value ~-1~ SPRINT relation ~1~ SET kf_row=r END
+        PATCH_IF IS_AN_INT ~%stat%~ AND IS_AN_INT ~%value%~ AND IS_AN_INT ~%relation%~ BEGIN PATCH_IF stat=274 AND value=(0 - 1) AND relation=1 AND kf_row<0 BEGIN SET kf_row=r END END
+        SPRINT result ~%result%%label% %stat% %value% %relation%%WNL%~
+      END
+      PATCH_IF kf_row<0 BEGIN SET kf_row=cbr_t_rows SPRINT result ~%result%CBR_SPLSTATE_ACTIVE 274 -1 1%WNL%~ END
+      PATCH_IF sc!=1 OR vc!=2 OR rc!=3 OR cbr_t_cols!=4 OR kf_row>=cbr_t_rows OR (INDEX_BUFFER (CASE_INSENSITIVE ~CBR_SPLSTATE_ACTIVE~))>=0 BEGIN
+        DELETE_BYTES 0 BUFFER_LENGTH INSERT_BYTES 0 (STRING_LENGTH ~%result%~) WRITE_ASCIIE 0 ~%result%~
+      END
+      BUT_ONLY
+  END ELSE BEGIN
+    PRINT ~CBR: no unused SPLSTATE slot for %kf_symbol%; only this stacking rule is omitted.~
   END
 END
 
-// Rewrites only Greater Heroism's "the more recently applied spell will remove
-// the effects of the other" sentence (pu_old_text) in either description.
+
 DEFINE_PATCH_MACRO cbr_pu_fix_description
 BEGIN
-  PATCH_FOR_EACH pu_off IN 0x50 0x54 BEGIN
-    READ_LONG pu_off pu_ref
-    PATCH_IF (pu_ref > 0) BEGIN
-      GET_STRREF pu_ref pu_text
-      PATCH_IF ((INDEX (CASE_SENSITIVE EXACT_MATCH ~%pu_old_text%~ ~%pu_text%~)) >= 0) BEGIN
-        INNER_PATCH_SAVE pu_text ~%pu_text%~ BEGIN
-          REPLACE_TEXTUALLY CASE_SENSITIVE EXACT_MATCH ~%pu_old_text%~ ~%pu_new_text%~
-        END
-        SET pu_new_ref = RESOLVE_STR_REF (~%pu_text%~)
-        WRITE_LONG pu_off pu_new_ref
-      END
-    END
+  PATCH_IF BUFFER_LENGTH>=0x72 BEGIN
+    PATCH_IF ~%EE_LANGUAGE%~ STRING_EQUAL_CASE ~en_us~ BEGIN
+      SPRINT description ~Heroism
+(Enchantment/Charm)
+
+Level: 2
+Range: Visual range of the caster
+Duration: 2 hours
+Casting Time: 2
+Area of Effect: Special
+Saving Throw: None
+
+For the next two hours, the targeted creature is blessed with an enchantment which increases their competence, granting them a +10% bonus to their Hit Points, and setting their THAC0 to 90% of their base.~
+      PATCH_IF ~%pu_description_kind%~ STR_EQ ~greater~ BEGIN SPRINT description ~Greater Heroism
+(Enchantment/Charm)
+
+Level: 5
+Range: Visual range of the caster
+Duration: 2 hours
+Casting Time: 2
+Area of Effect: 1 creature
+Saving Throw: None
+
+This is a more powerful version of the Heroism spell. For the next two hours, the targeted creature is blessed with an enchantment which increases their competence, granting them a +15% bonus to their Hit Points, setting their THAC0 to 85% of their base, and gaining a +2 bonus to all their Saving Throws. This spell, Heroism and the Potion of Heroism are non-cumulative: while one of them is active on a creature, the others have no effect on it until it ends.~ END
+      SET new_ref=RESOLVE_STR_REF (~%description%~) WRITE_LONG (item_mode ? 0x54 : 0x50) new_ref
+    END ELSE BEGIN PATCH_PRINT ~Potion uniqueness: no %EE_LANGUAGE% translation; existing text retained for %SOURCE_FILE%.~ END
   END
 END
 
-// potions = 1: potion types refresh or keep their first dose (330/331).
-// genius_exempt = 1: the Potion of Genius type keeps its native stacking (331).
-// heroism = 1: Heroism, Greater Heroism, their copies and the Potion of Heroism
-// form one first-active-wins family (332).
+
 DEFINE_ACTION_FUNCTION cbr_install_potion_uniqueness
   INT_VAR
     potions = 0
@@ -420,60 +631,11 @@ BEGIN
   ACTION_CLEAR_ARRAY cbr_pu_scroll
   ACTION_CLEAR_ARRAY cbr_pu_need_spl
 
-  // Heroism family spells: Bardic Wonders' Heroism and Greater Heroism (no
-  // SPELL.IDS symbol exists) and any spell with exactly their gameplay, which
-  // is how copies under another resref (the Gallant versions) are found.
+  // Explicit upstream copy identities, including Gallant's named copies.
   ACTION_IF heroism BEGIN
-    ACTION_CLEAR_ARRAY cbr_pu_anchor_sig
-    ACTION_CLEAR_ARRAY cbr_pu_copy
-    ACTION_FOR_EACH pu_r IN C0BW202 C0BW502 BEGIN
-      ACTION_IF (FILE_EXISTS_IN_GAME ~%pu_r%.spl~) BEGIN
-        OUTER_SET $cbr_pu_family_spell(~%pu_r%~) = cbr_pu_gen
-      END
+    ACTION_FOR_EACH pu_r IN C0BW202 C0BW502 C0GA202 C0GA502 BEGIN
+      ACTION_IF FILE_EXISTS_IN_GAME ~%pu_r%.SPL~ BEGIN OUTER_SET $cbr_pu_family_spell(~%pu_r%~)=cbr_pu_gen END
     END
-    OUTER_SET item_mode = 0
-    OUTER_SET follow_links = 0
-    ACTION_PHP_EACH cbr_pu_family_spell AS pu_r => pu_one BEGIN
-      COPY_EXISTING ~%pu_r%.spl~ ~override~
-        SPRINT pu_own ~%pu_r%~
-        LPM cbr_pu_layout
-        LPM cbr_pu_collect_spell
-        PATCH_IF (pu_ok AND (STRING_LENGTH ~%pu_sig%~ > pu_nab)) BEGIN
-          SPRINT $cbr_pu_anchor_sig(~%pu_r%~) ~%pu_sig%~
-        END
-      BUT_ONLY
-    END
-    COPY_EXISTING_REGEXP GLOB ~^.+\.spl$~ ~override~
-      SPRINT pu_own ~%SOURCE_RES%~
-      TO_UPPER pu_own
-      LPM cbr_pu_layout
-      SET pu_candidate = 0
-      PATCH_IF (pu_ok AND (NOT VARIABLE_IS_SET $cbr_pu_anchor_sig(~%pu_own%~))) BEGIN
-        // Cheap filter first: a timed maximum-HP effect somewhere.
-        FOR (pu_a = 0; pu_a < pu_nab; ++pu_a) BEGIN
-          READ_SHORT (pu_ab + pu_a * 0x28 + 0x1e) pu_n
-          READ_SHORT (pu_ab + pu_a * 0x28 + 0x20) pu_f
-          FOR (pu_i = 0; pu_i < pu_n; ++pu_i) BEGIN
-            READ_SHORT (pu_fx + (pu_f + pu_i) * 0x30) pu_op
-            READ_BYTE  (pu_fx + (pu_f + pu_i) * 0x30 + 0x0c) pu_tm
-            PATCH_IF ((pu_op = 18) AND (pu_tm = 0)) BEGIN SET pu_candidate = 1 END
-          END
-        END
-      END
-      PATCH_IF pu_candidate BEGIN
-        LPM cbr_pu_collect_spell
-        PHP_EACH cbr_pu_anchor_sig AS pu_anchor => pu_anchor_sig BEGIN
-          PATCH_IF (~%pu_sig%~ STR_EQ ~%pu_anchor_sig%~) BEGIN
-            SET $cbr_pu_copy(~%pu_own%~) = 1
-          END
-        END
-      END
-    BUT_ONLY
-    ACTION_PHP_EACH cbr_pu_copy AS pu_r => pu_one BEGIN
-      OUTER_SET $cbr_pu_family_spell(~%pu_r%~) = cbr_pu_gen
-    END
-    OUTER_SET item_mode = 1
-    OUTER_SET follow_links = 1
   END
 
   // Potions: category-9 items with an ability the user applies to themself.
@@ -484,7 +646,10 @@ BEGIN
     PATCH_IF (pu_ok AND (pu_absz = 0x38)) BEGIN
       READ_SHORT 0x1c pu_cat
     END
-    PATCH_IF ((pu_cat = 9) OR (heroism AND (pu_cat = 11))) BEGIN
+    SPRINT pu_res ~%SOURCE_RES%~ TO_UPPER pu_res
+    SET known_potion=(~%pu_res%~ STRING_MATCHES_REGEXP ~\(POTN[0-9]+\|DW#PTN[0-9]+\)~)=0
+    PATCH_IF pu_ok AND (pu_cat=9 OR known_potion) BEGIN SET $cbr_pu_potion(~%pu_res%~)=cbr_pu_gen END
+    PATCH_IF ((pu_cat = 9) OR known_potion OR (heroism AND (pu_cat = 11))) BEGIN
       SPRINT pu_res ~%SOURCE_RES%~
       TO_UPPER pu_res
       FOR (pu_a = 0; pu_a < pu_nab; ++pu_a) BEGIN
@@ -501,7 +666,7 @@ BEGIN
             TO_UPPER res
             PATCH_IF ((pu_op = 146) OR (pu_op = 147) OR (pu_op = 148)) BEGIN
               LPM cbr_pu_is_family
-              PATCH_IF pu_member BEGIN SET $cbr_pu_scroll(~%pu_res%~) = 1 END
+              PATCH_IF pu_member BEGIN SPRINT $cbr_pu_scroll(~%pu_res%~) ~%res%~ END
             END
           END
         END
@@ -549,70 +714,66 @@ BEGIN
     BUT_ONLY
   END
 
-  // A potion-named spell cast by a potion delivers part of its payload.
-  OUTER_SET follow_links = 0
-  ACTION_PHP_EACH cbr_pu_need_spl AS pu_r => pu_one BEGIN
-    COPY_EXISTING ~%pu_r%.spl~ ~override~
-      SPRINT pu_own ~%pu_r%~
-      LPM cbr_pu_layout
-      LPM cbr_pu_collect_spell
-      PATCH_IF (NOT pu_ok) BEGIN
-        SET f_instant = 1
-        SET f_badkf = 1
-      END
-      SET $cbr_pu_spl_timed(~%pu_r%~) = f_timed
-      SET $cbr_pu_spl_hp(~%pu_r%~) = f_hp
-      SET $cbr_pu_spl_int(~%pu_r%~) = f_int
-      SET $cbr_pu_spl_instant(~%pu_r%~) = f_instant
-      SET $cbr_pu_spl_badkf(~%pu_r%~) = f_badkf
-      SET $cbr_pu_spl_dur(~%pu_r%~) = f_dur
-      SET $cbr_pu_spl_rs(~%pu_r%~) = f_rs
-      SET $cbr_pu_spl_pw(~%pu_r%~) = f_pw
-      SET $cbr_pu_spl_rspw(~%pu_r%~) = f_rspw
-      SPRINT $cbr_pu_spl_wards(~%pu_r%~) ~%f_wards%~
-    BUT_ONLY
-  END
-  OUTER_SET follow_links = 1
 
-  ACTION_PHP_EACH cbr_pu_potion AS pu_p => pu_one BEGIN
-    OUTER_SPRINT pu_links $cbr_pu_links(~%pu_p%~)
-    ACTION_PHP_EACH cbr_pu_need_spl AS pu_r => pu_two BEGIN
-      ACTION_IF ((INDEX (CASE_INSENSITIVE EXACT_MATCH ~ %pu_r% ~ ~%pu_links%~)) >= 0) BEGIN
-        OUTER_SET $cbr_pu_timed(~%pu_p%~) = ($cbr_pu_timed(~%pu_p%~) OR $cbr_pu_spl_timed(~%pu_r%~))
-        OUTER_SET $cbr_pu_hp(~%pu_p%~) = ($cbr_pu_hp(~%pu_p%~) OR $cbr_pu_spl_hp(~%pu_r%~))
-        OUTER_SET $cbr_pu_int(~%pu_p%~) = ($cbr_pu_int(~%pu_p%~) OR $cbr_pu_spl_int(~%pu_r%~))
-        OUTER_SET $cbr_pu_instant(~%pu_p%~) = ($cbr_pu_instant(~%pu_p%~) OR $cbr_pu_spl_instant(~%pu_r%~))
-        OUTER_SET $cbr_pu_badkf(~%pu_p%~) = ($cbr_pu_badkf(~%pu_p%~) OR $cbr_pu_spl_badkf(~%pu_r%~))
-        ACTION_IF ($cbr_pu_spl_dur(~%pu_r%~) > $cbr_pu_dur(~%pu_p%~)) BEGIN
-          OUTER_SET $cbr_pu_dur(~%pu_p%~) = $cbr_pu_spl_dur(~%pu_r%~)
-        END
-        ACTION_IF ($cbr_pu_spl_rspw(~%pu_r%~) > $cbr_pu_rspw(~%pu_p%~)) BEGIN
-          OUTER_SET $cbr_pu_rs(~%pu_p%~) = $cbr_pu_spl_rs(~%pu_r%~)
-          OUTER_SET $cbr_pu_pw(~%pu_p%~) = $cbr_pu_spl_pw(~%pu_r%~)
-          OUTER_SET $cbr_pu_rspw(~%pu_p%~) = $cbr_pu_spl_rspw(~%pu_r%~)
-        END
-        OUTER_SPRINT pu_w1 $cbr_pu_wards(~%pu_p%~)
-        OUTER_SPRINT pu_w2 $cbr_pu_spl_wards(~%pu_r%~)
-        OUTER_SPRINT $cbr_pu_wards(~%pu_p%~) ~%pu_w1%%pu_w2%~
+  // Visit every linked spell once, then propagate facts through the graph.
+  // Cycles terminate on resource identity; depth and payload shape do not veto.
+  OUTER_SET node_count=0
+  ACTION_PHP_EACH cbr_pu_need_spl AS pu_r => ignored BEGIN
+    OUTER_SPRINT $cbr_pu_node(~%node_count%~) ~%pu_r%~ OUTER_SET node_count+=1
+  END
+  OUTER_SET follow_links=1
+  OUTER_FOR (node=0;node<node_count;++node) BEGIN
+    OUTER_SPRINT pu_r $cbr_pu_node(~%node%~)
+    COPY_EXISTING ~%pu_r%.SPL~ ~override~
+      SPRINT pu_own ~%pu_r%~ LPM cbr_pu_layout LPM cbr_pu_collect_spell
+      SET $cbr_pu_spl_timed(~%pu_r%~)=f_timed SET $cbr_pu_spl_hp(~%pu_r%~)=f_hp SET $cbr_pu_spl_int(~%pu_r%~)=f_int
+      SET $cbr_pu_spl_dur(~%pu_r%~)=f_dur SET $cbr_pu_spl_rs(~%pu_r%~)=f_rs SET $cbr_pu_spl_pw(~%pu_r%~)=f_pw
+      SPRINT $cbr_pu_spl_links(~%pu_r%~) ~%f_links%~
+      INNER_PATCH ~%f_links%~ BEGIN
+        REPLACE_EVALUATE ~[^ ]+~ BEGIN
+          PATCH_IF NOT VARIABLE_IS_SET $cbr_pu_need_spl(~%MATCH0%~) BEGIN
+            SET $cbr_pu_need_spl(~%MATCH0%~)=1 SPRINT $cbr_pu_node(~%node_count%~) ~%MATCH0%~ SET node_count+=1
+          END
+        END ~%MATCH0%~
       END
+      BUT_ONLY
+  END
+  OUTER_FOR (step=0;step<=node_count;++step) BEGIN
+    ACTION_PHP_EACH cbr_pu_potion AS pu_p => ignored BEGIN
+      OUTER_SPRINT links $cbr_pu_links(~%pu_p%~)
+      OUTER_FOR (node=0;node<node_count;++node) BEGIN
+        OUTER_SPRINT pu_r $cbr_pu_node(~%node%~)
+        ACTION_IF (INDEX (CASE_INSENSITIVE EXACT_MATCH ~ %pu_r% ~ ~%links%~))>=0 BEGIN
+          OUTER_SET $cbr_pu_timed(~%pu_p%~)=$cbr_pu_timed(~%pu_p%~) OR $cbr_pu_spl_timed(~%pu_r%~)
+          OUTER_SET $cbr_pu_hp(~%pu_p%~)=$cbr_pu_hp(~%pu_p%~) OR $cbr_pu_spl_hp(~%pu_r%~)
+          OUTER_SET $cbr_pu_int(~%pu_p%~)=$cbr_pu_int(~%pu_p%~) OR $cbr_pu_spl_int(~%pu_r%~)
+          ACTION_IF $cbr_pu_spl_dur(~%pu_r%~)>$cbr_pu_dur(~%pu_p%~) BEGIN
+            OUTER_SET $cbr_pu_dur(~%pu_p%~)=$cbr_pu_spl_dur(~%pu_r%~)
+            OUTER_SET $cbr_pu_rs(~%pu_p%~)=$cbr_pu_spl_rs(~%pu_r%~) OUTER_SET $cbr_pu_pw(~%pu_p%~)=$cbr_pu_spl_pw(~%pu_r%~)
+          END
+          OUTER_SPRINT child_links $cbr_pu_spl_links(~%pu_r%~)
+          OUTER_PATCH ~%child_links%~ BEGIN
+            REPLACE_EVALUATE ~[^ ]+~ BEGIN
+              PATCH_IF (INDEX (CASE_INSENSITIVE EXACT_MATCH ~ %MATCH0% ~ ~%links%~))<0 BEGIN SPRINT links ~%links%%MATCH0% ~ END
+            END ~%MATCH0%~
+          END
+        END
+      END
+      OUTER_SPRINT $cbr_pu_links(~%pu_p%~) ~%links%~
     END
   END
 
-  // Potion types: the same drink-ability gameplay, in any order.
-  OUTER_SET pu_ntypes = 0
+  OUTER_SET pu_ntypes=0
   ACTION_PHP_EACH cbr_pu_potion AS pu_p => pu_one BEGIN
-    OUTER_SPRINT pu_sig $cbr_pu_sig(~%pu_p%~)
-    OUTER_SET pu_type = (0 - 1)
-    OUTER_FOR (pu_j = 0; (pu_j < pu_ntypes) AND (pu_type < 0); ++pu_j) BEGIN
-      OUTER_SPRINT pu_other $cbr_pu_typesig(~%pu_j%~)
-      ACTION_IF (~%pu_sig%~ STR_EQ ~%pu_other%~) BEGIN OUTER_SET pu_type = pu_j END
+    OUTER_SPRINT pu_key ~%pu_p%~
+    OUTER_PATCH_SAVE pu_key ~%pu_key%~ BEGIN REPLACE_TEXTUALLY ~^DW#PTN~ ~POTN~ END
+    OUTER_SET pu_type=(0 - 1)
+    OUTER_FOR (pu_j=0;pu_j<pu_ntypes;++pu_j) BEGIN
+      OUTER_SPRINT other $cbr_pu_typesig(~%pu_j%~)
+      ACTION_IF ~%pu_key%~ STR_EQ ~%other%~ BEGIN OUTER_SET pu_type=pu_j END
     END
-    ACTION_IF (pu_type < 0) BEGIN
-      OUTER_SET pu_type = pu_ntypes
-      OUTER_SPRINT $cbr_pu_typesig(~%pu_type%~) ~%pu_sig%~
-      OUTER_SET pu_ntypes = pu_ntypes + 1
-    END
-    OUTER_SET $cbr_pu_type(~%pu_p%~) = pu_type
+    ACTION_IF pu_type<0 BEGIN OUTER_SET pu_type=pu_ntypes OUTER_SPRINT $cbr_pu_typesig(~%pu_type%~) ~%pu_key%~ OUTER_SET pu_ntypes+=1 END
+    OUTER_SET $cbr_pu_type(~%pu_p%~)=pu_type
   END
 
   OUTER_SET pu_count_refresh = 0
@@ -663,14 +824,60 @@ BEGIN
         ACTION_IF (~%pu_p%~ STR_EQ ~POTN09~) BEGIN OUTER_SET pu_is_heroism = 1 END
       END
     END
-    OUTER_SET pu_genius = (pu_genius AND pu_int)
+    OUTER_SPRINT pu_anchor $cbr_pu_typesig(~%pu_j%~)
+    OUTER_SET pu_genius = (~%pu_anchor%~ STR_EQ ~POTN29~)
+    OUTER_SET pu_is_heroism = (~%pu_anchor%~ STR_EQ ~POTN09~)
     OUTER_SET pu_ward = 0
     ACTION_PHP_EACH cbr_pu_refs AS pu_p => pu_one BEGIN
       ACTION_IF ((INDEX (CASE_INSENSITIVE EXACT_MATCH ~ %pu_p% ~ ~%pu_wards%~)) >= 0) BEGIN
         OUTER_SET pu_ward = 1
       END
     END
-    OUTER_SET pu_kf_ok = (pu_timed AND (NOT pu_instant) AND (NOT pu_badkf) AND (kf_dur > 0))
+    // Base temporary-potion identities keep their decided controls when old
+    // effects are removed. Durations here are fallbacks, not equality tests.
+    ACTION_MATCH ~%pu_anchor%~ WITH
+      ~POTN02~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN03~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN04~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN05~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN06~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN07~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN09~ BEGIN OUTER_SET pu_timed=1 OUTER_SET pu_hp=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN10~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=3600 END END
+      ~POTN11~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=300 END END
+      ~POTN12~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN14~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=300 END END
+      ~POTN15~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=7200 END END
+      ~POTN16~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=7200 END END
+      ~POTN18~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN19~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=900 END END
+      ~POTN21~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=300 END END
+      ~POTN22~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN23~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=300 END END
+      ~POTN24~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN28~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=900 END END
+      ~POTN29~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=900 END END
+      ~POTN30~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=1200 END END
+      ~POTN31~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN32~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=120 END END
+      ~POTN33~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=30 END END
+      ~POTN34~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN35~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=180 END END
+      ~POTN36~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=1260 END END
+      ~POTN37~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=3600 END END
+      ~POTN38~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=60 END END
+      ~POTN39~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=1800 END END
+      ~POTN41~ BEGIN OUTER_SET pu_timed=1 OUTER_SET pu_hp=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=240 END END
+      ~POTN42~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=180 END END
+      ~POTN43~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=1800 END END
+      ~POTN44~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=1200 END END
+      ~POTN45~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN46~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=300 END END
+      ~POTN48~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=60 END END
+      ~POTN56~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=600 END END
+      ~POTN60~ BEGIN OUTER_SET pu_timed=1 ACTION_IF kf_dur<=0 BEGIN OUTER_SET kf_dur=900 END END
+      DEFAULT END
+    OUTER_SET pu_kf_ok=1
     ACTION_IF pu_is_heroism BEGIN
       OUTER_SET pu_heroism_type = pu_j
       OUTER_SPRINT pu_heroism_members ~%pu_members%~
@@ -682,14 +889,9 @@ BEGIN
     END
 
     ACTION_IF (potions AND pu_timed) BEGIN
-      ACTION_IF pu_ward BEGIN
-        PRINT @3301
-      END ELSE ACTION_IF (genius_exempt AND pu_genius) BEGIN
+      ACTION_IF (genius_exempt AND pu_genius) BEGIN
         PRINT @3302
       END ELSE ACTION_IF pu_hp BEGIN
-        ACTION_IF (NOT pu_kf_ok) BEGIN
-          PRINT @3303
-        END ELSE BEGIN
           OUTER_SPRINT kf_symbol ~CBR_POTION_%pu_anchor%~
           OUTER_PATCH_SAVE kf_symbol ~%kf_symbol%~ BEGIN
             REPLACE_TEXTUALLY ~[^A-Za-z0-9_]~ ~_~
@@ -701,14 +903,19 @@ BEGIN
               LPM cbr_pu_patch_keep_first
             BUT_ONLY
           END
-          OUTER_SET pu_count_keep = pu_count_keep + 1
-        END
+          ACTION_IF kf_state>=0 BEGIN OUTER_SET pu_count_keep = pu_count_keep + 1 END
       END ELSE BEGIN
-        ACTION_PHP_EACH cbr_pu_refs AS pu_p => pu_one BEGIN
-          OUTER_SPRINT pu_own ~%pu_p%~
-          COPY_EXISTING ~%pu_p%.itm~ ~override~
-            LPM cbr_pu_patch_refresh
-          BUT_ONLY
+        ACTION_PHP_EACH cbr_pu_potion AS pu_p => pu_one BEGIN
+          ACTION_IF $cbr_pu_type(~%pu_p%~)=pu_j BEGIN
+            OUTER_SPRINT links $cbr_pu_links(~%pu_p%~)
+            OUTER_PATCH ~%links%~ BEGIN REPLACE_EVALUATE ~[^ ]+~ BEGIN SET $cbr_pu_refs(~%MATCH0%~)=1 END ~%MATCH0%~ END
+          END
+        END
+        ACTION_PHP_EACH cbr_pu_potion AS pu_p => pu_one BEGIN
+          ACTION_IF $cbr_pu_type(~%pu_p%~)=pu_j BEGIN
+            OUTER_SPRINT pu_own ~%pu_p%~
+            COPY_EXISTING ~%pu_p%.itm~ ~override~ LPM cbr_pu_patch_refresh BUT_ONLY
+          END
         END
         OUTER_SET pu_count_refresh = pu_count_refresh + 1
       END
@@ -724,7 +931,7 @@ BEGIN
     LAM cbr_pu_allocate_state
     // The Potion of Heroism and its copies.
     ACTION_IF (pu_heroism_type >= 0) BEGIN
-      ACTION_IF pu_heroism_ok BEGIN
+      ACTION_IF 1 BEGIN
         OUTER_SET kf_dur = pu_heroism_dur
         OUTER_SET kf_rs = pu_heroism_rs
         OUTER_SET kf_pw = pu_heroism_pw
@@ -734,11 +941,9 @@ BEGIN
             COPY_EXISTING ~%pu_p%.itm~ ~override~
               LPM cbr_pu_patch_keep_first
             BUT_ONLY
-            OUTER_SET pu_count_family = pu_count_family + 1
+            ACTION_IF kf_state>=0 BEGIN OUTER_SET pu_count_family = pu_count_family + 1 END
           END
         END
-      END ELSE ACTION_IF pu_heroism_timed BEGIN
-        PRINT @3305
       END
     END
     // Heroism, Greater Heroism and their copies.
@@ -746,45 +951,32 @@ BEGIN
     OUTER_SET follow_links = 0
     ACTION_PHP_EACH cbr_pu_family_spell AS pu_r => pu_one BEGIN
       OUTER_SPRINT pu_own ~%pu_r%~
-      OUTER_SET pu_spell_ok = 0
-      COPY_EXISTING ~%pu_r%.spl~ ~override~
-        LPM cbr_pu_layout
-        SET pu_spell_ok = pu_ok
-        FOR (pu_a = 0; pu_ok AND (pu_a < pu_nab); ++pu_a) BEGIN
-          LPM cbr_pu_reset_facts
-          SET check_paths = 1
-          READ_SHORT (pu_ab + pu_a * 0x28 + 0x1e) fx_n
-          READ_SHORT (pu_ab + pu_a * 0x28 + 0x20) pu_first
-          SET fx_base = pu_fx + pu_first * 0x30
-          LPM cbr_pu_collect_slice
-          SET check_paths = 0
-          PATCH_IF (f_instant OR f_badkf OR (NOT f_timed)) BEGIN SET pu_spell_ok = 0 END
-        END
-      BUT_ONLY
-      ACTION_IF pu_spell_ok BEGIN
-        COPY_EXISTING ~%pu_r%.spl~ ~override~
-          LPM cbr_pu_patch_keep_first
-        BUT_ONLY
-        OUTER_SET pu_count_family = pu_count_family + 1
-      END ELSE BEGIN
-        PRINT @3306
-      END
+      COPY_EXISTING ~%pu_r%.spl~ ~override~ LPM cbr_pu_patch_keep_first BUT_ONLY
+      ACTION_IF kf_state>=0 BEGIN OUTER_SET pu_count_family += 1 END
     END
     OUTER_SET item_mode = 1
     OUTER_SET follow_links = 1
 
-    OUTER_SPRINT pu_old_text ~This spell and Heroism are non-cumulative with each other, and the more recently applied spell will remove the effects of the other.~
-    OUTER_SPRINT pu_new_text @3310
-    ACTION_PHP_EACH cbr_pu_family_spell AS pu_r => pu_one BEGIN
-      COPY_EXISTING ~%pu_r%.spl~ ~override~
-        LPM cbr_pu_fix_description
-      BUT_ONLY
+    ACTION_IF kf_state>=0 BEGIN
+      OUTER_SPRINT pu_old_text ~This spell and Heroism are non-cumulative with each other, and the more recently applied spell will remove the effects of the other.~
+      OUTER_SPRINT pu_new_text @3310
+      OUTER_SET item_mode=0
+      ACTION_PHP_EACH cbr_pu_family_spell AS pu_r => pu_one BEGIN
+        OUTER_SPRINT pu_description_kind ~heroism~
+        ACTION_IF (~%pu_r%~ STR_EQ ~C0BW502~) OR (~%pu_r%~ STR_EQ ~C0GA502~) BEGIN OUTER_SPRINT pu_description_kind ~greater~ END
+        COPY_EXISTING ~%pu_r%.spl~ ~override~
+          LPM cbr_pu_fix_description
+        BUT_ONLY
+      END
+      OUTER_SET item_mode=1
+      ACTION_PHP_EACH cbr_pu_scroll AS pu_r => pu_one BEGIN
+        OUTER_SPRINT pu_description_kind ~heroism~
+        ACTION_IF (~%pu_one%~ STR_EQ ~C0BW502~) OR (~%pu_one%~ STR_EQ ~C0GA502~) BEGIN OUTER_SPRINT pu_description_kind ~greater~ END
+        COPY_EXISTING ~%pu_r%.itm~ ~override~
+          LPM cbr_pu_fix_description
+        BUT_ONLY
+      END
+      PRINT @3307
     END
-    ACTION_PHP_EACH cbr_pu_scroll AS pu_r => pu_one BEGIN
-      COPY_EXISTING ~%pu_r%.itm~ ~override~
-        LPM cbr_pu_fix_description
-      BUT_ONLY
-    END
-    PRINT @3307
   END
 END

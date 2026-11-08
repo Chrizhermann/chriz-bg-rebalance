@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.8.11 — 2026-11-08
+
+- Every component now writes its chosen spells, items, kits, creatures and tables even when a
+  player or another mod changed their old values, descriptions or effect layouts. Missing or
+  extra old pieces no longer make the installer stop, warn about the old data, or skip the
+  component.
+- This applies to the Cleric of Tempus bundle; Spell Revisions and SCS adjustments; Emotion,
+  Hope and combat clouds; and the installer setup. It also covers Flail of the Ages, weapon
+  access, bard progression, dragon, elemental-arrow and potion changes.
+- Actual requirements remain: the supported game, EEex where a component uses it, and a selected
+  base component or kit where an option builds on one. Components still keep mechanics they do
+  not choose to change and avoid installing the same standalone and full component twice.
+- The bard progression tables (420) are copied by their exact file names, so WeiDU on a
+  case-sensitive file system finds them. Windows was not affected.
+
 ## v0.8.10 — 2026-11-04
 
 - Flail of the Ages (302) installs on BG2:EE / EET without Spell Revisions when SCS's

@@ -118,24 +118,22 @@ class PhysicalResistanceCoreTests(unittest.TestCase):
         self.assertEqual(seen["after_load"], "85,85,85,85")
         self.assertEqual(seen["old_untouched"], "true")
 
-    def test_missing_or_invalid_required_fields_fail_before_partial_writes(self) -> None:
-        for scenario in (
-            "missing_field", "string_field", "nan_field", "infinite_field",
-            "missing_stats", "missing_states", "missing_get", "missing_set",
-            "copy_states", "bad_portrait_index",
-        ):
+    def test_unreadable_fields_are_local_and_other_sprites_continue(self):
+        fields = ("missing_field", "string_field", "nan_field", "infinite_field")
+        for scenario in (*fields, "missing_stats", "missing_states", "missing_get", "missing_set",
+                         "copy_states", "bad_portrait_index"):
             with self.subTest(scenario=scenario):
                 seen = self.run_scenario(scenario)
-                self.assertEqual(seen["writes"], "0")
-                self.assertEqual(seen["failed"], "true")
-                self.assertEqual(seen["failure_logs"], "1")
-                self.assertEqual(seen["later_healthy_unchanged"], "true")
+                self.assertEqual(seen["writes"], "3" if scenario in fields else "0")
+                self.assertEqual(seen["failed"], "false")
+                self.assertEqual(seen["failure_logs"], "0" if scenario == "bad_portrait_index" else "1")
+                self.assertEqual(seen["later_healthy_unchanged"], "false")
 
-    def test_failed_callback_stays_disabled_when_module_is_reloaded(self) -> None:
+    def test_module_reload_does_not_restore_an_old_failure_fuse(self):
         seen = self.run_scenario("failure_reload")
-        self.assertEqual(seen["failed"], "true")
+        self.assertEqual(seen["failed"], "false")
         self.assertEqual(seen["failure_logs"], "1")
-        self.assertEqual(seen["writes"], "0")
+        self.assertEqual(seen["writes"], "3")
 
     def test_registered_callback_applies_once_per_rebuild(self) -> None:
         seen = self.run_scenario("registered_callback")
@@ -221,17 +219,15 @@ class PhysicalResistanceCoreTests(unittest.TestCase):
         self.assertEqual(seen["cast_rebuild"], "100,100,100,100")
         self.assertEqual(seen["expired_rebuild"], "85,85,85,85")
 
-    def test_invalid_effect_list_fails_before_partial_writes(self) -> None:
-        for scenario in (
-            "missing_timed_list", "bad_effect_opcode", "bad_effect_amount",
-            "bad_effect_mode", "bad_effect_timing", "bad_effect_done",
-        ):
+    def test_unreadable_effect_does_not_disable_other_channels_or_sprites(self):
+        for scenario in ("missing_timed_list", "bad_effect_opcode", "bad_effect_amount",
+                         "bad_effect_mode", "bad_effect_timing", "bad_effect_done"):
             with self.subTest(scenario=scenario):
                 seen = self.run_scenario(scenario)
-                self.assertEqual(seen["writes"], "0")
-                self.assertEqual(seen["failed"], "true")
-                self.assertEqual(seen["failure_logs"], "1")
-                self.assertEqual(seen["later_healthy_unchanged"], "true")
+                self.assertEqual(seen["writes"], "0" if scenario == "missing_timed_list" else "4")
+                self.assertEqual(seen["failed"], "false")
+                self.assertEqual(seen["failure_logs"], "1" if scenario == "missing_timed_list" else "0")
+                self.assertEqual(seen["later_healthy_unchanged"], "false")
 
     def test_missing_effect_list_iterator_disables_the_module_at_load(self) -> None:
         seen = self.run_scenario("missing_iterate")
@@ -242,11 +238,12 @@ class PhysicalResistanceCoreTests(unittest.TestCase):
 
     def test_setter_failure_rolls_back_partial_stat_writes_and_marker(self) -> None:
         seen = self.run_scenario("setter_failure")
-        self.assertEqual(seen["physical"], "100,100,100,100")
-        self.assertEqual(seen["marker"], "0")
-        self.assertEqual(seen["failed"], "true")
+        self.assertEqual(seen["after_failure"], "100,100,100,100")
+        self.assertEqual(seen["physical"], "90,90,90,90")
+        self.assertEqual(seen["marker"], "1")
+        self.assertEqual(seen["failed"], "false")
         self.assertEqual(seen["failure_logs"], "1")
-        self.assertEqual(seen["later_healthy_unchanged"], "true")
+        self.assertEqual(seen["later_healthy_unchanged"], "false")
 
 
 if __name__ == "__main__":

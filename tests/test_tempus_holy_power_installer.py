@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.ie_formats import read_spl
 from tests.test_tempus_holy_power import (
     APR_CONDITION_RESREFS,
     APR_HELPER_RESREFS,
@@ -413,18 +414,19 @@ class TempusHolyPowerPublicInstallerTests(unittest.TestCase):
         self._assert_installed(game, install, 401)
         self._assert_publication_contract(game, "doubling", additive=False)
 
-    def test_forced_semantic_mismatches_fail_atomically(self) -> None:
-        for component, variant in ((402, "additive"), (403, "doubling")):
+    def test_forced_modes_apply_to_either_haste_input(self) -> None:
+        for component, variant, additive in ((402, "additive", False), (403, "doubling", True)):
             with self.subTest(component=component, variant=variant):
                 game = self._make_game(variant)
                 process = game.run_install(component)
-                self._assert_not_installed(game, process, component)
+                self._assert_installed(game, process, component)
+                self.assertNotIn("WITH WARNINGS", game.transcript(process))
+                holy = read_spl(game.override / f"{HOLY_RESREF}.SPL")
+                self.assertEqual(30, len(holy.abilities))
+                self.assertEqual(additive, (game.override / "CBRAPR1.SPL").is_file())
+                uninstall = game.run_uninstall(component)
+                self.assertEqual(0, uninstall.returncode, game.transcript(uninstall))
                 self.assertEqual(game.pre_override, _raw_file_tree(game.override))
-                self.assertFalse(game.scratch.exists())
-                self.assertRegex(
-                    game.transcript(process),
-                    r"(?i)force_(?:double|additive)|semantics|improved haste|mismatch",
-                )
 
     def test_foreign_scratch_file_is_ignored_while_component_installs(self) -> None:
         game = self._make_game("additive")

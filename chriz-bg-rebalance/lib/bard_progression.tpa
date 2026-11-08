@@ -75,68 +75,330 @@ BEGIN
   PRINT ~Bard progression: compatible native hook found in %executable_path% at file offset %hook_offset%.~
 END
 
+DEFINE_PATCH_FUNCTION cbr_sp_table_read
+  RET cbr_t_cols cbr_t_rows cbr_t_default
+  RET_ARRAY cbr_t_head cbr_t_cell
+BEGIN
+  CLEAR_ARRAY cbr_t_head CLEAR_ARRAY cbr_t_cell CLEAR_ARRAY cbr_t_line CLEAR_ARRAY cbr_t_width
+  SET line = 0
+  READ_ASCII 0 source (BUFFER_LENGTH)
+  INNER_PATCH ~%source%~ BEGIN
+    REPLACE_EVALUATE ~[^%LNL%%MNL%]+~ BEGIN
+      SPRINT content ~%MATCH0%~
+      SET token = 0
+      INNER_PATCH ~%content%~ BEGIN
+        REPLACE_TEXTUALLY ~//.*~ ~~
+        REPLACE_EVALUATE ~[^ %TAB%%LNL%%MNL%]+~ BEGIN
+          SPRINT $cbr_t_line(~%line%~ ~%token%~) ~%MATCH0%~
+          SET token += 1
+        END ~%MATCH0%~
+      END
+      PATCH_IF token > 0 BEGIN SET $cbr_t_width(~%line%~) = token SET line += 1 END
+    END ~%MATCH0%~
+  END
+  SPRINT cbr_t_default ~0~
+  PATCH_IF line > 1 BEGIN SPRINT cbr_t_default $cbr_t_line(~1~ ~0~) END
+  SET cbr_t_cols = 1 SET cbr_t_rows = 0
+  PATCH_IF line > 2 BEGIN
+    SET cbr_t_cols = $cbr_t_width(~2~) + 1
+    FOR (c = 1; c < cbr_t_cols; ++c) BEGIN
+      SET j = c - 1 SPRINT $cbr_t_head(~%c%~) $cbr_t_line(~2~ ~%j%~)
+    END
+    SET cbr_t_rows = line - 3
+    FOR (r = 0; r < cbr_t_rows; ++r) BEGIN
+      SET l = r + 3
+      PATCH_IF $cbr_t_width(~%l%~) > cbr_t_cols BEGIN
+        FOR (c = cbr_t_cols; c < $cbr_t_width(~%l%~); ++c) BEGIN SPRINT $cbr_t_head(~%c%~) ~CBR_COLUMN_%c%~ END
+        SET cbr_t_cols = $cbr_t_width(~%l%~)
+      END
+    END
+    FOR (r = 0; r < cbr_t_rows; ++r) BEGIN
+      SET l = r + 3
+      FOR (c = 0; c < cbr_t_cols; ++c) BEGIN
+        SPRINT $cbr_t_cell(~%r%~ ~%c%~) ~%cbr_t_default%~
+        PATCH_IF c < $cbr_t_width(~%l%~) BEGIN SPRINT $cbr_t_cell(~%r%~ ~%c%~) $cbr_t_line(~%l%~ ~%c%~) END
+      END
+    END
+  END
+END
+
+DEFINE_PATCH_FUNCTION cbr_sp_table_write
+BEGIN
+  SPRINT output ~2DA V1.0%WNL%%cbr_t_default%%WNL%~
+  FOR (c = 1; c < cbr_t_cols; ++c) BEGIN
+    SPRINT value $cbr_t_head(~%c%~) SPRINT output ~%output% %value%~
+  END
+  SPRINT output ~%output%%WNL%~
+  FOR (r = 0; r < cbr_t_rows; ++r) BEGIN
+    FOR (c = 0; c < cbr_t_cols; ++c) BEGIN
+      SPRINT value $cbr_t_cell(~%r%~ ~%c%~) SPRINT output ~%output%%value% ~
+    END
+    SPRINT output ~%output%%WNL%~
+  END
+  DELETE_BYTES 0 BUFFER_LENGTH INSERT_BYTES 0 (STRING_LENGTH ~%output%~) WRITE_ASCIIE 0 ~%output%~
+END
+
+DEFINE_PATCH_FUNCTION cbr_sp_normalize_2da
+  STR_VAR required = ~~
+BEGIN
+  LPF cbr_sp_table_read RET cbr_t_cols cbr_t_rows cbr_t_default RET_ARRAY cbr_t_head cbr_t_cell END
+  SET changed = 0
+  // Padding short rows and adding named columns makes subsequent address reads safe.
+  COUNT_2DA_COLS width
+  COUNT_2DA_ROWS cbr_t_cols complete_rows
+  PATCH_IF width != cbr_t_cols OR complete_rows != cbr_t_rows BEGIN SET changed = 1 END
+  INNER_PATCH ~%required%~ BEGIN
+    REPLACE_EVALUATE ~[^ ]+~ BEGIN
+      SPRINT required_name ~%MATCH0%~ SET found = 0
+      FOR (c = 1; c < cbr_t_cols; ++c) BEGIN
+        SPRINT name $cbr_t_head(~%c%~)
+        PATCH_IF ~%name%~ STRING_EQUAL_CASE ~%required_name%~ BEGIN SET found = 1 END
+      END
+      PATCH_IF NOT found BEGIN
+        SET c = cbr_t_cols SPRINT $cbr_t_head(~%c%~) ~%required_name%~
+        FOR (r = 0; r < cbr_t_rows; ++r) BEGIN SPRINT $cbr_t_cell(~%r%~ ~%c%~) ~%cbr_t_default%~ END
+        SET cbr_t_cols += 1 SET changed = 1
+      END
+    END ~%MATCH0%~
+  END
+  PATCH_IF changed BEGIN LPF cbr_sp_table_write END END
+END
+
+DEFINE_PATCH_FUNCTION cbr_sp_named_column
+  STR_VAR name = ~~ required = ~~
+  RET data_column
+BEGIN
+  LPF cbr_sp_normalize_2da STR_VAR required = EVAL ~%required% %name%~ END
+  LPF cbr_sp_table_read RET cbr_t_cols cbr_t_rows cbr_t_default RET_ARRAY cbr_t_head cbr_t_cell END
+  SET data_column = 1
+  FOR (c = cbr_t_cols - 1; c >= 1; --c) BEGIN
+    SPRINT header $cbr_t_head(~%c%~)
+    PATCH_IF ~%header%~ STRING_EQUAL_CASE ~%name%~ BEGIN SET data_column = c END
+  END
+END
+
+
+<<<<<<<< cbr_sp_CBRSPVER
+2DA V1.0
+0
+        VALUE
+API     1
+>>>>>>>>
+
+<<<<<<<< cbr_sp_CBRSPKIT
+2DA V1.0
+****
+        CLASS KIT TABLE
+>>>>>>>>
+
+<<<<<<<< cbr_sp_CBRBG6
+2DA V1.0
+0
+        1 2 3 4 5 6 7 8 9
+1       0 0 0 0 0 0 0 0 0
+2       1 0 0 0 0 0 0 0 0
+3       2 0 0 0 0 0 0 0 0
+4       2 1 0 0 0 0 0 0 0
+5       3 1 0 0 0 0 0 0 0
+6       3 2 0 0 0 0 0 0 0
+7       3 2 1 0 0 0 0 0 0
+8       3 3 1 0 0 0 0 0 0
+9       3 3 2 0 0 0 0 0 0
+10      3 3 2 1 0 0 0 0 0
+11      3 3 3 1 0 0 0 0 0
+12      3 3 3 2 0 0 0 0 0
+13      3 3 3 2 1 0 0 0 0
+14      3 3 3 3 1 0 0 0 0
+15      3 3 3 3 2 0 0 0 0
+16      4 3 3 3 2 1 0 0 0
+17      4 4 3 3 3 1 0 0 0
+18      4 4 4 3 3 2 0 0 0
+19      4 4 4 4 3 2 0 0 0
+20      4 4 4 4 4 3 0 0 0
+21      5 4 4 4 4 3 0 0 0
+22      5 5 4 4 4 3 0 0 0
+23      5 5 5 4 4 3 0 0 0
+24      5 5 5 4 4 3 0 0 0
+25      5 5 5 5 4 3 0 0 0
+26      5 5 5 5 4 3 0 0 0
+27      5 5 5 5 4 3 0 0 0
+28      5 5 5 5 5 3 0 0 0
+29      5 5 5 5 5 3 0 0 0
+30      5 5 5 5 5 4 0 0 0
+31      5 5 5 5 5 4 0 0 0
+32      5 5 5 5 5 4 0 0 0
+33      5 5 5 5 5 4 0 0 0
+34      5 5 5 5 5 4 0 0 0
+35      5 5 5 5 5 4 0 0 0
+36      5 5 5 5 5 4 0 0 0
+37      5 5 5 5 5 4 0 0 0
+38      5 5 5 5 5 5 0 0 0
+39      5 5 5 5 5 5 0 0 0
+40      5 5 5 5 5 5 0 0 0
+41      5 5 5 5 5 5 0 0 0
+42      5 5 5 5 5 5 0 0 0
+43      5 5 5 5 5 5 0 0 0
+44      5 5 5 5 5 5 0 0 0
+45      5 5 5 5 5 5 0 0 0
+46      5 5 5 5 5 5 0 0 0
+47      5 5 5 5 5 5 0 0 0
+48      5 5 5 5 5 5 0 0 0
+49      5 5 5 5 5 5 0 0 0
+50      5 5 5 5 5 5 0 0 0
+>>>>>>>>
+
+<<<<<<<< cbr_sp_CBRIWD7
+2DA V1.0
+0
+        1 2 3 4 5 6 7 8 9
+1       0 0 0 0 0 0 0 0 0
+2       1 0 0 0 0 0 0 0 0
+3       2 0 0 0 0 0 0 0 0
+4       2 1 0 0 0 0 0 0 0
+5       3 1 0 0 0 0 0 0 0
+6       3 2 0 0 0 0 0 0 0
+7       3 2 1 0 0 0 0 0 0
+8       3 3 1 0 0 0 0 0 0
+9       3 3 2 0 0 0 0 0 0
+10      3 3 2 1 0 0 0 0 0
+11      3 3 3 1 0 0 0 0 0
+12      3 3 3 2 0 0 0 0 0
+13      3 3 3 2 1 0 0 0 0
+14      3 3 3 3 1 0 0 0 0
+15      3 3 3 3 2 0 0 0 0
+16      4 3 3 3 2 1 0 0 0
+17      4 4 3 3 3 1 0 0 0
+18      4 4 4 3 3 2 0 0 0
+19      4 4 4 4 3 2 0 0 0
+20      4 4 4 4 4 3 0 0 0
+21      4 4 4 4 4 4 1 0 0
+22      4 4 4 4 4 4 2 0 0
+23      4 4 4 4 4 4 3 0 0
+24      4 4 4 4 4 4 4 0 0
+25      5 5 4 4 4 4 4 0 0
+26      5 5 5 5 4 4 4 0 0
+27      5 5 5 5 5 5 4 0 0
+28      6 5 5 5 5 5 5 0 0
+29      6 6 5 5 5 5 5 0 0
+30      6 6 6 6 5 5 5 0 0
+31      6 6 6 6 5 5 5 0 0
+32      6 6 6 6 6 5 5 0 0
+33      6 6 6 6 6 6 5 0 0
+34      6 6 6 6 6 6 6 0 0
+35      7 6 6 6 6 6 6 0 0
+36      7 7 6 6 6 6 6 0 0
+37      7 7 7 6 6 6 6 0 0
+38      7 7 7 7 6 6 6 0 0
+39      7 7 7 7 7 6 6 0 0
+40      7 7 7 7 7 7 6 0 0
+41      7 7 7 7 7 7 6 0 0
+42      7 7 7 7 7 7 6 0 0
+43      7 7 7 7 7 7 6 0 0
+44      7 7 7 7 7 7 6 0 0
+45      7 7 7 7 7 7 6 0 0
+46      7 7 7 7 7 7 6 0 0
+47      7 7 7 7 7 7 6 0 0
+48      7 7 7 7 7 7 6 0 0
+49      7 7 7 7 7 7 6 0 0
+50      7 7 7 7 7 7 6 0 0
+>>>>>>>>
+
+<<<<<<<< cbr_sp_CBRIWD8
+2DA V1.0
+0
+        1 2 3 4 5 6 7 8 9
+1       0 0 0 0 0 0 0 0 0
+2       1 0 0 0 0 0 0 0 0
+3       2 0 0 0 0 0 0 0 0
+4       2 1 0 0 0 0 0 0 0
+5       3 1 0 0 0 0 0 0 0
+6       3 2 0 0 0 0 0 0 0
+7       3 2 1 0 0 0 0 0 0
+8       3 3 1 0 0 0 0 0 0
+9       3 3 2 0 0 0 0 0 0
+10      3 3 2 1 0 0 0 0 0
+11      3 3 3 1 0 0 0 0 0
+12      3 3 3 2 0 0 0 0 0
+13      3 3 3 2 1 0 0 0 0
+14      3 3 3 3 1 0 0 0 0
+15      3 3 3 3 2 0 0 0 0
+16      4 3 3 3 2 1 0 0 0
+17      4 4 3 3 3 1 0 0 0
+18      4 4 4 3 3 2 0 0 0
+19      4 4 4 4 3 2 0 0 0
+20      4 4 4 4 4 3 0 0 0
+21      4 4 4 4 4 4 1 0 0
+22      4 4 4 4 4 4 2 0 0
+23      4 4 4 4 4 4 3 0 0
+24      4 4 4 4 4 4 4 0 0
+25      5 5 4 4 4 4 4 0 0
+26      5 5 5 5 4 4 4 0 0
+27      5 5 5 5 5 5 4 0 0
+28      6 5 5 5 5 5 5 0 0
+29      6 6 5 5 5 5 5 1 0
+30      6 6 6 6 5 5 5 1 0
+31      6 6 6 6 5 5 5 1 0
+32      6 6 6 6 6 5 5 1 0
+33      6 6 6 6 6 6 5 1 0
+34      6 6 6 6 6 6 6 1 0
+35      7 6 6 6 6 6 6 2 0
+36      7 7 6 6 6 6 6 2 0
+37      7 7 7 6 6 6 6 2 0
+38      7 7 7 7 6 6 6 2 0
+39      7 7 7 7 7 6 6 2 0
+40      7 7 7 7 7 7 6 2 0
+41      7 7 7 7 7 7 6 2 0
+42      7 7 7 7 7 7 6 2 0
+43      7 7 7 7 7 7 6 2 0
+44      7 7 7 7 7 7 6 2 0
+45      7 7 7 7 7 7 6 2 0
+46      7 7 7 7 7 7 6 2 0
+47      7 7 7 7 7 7 6 2 0
+48      7 7 7 7 7 7 6 2 0
+49      7 7 7 7 7 7 6 2 0
+50      7 7 7 7 7 7 6 2 0
+>>>>>>>>
+
+
+// This API is also published on its own. Its provider data is bundled here so
+// late adapters can restore our resources without depending on an old install.
 DEFINE_ACTION_FUNCTION cbr_sp_validate_provider
 BEGIN
-  ACTION_IF (NOT FILE_EXISTS_IN_GAME ~CBRSPVER.2DA~) BEGIN
-    FAIL ~Bard progression: the shared provider is missing.~
+  ACTION_FOR_EACH owned IN CBRSPVER CBRBG6 CBRIWD7 CBRIWD8 BEGIN
+    COPY ~cbr_sp_%owned%~ ~override/%owned%.2DA~
   END
-  OUTER_SET cbr_sp_api = 0
-  OUTER_SET cbr_sp_api_rows = 0
-  COPY_EXISTING ~CBRSPVER.2DA~ ~override~
-    COUNT_2DA_ROWS 2 cbr_sp_rows
-    FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
-      READ_2DA_ENTRY cbr_sp_row 0 2 cbr_sp_key
-      PATCH_IF (~%cbr_sp_key%~ STRING_EQUAL_CASE ~API~) BEGIN
-        READ_2DA_ENTRY cbr_sp_row 1 2 cbr_sp_api
-        SET cbr_sp_api_rows += 1
-      END
-    END
-    BUT_ONLY
-  ACTION_IF (NOT IS_AN_INT ~%cbr_sp_api%~) BEGIN
-    FAIL ~Bard progression: invalid provider API marker.~
-  END
-  ACTION_IF ((cbr_sp_api_rows != 1) OR (cbr_sp_api != 1)) BEGIN
-    FAIL ~Bard progression: this installer requires provider API 1.~
-  END
-  ACTION_FOR_EACH cbr_sp_required IN CBRSPKIT CBRBG6 CBRIWD7 CBRIWD8 BEGIN
-    ACTION_IF (NOT FILE_EXISTS_IN_GAME ~%cbr_sp_required%.2DA~) BEGIN
-      FAIL ~Bard progression: missing provider resource %cbr_sp_required%.2DA.~
-    END
+  ACTION_IF NOT FILE_EXISTS_IN_GAME ~CBRSPKIT.2DA~ BEGIN
+    COPY ~cbr_sp_CBRSPKIT~ ~override/CBRSPKIT.2DA~
   END
   COPY_EXISTING ~CBRSPKIT.2DA~ ~override~
-    COUNT_2DA_COLS cbr_sp_cols
-    // A new registry has only its three-token header and no data rows yet.
-    PATCH_IF ((cbr_sp_cols != 3) AND (cbr_sp_cols != 4)) BEGIN
-      PATCH_FAIL ~Bard progression: registry must have CLASS, KIT and TABLE columns.~
-    END
-    READ_2DA_ENTRIES_NOW cbr_sp_headers 3
-    READ_2DA_ENTRY_FORMER cbr_sp_headers 0 0 cbr_sp_h1
-    READ_2DA_ENTRY_FORMER cbr_sp_headers 0 1 cbr_sp_h2
-    READ_2DA_ENTRY_FORMER cbr_sp_headers 0 2 cbr_sp_h3
-    PATCH_IF (NOT (~%cbr_sp_h1%~ STRING_EQUAL_CASE ~CLASS~)
-           OR NOT (~%cbr_sp_h2%~ STRING_EQUAL_CASE ~KIT~)
-           OR NOT (~%cbr_sp_h3%~ STRING_EQUAL_CASE ~TABLE~)) BEGIN
-      PATCH_FAIL ~Bard progression: unsupported registry columns.~
-    END
-    COUNT_2DA_ROWS 4 cbr_sp_rows
-    CLEAR_ARRAY cbr_sp_seen
-    FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
-      READ_2DA_ENTRY cbr_sp_row 1 4 cbr_sp_class
-      READ_2DA_ENTRY cbr_sp_row 2 4 cbr_sp_kit
-      READ_2DA_ENTRY cbr_sp_row 3 4 cbr_sp_table
-      PATCH_IF (NOT IS_AN_INT ~%cbr_sp_class%~ OR NOT IS_AN_INT ~%cbr_sp_kit%~) BEGIN
-        PATCH_FAIL ~Bard progression: registry CLASS and KIT values must be integers.~
+    LPF cbr_sp_named_column STR_VAR name = ~CLASS~ required = ~KIT TABLE~ RET class_col = data_column END
+    LPF cbr_sp_named_column STR_VAR name = ~KIT~ RET kit_col = data_column END
+    LPF cbr_sp_named_column STR_VAR name = ~TABLE~ RET table_col = data_column END
+    LPF cbr_sp_table_read RET cbr_t_cols cbr_t_rows cbr_t_default RET_ARRAY cbr_t_head cbr_t_cell END
+    CLEAR_ARRAY registrations
+    FOR (row = 0; row < cbr_t_rows; ++row) BEGIN
+      SPRINT class $cbr_t_cell(~%row%~ ~%class_col%~)
+      SPRINT kit $cbr_t_cell(~%row%~ ~%kit_col%~)
+      SPRINT tab $cbr_t_cell(~%row%~ ~%table_col%~)
+      PATCH_IF NOT IS_AN_INT ~%class%~ BEGIN
+        PATCH_IF FILE_EXISTS_IN_GAME ~CLASS.IDS~ BEGIN SET class = IDS_OF_SYMBOL (~CLASS~ ~%class%~) END
       END
-      SET cbr_sp_class = cbr_sp_class
-      SET cbr_sp_kit = cbr_sp_kit
-      PATCH_IF (VARIABLE_IS_SET $cbr_sp_seen(~%cbr_sp_class%~ ~%cbr_sp_kit%~)) BEGIN
-        PATCH_FAIL ~Bard progression: duplicate class/kit registration.~
+      PATCH_IF NOT IS_AN_INT ~%kit%~ BEGIN
+        PATCH_IF FILE_EXISTS_IN_GAME ~KIT.IDS~ BEGIN SET kit = IDS_OF_SYMBOL (~KIT~ ~%kit%~) END
       END
-      SET $cbr_sp_seen(~%cbr_sp_class%~ ~%cbr_sp_kit%~) = 1
-      PATCH_IF (NOT FILE_EXISTS_IN_GAME ~%cbr_sp_table%.2DA~) BEGIN
-        PATCH_FAIL ~Bard progression: registered table %cbr_sp_table%.2DA is missing.~
+      PATCH_IF IS_AN_INT ~%class%~ AND IS_AN_INT ~%kit%~ BEGIN
+        SET class = class BAND 0xff SET kit = kit
+        PATCH_IF class != 5 OR FILE_EXISTS_IN_GAME ~%tab%.2DA~ BEGIN
+          SPRINT $registrations(~%class%~ ~%kit%~) ~%tab%~
+        END ELSE BEGIN PATCH_PRINT ~Bard progression: optional table %tab%.2DA is absent; its registration is unavailable.~ END
       END
     END
+    SPRINT output ~2DA V1.0%WNL%****%WNL% CLASS KIT TABLE%WNL%~
+    PATCH_PHP_EACH registrations AS keys => tab BEGIN
+      SPRINT class ~%keys_0%~ SPRINT kit ~%keys_1%~
+      SPRINT output ~%output%CBR_%class%_%kit% %class% %kit% %tab%%WNL%~
+    END
+    DELETE_BYTES 0 BUFFER_LENGTH INSERT_BYTES 0 (STRING_LENGTH ~%output%~) WRITE_ASCIIE 0 ~%output%~
     BUT_ONLY
 END
 
@@ -144,139 +406,182 @@ DEFINE_ACTION_FUNCTION cbr_sp_register
   INT_VAR class_id = 5 kit_id = 0
   STR_VAR slot_table = ~~
 BEGIN
-  OUTER_SET cbr_sp_matches = 0
-  ACTION_IF (NOT FILE_EXISTS_IN_GAME ~%slot_table%.2DA~) BEGIN
-    FAIL ~Bard progression: requested table %slot_table%.2DA is missing.~
-  END
-  COPY_EXISTING ~CBRSPKIT.2DA~ ~override~
-    COUNT_2DA_ROWS 4 cbr_sp_rows
-    FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
-      READ_2DA_ENTRY cbr_sp_row 1 4 cbr_sp_class
-      READ_2DA_ENTRY cbr_sp_row 2 4 cbr_sp_kit
-      PATCH_IF ((cbr_sp_class = class_id) AND (cbr_sp_kit = kit_id)) BEGIN
-        SET cbr_sp_matches += 1
-        SET_2DA_ENTRY cbr_sp_row 3 4 ~%slot_table%~
+  LAF cbr_sp_validate_provider END
+  ACTION_IF FILE_EXISTS_IN_GAME ~%slot_table%.2DA~ BEGIN
+    COPY_EXISTING ~CBRSPKIT.2DA~ ~override~
+      LPF cbr_sp_table_read RET cbr_t_cols cbr_t_rows cbr_t_default RET_ARRAY cbr_t_head cbr_t_cell END
+      SET found = 0
+      FOR (row = 0; row < cbr_t_rows; ++row) BEGIN
+        SET class = $cbr_t_cell(~%row%~ ~1~) SET kit = $cbr_t_cell(~%row%~ ~2~)
+        PATCH_IF class = class_id AND kit = kit_id BEGIN
+          SPRINT $cbr_t_cell(~%row%~ ~3~) ~%slot_table%~ SET found = 1
+        END
       END
-    END
-    PATCH_IF (cbr_sp_matches > 1) BEGIN
-      PATCH_FAIL ~Bard progression: duplicate class/kit registration.~
-    END
-    BUT_ONLY
-  ACTION_IF (cbr_sp_matches = 0) BEGIN
-    APPEND ~CBRSPKIT.2DA~ ~CBR_%class_id%_%kit_id% %class_id% %kit_id% %slot_table%~
-  END
+      PATCH_IF NOT found BEGIN
+        SET row = cbr_t_rows SET cbr_t_rows += 1
+        SPRINT $cbr_t_cell(~%row%~ ~0~) ~CBR_%class_id%_%kit_id%~
+        SPRINT $cbr_t_cell(~%row%~ ~1~) ~%class_id%~
+        SPRINT $cbr_t_cell(~%row%~ ~2~) ~%kit_id%~
+        SPRINT $cbr_t_cell(~%row%~ ~3~) ~%slot_table%~
+      END
+      LPF cbr_sp_table_write END
+      BUT_ONLY
+  END ELSE BEGIN PRINT ~Bard progression: optional table %slot_table%.2DA is absent; this registration is unavailable.~ END
 END
 
 DEFINE_ACTION_FUNCTION cbr_sp_register_bard
   INT_VAR register_table = 1
-  STR_VAR kit_symbol = ~~ slot_table = ~~ description_section = ~Advantages~ progression_text = ~~
+  STR_VAR kit_symbol = ~~ slot_table = ~~ description_section = ~Advantages~ progression_text = ~~ complete_description = ~~
 BEGIN
-  OUTER_SET cbr_sp_help = (0 - 1)
-  OUTER_SET cbr_sp_found = 0
-  OUTER_SET cbr_sp_trueclass = (~%kit_symbol%~ STRING_EQUAL_CASE ~BARD~)
-  ACTION_IF cbr_sp_trueclass BEGIN
-    OUTER_SET cbr_sp_id = 0x4000
-    COPY_EXISTING ~CLASTEXT.2DA~ ~override~
-      COUNT_2DA_COLS cbr_sp_cols
-      COUNT_2DA_ROWS cbr_sp_cols cbr_sp_rows
-      FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
-        READ_2DA_ENTRY cbr_sp_row 0 cbr_sp_cols cbr_sp_symbol
-        PATCH_IF (~%cbr_sp_symbol%~ STRING_EQUAL_CASE ~BARD~) BEGIN
-          READ_2DA_ENTRY cbr_sp_row 4 cbr_sp_cols cbr_sp_help
-          SET cbr_sp_found = 1
-        END
-      END
-      BUT_ONLY
-  END ELSE BEGIN
-    COPY_EXISTING ~KITLIST.2DA~ ~override~
-      COUNT_2DA_ROWS 10 cbr_sp_rows
-      FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
-        READ_2DA_ENTRY cbr_sp_row 1 10 cbr_sp_symbol
-        READ_2DA_ENTRY cbr_sp_row 8 10 cbr_sp_class
-        PATCH_IF ((~%cbr_sp_symbol%~ STRING_EQUAL_CASE ~%kit_symbol%~) AND (cbr_sp_class = 5)) BEGIN
-          READ_2DA_ENTRY cbr_sp_row 4 10 cbr_sp_help
-          SET cbr_sp_found = 1
-        END
-      END
-      BUT_ONLY
-    ACTION_IF cbr_sp_found BEGIN
-      OUTER_SET cbr_sp_id = IDS_OF_SYMBOL (~KIT~ ~%kit_symbol%~)
-      ACTION_IF (cbr_sp_id <= 0) BEGIN
-        FAIL ~Bard progression: KIT.IDS has no valid %kit_symbol% mapping.~
-      END
-    END
+  OUTER_SET cbr_sp_id = 0
+  ACTION_MATCH ~%kit_symbol%~ WITH
+    ~BARD~ BEGIN OUTER_SET cbr_sp_id = 0x4000 END
+    ~BLADE~ BEGIN OUTER_SET cbr_sp_id = 0x400d END
+    ~JESTER~ BEGIN OUTER_SET cbr_sp_id = 0x400e END
+    ~SKALD~ BEGIN OUTER_SET cbr_sp_id = 0x400f END
+    DEFAULT END
+  ACTION_IF FILE_EXISTS_IN_GAME ~KIT.IDS~ BEGIN
+    OUTER_SET mapped = IDS_OF_SYMBOL (~KIT~ ~%kit_symbol%~)
+    ACTION_IF mapped > 0 BEGIN OUTER_SET cbr_sp_id = mapped END
   END
-  ACTION_IF cbr_sp_found BEGIN
-    ACTION_IF (NOT IS_AN_INT ~%cbr_sp_help%~) BEGIN
-      FAIL ~Bard progression: %kit_symbol% has an invalid description reference.~
-    END
-    ACTION_IF (cbr_sp_help < 0) BEGIN
-      FAIL ~Bard progression: %kit_symbol% has no description reference.~
-    END
-    OUTER_SET cbr_sp_mapping_matches = 0
+  ACTION_IF cbr_sp_id > 0 BEGIN
     ACTION_IF register_table BEGIN
       LAF cbr_sp_register INT_VAR class_id = 5 kit_id = cbr_sp_id STR_VAR slot_table END
-      OUTER_SET cbr_sp_mapping_matches = 1
-    END ELSE BEGIN
-      COPY_EXISTING ~CBRSPKIT.2DA~ ~override~
-        COUNT_2DA_ROWS 4 cbr_sp_rows
-        FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
-          READ_2DA_ENTRY cbr_sp_row 1 4 cbr_sp_class
-          READ_2DA_ENTRY cbr_sp_row 2 4 cbr_sp_kit
-          READ_2DA_ENTRY cbr_sp_row 3 4 cbr_sp_table
-          PATCH_IF ((cbr_sp_class = 5) AND (cbr_sp_kit = cbr_sp_id)
-                 AND (~%cbr_sp_table%~ STRING_EQUAL_CASE ~%slot_table%~)) BEGIN
-            SET cbr_sp_mapping_matches = 1
-          END
-        END
-        BUT_ONLY
     END
-    ACTION_IF cbr_sp_mapping_matches BEGIN
-      OUTER_PATCH ~~ BEGIN
-        GET_STRREF cbr_sp_help cbr_sp_old_description
-      END
-      OUTER_SPRINT cbr_sp_line ~- Spellbook progression: %progression_text%~
-      OUTER_PATCH_SAVE cbr_sp_description ~%cbr_sp_old_description%~ BEGIN
-        // Remove only simple obsolete normal-spellbook cap claims. Extra-slot,
-        // caster-level, and innate/HLA statements remain independent.
-        REPLACE_TEXTUALLY CASE_INSENSITIVE ~May cast arcane spells up to [678][a-z]* level\.~ ~~
-        PATCH_IF (INDEX_BUFFER (~Spellbook progression:~) >= 0) BEGIN
-          REPLACE_TEXTUALLY ~Spellbook progression:[^%WNL%%LNL%%MNL%]*~ ~Spellbook progression: %progression_text%~
-        END ELSE BEGIN
-          REPLACE_TEXTUALLY CASE_INSENSITIVE ~\(^\|[%WNL%%LNL%%MNL%]\)\([ %TAB%]*%description_section%:[ %TAB%]*\)~ ~\1\2%WNL%%cbr_sp_line%~
-          PATCH_IF (INDEX_BUFFER (~Spellbook progression:~) < 0) BEGIN
-            INSERT_BYTES SOURCE_SIZE (STRING_LENGTH ~%WNL%%WNL%%description_section%:%WNL%%cbr_sp_line%~)
-            WRITE_ASCIIE (SOURCE_SIZE - STRING_LENGTH ~%WNL%%WNL%%description_section%:%WNL%%cbr_sp_line%~) ~%WNL%%WNL%%description_section%:%WNL%%cbr_sp_line%~
-          END
-        END
-      END
-      OUTER_SET cbr_sp_new_help = RESOLVE_STR_REF (~%cbr_sp_description%~)
-      ACTION_IF (NOT cbr_sp_trueclass) BEGIN
-        COPY_EXISTING ~KITLIST.2DA~ ~override~
-          COUNT_2DA_ROWS 10 cbr_sp_rows
-          FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
-            READ_2DA_ENTRY cbr_sp_row 1 10 cbr_sp_symbol
-            PATCH_IF (~%cbr_sp_symbol%~ STRING_EQUAL_CASE ~%kit_symbol%~) BEGIN
-              SET_2DA_ENTRY cbr_sp_row 4 10 cbr_sp_new_help
+    // Complete English descriptions are the previous normal component output.
+    // Adapters for other kits can provide their own complete_description.
+    OUTER_SPRINT cbr_sp_spaces_1 ~ ~
+    OUTER_SPRINT cbr_sp_spaces_10 ~          ~
+    OUTER_SPRINT cbr_sp_description ~%complete_description%~
+    ACTION_IF ~%kit_symbol%~ STRING_EQUAL_CASE ~BARD~ BEGIN OUTER_SPRINT cbr_sp_description ~BARD: The Bard is a rogue, but <PRO_HESHE> is very different from the Thief. The Bard's strength is <PRO_HISHER> pleasant and charming personality. With it and <PRO_HISHER> wits, <PRO_HESHE> makes <PRO_HISHER> way through the world. A Bard is a talented musician and a walking storehouse of gossip, tall tales, and lore; <PRO_HESHE> learns a little bit about everything that crosses <PRO_HISHER> path and is a jack-of-all-trades but master of none. While many Bards are scoundrels, their stories and songs are welcome almost everywhere.
+
+CLASS FEATURES:
+- Spellbook progression: %progression_text%
+
+– May not wear armor heavier than chain mail. (Spells may be cast while wearing up to studded leather armor.)
+– May not equip shields larger than bucklers.
+– May only become Proficient (one slot) in any weapon class.
+– May only become Proficient (one slot) in any fighting style.
+– Thieving abilities: Pick Pockets.
+– Increased Lore score.
+– May cast arcane spells starting at 2nd level.
+– May use Bardic Inspirations.
+%cbr_sp_spaces_10%
+BARDIC INSPIRATION: A bard's presence serves as an inspiration to their companions, granting them passive bonuses. Inspirations provide various benefits that persist so long as they are within visual range of the bard. The bard begins with Inspire Courage and gains different inspirations on top of stronger effects for existing ones as they grow in level.
+
+– May use Bard Song ability.
+%cbr_sp_spaces_10%
+BARD SONG: The Bard's Song may be used an unlimited number of times, and lasts for 6 rounds + 1 round per 5 levels gained. The Bard Song has a cooldown of 1 turn before it may be used again. . While active, the Bard Song has the following effects, improving with level:
+  1st level: +1 Luck, immunity to fear and morale failure
+  15th level: +2 Luck, immunity to fear and morale failure
+  20th level: +3 Luck, immunity to fear and morale failure
+
+– Alignment restricted to any neutral.
+– Hit Die: d6~ END
+    ACTION_IF ~%kit_symbol%~ STRING_EQUAL_CASE ~BLADE~ BEGIN OUTER_SPRINT cbr_sp_description ~BLADE: Blades are master artisans with bladed weapons. Everyone has seen a Blade in action at fairs and carnivals. They are the knife throwers who pop balloons while blindfolded and swallow slender sabers such as those used by lawless pirates on the high seas. Blades also perform amazing displays of weapon skill and control as they flash various weapons all about their bodies with deadly precision.%cbr_sp_spaces_1%
+
+Advantages:
+– Blade Dancer: The blade uses their Charisma modifier, if higher, for melee bonuses to hit instead of Strength.
+– May achieve Grand Mastery (five slots) in any bladed weapon.
+– Gains Mastery in Two-Weapon Style at 1st level.
+– Instead of a regular Bard Song, the blade may perform a Weapons Display, performing a deadly dance with their weapons to intimidate their foes while inspiring their allies. This reduces the morale of all nearby foes by 2 while granting a +1 bonus to hit to all allies within visual range. The display has no effect on non-sentient creatures such as golems or undead.
+– May use the Offensive Spin and Defensive Spin abilities once per day. Gains one use each at level 1 and an additional use each every 4 levels thereafter. Using either spin will remove the effects of the other, if ongoing.
+
+OFFENSIVE SPIN: The blade takes on a fighting maneuver which is both fearsome and lethal. For the next four rounds, the blade receives movement speed and a bonus attack per round as a haste spell, while additionally dealing maximum damage for the duration. However, the blade cannot cast spells during this time. After the end of the duration, the blade is briefly winded and may not attack or cast spells for three rounds.
+
+DEFENSIVE SPIN: The blade whirls their weapon rapidly around their body in a defensive stance for up to four rounds. During this period, the blade cannot move, attack, or cast spells, but receives a +1 bonus to Armor Class per level up to a maximum of 10. The blade also deflects projectiles while spinning, becoming immune to most missile attacks. If the blade is struck by a melee attack during the spin, they negate the damage and return 1d10 slashing damage per 5 levels to the attacker and disarms them, rendering them unable to attack for three rounds and ending the spin.
+
+Disadvantages:
+- Spellbook progression: %progression_text%
+– May not use Inspirations.
+– Weapons Display does not improve with level.
+– Only has one half the normal Lore value.
+– Only has one half the normal Pick Pockets skill.~ END
+    ACTION_IF ~%kit_symbol%~ STRING_EQUAL_CASE ~JESTER~ BEGIN OUTER_SPRINT cbr_sp_description ~JESTER: This Bard is well versed in the arts of ridicule and hilarity, and uses <PRO_HISHER> abilities to distract and confuse <PRO_HISHER> enemies, cavorting madly during combat. Do not mistake <PRO_HIMHER> for a true fool, however, as <PRO_HESHE> can also be quite deadly.
+
+Advantages:
+- Spellbook progression: %progression_text%
+– The Jester's Song, "Piercing Mockery", does not help allies. Instead, every opponent within 30 feet must save once per round to avoid falling under its effects:
+ 1st level: Enemies receive a -2 penalty to Armor Class and a 25% chance to miscast their spells.
+ 10th level: Enemies receive a -2 penalty to Armor Class, a 40% chance to miscast spells, and an increased critical miss modifier of 1.
+ 15th level: Enemies receive a -4 penalty to Armor Class, a 55% chance to miscast spells, and an increased critical miss modifier of 1.
+ 20th level: Enemies receive a -6 penalty to Armor Class, a 55% chance to miscast spells, and an increased critical miss modifier of 2.
+%cbr_sp_spaces_1%
+– May use Heckle once per level.
+
+HECKLE: The Jester uses every trick imaginable to taunt a single target, increasing their critical miss modifier by 4 and inflicting a 75% chance for spell failure for the next round. The target must also make a Saving vs. Breath (-1 to modifier per 6 levels) or go berserk for 3 rounds.
+
+– 6th level May use Mad Ramble once per day. Gains an additional use at 10th and 14th level.
+
+MAD RAMBLE: The Jester forces all enemies within a 15-ft. radius to make a Save vs. Spell with a -4 penalty or become confused for 5 rounds + 1 round/6 levels, as per a Chaos spell. Unlike Chaos, this ability is not affected by Magic Resistance.
+
+Disadvantages:
+– May not use Inspirations.
+– May not use regular Bard Song.~ END
+    ACTION_IF ~%kit_symbol%~ STRING_EQUAL_CASE ~SKALD~ BEGIN OUTER_SPRINT cbr_sp_description ~SKALD: This nordic Bard is also a warrior of great strength, skill, and virtue; <PRO_HISHER> songs are inspiring sagas of battle and valor, and the Skald devotes <PRO_HISHER> life to those pursuits.
+
+Advantages:
+– May Specialize (two slots) in any weapon.
+– May Specialize (two slots) in any fighting style.
+– Battle Caster: The Skald may cast spells while wearing any armor.
+
+– The Skald's Bard Song, "Battle Song of Valor", empowers their allies' and bolsters their will to battle, granting them combat bonuses.
+ 1st level: +2 bonus to hit rolls, Armor Class and Morale.
+ 10th level: +2 bonus to hit and damage rolls, Armor Class and Morale, +10% to all resistances.
+ 15th level: +3 bonus to hit and damage rolls, Armor Class, +10% to all resistances, immunity to fear.
+ 20th level: +3 bonus to hit and damage rolls, Armor Class, +10% to all resistances, immunity to fear, stun, and confusion.%cbr_sp_spaces_1%
+%cbr_sp_spaces_1%
+– 8th level: Combat Casting: The skald is skilled at casting spells in the midst of combat. If there is an enemy within 5-ft. of the skald, they gain an increased casting speed of 2.
+
+– 12th level: Gains Heroic Inspiration.
+
+HEROIC INSPIRATION: When the skald's maximum hit points falls below 50%, all allies (except the skald) within visual range gain an additional +1 bonus to hit, damage and saving throws.
+
+Disadvantages:
+- Spellbook progression: %progression_text%
+– May not use Inspirations.
+– The Skald's spells are cast as though a level lower than a normal Bard of the same level.
+– May not Pick Pockets.~ END
+
+    ACTION_IF (~%EE_LANGUAGE%~ STRING_EQUAL_CASE ~en_us~) AND (NOT ~%cbr_sp_description%~ STRING_EQUAL ~~) BEGIN
+      OUTER_SET new_help = RESOLVE_STR_REF (~%cbr_sp_description%~)
+      ACTION_FOR_EACH table IN KITLIST CLASTEXT BGCLATXT SODCLTXT BEGIN
+        ACTION_IF FILE_EXISTS_IN_GAME ~%table%.2DA~ BEGIN
+          COPY_EXISTING ~%table%.2DA~ ~override~
+            SET match_col = 0
+            PATCH_IF ~%table%~ STRING_EQUAL_CASE ~KITLIST~ BEGIN
+              LPF cbr_sp_named_column STR_VAR name = ~HELP~ required = ~ROWNAME LOWER MIXED ABILITIES PROF UNUSABLE CLASS KITIDS~ RET text_col = data_column END
+              LPF cbr_sp_named_column STR_VAR name = ~ROWNAME~ RET match_col = data_column END
+            END ELSE BEGIN
+              LPF cbr_sp_named_column STR_VAR name = ~DESCSTR~ required = ~ID KIT LOWER MIXED HELP FALLEN HATEDRACE SAVE STRREF~ RET text_col = data_column END
             END
-          END
-          BUT_ONLY
-      END
-      ACTION_FOR_EACH cbr_sp_class_text IN BGCLATXT CLASTEXT SODCLTXT BEGIN
-        ACTION_IF FILE_EXISTS_IN_GAME ~%cbr_sp_class_text%.2DA~ BEGIN
-          COPY_EXISTING ~%cbr_sp_class_text%.2DA~ ~override~
-            COUNT_2DA_COLS cbr_sp_cols
-            COUNT_2DA_ROWS cbr_sp_cols cbr_sp_rows
-            FOR (cbr_sp_row = 0; cbr_sp_row < cbr_sp_rows; ++cbr_sp_row) BEGIN
-              READ_2DA_ENTRY cbr_sp_row 0 cbr_sp_cols cbr_sp_symbol
-              PATCH_IF (~%cbr_sp_symbol%~ STRING_EQUAL_CASE ~%kit_symbol%~) BEGIN
-                SET_2DA_ENTRY cbr_sp_row 4 cbr_sp_cols cbr_sp_new_help
+            LPF cbr_sp_table_read RET cbr_t_cols cbr_t_rows cbr_t_default RET_ARRAY cbr_t_head cbr_t_cell END
+            SET found = 0
+            FOR (row = 0; row < cbr_t_rows; ++row) BEGIN
+              SPRINT symbol $cbr_t_cell(~%row%~ ~%match_col%~)
+              PATCH_IF ~%symbol%~ STRING_EQUAL_CASE ~%kit_symbol%~ BEGIN
+                SPRINT $cbr_t_cell(~%row%~ ~%text_col%~) ~%new_help%~ SET found = 1
               END
             END
+            PATCH_IF NOT found AND (NOT (~%table%~ STRING_EQUAL_CASE ~KITLIST~) OR NOT (~%kit_symbol%~ STRING_EQUAL_CASE ~BARD~)) BEGIN
+              SET row = cbr_t_rows SET cbr_t_rows += 1
+              FOR (col = 0; col < cbr_t_cols; ++col) BEGIN SPRINT $cbr_t_cell(~%row%~ ~%col%~) ~0~ END
+              SPRINT $cbr_t_cell(~%row%~ ~0~) ~%kit_symbol%~
+              PATCH_IF match_col != 0 BEGIN
+                SET kit_row = cbr_sp_id BAND 0x3fff SPRINT $cbr_t_cell(~%row%~ ~0~) ~%kit_row%~
+                SPRINT $cbr_t_cell(~%row%~ ~%match_col%~) ~%kit_symbol%~
+              END
+              SPRINT $cbr_t_cell(~%row%~ ~%text_col%~) ~%new_help%~
+              FOR (col = 1; col < cbr_t_cols; ++col) BEGIN
+                SPRINT heading $cbr_t_head(~%col%~)
+                PATCH_IF (~%heading%~ STRING_EQUAL_CASE ~CLASS~) OR (~%heading%~ STRING_EQUAL_CASE ~ID~) BEGIN SPRINT $cbr_t_cell(~%row%~ ~%col%~) ~5~ END
+                PATCH_IF ~%heading%~ STRING_EQUAL_CASE ~KITIDS~ BEGIN SPRINT $cbr_t_cell(~%row%~ ~%col%~) ~%cbr_sp_id%~ END
+              END
+            END
+            LPF cbr_sp_table_write END
             BUT_ONLY
         END
       END
-      PRINT ~Bard progression: %kit_symbol% uses %slot_table%; description updated.~
-    END
-  END
+    END ELSE BEGIN PRINT ~Bard progression: no complete translation supplied for %kit_symbol% in %EE_LANGUAGE%; existing description retained.~ END
+  END ELSE BEGIN PRINT ~Bard progression: optional kit %kit_symbol% has no identity; its registration is unavailable.~ END
 END

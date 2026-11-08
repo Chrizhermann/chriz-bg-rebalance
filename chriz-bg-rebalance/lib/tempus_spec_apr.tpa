@@ -16,153 +16,64 @@
 // KITLIST×WEAPPROF scan found exactly one pure-cleric kit with any cap >= 2:
 // OHTEMPUS itself. Fresh-install scope scan is a tracked follow-up.
 //
-// All writes are read-compare guarded (byte-idempotent under BUT_ONLY),
-// two-pass verified, hard FAIL on any unrecognized shape.
-
-// Locate the GETS_PROF_APR header token. CLSWPBON's column-header row is one
-// token shorter than the data rows (no label column), so with the validated
-// width of 4 the header is row 0 of the 3-token view — the same two-set
-// idiom as the WEAPPROF locator in tempus_weapon_training.tpa.
-DEFINE_PATCH_FUNCTION cbr_sa_locate_prof_apr_column
-  RET
-    apr_header_index
-BEGIN
-  COUNT_2DA_COLS cbr_sa_loc_cols
-  PATCH_IF (cbr_sa_loc_cols != 4) BEGIN
-    PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: expected label plus 3 value columns, found %cbr_sa_loc_cols% total.~
+// Own GETS_PROF_APR in both named rows. Existing cells in other columns stay.
+// Missing rows use the existing cleric definition (1, 0, 3 by column name).
+DEFINE_PATCH_FUNCTION cbr_sa_transform_clswpbon STR_VAR row_label = ~~ BEGIN
+  LPM cbr_tempus_read_table
+  SET cbr_sa_found_col = 0
+  FOR (cbr_sa_c = 0; cbr_sa_c < cbr_t_cols; ++cbr_sa_c) BEGIN
+    SPRINT cbr_sa_column $cbr_t_cell(2 ~%cbr_sa_c%~)
+    PATCH_IF ~%cbr_sa_column%~ STRING_EQUAL_CASE ~GETS_PROF_APR~ BEGIN SET cbr_sa_found_col = 1 END
   END
-  SET apr_header_index = "-1"
-  READ_2DA_ENTRIES_NOW cbr_sa_hdr_rows 3
-  PATCH_IF (cbr_sa_hdr_rows < 1) BEGIN
-    PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: no header row.~
-  END
-  FOR (cbr_sa_loc_col = 0; cbr_sa_loc_col < 3; ++cbr_sa_loc_col) BEGIN
-    READ_2DA_ENTRY_FORMER cbr_sa_hdr_rows 0 cbr_sa_loc_col cbr_sa_header_token
-    PATCH_IF (~%cbr_sa_header_token%~ STRING_EQUAL_CASE ~GETS_PROF_APR~) BEGIN
-      PATCH_IF (apr_header_index >= 0) BEGIN
-        PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: duplicate GETS_PROF_APR header columns.~
-      END
-      SET apr_header_index = cbr_sa_loc_col
+  PATCH_IF NOT cbr_sa_found_col BEGIN
+    SPRINT $cbr_t_cell(2 ~%cbr_t_cols%~) ~GETS_PROF_APR~ ++cbr_t_cols
+    FOR (cbr_sa_r = 3; cbr_sa_r < cbr_t_lines; ++cbr_sa_r) BEGIN
+      SPRINT $cbr_t_cell(~%cbr_sa_r%~ ~%cbr_t_cols%~) ~%cbr_t_default%~
     END
   END
-  PATCH_IF (apr_header_index < 0) BEGIN
-    PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: no GETS_PROF_APR header column.~
+  SET cbr_sa_found_row = 0
+  FOR (cbr_sa_r = 3; cbr_sa_r < cbr_t_lines; ++cbr_sa_r) BEGIN
+    SPRINT cbr_sa_name $cbr_t_cell(~%cbr_sa_r%~ 0)
+    PATCH_IF ~%cbr_sa_name%~ STRING_EQUAL_CASE ~%row_label%~ BEGIN SET cbr_sa_found_row = 1 END
   END
+  PATCH_IF NOT cbr_sa_found_row BEGIN
+    SPRINT $cbr_t_cell(~%cbr_t_lines%~ 0) ~%row_label%~
+    FOR (cbr_sa_c = 0; cbr_sa_c < cbr_t_cols; ++cbr_sa_c) BEGIN
+      SPRINT cbr_sa_column $cbr_t_cell(2 ~%cbr_sa_c%~)
+      SPRINT cbr_sa_value ~%cbr_t_default%~
+      PATCH_IF ~%cbr_sa_column%~ STRING_EQUAL_CASE ~UNARMED_DIVISOR~ BEGIN SPRINT cbr_sa_value ~0~ END
+      PATCH_IF ~%cbr_sa_column%~ STRING_EQUAL_CASE ~ZERO_SKILL_THAC0~ BEGIN SPRINT cbr_sa_value ~3~ END
+      SET cbr_sa_col = cbr_sa_c + 1 SPRINT $cbr_t_cell(~%cbr_t_lines%~ ~%cbr_sa_col%~) ~%cbr_sa_value%~
+    END
+    ++cbr_t_lines
+  END
+  FOR (cbr_sa_r = 3; cbr_sa_r < cbr_t_lines; ++cbr_sa_r) BEGIN
+    SPRINT cbr_sa_name $cbr_t_cell(~%cbr_sa_r%~ 0)
+    PATCH_IF ~%cbr_sa_name%~ STRING_EQUAL_CASE ~%row_label%~ BEGIN
+      FOR (cbr_sa_c = 0; cbr_sa_c < cbr_t_cols; ++cbr_sa_c) BEGIN
+        SPRINT cbr_sa_column $cbr_t_cell(2 ~%cbr_sa_c%~)
+        PATCH_IF ~%cbr_sa_column%~ STRING_EQUAL_CASE ~GETS_PROF_APR~ BEGIN
+          SET cbr_sa_col = cbr_sa_c + 1 SPRINT $cbr_t_cell(~%cbr_sa_r%~ ~%cbr_sa_col%~) ~1~
+        END
+      END
+    END
+  END
+  LPM cbr_tempus_write_table
 END
 
-// Ensure one row's GETS_PROF_APR is 1. allow_append: 0 = the row must exist
-// (class rows), 1 = append a cleric-shaped row when absent (the OHTEMPUS kit
-// row on games that ship without it).
-DEFINE_PATCH_FUNCTION cbr_sa_transform_clswpbon
-  INT_VAR
-    verify_only = 0
-    allow_append = 0
-  STR_VAR
-    row_label = ~~
-  RET
-    changed_cells
-    appended_row
-    found_value
-BEGIN
-  SET changed_cells = 0
-  SET appended_row = 0
-  LPF cbr_sa_locate_prof_apr_column RET cbr_sa_apr_hdr = apr_header_index END
-  READ_2DA_ENTRIES_NOW cbr_sa_rows 4
-  SET cbr_sa_target_row = "-1"
-  FOR (cbr_sa_row = 0; cbr_sa_row < cbr_sa_rows; ++cbr_sa_row) BEGIN
-    READ_2DA_ENTRY_FORMER cbr_sa_rows cbr_sa_row 0 cbr_sa_label
-    PATCH_IF (~%cbr_sa_label%~ STRING_EQUAL_CASE ~%row_label%~) BEGIN
-      PATCH_IF (cbr_sa_target_row >= 0) BEGIN
-        PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: duplicate %row_label% rows.~
-      END
-      SET cbr_sa_target_row = cbr_sa_row
-    END
-  END
-  SPRINT found_value ~absent~
-  PATCH_IF (cbr_sa_target_row >= 0) BEGIN
-    READ_2DA_ENTRY_FORMER cbr_sa_rows cbr_sa_target_row (cbr_sa_apr_hdr + 1) cbr_sa_value
-    SPRINT found_value ~%cbr_sa_value%~
-    PATCH_IF (~%cbr_sa_value%~ STR_EQ ~1~) BEGIN
-      // Already granted — nothing to do.
-    END ELSE PATCH_IF (~%cbr_sa_value%~ STR_EQ ~0~) BEGIN
-      PATCH_IF (verify_only) BEGIN
-        PATCH_FAIL ~CBR Tempus CLSWPBON.2DA verification failed: %row_label% GETS_PROF_APR is still 0.~
-      END
-      SET_2DA_ENTRY cbr_sa_target_row (cbr_sa_apr_hdr + 1) 4 ~1~
-      ++changed_cells
-    END ELSE BEGIN
-      PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: %row_label% GETS_PROF_APR holds %cbr_sa_value% (expected 0 or 1).~
-    END
-  END ELSE PATCH_IF (allow_append = 0) BEGIN
-    PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: no %row_label% row.~
-  END ELSE BEGIN
-    PATCH_IF (verify_only) BEGIN
-      PATCH_FAIL ~CBR Tempus CLSWPBON.2DA verification failed: %row_label% row is still missing.~
-    END
-    // Build the new row against the actual header order so a reordered
-    // table gets the right value in each column.
-    READ_2DA_ENTRIES_NOW cbr_sa_hdr_rows 3
-    SPRINT cbr_sa_new_row ~%row_label%~
-    FOR (cbr_sa_col = 0; cbr_sa_col < 3; ++cbr_sa_col) BEGIN
-      READ_2DA_ENTRY_FORMER cbr_sa_hdr_rows 0 cbr_sa_col cbr_sa_header_token
-      PATCH_IF (~%cbr_sa_header_token%~ STRING_EQUAL_CASE ~GETS_PROF_APR~) BEGIN
-        SPRINT cbr_sa_new_row ~%cbr_sa_new_row% 1~
-      END ELSE PATCH_IF (~%cbr_sa_header_token%~ STRING_EQUAL_CASE ~UNARMED_DIVISOR~) BEGIN
-        SPRINT cbr_sa_new_row ~%cbr_sa_new_row% 0~
-      END ELSE PATCH_IF (~%cbr_sa_header_token%~ STRING_EQUAL_CASE ~ZERO_SKILL_THAC0~) BEGIN
-        SPRINT cbr_sa_new_row ~%cbr_sa_new_row% 3~
-      END ELSE BEGIN
-        PATCH_FAIL ~CBR Tempus CLSWPBON.2DA validation failed: unknown header column %cbr_sa_header_token%.~
-      END
-    END
-    INSERT_2DA_ROW cbr_sa_rows 4 ~%cbr_sa_new_row%~
-    SET appended_row = 1
-  END
-END
-
-DEFINE_ACTION_FUNCTION cbr_apply_tempus_spec_apr
-  STR_VAR
-    resource_dir = ~~
-BEGIN
+DEFINE_ACTION_FUNCTION cbr_apply_tempus_spec_apr STR_VAR resource_dir = ~~ BEGIN
   OUTER_SPRINT resource_dir EVALUATE_BUFFER ~%resource_dir%~
-  ACTION_IF (~%resource_dir%~ STR_EQ ~~) BEGIN
-    FAIL ~CBR Tempus spec APR requires resource_dir.~
+  ACTION_IF ~%resource_dir%~ STRING_EQUAL ~~ BEGIN FAIL ~CBR Tempus spec APR requires resource_dir.~ END
+  ACTION_IF NOT FILE_EXISTS ~%resource_dir%/CLSWPBON.2DA~ BEGIN
+    <<<<<<<< cbr-spec-apr-table
+2DA V1.0
+0
+GETS_PROF_APR UNARMED_DIVISOR ZERO_SKILL_THAC0
+>>>>>>>>
+    COPY ~cbr-spec-apr-table~ ~%resource_dir%/CLSWPBON.2DA~
   END
-  ACTION_IF !(FILE_EXISTS ~%resource_dir%/CLSWPBON.2DA~) BEGIN
-    FAIL ~CBR Tempus spec APR requires %resource_dir%/CLSWPBON.2DA.~
-  END
-
-  // Kit row first (append-capable), then the operative class row.
   COPY ~%resource_dir%/CLSWPBON.2DA~ ~%resource_dir%/CLSWPBON.2DA~
-    LPF cbr_sa_transform_clswpbon
-      INT_VAR verify_only = 0 allow_append = 1
-      STR_VAR row_label = ~OHTEMPUS~
-      RET
-        cbr_sa_kit_changed = changed_cells
-        cbr_sa_kit_appended = appended_row
-        cbr_sa_kit_before = found_value
-    END
-    LPF cbr_sa_transform_clswpbon
-      INT_VAR verify_only = 0 allow_append = 0
-      STR_VAR row_label = ~CLERIC~
-      RET
-        cbr_sa_class_changed = changed_cells
-        cbr_sa_class_before = found_value
-    END
+    LPF cbr_sa_transform_clswpbon STR_VAR row_label = ~OHTEMPUS~ END
+    LPF cbr_sa_transform_clswpbon STR_VAR row_label = ~CLERIC~ END
   BUT_ONLY
-
-  // Second pass re-validates the final state (and proves the writes landed);
-  // on an already-transformed table both passes take zero writes.
-  COPY ~%resource_dir%/CLSWPBON.2DA~ ~%resource_dir%/CLSWPBON.2DA~
-    LPF cbr_sa_transform_clswpbon
-      INT_VAR verify_only = 1 allow_append = 1
-      STR_VAR row_label = ~OHTEMPUS~
-    END
-    LPF cbr_sa_transform_clswpbon
-      INT_VAR verify_only = 1 allow_append = 0
-      STR_VAR row_label = ~CLERIC~
-    END
-  BUT_ONLY
-
-  PRINT ~cbr 406: CLSWPBON OHTEMPUS GETS_PROF_APR was %cbr_sa_kit_before% (cells changed: %cbr_sa_kit_changed%; row appended: %cbr_sa_kit_appended%); CLERIC was %cbr_sa_class_before% (cells changed: %cbr_sa_class_changed%).~
 END

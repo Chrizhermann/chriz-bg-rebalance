@@ -1,263 +1,234 @@
-// SR anti-magic adjustments. Shared by the public and independent tail installer.
+// SR anti-magic: own the recipient MR / spell-failure package and its full
+// English descriptions. Delivery wrappers, Spell Shield and other effects stay.
 DEFINE_PATCH_MACRO cbr_am_layout
 BEGIN
-  PATCH_IF BUFFER_LENGTH < 0x72 BEGIN PATCH_FAIL ~CBR anti-magic: truncated SPL.~ END
-  READ_ASCII 0 am_sig (8)
-  READ_LONG 0x64 am_ab
-  READ_SHORT 0x68 am_nab
-  READ_LONG 0x6a am_fx
-  READ_SHORT 0x6e am_cf
-  READ_SHORT 0x70 am_nc
-  PATCH_IF NOT (~%am_sig%~ STRING_EQUAL ~SPL V1  ~)
-    OR am_nab = 0 OR am_ab < 0x72 OR am_ab + 40 * am_nab > BUFFER_LENGTH
-    OR am_fx < am_ab + 40 * am_nab OR am_fx > BUFFER_LENGTH
-    OR (BUFFER_LENGTH - am_fx) MODULO 48 != 0 BEGIN
-    PATCH_FAIL ~CBR anti-magic: invalid SPL ability/effect layout.~
+  SET am_readable = BUFFER_LENGTH >= 0x72
+  PATCH_IF am_readable BEGIN
+    READ_LONG 0x64 am_ab READ_SHORT 0x68 am_nab
+    READ_LONG 0x6a am_fx READ_SHORT 0x6e am_cf READ_SHORT 0x70 am_nc
+    SET am_readable = am_ab >= 0x72 AND am_ab + 40 * am_nab <= BUFFER_LENGTH
+      AND am_fx >= 0x72 AND am_fx <= BUFFER_LENGTH
+    SET am_total = am_cf + am_nc
+    FOR (am_a = 0; am_readable AND am_a < am_nab; ++am_a) BEGIN
+      READ_SHORT (am_ab + 40 * am_a + 0x1e) am_n
+      READ_SHORT (am_ab + 40 * am_a + 0x20) am_first
+      SET am_total = (am_total > am_first + am_n ? am_total : am_first + am_n)
+    END
+    SET am_readable = am_readable AND am_fx + 48 * am_total <= BUFFER_LENGTH
   END
-  SET am_total = (BUFFER_LENGTH - am_fx) / 48
-  PATCH_IF am_total > 65535 OR am_cf + am_nc > am_total BEGIN
-    PATCH_FAIL ~CBR anti-magic: invalid casting slice.~
-  END
-  FOR (am_i = 0; am_i < am_total; ++am_i) BEGIN SET $am_owner(~%am_i%~) = (0 - 2) END
-  FOR (am_i = am_cf; am_i < am_cf + am_nc; ++am_i) BEGIN SET $am_owner(~%am_i%~) = (0 - 1) END
-  FOR (am_a = 0; am_a < am_nab; ++am_a) BEGIN
-    READ_SHORT (am_ab + 40 * am_a + 0x1e) am_n
-    READ_SHORT (am_ab + 40 * am_a + 0x20) am_first
-    PATCH_IF am_n = 0 OR am_first + am_n > am_total BEGIN PATCH_FAIL ~CBR anti-magic: invalid effect slice.~ END
-    SET $am_first(~%am_a%~) = am_first
-    SET $am_count(~%am_a%~) = am_n
-    FOR (am_i = am_first; am_i < am_first + am_n; ++am_i) BEGIN
-      PATCH_IF $am_owner(~%am_i%~) != (0 - 2) BEGIN PATCH_FAIL ~CBR anti-magic: overlapping effect slices.~ END
-      SET $am_owner(~%am_i%~) = am_a
+  PATCH_IF am_readable BEGIN
+    READ_ASCII (am_fx + 48 * am_cf) am_cast (48 * am_nc)
+    FOR (am_a = 0; am_a < am_nab; ++am_a) BEGIN
+      READ_ASCII (am_ab + 40 * am_a) $am_header(~%am_a%~) (40)
+      READ_SHORT (am_ab + 40 * am_a + 0x1e) am_n
+      READ_SHORT (am_ab + 40 * am_a + 0x20) am_first
+      READ_ASCII (am_fx + 48 * am_first) $am_effects(~%am_a%~) (48 * am_n)
     END
   END
 END
 
 DEFINE_PATCH_FUNCTION cbr_sr_pierce_magic_patch
+  RET am_readable
 BEGIN
   LPM cbr_am_layout
-  // Exactly one reviewed MR modifier/callback and one protection remover in
-  // each ability. Reject unknown parallel MR writers instead of layering over them.
-  FOR (am_i = 0; am_i < am_total; ++am_i) BEGIN SET $am_drop(~%am_i%~) = 0 END
-  FOR (am_a = 0; am_a < am_nab; ++am_a) BEGIN
-    SET pm_mr = 0
-    SET pm_strip = 0
-    FOR (am_i = $am_first(~%am_a%~); am_i < $am_first(~%am_a%~) + $am_count(~%am_a%~); ++am_i) BEGIN
-      SET am_at = am_fx + 48 * am_i
-      READ_SHORT am_at pm_op
-      READ_LONG (am_at + 4) pm_p1
-      READ_LONG (am_at + 8) pm_p2
-      READ_BYTE (am_at + 2) pm_tgt
-      READ_BYTE (am_at + 12) pm_time
-      READ_LONG (am_at + 36) pm_save
-      READ_ASCII (am_at + 20) pm_res (8) NULL
-      PATCH_IF pm_op = 230 AND pm_p1 = 8 AND pm_p2 = 1 BEGIN ++pm_strip END
-      PATCH_IF pm_op = 166 OR (pm_op = 402 AND ~%pm_res%~ STRING_EQUAL_CASE ~CBRPM~) BEGIN
-        PATCH_IF pm_tgt != 2 OR (pm_save BAND 31) != 0
-          OR (pm_op = 166 AND (pm_p1 != 0 OR pm_p2 != 1 OR pm_time != 0)) BEGIN
-          PATCH_FAIL ~CBR Pierce Magic: unsupported MR payload.~
+  PATCH_IF am_readable BEGIN
+    PATCH_IF am_nab = 0 BEGIN
+      SET am_nab = 1
+      INNER_PATCH_SAVE $am_header(~0~) ~~ BEGIN
+        INSERT_BYTES 0 40 WRITE_BYTE 0 1 WRITE_BYTE 0xc 2 WRITE_BYTE 0xd 1
+        WRITE_SHORT 0xe 40 WRITE_SHORT 0x10 1 WRITE_SHORT 0x26 1
+      END
+      SPRINT $am_effects(~0~) ~~
+    END
+    DELETE_BYTES 0x72 (BUFFER_LENGTH - 0x72)
+    INSERT_BYTES 0x72 (40 * am_nab)
+    SET am_fx = BUFFER_LENGTH INSERT_BYTES am_fx (48 * am_nc)
+    WRITE_ASCIIE am_fx ~%am_cast%~ (48 * am_nc)
+    WRITE_LONG 0x64 0x72 WRITE_SHORT 0x68 am_nab
+    WRITE_LONG 0x6a am_fx WRITE_SHORT 0x6e 0
+    SET am_out = am_nc
+    FOR (am_a = 0; am_a < am_nab; ++am_a) BEGIN
+      SPRINT am_raw $am_header(~%am_a%~)
+      WRITE_ASCIIE (0x72 + 40 * am_a) ~%am_raw%~ (40)
+      WRITE_SHORT (0x72 + 40 * am_a + 0x20) am_out
+      SPRINT am_raw $am_effects(~%am_a%~)
+      INNER_PATCH_SAVE pm_donor ~~ BEGIN
+        INSERT_BYTES 0 48 WRITE_BYTE 0xd 2 WRITE_BYTE 0x12 100
+      END
+      SPRINT pm_strip_donor ~%pm_donor%~
+      SET pm_have_mr = 0 SET pm_have_strip = 0
+      INNER_PATCH ~%am_raw%~ BEGIN
+        FOR (am_at = 0; am_at < BUFFER_LENGTH; am_at += 48) BEGIN
+          READ_SHORT am_at pm_op READ_LONG (am_at + 8) pm_mode
+          READ_ASCII (am_at + 20) pm_res (8) NULL
+          PATCH_IF NOT pm_have_mr AND (pm_op = 166
+            OR (pm_op = 402 AND ~%pm_res%~ STRING_EQUAL_CASE ~CBRPM~)) BEGIN
+            READ_ASCII am_at pm_donor (48) SET pm_have_mr = 1
+          END
+          PATCH_IF NOT pm_have_strip AND pm_op = 230 AND pm_mode = 1 BEGIN
+            READ_ASCII am_at pm_strip_donor (48) SET pm_have_strip = 1
+          END
         END
-        ++pm_mr
-        SET $pm_donor(~%am_a%~) = am_at
-        SET $am_drop(~%am_i%~) = 1
       END
-      // The runtime owns a refreshing MR icon. The old expiry sound would
-      // otherwise play at the original deadline after a successful refresh.
-      PATCH_IF pm_tgt = 2 AND ((pm_op = 142 AND pm_p2 = 106 AND pm_time = 0)
-        OR (pm_op = 174 AND pm_time = 4 AND ~%pm_res%~ STRING_EQUAL_CASE ~EFF_E06~)) BEGIN
-        SET $am_drop(~%am_i%~) = 1
+      // Impact-time MR is measured before removing protections.
+      INNER_PATCH_SAVE pm_result ~%pm_donor%~ BEGIN
+        WRITE_SHORT 0 402 WRITE_BYTE 2 2 WRITE_LONG 4 0 WRITE_LONG 8 0
+        WRITE_BYTE 12 1 WRITE_BYTE 13 2 WRITE_LONG 14 0
+        WRITE_BYTE 18 100 WRITE_BYTE 19 0 WRITE_ASCII 20 ~CBRPM~ #8
+        READ_LONG 36 pm_save WRITE_LONG 36 (pm_save BAND 0xffffffe0)
       END
-    END
-    PATCH_IF pm_mr != 1 OR pm_strip != 1 BEGIN
-      PATCH_FAIL ~CBR Pierce Magic: expected one MR payload and one level-8 protection remover per ability.~
-    END
-  END
-  SET am_out = 0
-  FOR (am_i = 0; am_i < am_total; ++am_i) BEGIN
-    SET am_a = $am_owner(~%am_i%~)
-    PATCH_IF am_i = am_cf BEGIN WRITE_SHORT 0x6e am_out END
-    PATCH_IF am_a >= 0 BEGIN
-      PATCH_IF am_i = $am_first(~%am_a%~) BEGIN
-        WRITE_SHORT (am_ab + 40 * am_a + 0x20) am_out
-        SET $am_new_start(~%am_a%~) = am_out
-        // Measure MR at impact, before protection removal can change a stat.
-        SET am_dest = BUFFER_LENGTH
-        INSERT_BYTES am_dest 48
-        SET am_at = $pm_donor(~%am_a%~)
-        FOR (am_b = 0; am_b < 48; ++am_b) BEGIN
-          READ_BYTE (am_at + am_b) am_byte
-          WRITE_BYTE (am_dest + am_b) am_byte
+      INNER_PATCH_SAVE pm_strip_donor ~%pm_strip_donor%~ BEGIN
+        WRITE_SHORT 0 230 WRITE_BYTE 2 2 WRITE_LONG 4 8 WRITE_LONG 8 1
+        WRITE_BYTE 12 1 WRITE_BYTE 13 2 WRITE_LONG 14 0
+        WRITE_BYTE 18 100 WRITE_BYTE 19 0
+        READ_LONG 36 pm_save WRITE_LONG 36 (pm_save BAND 0xffffffe0)
+      END
+      SET pm_wrote_strip = 0
+      INNER_PATCH ~%am_raw%~ BEGIN SET pm_count = BUFFER_LENGTH / 48 END
+      FOR (pm_i = 0; pm_i <= pm_count; ++pm_i) BEGIN
+        SET pm_op = 0 - 1 SET pm_mode = 0 SPRINT pm_res ~~
+        PATCH_IF pm_i < pm_count BEGIN
+          INNER_PATCH ~%am_raw%~ BEGIN
+            SET am_at = pm_i * 48
+            READ_SHORT am_at pm_op READ_LONG (am_at + 8) pm_mode
+            READ_ASCII (am_at + 20) pm_res (8) NULL
+            READ_ASCII am_at pm_record (48)
+          END
         END
-        WRITE_SHORT am_dest 402
-        WRITE_LONG (am_dest + 4) 0
-        WRITE_LONG (am_dest + 8) 0
-        WRITE_BYTE (am_dest + 12) 1
-        WRITE_BYTE (am_dest + 13) 2
-        WRITE_LONG (am_dest + 14) 0
-        WRITE_ASCII (am_dest + 20) ~CBRPM~ #8
-        ++am_out
+        SET pm_strip = pm_op = 230 AND pm_mode = 1
+        PATCH_IF NOT pm_wrote_strip AND (pm_strip OR pm_i = pm_count) BEGIN
+          INNER_PATCH_SAVE pm_result ~%pm_result%~ BEGIN
+            SET am_at = BUFFER_LENGTH INSERT_BYTES am_at 48
+            WRITE_ASCIIE am_at ~%pm_strip_donor%~ (48)
+          END
+          SET pm_wrote_strip = 1
+        END
+        PATCH_IF pm_i < pm_count AND NOT pm_strip AND pm_op != 166
+          AND NOT (pm_op = 402 AND ~%pm_res%~ STRING_EQUAL_CASE ~CBRPM~)
+          AND NOT (pm_op = 142 AND pm_mode = 106)
+          AND NOT (pm_op = 174 AND ~%pm_res%~ STRING_EQUAL_CASE ~EFF_E06~) BEGIN
+          INNER_PATCH_SAVE pm_result ~%pm_result%~ BEGIN
+            SET am_at = BUFFER_LENGTH INSERT_BYTES am_at 48
+            WRITE_ASCIIE am_at ~%pm_record%~ (48)
+          END
+        END
       END
+      INNER_PATCH ~%pm_result%~ BEGIN SET pm_length = BUFFER_LENGTH END
+      SET am_at = BUFFER_LENGTH INSERT_BYTES am_at pm_length
+      WRITE_ASCIIE am_at ~%pm_result%~ (pm_length)
+      WRITE_SHORT (0x72 + 40 * am_a + 0x1e) (pm_length / 48)
+      SET am_out += pm_length / 48
     END
-    PATCH_IF NOT $am_drop(~%am_i%~) BEGIN
-      SET am_at = am_fx + 48 * am_i
-      SET am_dest = BUFFER_LENGTH
-      INSERT_BYTES am_dest 48
-      FOR (am_b = 0; am_b < 48; ++am_b) BEGIN
-        READ_BYTE (am_at + am_b) am_byte
-        WRITE_BYTE (am_dest + am_b) am_byte
-      END
-      ++am_out
-    END
-    PATCH_IF am_a >= 0 BEGIN
-      PATCH_IF am_i = $am_first(~%am_a%~) + $am_count(~%am_a%~) - 1 BEGIN
-        WRITE_SHORT (am_ab + 40 * am_a + 0x1e) (am_out - $am_new_start(~%am_a%~))
-      END
-    END
-  END
-  PATCH_IF am_out > 65535 BEGIN PATCH_FAIL ~CBR anti-magic: too many effects.~ END
-  PATCH_IF am_cf = am_total BEGIN WRITE_SHORT 0x6e am_out END
-  DELETE_BYTES am_fx (48 * am_total)
-END
-
-// Count mechanics in a validated spell; action discovery follows actual cast
-// links rather than assuming SR/SCS's usual B suffix. C/Spell Shield stays intact.
-DEFINE_PATCH_MACRO cbr_am_classify
-BEGIN
-  LPM cbr_am_layout
-  SET am_matches = 0
-  FOR (am_i = 0; am_i < am_total; ++am_i) BEGIN
-    PATCH_IF $am_owner(~%am_i%~) >= 0 BEGIN
-      SET am_at = am_fx + 48 * am_i
-      READ_SHORT am_at am_op
-      READ_ASCII (am_at + 20) am_res (8) NULL
-      PATCH_IF (component = 210 AND (am_op = 166 OR (am_op = 402 AND ~%am_res%~ STRING_EQUAL_CASE ~CBRPM~)))
-        OR (component = 211 AND am_op = 60) BEGIN ++am_matches END
-    END
+  END ELSE BEGIN
+    PATCH_PRINT ~CBR Pierce Magic: unreadable spell tables; leaving this file unchanged.~
   END
 END
 
-// True when the validated spell already carries the changed payload of
-// `component`: the CBRPM callback for 210, a 15% spell failure for 211.
-DEFINE_PATCH_MACRO cbr_am_converted
-BEGIN
-  LPM cbr_am_layout
-  SET am_conv = 0
-  FOR (am_i = 0; am_i < am_total; ++am_i) BEGIN
-    PATCH_IF $am_owner(~%am_i%~) >= 0 BEGIN
-      SET am_at = am_fx + 48 * am_i
-      READ_SHORT am_at am_op
-      READ_LONG (am_at + 4) am_p1
-      READ_ASCII (am_at + 20) am_res (8) NULL
-      PATCH_IF (component = 210 AND am_op = 402 AND ~%am_res%~ STRING_EQUAL_CASE ~CBRPM~)
-        OR (component = 211 AND am_op = 60 AND am_p1 = 15) BEGIN ++am_conv END
-    END
-  END
-END
-
-// Finds the spell, its effective payload and the linked spells of `component`
-// by their meaning: through spell.ids and the actual cast links, never by suffix.
-// Sets am_symbol, am_parent, am_children (array) and am_payload.
+// Walk actual delivery links. Every mechanical payload and every non-Shield
+// leaf receives the package, even when all its old effects have been removed.
+// Visited identities terminate cycles; absent resources cost only that target.
 DEFINE_ACTION_MACRO cbr_am_discover
 BEGIN
-  ACTION_IF component = 210 BEGIN
-    OUTER_SPRINT am_symbol ~WIZARD_PIERCE_MAGIC~
-  END ELSE ACTION_IF component = 211 BEGIN
-    OUTER_SPRINT am_symbol ~WIZARD_SPELL_STRIKE~
-  END ELSE BEGIN FAIL ~CBR anti-magic: unknown component.~ END
-  OUTER_SET am_id = IDS_OF_SYMBOL (~spell~ ~%am_symbol%~)
-  ACTION_IF am_id < 2100 OR am_id > 2999 BEGIN FAIL ~CBR anti-magic: missing or invalid spell.ids mapping.~ END
-  OUTER_SET am_slot = am_id - 2000
-  OUTER_SPRINT am_parent ~SPWI%am_slot%~
-  ACTION_IF NOT FILE_EXISTS_IN_GAME ~%am_parent%.spl~ BEGIN FAIL ~CBR anti-magic: missing parent spell.~ END
-  OUTER_SET am_parent_matches = 0
-  ACTION_CLEAR_ARRAY am_children
-  COPY_EXISTING - ~%am_parent%.spl~ ~override~
-    LPM cbr_am_classify
-    SET am_parent_matches = am_matches
-    FOR (am_i = 0; am_i < am_total; ++am_i) BEGIN
-      PATCH_IF $am_owner(~%am_i%~) >= 0 BEGIN
-        SET am_at = am_fx + 48 * am_i
-        READ_SHORT am_at am_op
-        READ_BYTE (am_at + 2) am_tgt
-        PATCH_IF am_op = 146 AND am_tgt = 2 BEGIN
-          READ_ASCII (am_at + 20) am_child (8) NULL
-          TO_UPPER am_child
-          SET $am_children(~%am_child%~) = 1
+  ACTION_IF component = 210 BEGIN OUTER_SPRINT am_symbol ~WIZARD_PIERCE_MAGIC~ END
+  ELSE ACTION_IF component = 211 BEGIN OUTER_SPRINT am_symbol ~WIZARD_SPELL_STRIKE~ END
+  ELSE BEGIN FAIL ~CBR anti-magic: unknown component argument.~ END
+  ACTION_CLEAR_ARRAY am_srcs ACTION_CLEAR_ARRAY am_payloads ACTION_CLEAR_ARRAY am_queue
+  OUTER_SET am_available = 0 OUTER_SET am_id = 0 - 1
+  ACTION_IF FILE_EXISTS_IN_GAME ~spell.ids~ BEGIN
+    OUTER_SET am_id = IDS_OF_SYMBOL (~spell~ ~%am_symbol%~)
+  END
+  ACTION_IF am_id >= 2000 AND am_id < 3000 BEGIN
+    OUTER_SET am_slot = am_id - 2000 OUTER_SPRINT am_parent ~SPWI%am_slot%~
+    ACTION_IF am_slot < 100 BEGIN OUTER_SPRINT am_parent ~SPWI0%am_slot%~ END
+    ACTION_IF am_slot < 10 BEGIN OUTER_SPRINT am_parent ~SPWI00%am_slot%~ END
+    ACTION_IF FILE_EXISTS_IN_GAME ~%am_parent%.spl~ BEGIN
+      OUTER_SET am_available = 1 OUTER_SET am_any_payload = 0 OUTER_SET am_missing = 0
+      OUTER_SPRINT $am_queue(~0~) ~%am_parent%~ OUTER_SET am_queued = 1
+      OUTER_FOR (am_q = 0; am_q < am_queued; ++am_q) BEGIN
+        OUTER_SPRINT am_current $am_queue(~%am_q%~)
+        ACTION_IF NOT VARIABLE_IS_SET $am_srcs(~%am_current%~) BEGIN
+          OUTER_SET $am_srcs(~%am_current%~) = 1
+          ACTION_IF FILE_EXISTS_IN_GAME ~%am_current%.spl~ BEGIN
+            COPY_EXISTING - ~%am_current%.spl~ ~override~
+              LPM cbr_am_layout
+              PATCH_IF am_readable BEGIN
+                SET am_links = 0 SET am_mechanic = 0 SET am_shield = 0
+                FOR (am_a = 0; am_a < am_nab; ++am_a) BEGIN
+                  SPRINT am_raw $am_effects(~%am_a%~)
+                  INNER_PATCH ~%am_raw%~ BEGIN
+                    FOR (am_at = 0; am_at < BUFFER_LENGTH; am_at += 48) BEGIN
+                      READ_SHORT am_at am_op READ_LONG (am_at + 8) am_mode
+                      READ_ASCII (am_at + 20) am_res (8) NULL TO_UPPER am_res
+                      PATCH_IF am_op = 230 AND am_mode = 19 BEGIN SET am_shield = 1 END
+                      PATCH_IF (component = 210 AND (am_op = 166 OR (am_op = 230 AND am_mode = 1)
+                        OR (am_op = 402 AND ~%am_res%~ STRING_EQUAL_CASE ~CBRPM~)))
+                        OR (component = 211 AND (am_op = 60 OR (am_op = 221 AND am_mode = 1))) BEGIN
+                        SET am_mechanic = 1
+                      END
+                      PATCH_IF (am_op = 146 OR am_op = 148) AND NOT (~%am_res%~ STRING_EQUAL ~~) BEGIN
+                        SET am_links = 1
+                        SPRINT $am_queue(~%am_queued%~) ~%am_res%~ SET am_queued += 1
+                      END
+                    END
+                  END
+                END
+                PATCH_IF am_mechanic OR (NOT am_links AND NOT am_shield) BEGIN
+                  SET $am_payloads(~%am_current%~) = 1 SET am_any_payload = 1
+                END
+              END ELSE BEGIN
+                PATCH_PRINT ~CBR anti-magic: %am_current%.spl has unreadable tables; continuing.~
+                SET am_missing = 1
+                PATCH_IF ~%am_current%~ STRING_EQUAL_CASE ~%am_parent%~ BEGIN SET am_available = 0 END
+              END
+          END ELSE BEGIN
+            OUTER_SET am_missing = 1 PRINT ~CBR anti-magic: %am_current%.spl is absent; continuing.~
+          END
         END
       END
-    END
-  OUTER_SET am_payload_count = 0
-  ACTION_IF am_parent_matches > 0 BEGIN
-    OUTER_SPRINT am_payload ~%am_parent%~
-    OUTER_SET am_payload_count = 1
-  END
-  ACTION_PHP_EACH am_children AS am_child => _ BEGIN
-    ACTION_IF FILE_EXISTS_IN_GAME ~%am_child%.spl~ BEGIN
-      COPY_EXISTING - ~%am_child%.spl~ ~override~
-        LPM cbr_am_classify
-        PATCH_IF am_matches > 0 BEGIN
-          SET am_payload_count += 1
-          SPRINT am_payload ~%am_child%~
-        END
-    END ELSE BEGIN FAIL ~CBR anti-magic: missing linked payload %am_child%.spl.~ END
-  END
-  ACTION_IF am_payload_count != 1 BEGIN FAIL ~CBR anti-magic: ambiguous or unsupported effective payload.~ END
+      // A readable cycle with no leaf still gets the decided behavior.
+      ACTION_IF am_available AND NOT am_missing AND NOT am_any_payload BEGIN
+        OUTER_SET $am_payloads(~%am_parent%~) = 1
+      END
+    END ELSE BEGIN PRINT ~CBR anti-magic: %am_parent%.spl is absent; continuing.~ END
+  END ELSE BEGIN PRINT ~CBR anti-magic: %am_symbol% is absent from spell.ids; continuing.~ END
 END
 
-// The effects of the current SPL buffer: as_casts = 1 when one of them casts
-// (opcode 146 or 148) a member of the family array am_srcs.
+// Text ownership follows delivery identities, never an old strref or sentence.
 DEFINE_PATCH_MACRO cbr_am_spell_links
 BEGIN
   SET as_casts = 0
-  PATCH_IF BUFFER_LENGTH >= 0x72 BEGIN
-    READ_ASCII 0 as_sig (8)
-    PATCH_IF ~%as_sig%~ STRING_EQUAL ~SPL V1  ~ BEGIN
-      READ_LONG 0x64 as_ab
-      READ_SHORT 0x68 as_nab
-      READ_LONG 0x6a as_fx
-      PATCH_IF as_ab >= 0x72 AND as_ab + 40 * as_nab <= BUFFER_LENGTH
-        AND as_fx >= as_ab + 40 * as_nab AND as_fx <= BUFFER_LENGTH BEGIN
-        SET as_total = (BUFFER_LENGTH - as_fx) / 48
-        FOR (as_i = 0; as_i < as_total; ++as_i) BEGIN
-          SET as_at = as_fx + 48 * as_i
-          READ_SHORT as_at as_op
-          PATCH_IF as_op = 146 OR as_op = 148 BEGIN
-            READ_ASCII (as_at + 20) as_res (8) NULL
-            TO_UPPER as_res
-            PATCH_IF VARIABLE_IS_SET $am_srcs(~%as_res%~) BEGIN SET as_casts = 1 END
-          END
+  LPM cbr_am_layout
+  PATCH_IF am_readable BEGIN
+    FOR (am_a = 0; am_a < am_nab; ++am_a) BEGIN
+      SPRINT am_raw $am_effects(~%am_a%~)
+      INNER_PATCH ~%am_raw%~ BEGIN
+        FOR (am_at = 0; am_at < BUFFER_LENGTH; am_at += 48) BEGIN
+          READ_SHORT am_at am_op READ_ASCII (am_at + 20) am_res (8) NULL TO_UPPER am_res
+          PATCH_IF (am_op = 146 OR am_op = 148) AND VARIABLE_IS_SET $am_srcs(~%am_res%~) BEGIN SET as_casts = 1 END
         END
       END
     END
   END
 END
 
-// The effects of the current ITM buffer: ai_direct = 1 when it casts or teaches
-// (opcodes 146, 147, 148) the parent, ai_indirect = 1 when it casts a sibling
-// spell (array am_sib) that casts the family. Only effects, never text.
 DEFINE_PATCH_MACRO cbr_am_item_links
 BEGIN
-  SET ai_direct = 0
-  SET ai_indirect = 0
+  SET ai_direct = 0 SET ai_indirect = 0
   PATCH_IF BUFFER_LENGTH >= 0x72 BEGIN
-    READ_ASCII 0 ai_sig (8)
-    PATCH_IF ~%ai_sig%~ STRING_EQUAL ~ITM V1  ~ BEGIN
-      READ_LONG 0x64 ai_ab
-      READ_SHORT 0x68 ai_nab
-      READ_LONG 0x6a ai_fx
-      PATCH_IF ai_ab >= 0x72 AND ai_ab + 0x38 * ai_nab <= BUFFER_LENGTH
-        AND ai_fx >= ai_ab + 0x38 * ai_nab AND ai_fx <= BUFFER_LENGTH BEGIN
-        SET ai_total = (BUFFER_LENGTH - ai_fx) / 48
-        FOR (ai_i = 0; ai_i < ai_total; ++ai_i) BEGIN
-          SET ai_at = ai_fx + 48 * ai_i
-          READ_SHORT ai_at ai_op
-          PATCH_IF ai_op = 146 OR ai_op = 147 OR ai_op = 148 BEGIN
-            READ_ASCII (ai_at + 20) ai_res (8) NULL
-            TO_UPPER ai_res
-            PATCH_IF ~%ai_res%~ STRING_EQUAL_CASE ~%am_parent%~ BEGIN SET ai_direct = 1 END
-            PATCH_IF (ai_op = 146 OR ai_op = 148) AND VARIABLE_IS_SET $am_sib(~%ai_res%~) BEGIN
-              SET ai_indirect = 1
-            END
+    READ_LONG 0x64 ai_ab READ_SHORT 0x68 ai_nab READ_LONG 0x6a ai_fx
+    PATCH_IF ai_ab >= 0x72 AND ai_ab + 0x38 * ai_nab <= BUFFER_LENGTH
+      AND ai_fx >= 0x72 AND ai_fx <= BUFFER_LENGTH BEGIN
+      // Each ability owns a slice; table order and shared slices do not matter.
+      FOR (ai_a = 0; ai_a < ai_nab; ++ai_a) BEGIN
+        READ_SHORT (ai_ab + 0x38 * ai_a + 0x1e) ai_n
+        READ_SHORT (ai_ab + 0x38 * ai_a + 0x20) ai_first
+        PATCH_IF ai_fx + 48 * (ai_first + ai_n) <= BUFFER_LENGTH BEGIN
+          FOR (ai_i = ai_first; ai_i < ai_first + ai_n; ++ai_i) BEGIN
+            SET ai_at = ai_fx + 48 * ai_i READ_SHORT ai_at ai_op
+            READ_ASCII (ai_at + 20) ai_res (8) NULL TO_UPPER ai_res
+            PATCH_IF (ai_op = 146 OR ai_op = 147 OR ai_op = 148)
+              AND ~%ai_res%~ STRING_EQUAL_CASE ~%am_parent%~ BEGIN SET ai_direct = 1 END
+            PATCH_IF (ai_op = 146 OR ai_op = 148) AND VARIABLE_IS_SET $am_sib(~%ai_res%~) BEGIN SET ai_indirect = 1 END
           END
         END
       END
@@ -265,232 +236,74 @@ BEGIN
   END
 END
 
-// am_is_old = 1 when strref am_ref is a description this change replaces: a
-// recorded old description (the strrefs of the parent as it was, of the payload
-// and of its linked spells) or any string with exactly the same long text.
-DEFINE_PATCH_MACRO cbr_am_is_old
-BEGIN
-  SET am_is_old = 0
-  PATCH_IF am_ref > 0 AND am_ref != am_new_ref BEGIN
-    FOR (am_k = 0; am_k < am_old_n; ++am_k) BEGIN
-      PATCH_IF $am_old_ref(~%am_k%~) = am_ref BEGIN SET am_is_old = 1 END
-    END
-    PATCH_IF NOT am_is_old BEGIN
-      GET_STRREF am_ref am_cand
-      PATCH_IF STRING_LENGTH ~%am_cand%~ > 40 BEGIN
-        FOR (am_k = 0; am_k < am_old_n; ++am_k) BEGIN
-          SPRINT am_otxt $am_old_text(~%am_k%~)
-          PATCH_IF ~%am_cand%~ STRING_EQUAL ~%am_otxt%~ BEGIN SET am_is_old = 1 END
-        END
-      END
-    END
-  END
-END
-
-// Charge-list entry of an item description, as vanilla and SCS write it:
-//   <bullet> <spell name>
-//     Special: <what it does>
-// Reads the current buffer (an INNER_PATCH over the description; it never edits,
-// because growing an INNER_PATCH_SAVE buffer pads the saved string with NUL bytes).
-// aw_state: 0 = no recognizable line, 1 = the Special value of this spell's entry
-// still speaks about am_wand_marker (aw_head is the text before its value and
-// aw_rest the text from the end of that line), 2 = the line already says
-// am_wand_special.
-DEFINE_PATCH_MACRO cbr_am_wand_line
-BEGIN
-  SET aw_state = 0
-  SET aw_len = STRING_LENGTH ~%am_name%~
-  PATCH_IF aw_len > 0 BEGIN
-    SET aw_at = INDEX_BUFFER (CASE_SENSITIVE EXACT_MATCH ~%am_name%~)
-    WHILE (aw_at >= 0 AND aw_state = 0) BEGIN
-      SET aw_after = aw_at + aw_len
-      SET aw_sp = INDEX_BUFFER (CASE_SENSITIVE EXACT_MATCH ~Special:~ aw_after)
-      SET aw_ok = (aw_sp > aw_after AND aw_sp - aw_after <= 6)
-      PATCH_IF aw_ok BEGIN
-        // Only a line break and indentation may lie between name and "Special:".
-        READ_BYTE aw_after aw_b
-        SET aw_ok = (aw_b = 10 OR aw_b = 13)
-        FOR (aw_j = aw_after + 1; aw_j < aw_sp; ++aw_j) BEGIN
-          READ_BYTE aw_j aw_b
-          PATCH_IF NOT (aw_b = 10 OR aw_b = 13 OR aw_b = 32 OR aw_b = 9) BEGIN SET aw_ok = 0 END
-        END
-      END
-      PATCH_IF aw_ok BEGIN
-        SET aw_vs = aw_sp + 8
-        READ_BYTE aw_vs aw_b
-        WHILE (aw_vs < BUFFER_LENGTH AND aw_b = 32) BEGIN
-          SET aw_vs += 1
-          READ_BYTE aw_vs aw_b
-        END
-        SET aw_eol = INDEX_BUFFER (CASE_SENSITIVE EXACT_MATCH ~%am_nl%~ aw_vs)
-        PATCH_IF aw_eol < 0 BEGIN SET aw_eol = BUFFER_LENGTH END
-        // A CRLF text keeps its carriage return.
-        PATCH_IF aw_eol > aw_vs BEGIN
-          READ_BYTE (aw_eol - 1) aw_b
-          PATCH_IF aw_b = 13 BEGIN SET aw_eol -= 1 END
-        END
-        SET aw_vl = aw_eol - aw_vs
-        READ_ASCII aw_vs aw_value (aw_vl)
-        PATCH_IF ~%aw_value%~ STRING_EQUAL ~%am_wand_special%~ BEGIN
-          SET aw_state = 2
-        END ELSE PATCH_IF (INDEX (CASE_SENSITIVE EXACT_MATCH ~%am_wand_marker%~ ~%aw_value%~)) >= 0 BEGIN
-          SET aw_state = 1
-          READ_ASCII 0 aw_head (aw_vs)
-          SET aw_rl = BUFFER_LENGTH - aw_eol
-          SPRINT aw_rest ~~
-          PATCH_IF aw_rl > 0 BEGIN READ_ASCII aw_eol aw_rest (aw_rl) END
-        END
-      END
-      PATCH_IF aw_state = 0 BEGIN
-        SET aw_at = INDEX_BUFFER (CASE_SENSITIVE EXACT_MATCH ~%am_name%~ aw_after)
-      END
-    END
-  END
-END
-// Rewrites the parent's description in Spell Revisions' layout and repoints every
-// text that still shows an old description of this spell:
-//  - scrolls and other items that learn or cast the parent (opcodes 147, 146, 148):
-//    identified and unidentified description, only when it is an old description;
-//  - items that reach the payload through a sibling spell (SCS's Wand of Spell
-//    Striking): only the charge line of this spell inside their own text;
-//  - sibling spells that cast the family and share an old description.
-// An item with a different text keeps it and the installer says so.
-// Needs am_parent, am_payload and am_children from cbr_am_discover, `component`,
-// am_keep_existing (1: a parent text that already has the layout and contains
-// am_keep_marker stays) and am_label. The family's own hidden spells are not repointed:
-// their old strrefs are how an already changed installation finds what is stale.
 DEFINE_ACTION_MACRO cbr_am_describe
 BEGIN
-  OUTER_SPRINT am_nl ~x~
-  OUTER_INNER_PATCH_SAVE am_nl ~%am_nl%~ BEGIN WRITE_BYTE 0 10 END
-
-  ACTION_CLEAR_ARRAY am_srcs
-  OUTER_SET $am_srcs(~%am_parent%~) = 1
-  OUTER_SET $am_srcs(~%am_payload%~) = 1
-  ACTION_PHP_EACH am_children AS am_child => _ BEGIN OUTER_SET $am_srcs(~%am_child%~) = 1 END
-
-  // The descriptions this change replaces, read before anything is written.
-  ACTION_CLEAR_ARRAY am_old_ref
-  ACTION_CLEAR_ARRAY am_old_text
-  OUTER_SET am_old_n = 0
-  ACTION_PHP_EACH am_srcs AS am_src => _ BEGIN
-    ACTION_IF FILE_EXISTS_IN_GAME ~%am_src%.spl~ BEGIN
-      COPY_EXISTING - ~%am_src%.spl~ ~override~
-        READ_SLONG 0x50 am_ref
-        PATCH_IF am_ref > 0 BEGIN
-          SET am_dup = 0
-          FOR (am_k = 0; am_k < am_old_n; ++am_k) BEGIN
-            PATCH_IF $am_old_ref(~%am_k%~) = am_ref BEGIN SET am_dup = 1 END
-          END
-          PATCH_IF NOT am_dup BEGIN
-            GET_STRREF am_ref am_t
-            SET $am_old_ref(~%am_old_n%~) = am_ref
-            SPRINT $am_old_text(~%am_old_n%~) ~%am_t%~
-            SET am_old_n += 1
-          END
-        END
+  ACTION_IF am_available AND ~%EE_LANGUAGE%~ STRING_EQUAL_CASE ~en_us~ BEGIN
+    ACTION_IF component = 210 BEGIN
+      OUTER_SPRINT am_text @2100 OUTER_SPRINT am_wand_special @2101
+      OUTER_SPRINT am_name ~Pierce Magic~ OUTER_SPRINT am_scroll ~SCRL7L~
+    END ELSE BEGIN
+      OUTER_SPRINT am_text @2110 OUTER_SPRINT am_wand_special @2111
+      OUTER_SPRINT am_name ~Spellstrike~ OUTER_SPRINT am_scroll ~SCRL9M~
     END
-  END
-
-  ACTION_IF component = 210 BEGIN
-    OUTER_SPRINT am_text @2100
-    OUTER_SPRINT am_wand_special @2101
-    OUTER_SPRINT am_wand_marker ~Magic Resistance~
-    OUTER_SPRINT am_keep_marker ~half~
-  END ELSE BEGIN
-    OUTER_SPRINT am_text @2110
-    OUTER_SPRINT am_wand_special @2111
-    OUTER_SPRINT am_wand_marker ~protection~
-    OUTER_SPRINT am_keep_marker ~15%~
-  END
-  OUTER_SPRINT am_note @2102
-
-  OUTER_SET am_flags = 0
-  OUTER_SET am_name_ref = 0
-  OUTER_SET am_parent_ref = 0
-  OUTER_SPRINT am_name ~~
-  OUTER_SPRINT am_parent_text ~~
-  COPY_EXISTING - ~%am_parent%.spl~ ~override~
-    READ_LONG 0x18 am_flags
-    READ_SLONG 0x08 am_name_ref
-    READ_SLONG 0x50 am_parent_ref
-    PATCH_IF am_name_ref > 0 BEGIN GET_STRREF am_name_ref am_name END
-    PATCH_IF am_parent_ref > 0 BEGIN GET_STRREF am_parent_ref am_parent_text END
-  // Preserve the installed SCS allowance for invisible targets: the paragraph that
-  // says so is part of Spell Revisions' layout and is kept only for such a spell.
-  ACTION_IF (am_flags BAND 0x1000000) != 0 BEGIN
-    OUTER_SPRINT am_text ~%am_text%%am_nl%%am_nl%%am_note%~
-  END
-
-  // Spell Revisions' layout puts the header on the lines right after the name; a
-  // text with a blank line after the name has no header.
-  OUTER_SET am_keep = 0
-  ACTION_IF am_keep_existing AND NOT (~%am_name%~ STRING_EQUAL ~~) BEGIN
-    OUTER_SET am_keep = (((INDEX (CASE_SENSITIVE EXACT_MATCH ~%am_name%%am_nl%~ ~%am_parent_text%~)) = 0)
-      AND ((INDEX (CASE_SENSITIVE EXACT_MATCH ~%am_name%%am_nl%%am_nl%~ ~%am_parent_text%~)) != 0)
-      AND ((INDEX (CASE_SENSITIVE EXACT_MATCH ~%am_keep_marker%~ ~%am_parent_text%~)) >= 0))
-  END
-  ACTION_IF am_keep BEGIN
-    OUTER_SET am_new_ref = am_parent_ref
-  END ELSE BEGIN
-    OUTER_SET am_new_ref = RESOLVE_STR_REF (~%am_text%~)
+    OUTER_SPRINT am_note @2102
     COPY_EXISTING ~%am_parent%.spl~ ~override~
-      WRITE_LONG 0x50 am_new_ref
-    BUT_ONLY_IF_IT_CHANGES
+      PATCH_IF BUFFER_LENGTH >= 0x72 BEGIN
+        READ_LONG 0x18 am_flags READ_SLONG 8 am_name_ref
+        PATCH_IF am_name_ref >= 0 BEGIN GET_STRREF am_name_ref am_name END
+        PATCH_IF (am_flags BAND 0x1000000) != 0 BEGIN
+          SPRINT am_text ~%am_text%
+
+%am_note%~
+        END
+        SET am_new_ref = RESOLVE_STR_REF (~%am_text%~)
+        WRITE_LONG 0x50 am_new_ref
+      END
+    BUT_ONLY
+    OUTER_SPRINT am_wand_text ~Ironically, these wands are both prized and hated by wizards.
+
+STATISTICS:
+
+Charge abilities:
+– Breach
+  Special: Dispels all specific and combat protections on target
+  Range: 40 ft.
+  Area of Effect: 1 creature
+
+– %am_name%
+  Special: %am_wand_special%
+  Range: 40 ft.
+  Area of Effect: 1 creature
+
+Requires:
+ 9 Intelligence
+
+Weight: 1~
+    OUTER_SET am_wand_ref = RESOLVE_STR_REF (~%am_wand_text%~)
+    ACTION_CLEAR_ARRAY am_sib
+    COPY_EXISTING_REGEXP GLOB ~^.+\.spl$~ ~override~
+        LPM cbr_am_spell_links
+        SPRINT am_me ~%SOURCE_RES%~ TO_UPPER am_me
+        PATCH_IF as_casts AND NOT VARIABLE_IS_SET $am_srcs(~%am_me%~) BEGIN
+          SET $am_sib(~%am_me%~) = 1 WRITE_LONG 0x50 am_new_ref
+        END
+    BUT_ONLY IF_EXISTS
+    COPY_EXISTING_REGEXP GLOB ~^.+\.itm$~ ~override~
+        // We own complete text only for these stock scrolls and WAND18.
+        // Other items can expose more abilities; their descriptions remain
+        // theirs while the invoked spell receives our mechanical changes.
+        PATCH_IF BUFFER_LENGTH >= 0x72 BEGIN
+          PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~%am_scroll%~ BEGIN
+            WRITE_LONG 0x54 am_new_ref WRITE_LONG 0x50 am_new_ref
+          END ELSE PATCH_IF ~%SOURCE_RES%~ STRING_EQUAL_CASE ~WAND18~ BEGIN
+            LPM cbr_am_item_links
+            PATCH_IF ai_direct OR ai_indirect BEGIN WRITE_LONG 0x54 am_wand_ref END
+          END
+        END
+    BUT_ONLY IF_EXISTS
+  END ELSE ACTION_IF am_available BEGIN
+    PRINT ~CBR anti-magic: no translation for this language; retaining descriptions.~
   END
-
-  // Sibling spells that cast the family. They show an old description themselves
-  // (Artisan's Kitpack's monk Spellstrike) or lead an item to the payload.
-  ACTION_CLEAR_ARRAY am_sib
-  COPY_EXISTING_REGEXP GLOB ~^.+\.spl$~ ~override~
-    LPM cbr_am_spell_links
-    PATCH_IF as_casts BEGIN
-      SPRINT am_me ~%SOURCE_RES%~
-      TO_UPPER am_me
-      PATCH_IF NOT VARIABLE_IS_SET $am_srcs(~%am_me%~) BEGIN
-        SET $am_sib(~%am_me%~) = 1
-        READ_SLONG 0x50 am_ref
-        LPM cbr_am_is_old
-        PATCH_IF am_is_old BEGIN
-          WRITE_LONG 0x50 am_new_ref
-        END
-      END
-    END
-  BUT_ONLY_IF_IT_CHANGES
-
-  COPY_EXISTING_REGEXP GLOB ~^.+\.itm$~ ~override~
-    LPM cbr_am_item_links
-    PATCH_IF ai_direct OR ai_indirect BEGIN
-      SET ai_done = 0
-      PATCH_IF ai_direct BEGIN
-        PATCH_FOR_EACH ai_off IN 0x54 0x50 BEGIN
-          READ_SLONG ai_off am_ref
-          LPM cbr_am_is_old
-          PATCH_IF am_is_old BEGIN
-            WRITE_LONG ai_off am_new_ref
-            PATCH_IF ai_off = 0x54 BEGIN SET ai_done = 1 END
-          END ELSE PATCH_IF ai_off = 0x54 AND am_ref > 0 AND am_ref = am_new_ref BEGIN
-            SET ai_done = 1
-          END
-        END
-      END
-      // Its own identified text: only this spell's charge line may be corrected.
-      PATCH_IF NOT ai_done BEGIN
-        READ_SLONG 0x54 am_ref
-        PATCH_IF am_ref > 0 BEGIN
-          GET_STRREF am_ref ai_text
-          INNER_PATCH ~%ai_text%~ BEGIN LPM cbr_am_wand_line END
-          PATCH_IF aw_state = 1 BEGIN
-            SPRINT ai_new_text ~%aw_head%%am_wand_special%%aw_rest%~
-            SET ai_new_ref = RESOLVE_STR_REF (~%ai_new_text%~)
-            WRITE_LONG 0x54 ai_new_ref
-          END ELSE PATCH_IF aw_state = 0 BEGIN
-            PATCH_PRINT ~CBR %am_label%: %SOURCE_FILE% casts, teaches or reaches %am_parent%, but its description is its own text without a recognizable %am_name% line; it was left unchanged.~
-          END
-        END
-      END
-    END
-  BUT_ONLY_IF_IT_CHANGES
 END
 
 DEFINE_ACTION_FUNCTION cbr_install_sr_antimagic
@@ -498,53 +311,37 @@ DEFINE_ACTION_FUNCTION cbr_install_sr_antimagic
   STR_VAR runtime_file = ~chriz-bg-rebalance/lua/M_CBRPM.lua~
 BEGIN
   LAM cbr_am_discover
-
-  ACTION_IF component = 210 BEGIN
-    OUTER_SET CBR_PM_MR_STAT = IDS_OF_SYMBOL (~stats~ ~RESISTMAGIC~)
-    ACTION_IF CBR_PM_MR_STAT < 0 BEGIN FAIL ~CBR Pierce Magic: cannot resolve RESISTMAGIC.~ END
-    ACTION_FOR_EACH am_ext IN spl eff itm BEGIN
-      ACTION_IF FILE_EXISTS_IN_GAME ~CBRPM.%am_ext%~ BEGIN FAIL ~CBR Pierce Magic: private CBRPM namespace already occupied.~ END
+  ACTION_IF am_available BEGIN
+    ACTION_PHP_EACH am_payloads AS am_payload => _ BEGIN
+      COPY_EXISTING ~%am_payload%.spl~ ~override~
+        PATCH_IF component = 210 BEGIN LPF cbr_sr_pierce_magic_patch END END
+        ELSE BEGIN LPF cbr_sr_spellstrike_patch STR_VAR payload_resref = EVAL ~%am_payload%~ END END
+      BUT_ONLY
     END
-    ACTION_IF FILE_EXISTS_IN_GAME ~M_CBRPM.lua~ BEGIN
-      COPY_EXISTING - ~M_CBRPM.lua~ ~override~
-        READ_ASCII 0 am_marker (25)
-        PATCH_IF NOT (~%am_marker%~ STRING_EQUAL ~-- CBR_SR_PIERCE_MAGIC_V1~) BEGIN
-          PATCH_FAIL ~CBR Pierce Magic: foreign M_CBRPM.lua collision.~
-        END
+    ACTION_IF component = 210 BEGIN
+      OUTER_SET CBR_PM_MR_STAT = 18
+      ACTION_IF FILE_EXISTS_IN_GAME ~stats.ids~ BEGIN
+        OUTER_SET am_stat = IDS_OF_SYMBOL (~stats~ ~RESISTMAGIC~)
+        ACTION_IF am_stat >= 0 BEGIN OUTER_SET CBR_PM_MR_STAT = am_stat END
+        ELSE BEGIN APPEND ~stats.ids~ ~18 RESISTMAGIC~ END
+      END ELSE BEGIN
+        COPY ~%runtime_file%~ ~override/stats.ids~
+          DELETE_BYTES 0 BUFFER_LENGTH
+          SPRINT am_ids ~IDS V1.0%WNL%18 RESISTMAGIC%WNL%~
+          SET am_len = STRING_LENGTH ~%am_ids%~
+          INSERT_BYTES 0 am_len WRITE_ASCIIE 0 ~%am_ids%~ (am_len)
+      END
+      COPY ~%runtime_file%~ ~override/M_CBRPM.lua~ EVALUATE_BUFFER
     END
-    COPY_EXISTING ~%am_payload%.spl~ ~override~
-      LPF cbr_sr_pierce_magic_patch END
-    BUT_ONLY_IF_IT_CHANGES
-    COPY ~%runtime_file%~ ~override/M_CBRPM.lua~ EVALUATE_BUFFER
-  END ELSE BEGIN
-    COPY_EXISTING ~%am_payload%.spl~ ~override~
-      LPF cbr_sr_spellstrike_patch STR_VAR payload_resref = EVAL ~%am_payload%~ END
-    BUT_ONLY_IF_IT_CHANGES
+    LAM cbr_am_describe
   END
-  // Texts last, after the binary preflight and transformation: the description
-  // is allocated only for a payload that was accepted.
-  OUTER_SET am_keep_existing = 0
-  OUTER_SPRINT am_label ~anti-magic~
-  LAM cbr_am_describe
 END
 
-// Texts only, for an installation whose payload already carries the changed
-// mechanic: the five-round Pierce Magic reduction (210), the 15% Spellstrike
-// failure (211), whichever installer or private tail made it. Nothing but
-// descriptions changes. A Spellstrike description that already has Spell
-// Revisions' layout and states the 15% stays as it is; scrolls and sibling spells
-// are pointed at it.
+// The independent text refresh owns only descriptions, irrespective of the
+// current mechanical payload. It never alters the spell's effects or runtime.
 DEFINE_ACTION_FUNCTION cbr_refresh_sr_antimagic_texts
   INT_VAR component = 210
 BEGIN
   LAM cbr_am_discover
-  OUTER_SET am_conv = 0
-  COPY_EXISTING - ~%am_payload%.spl~ ~override~
-    LPM cbr_am_converted
-  ACTION_IF am_conv < 1 BEGIN
-    FAIL ~CBR anti-magic texts: %am_payload%.spl does not carry the changed mechanic of component %component%. Install the mechanic first; this component only updates texts.~
-  END
-  OUTER_SET am_keep_existing = (component = 211)
-  OUTER_SPRINT am_label ~anti-magic texts~
   LAM cbr_am_describe
 END

@@ -20,7 +20,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.ie_formats import SplAbility, make_spl, read_2da, read_eff_v2, read_spl
+from tests.ie_formats import SplAbility, TwoDA, make_spl, read_2da, read_eff_v2, read_spl
 from tests.test_tempus_completion import (
     EEEX_KIT_ID,
     MARKER_SYMBOL,
@@ -88,6 +88,7 @@ class CompletionGame:
         self.temporary = temporary
         self.root = Path(temporary.name) / "game"
         self.root.mkdir()
+        (self.root / "WeiDU.log").write_text("", encoding="ascii")
         self.override = self.root / "override"
         self.override.mkdir()
 
@@ -258,15 +259,15 @@ class TempusCompletionInstallerTests(unittest.TestCase):
         )
         self._uninstall_restores_override(game, 400)
 
-    def test_component_400_is_byte_stable_over_hotfixed_state(self) -> None:
+    def test_component_400_preserves_hotfixed_values_and_grant_bytes(self):
         game = self._game(training_shape="hotfixed")
         self._install(game, 400)
-        for name in ("WEAPPROF.2DA", "C0PR#C4.SPL"):
-            self.assertEqual(
-                game.pre_override[name.upper()],
-                (game.override / name).read_bytes(),
-                f"{name} must stay byte-identical over the hotfixed state",
-            )
+        self.assertEqual(game.pre_override["C0PR#C4.SPL"], (game.override / "C0PR#C4.SPL").read_bytes())
+        before = TwoDA.from_text(game.pre_override["WEAPPROF.2DA"].decode())
+        after = read_2da(game.override / "WEAPPROF.2DA")
+        for name, cells in before.rows:
+            for column, value in zip(before.columns, cells):
+                self.assertEqual(value, after.cell(name, column))
 
     def test_component_400_fails_without_artisan_permissions(self) -> None:
         game = self._game(with_artisan_permissions=False)
@@ -342,14 +343,26 @@ class TempusCompletionInstallerTests(unittest.TestCase):
         )
         self._uninstall_restores_override(game, 405)
 
-    def test_component_405_fails_without_divination_spells(self) -> None:
+    def test_component_405_without_divination_writes_inert_toll_and_clab(self) -> None:
         game = self._game(
             override_schools=(("SPPR104", 2), ("SPPR205", 6)), biff_schools=()
         )
         process = game.run("--force-install-list", 405)
         transcript = game.transcript(process)
-        self.assertIn("NOT INSTALLED", transcript, transcript)
-        self.assertEqual(game.pre_override, _raw_file_tree(game.override))
+        self.assertEqual(0, process.returncode, transcript)
+        self.assertIn("SUCCESSFULLY INSTALLED", transcript)
+        self.assertNotIn("WARNING", transcript.upper())
+        self.assertEqual(1, transcript.count("no addressable Divination spells"))
+        toll = read_spl(game.override / "CBRTMDV.spl")
+        self.assertEqual([321], [effect.opcode for effect in toll.abilities[0].effects])
+        self.assertEqual("CBRTMDV", toll.abilities[0].effects[0].resource)
+        table = read_2da(game.override / "OHTEMPUS.2DA")
+        self.assertTrue(all(table.cell("CBR_DIVTOLL", str(level)) == "AP_CBRTMDV" for level in range(1, 51)))
+        for name, payload in game.pre_override.items():
+            if name.upper() != "OHTEMPUS.2DA":
+                self.assertEqual(payload, (game.override / name).read_bytes(), name)
+        self.assertEqual([""], _read_tlk_strings(game.lang_tlk))
+        self._uninstall_restores_override(game, 405)
 
     def test_component_407_ships_stamped_listener_then_uninstalls(self) -> None:
         game = self._game()
