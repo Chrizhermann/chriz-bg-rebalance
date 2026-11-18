@@ -1,5 +1,34 @@
 # chriz-bg-rebalance — Handover
 
+## November 18 — v0.8.12: Round Clock — Personal rounds & cooldowns across world-time jumps (361)
+
+The full installer's `cbr_time_jump_round_cooldowns` and the standalone `CBR_ROUND_CLOCK`
+supply the same component 361. A committed forward jump ages spent spell and item aura, the
+round after a completed swing, the Hide in Shadows lockout and the contingency poll delay.
+The stock Stealth button accepts input on the first paused frame after the lockout expires.
+Choose either installer for 361. Component 360 is independent.
+
+- **Final BG2:EE smoke.** The code at `70c9e06` ran with 360 on 2.7.3.0, EEex v1.3.1 and
+  LuaJIT. On paused frame 388, `DayNight(13)` advanced the clock from 31,510 to 58,500.
+  The four seeded timers went from (36, 27, 90, 82) to (−1, −2, 0, 0). Slot 5 enabled on
+  its first paint. Its stock click changed the thief's modal state from 0 to 3 on that frame.
+  Component 361 recorded one jump, three actors, zero Lua errors and zero off-thread skips.
+  Component 360 reported zero errors.
+- **Earlier single-player trials.** BG2:EE covered world-map travel, completed and interrupted
+  rests, an in-flight spell, save/reload and Time Stop alongside 360. On BG2:EE and standalone
+  IWD:EE, all 12 LuaJIT spell and potion trials recovered all four timers. A follow-up spell
+  queued after native area compression started one tick after resume in each trial. IWD:EE's
+  paused Stealth input also passed with embedded Lua 5.2.
+- **Offline and Win64.** Full discovery passed 986 tests and skipped 29. The release check
+  walked captured Win64 call frames. Earlier checks generated frames with the EEex v1.2.0
+  and v1.3.1 writers under Lua 5.2 and LuaJIT. A BG2:EE process also walked the registered
+  clock and toolbar frames with Windows' unwind functions.
+
+Waylaid travel, custom UI action bars, a live multiplayer session and a full BG:EE/SoD runtime
+launch remain open. The multiplayer forced time-sync path has static evidence on three 2.7.3.0
+executables. The single-player runtime trials used BG2:EE and IWD:EE with EEex v1.3.1.
+[Release notes](release-notes/v0.8.12.md) · [Measurements](../research/16-time-jump-round-and-cooldowns.md).
+
 ## November 8 — v0.8.11: Every decided result, whatever the game files hold
 
 Release preparation for PR #27, “Write every change whatever the game files hold.” All components

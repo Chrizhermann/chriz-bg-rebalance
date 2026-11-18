@@ -1,14 +1,13 @@
-# Hardiness existing-install patch — v0.8.11
+# Hardiness existing-install patch — v0.8.12
 
 Since v0.8.11 this patch follows [We overwrite](../../AGENTS.md#we-overwrite): SR is
 optional and changed effects do not veto the owned resistance profile. The standalone
 setup applies each available Hardiness target independently, without an SR footprint
-gate. Older archives (v0.8.10 and before) still had additional SR requirements. The
-v0.8.11 archive has not been applied to a live game.
+gate. Components 200–202 have the same behavior in v0.8.12 as in v0.8.11.
 
 This new, standalone WeiDU mod appends its own entry after the current install.
 It does not reinstall Spell Revisions or any previously installed component.
-Requires BG2:EE/EET. The older archive also requires SR component 65. It changes both
+Requires BG2:EE/EET. Archives through v0.8.10 also require SR component 65. It changes both
 normal Hardiness (`SPCL907`) and Wish-granted Hardiness (`SPWISH12`).
 
 | Selection | Result |
@@ -34,7 +33,7 @@ Hardiness's existing Breach behavior. Only the resistance profile is vanilla.
    complete distribution.
 2. Before applying it, close the game and back up the game directory and saves.
    This package has not been applied to or playtested in a live game.
-3. Extract `CBR_SR_HARDINESS-v0.8.11-windows.zip` into the game directory.
+3. Extract `CBR_SR_HARDINESS-v0.8.12-windows.zip` into the game directory.
 4. Run `Setup-cbr_sr_hardiness.exe`. Choose 200 (recommended) or 201. Leave 202
    uninstalled unless the extra damage resistances are wanted.
 

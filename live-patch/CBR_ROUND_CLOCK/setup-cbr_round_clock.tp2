@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/cbr_round_clock~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.8.11~
+VERSION ~v0.8.12~
 ALWAYS
   INCLUDE ~CBR_ROUND_CLOCK/lib/round_clock.tpa~
 END

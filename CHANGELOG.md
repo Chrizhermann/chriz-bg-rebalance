@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.8.12 — 2026-11-18
+
+- Round Clock (361, `cbr_time_jump_round_cooldowns`) counts elapsed world time during travel,
+  rest, scripted jumps and the world-screen hour advance. It is also available as the standalone
+  `CBR_ROUND_CLOCK` installer.
+- Four personal timers now advance at each eligible creature's update speed. Spent spell and item
+  aura recovers, the attack round after a completed swing can finish, a Hide in Shadows lockout
+  can expire, and a contingency can become due for its next check. When Hide becomes available,
+  the stock Stealth button refreshes on the first paused frame and accepts input.
+- A zero-tick area or door move, loading a save, or an interrupted rest with zero elapsed ticks
+  grants no recovery. The engine retains control of active casts, attacks, item transactions and
+  the script timer set by `MakeUnselectable`.
+- Component 361 supports BG:EE, SoD, BG2:EE, EET and IWD:EE on Windows x64 2.7.3.0 with
+  EEex v1.2.0 or v1.3.1 and either LuaJIT or embedded Lua 5.2.
+
 ## v0.8.11 — 2026-11-08
 
 - Every component now writes its chosen spells, items, kits, creatures and tables even when a
