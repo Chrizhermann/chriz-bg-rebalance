@@ -1,7 +1,6 @@
-"""Build unpublished full-mod, Hardiness, anti-magic and True Time Stop Windows packages.
+"""Build unpublished full-mod, Hardiness, anti-magic, True Time Stop and Round Clock packages.
 
-The True Time Stop package is component 360 on its own: its tp2 and README from
-live-patch/CBR_TRUE_TIMESTOP, the library, strings and both Lua files from chriz-bg-rebalance/.
+Both clock packages take their library, strings and Lua payloads from the full mod.
 Does not inspect or write a game installation, invoke WeiDU, or use the network.
 """
 from __future__ import annotations
@@ -18,36 +17,40 @@ from tools.package_sr_antimagic import build as build_base
 from tools.package_sr_hardiness import write_checksum
 
 
+def version_of(path: Path) -> str:
+    versions = re.findall(r"(?m)^VERSION ~([^~\r\n]+)~[ \t]*$", path.read_text(encoding="utf-8"))
+    if len(versions) != 1:
+        raise ValueError(f"Expected one VERSION in {path.name}")
+    return versions[0]
+
+
 def build(output: Path) -> list[Path]:
-    setup = ROOT / "setup-chriz-bg-rebalance.tp2"
-    tail = ROOT / "live-patch/CBR_TRUE_TIMESTOP"
-    version = re.search(r"VERSION ~([^~]+)~", setup.read_text(encoding="utf-8")).group(1)
-    tail_setup = tail / "setup-cbr_true_timestop.tp2"
-    if f"VERSION ~{version}~" not in tail_setup.read_text(encoding="utf-8"):
-        raise ValueError("Full and True Time Stop installer versions must agree")
+    version = version_of(ROOT / "setup-chriz-bg-rebalance.tp2")
+    packages = (("CBR_TRUE_TIMESTOP", "time_stop_haste_clocks", "CBRTC"),
+                ("CBR_ROUND_CLOCK", "round_clock", "CBRRC"))
+    for name, _, _ in packages:
+        if version_of(ROOT / "live-patch" / name / f"setup-{name.lower()}.tp2") != version:
+            raise ValueError(f"Full and {name} installer versions must agree")
     result = build_base(output)
     source = ROOT / "chriz-bg-rebalance"
-    files = {
-        "LICENSE": ROOT / "LICENSE",
-        "WEIDU-LICENSE.txt": ROOT / "WEIDU-LICENSE.txt",
-        "Setup-cbr_true_timestop.exe": ROOT / "weidu.exe",
-        "CBR_TRUE_TIMESTOP/setup-cbr_true_timestop.tp2": tail_setup,
-        "CBR_TRUE_TIMESTOP/README.md": tail / "README.md",
-        "CBR_TRUE_TIMESTOP/languages/english/setup.tra": source / "languages/english/setup.tra",
-        "CBR_TRUE_TIMESTOP/lib/time_stop_haste_clocks.tpa": source / "lib/time_stop_haste_clocks.tpa",
-        # The same file names as component 360, so only one copy can ever be installed.
-        "CBR_TRUE_TIMESTOP/lua/CBRTC.lua": source / "lua/CBRTC.lua",
-        "CBR_TRUE_TIMESTOP/lua/M_CBRTC.lua": source / "lua/M_CBRTC.lua",
-    }
-    archive = output / f"CBR_TRUE_TIMESTOP-{version}-windows.zip"
-    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
-        for relative, path in sorted(files.items()):
-            entry = zipfile.ZipInfo(relative, date_time=(2026, 10, 6, 0, 0, 0))
-            entry.compress_type = zipfile.ZIP_DEFLATED
-            entry.external_attr = 0o644 << 16
-            bundle.writestr(entry, path.read_bytes())
-    write_checksum(archive)
-    return result + [archive]
+    for name, library, core in packages:
+        tail = ROOT / "live-patch" / name
+        tp2 = f"setup-{name.lower()}.tp2"
+        files = {"LICENSE": ROOT / "LICENSE", "WEIDU-LICENSE.txt": ROOT / "WEIDU-LICENSE.txt",
+                 f"Setup-{name.lower()}.exe": ROOT / "weidu.exe",
+                 f"{name}/{tp2}": tail / tp2, f"{name}/README.md": tail / "README.md"}
+        for path in ("languages/english/setup.tra", f"lib/{library}.tpa", f"lua/{core}.lua", f"lua/M_{core}.lua"):
+            files[f"{name}/{path}"] = source / path
+        archive = output / f"{name}-{version}-windows.zip"
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            for relative, path in sorted(files.items()):
+                entry = zipfile.ZipInfo(relative, date_time=(2026, 10, 6, 0, 0, 0))
+                entry.compress_type = zipfile.ZIP_DEFLATED
+                entry.external_attr = 0o644 << 16
+                bundle.writestr(entry, path.read_bytes())
+        write_checksum(archive)
+        result.append(archive)
+    return result
 
 
 if __name__ == "__main__":

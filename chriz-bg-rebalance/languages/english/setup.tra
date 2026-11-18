@@ -352,3 +352,12 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9364 = ~True Time Stop could not find the game's executable. BG2:EE / EET requires Baldur.exe or BaldurII.exe.~
 @9365 = ~True Time Stop installed. It switches itself on whenever the game starts through InfinityLoader; if anything does not match, the game stays unchanged and only the log says why. Install it before starting a playthrough: adding or removing it during one is not supported.~
 @9366 = ~True Time Stop is already installed by the other CBR installer (BG Rebalance's component 360 or its standalone package). Use one installer for it, never both.~
+
+@361 = ~Complete personal rounds and stealth cooldowns across time jumps (EEex, BG:EE / SoD / BG2:EE / EET / IWD:EE 2.7.3.0)~
+@9370 = ~Round Clock requires BG:EE, Siege of Dragonspear, BG2:EE, EET or IWD:EE.~
+@9371 = ~Round Clock requires EEex. Install EEex before this component.~
+@9372 = ~Round Clock requires icewind.exe in the IWD:EE game folder.~
+@9373 = ~Round Clock requires a supported 64-bit 2.7.3.0 executable. %cbr_rc_exe% is a different build or has an unreadable PE header.~
+@9374 = ~Round Clock could not find Baldur.exe or BaldurII.exe in the game folder.~
+@9375 = ~Round Clock installed. Start the game through InfinityLoader and check the log for [CBR Round Clock].~
+@9376 = ~Round Clock is already installed by the other CBR installer. Choose either BG Rebalance component 361 or the standalone Round Clock package.~
