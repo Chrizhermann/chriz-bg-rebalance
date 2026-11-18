@@ -119,6 +119,7 @@ The area asks the sprite's virtual `DoAIUpdate` whether to process it (`178CA6�
 392688  jle 3926EA               ; ready
 392698  test dword ptr [rax+rcx],8000h
         ; hasted and c > 0: compare (engineFrame & 1) with (spriteId & 1)
+3926C4  jne 3926D2               ; a parity mismatch still reaches the expiry check
 3926C6  inc r8w
 3926CA  mov [rdi+4990h],r8w
 3926D2  cmp r8w,64h
@@ -506,11 +507,11 @@ The constructors load the relevant vtables at BG/BG2 `130EEC` and IWD `130F0C`. 
 
 **Multiplayer has static verification only and has never been live-tested.** Only an admitted call on the thread captured at initialization enters Lua. On any other thread the gate increments `off_thread_skips` and immediately returns to the native path. The engine has already stored the new clock. The skipped delta grants no personal recovery and is never replayed.
 
-### Focused BG2:EE 2.7.3.0 quiet run
+### Focused BG2:EE 2.7.3.0 quiet run at `919e538`
 
 WeiDU 249 installed components 360 and 361 together in the standing BG2 Magic Lab with EEex v1.3.1 and LuaJIT. The worktree and installed `override` files matched byte for byte by SHA-256.
 
-| File | SHA-256 in the final smoke |
+| File | SHA-256 at `919e538` |
 |---|---|
 | `CBRRC.lua` | `37e7a2d1879eb3f8972638ab248c36e9cffde043d54b99c653ef628bef02f584` |
 | `M_CBRRC.lua` | `758b00a84b3f1ad1ebb5b14c61b53aa3363e9252ccd29056e90976b1c8bc1584` |
@@ -557,3 +558,52 @@ Full discovery with `python -B -m unittest discover -s tests -p "test_*.py"` ran
 The earlier Phase 2D full discovery at `a030734` passed all 1,002 tests in 567.953 seconds with zero skips, including 45 Round Clock tests. That run used the archived dragon, flail and bracer fixtures and removed the 51 staged files afterward.
 
 The Phase 2D package build keeps the installer version at `v0.8.11`. Four archive names are also used by the published release, so the branch builds are local verification artifacts. The Round Clock standalone is the fifth archive. Two independent invocations of `python -B tools/package_timestop.py --output <temporary-directory>` produced byte-identical ZIP pairs with matching SHA-256 sidecars and valid member CRCs.
+
+## Step 2B review fixes and verification (2026-11-18)
+
+All five regression cases reproduced on `919e538` in Lua 5.2 and LuaJIT. With the revised component, a throwing success logger leaves the clock installed and enabled with `refused == nil`, and the next initialization listener runs. This holds for queued and immediate initialization. After an array swap, both wrappers still call the stock methods and forward their return values when the shared metatable defines a throwing equality method. The two menu listeners and the key listener register independently. Losing any one of them leaves the initial paint and click bindings and the other available listeners working. [Lua host tests](../tests/test_round_clock.py).
+
+The executable-section scanner retains 30 bytes between 8,192-byte chunks. Both hosts installed with one 31-byte signature split 30+1. With two such split matches they reported `expected one clock checker, found 2` before allocating the hook. The Haste fixture forced world time from 0 to 1 with speed mask 2 and object ID 0. The one eligible update had zero cast increments. Cast counters of 99, 100 and 101 ended at 99, −1 and −1. The parity branch at BG2:EE 2.7.3.0 RVA `3926C4` reaches the threshold check at `3926D2` on this path.
+
+### Paused Stealth smoke on the final Lua
+
+WeiDU 249 installed components 360 and 361 together in the standing BG2:EE 2.7.3.0 x64 Magic Lab with EEex v1.3.1 and LuaJIT. The worktree and installed `override/CBRRC.lua` both had SHA-256 **`5a2e6792937349068941d1d767f71054d4d85bf21d5153da8408065597dc8d2f`**. The installed `M_CBRRC.lua` had SHA-256 `758b00a84b3f1ad1ebb5b14c61b53aa3363e9252ccd29056e90976b1c8bc1584`.
+
+The driver loaded a disposable copy of `000000010-BuffBot Clean Baseline` with a Thief in portrait 0. It paused the game, seeded that character's four counters and selected the stock Thief action bar. Slot 0's render issued the engine action `DayNight(13)`. A read-only observer sampled the component's commit. The first render callback for slot 5 sampled the native disabled flag after the stock enabled query, then invoked the stock press. Every sample was on **paused frame 388**, with Stealth button type 11.
+
+| Sample | World tick | Cast aura | Attack round | Hide | Contingency | Slot 5 disabled | Modal |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Before `DayNight(13)` | 31,510 | 36 | 27 | 90 | 82 | 1 | 0 |
+| Commit entry | 58,500 | 36 | 27 | 90 | 82 | 1 | 0 |
+| Commit exit | 58,500 | −1 | −2 | 0 | 0 | 1 | 0 |
+| First Stealth paint | 58,500 | −1 | −2 | 0 | 0 | 0 | 0 |
+| After `OnLButtonPressed(5)` | 58,500 | −1 | −2 | 0 | 0 | 0 | 3 |
+
+The hook recorded origin 2 and a delta of 26,990 ticks. Component 361 reported installed and enabled, one commit, three actors, `lua_errors = 0` and `off_thread_skips = 0`. Component 360 reported installed and enabled with zero errors. Audio preflight read seven of seven session meters. The 16.1-second quiet run measured **`max_job_audio_peak = 0.0`**. All three job processes exited with `0x00000000`, the pointer clip matched its initial value and the job was empty at exit.
+
+Two earlier driver runs ended before the cooldown measurement. The first timed out at the title menu after 85.1 seconds. The second exited cleanly after 16.0 seconds when the first world render did not accept the pause. The successful driver let each menu settle and confirmed the paused state on a subsequent world render before seeding the fields. All three runs installed the same Lua bytes and measured zero audio peak.
+
+WeiDU uninstalled both components with exit 0. Independent inventories of both restored roots matched their pre-run byte copies. Each manifest maps relative paths to file SHA-256 values or JSON null for directories. The digest uses sorted UTF-8 JSON with one-space indentation and no trailing newline. All five lab slots and `bg-game-install.lock` were free after teardown.
+
+| Restored root | Files / entries | Extra / missing / changed | SHA-256 before and after |
+|---|---:|---:|---|
+| `C:\Users\chris\CEBG-Tests\Magic-Lab-20261104\bg2ee` | 4,343 / 4,521 | 0 / 0 / 0 | `487909a1cf83b32bd8c0c3c8a3b5b9749730b34259a7a0d3ff58fa822c04bfd6` |
+| `C:\Users\chris\OneDrive\Documents\Chriz BG Magic Lab BG2EE - 20261104` | 25 / 31 | 0 / 0 / 0 | `671f6af86573004b44c8648718a36461a3fc2dc2d766db231b21c318985f74ed` |
+
+### Offline results
+
+| Suite | Tests run | Passed | Skipped | Failures / errors | Seconds |
+|---|---:|---:|---:|---:|---:|
+| Six focused modules | 83 | 81 | 2 | 0 / 0 | 37.971 |
+| Full discovery, one pass | 1,015 | 987 | 28 | 0 / 0 | 608.629 |
+
+The two focused skips were the BG:EE and IWD:EE executable-image tests. The BG2:EE test used a copy of the authorized lab executable. The Win64 unwind test exercised the captured call sites and generated fresh frames with the lab's EEex v1.3.1 scripts in both Lua runtimes. Full discovery included the same two image skips, 22 cases requiring the private dragon capture, one requiring `CBR_DRAGON_STACK_CAPTURE`, two Flail of Ages cases requiring the EET/SR/SCS and vanilla BIF captures, and one SR bracers case requiring private captured resources.
+
+Direct byte comparisons against both `a6205aa` and `919e538` matched all four assembly templates. The ranges below cover the entire gate and bridge functions, and the full JIT definitions through the exposure calls for the two helpers.
+
+| Compared source | Bytes | SHA-256 in all three revisions |
+|---|---:|---|
+| `BuildGate` | 2,028 | `68f8dc8ced1b180b85e268d5916622e238c66aaef74418ba938fa12708ccbb2b` |
+| `commitBridge` | 1,045 | `ddd7091b3174e4cfcf8886b50cf96a61be0b6ed74d3a6a03b598dde0d02c540d` |
+| `CBRRC_CaptureThread` | 314 | `5e8db0d59b1c3dea79beadca084927fdf2a5ca43d308d70ede9bb9857c6f26e1` |
+| `CBRRC_UpdateButtons` | 945 | `3ff04dbd555e0c9e294c7309f9f28b65cf3bc42e93a3b0b78772522c580746d9` |

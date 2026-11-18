@@ -73,7 +73,11 @@ local function bindToolbar()
                 bindingSkipped(key.." unavailable")
             elseif not wrapped[original] then
                 local function wrapper(self, ...)
-                    if pending and self == buttonArray then pcall(refreshToolbar) end
+                    if pending then
+                        pcall(function()
+                            if rawequal(self, buttonArray) then refreshToolbar() end
+                        end)
+                    end
                     return original(self, ...)
                 end
                 methods[key] = wrapper
@@ -146,7 +150,11 @@ local function age(sprite, id, stats, old, delta)
             h = updates(old, delta, mask + 1, id)
             if cast == 0 and firstParity ~= id % 2 then h = h + 1 end
         end
-        if h > 0 then mem.w16(sprite + 0x4990, cast + h >= 100 and 0xFFFF or cast + h) end
+        if cast + h >= 100 then
+            mem.w16(sprite + 0x4990, 0xFFFF)
+        elseif h > 0 then
+            mem.w16(sprite + 0x4990, cast + h)
+        end
     end
     local attack = mem.s16(sprite + 0x4B9A)
     if attack >= 0 and not attackAction[action]
@@ -273,7 +281,7 @@ local function findChecker(sections)
                     hits[#hits + 1] = address - #overlap + at - 1
                     from = at + 1
                 end
-                overlap = chunk:sub(2 - #signature)
+                overlap = chunk:sub(1 - #signature)
             end
         end
     end
@@ -492,10 +500,7 @@ C.requiredFunctions = {"EEex_GameState_AddInitializedListener", "EEex_GameState_
     "EEex_DisableCodeProtection", "EEex_EnableCodeProtection"}
 
 local function setupToolbar(a, block)
-    for _, name in ipairs({"EEex_Sprite_GetSelected", "EEex_Menu_AddAfterMainFileLoadedListener",
-                           "EEex_Key_AddPressedListener"}) do
-        assert(type(_G[name]) == "function", "missing "..name)
-    end
+    assert(type(EEex_Sprite_GetSelected) == "function", "missing EEex_Sprite_GetSelected")
     a.update = C.InspectToolbar(a)
     -- lua_CFunction. RBX preserves the Lua state over the engine call. The
     -- declared prolog describes both the 40-byte frame and the RBX save.
@@ -534,12 +539,18 @@ local function setupToolbar(a, block)
     assert(type(CBRRC_UpdateButtons) == "function", "cannot expose toolbar refresh")
     updateButtons, CBRRC_UpdateButtons = CBRRC_UpdateButtons, nil
     tryBindToolbar()
-    EEex_Menu_AddAfterMainFileLoadedListener(tryBindToolbar)
-    if type(EEex_Menu_AddAfterMainFileReloadedListener) == "function" then
-        EEex_Menu_AddAfterMainFileReloadedListener(tryBindToolbar)
+    local function register(name, listener)
+        local ok, reason = pcall(function()
+            local add = _G[name]
+            assert(type(add) == "function", "missing "..name)
+            add(listener)
+        end)
+        if not ok then bindingSkipped(reason) end
     end
+    register("EEex_Menu_AddAfterMainFileLoadedListener", tryBindToolbar)
+    register("EEex_Menu_AddAfterMainFileReloadedListener", tryBindToolbar)
     -- A toolbar hotkey can be dispatched before any item is painted.
-    EEex_Key_AddPressedListener(function() if pending then pcall(refreshToolbar) end end)
+    register("EEex_Key_AddPressedListener", function() if pending then pcall(refreshToolbar) end end)
 end
 
 local gateMayRun = false
@@ -636,7 +647,7 @@ function C.Start()
         patch(C.Inspect())
     end)
     if ok then
-        log("on ("..C.addresses.name.." 2.7.3.0)")
+        pcall(log, "on ("..C.addresses.name.." 2.7.3.0)")
     else
         CBRRC_CaptureThread = nil
         if C.block and not gateMayRun then
