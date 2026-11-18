@@ -1,6 +1,6 @@
 BACKUP ~weidu_external/backup/chriz-bg-rebalance~
 AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
-VERSION ~v0.8.11~
+VERSION ~v0.8.12~
 
 // Load the tested transformation library and define one installer wrapper for
 // all Tempus Holy Power compatibility choices. WeiDU's backup namespace is
@@ -31,6 +31,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/potion_uniqueness.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/chris_revisions.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/time_stop_haste_clocks.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/round_clock.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/class_weapon_access.tpa~
 
 
@@ -1581,3 +1582,10 @@ REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9361
 REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~cbr_true_timestop/setup-cbr_true_timestop.tp2~ 360) @9366
 LAF cbr_install_time_stop_haste_component END
 PRINT @9365
+
+BEGIN @361 DESIGNATED 361 GROUP @1300 LABEL ~cbr_time_jump_round_cooldowns~
+REQUIRE_PREDICATE (GAME_IS ~bgee bg2ee eet iwdee~) @9370
+REQUIRE_PREDICATE (FILE_EXISTS_IN_GAME ~M___EEex.lua~) @9371
+REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~cbr_round_clock/setup-cbr_round_clock.tp2~ 361) @9376
+LAF cbr_install_round_clock_component END
+PRINT @9375

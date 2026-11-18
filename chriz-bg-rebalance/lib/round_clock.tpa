@@ -1,0 +1,33 @@
+// Shared by both installers of component 361. Read only the loader's executable.
+DEFINE_ACTION_FUNCTION cbr_install_round_clock_component
+  STR_VAR source_dir = ~chriz-bg-rebalance/lua~
+BEGIN
+  // First existing ExeNames entry in the stock InfinityLoader.ini.
+  ACTION_IF (FILE_EXISTS ~Baldur.exe~) BEGIN
+    OUTER_SPRINT cbr_rc_exe ~Baldur.exe~
+  END ELSE ACTION_IF (FILE_EXISTS ~BaldurII.exe~) BEGIN
+    OUTER_SPRINT cbr_rc_exe ~BaldurII.exe~
+  END ELSE ACTION_IF (FILE_EXISTS ~icewind.exe~) BEGIN
+    OUTER_SPRINT cbr_rc_exe ~icewind.exe~
+  END ELSE ACTION_IF (FILE_EXISTS ~SiegeOfDragonspear.exe~) BEGIN
+    OUTER_SPRINT cbr_rc_exe ~SiegeOfDragonspear.exe~
+  END ELSE BEGIN
+    FAIL @9374
+  END
+  OUTER_SET cbr_rc_supported = 0
+  COPY - ~%cbr_rc_exe%~ ~cbr_rc_exe_probe~
+    PATCH_IF (SOURCE_SIZE >= 0x40) BEGIN
+      READ_SHORT 0 mz
+      READ_LONG 0x3c pe
+      PATCH_IF (mz = 0x5a4d AND pe >= 0x40 AND pe <= SOURCE_SIZE - 24) BEGIN
+        READ_LONG pe magic
+        READ_SHORT (pe + 4) machine
+        READ_LONG (pe + 8) stamp
+        SET cbr_rc_supported = (magic = 0x4550 AND machine = 0x8664 AND
+          (stamp = 0x6a18d6dc OR stamp = 0x6a18d73d OR stamp = 0x6a18d7e9))
+      END
+    END
+  ACTION_IF NOT cbr_rc_supported BEGIN FAIL @9373 END
+  COPY ~%source_dir%/CBRRC.lua~ ~override/CBRRC.lua~
+       ~%source_dir%/M_CBRRC.lua~ ~override/M_CBRRC.lua~
+END

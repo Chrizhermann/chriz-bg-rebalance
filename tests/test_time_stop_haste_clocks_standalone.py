@@ -121,13 +121,13 @@ class PackageTests(unittest.TestCase):
         self.assertNotIn("SUCCESSFULLY INSTALLED", transcript, transcript)
         self.assertEqual(before, (tree(game.override), game.active_log()))
 
-    def test_packager_builds_four_matched_archives_reproducibly(self) -> None:
+    def test_packager_builds_five_matched_archives_reproducibly(self) -> None:
         first, second = self.temporary("cbr-timestop-build-1-"), self.temporary("cbr-timestop-build-2-")
         for output in (first, second):
             result = run_packager(output)
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         expected = {f"{name}-{VERSION}-windows.zip" for name in
-                    ("chriz-bg-rebalance", "CBR_SR_HARDINESS", "CBR_SR_ANTIMAGIC", "CBR_TRUE_TIMESTOP")}
+                    ("chriz-bg-rebalance", "CBR_SR_HARDINESS", "CBR_SR_ANTIMAGIC", "CBR_TRUE_TIMESTOP", "CBR_ROUND_CLOCK")}
         self.assertEqual(expected, {path.name for path in first.glob("*.zip")})
         self.assertEqual({name + ".sha256" for name in expected}, {path.name for path in first.glob("*.sha256")})
         for name in expected:

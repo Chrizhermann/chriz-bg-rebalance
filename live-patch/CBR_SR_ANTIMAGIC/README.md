@@ -3,10 +3,11 @@
 Since v0.8.11 this patch follows [We overwrite](../../AGENTS.md#we-overwrite): Spell
 Revisions is not a feature requirement, and changed payloads or descriptions do not veto
 an owned write. The standalone setup resolves the available targets without SR footprint
-gates. The v0.8.11 archive has not been applied to a live game.
+gates.
 
-Source version **v0.8.11** (210 and 211 are unchanged since v0.8.1 except for their texts in v0.8.9;
-212 and 213 are new in v0.8.9). Component 210 was applied
+Source version **v0.8.12**. Components 210–213 have the same behavior as in v0.8.11.
+Components 210 and 211 received new descriptions in v0.8.9, which also introduced the
+texts-only options 212 and 213. Component 210 was applied
 with authorization to Christopher's private stream installation on October 6;
 211 was not. See the collection handover for backups and verification. Native
 gameplay acceptance remains separate from the automated release checks.
@@ -14,9 +15,9 @@ gameplay acceptance remains separate from the automated release checks.
 - **210:** Pierce Magic halves current MR, subtracting at least 10 and at most
   40 percentage points, rounded up; never below zero. Duration: five rounds.
   Recasts refresh the existing reduction, preserving its original amount.
-  Combines with Lower Resistance. Requires **EEex**. The older archive additionally requires SR.
+  Combines with Lower Resistance. Requires **EEex**. Archives through v0.8.10 additionally require SR.
 - **211:** Spellstrike gives **15% arcane/divine spell failure for two rounds**;
-  its own failures refresh instead of stacking. The older archive requires SR.
+  its own failures refresh instead of stacking. Archives through v0.8.10 require SR.
 
 Both preserve spell-protection removal, Spell Shield interception and installed
 invisible targeting. Pierce Shield, Lower Resistance and Entropy Shield are not
@@ -27,7 +28,7 @@ changed. These components are independent; choose either or both.
 1. Close the game and InfinityLoader. Verify the intended game root and its
    `WeiDU.log`. Keep a backup of the game, string tables and saves, plus a copy of
    the pre-patch log. Do not reuse an archive from a different development commit.
-2. Extract `CBR_SR_ANTIMAGIC-v0.8.11-windows.zip` into that root.
+2. Extract `CBR_SR_ANTIMAGIC-v0.8.12-windows.zip` into that root.
    It contains `Setup-cbr_sr_antimagic.exe` and the `CBR_SR_ANTIMAGIC` directory.
 3. Run the separate setup and choose 210 and/or 211. They append new entries at
    the end of the stack and use their own backup namespace. **Do not reinstall SR,

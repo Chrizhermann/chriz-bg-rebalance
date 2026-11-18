@@ -5,7 +5,7 @@ Personal SCS- and SR-adjacent balance adjustments and spell-behavior fixes for
 [chriz-bg-modpack](https://github.com/Chrizhermann/chriz-bg-modpack) (fix consolidation) and
 [chriz-sod-rebalance](https://github.com/Chrizhermann/chriz-sod-rebalance) (SoD remix + companions).
 
-**Version: v0.8.11.** Pierce Magic has a bounded five-round MR
+**Version: v0.8.12.** Pierce Magic has a bounded five-round MR
 reduction; Spellstrike causes 15% spell failure for two rounds.
 Hardiness has a recommended 40% physical-only
 profile, a 30% alternative, and an optional SR damage-resistance add-on.
@@ -39,10 +39,16 @@ for installations that already have the mechanic.
 Since v0.8.10: Flail of the Ages (302) installs without Spell Revisions, where SCS's own
 Haste and Slow system is in place, and its +5 version now also lets Potion of Haste and Haste
 rings work, with and without Spell Revisions. The Slow saving throws are unchanged.
-New in v0.8.11: every component writes the result it chose even when a player or another mod
+Since v0.8.11: every component writes the result it chose even when a player or another mod
 changed the old spell, item, kit or table. This covers the Tempus, Spell Revisions, SCS, Hope,
 cloud, Flail, weapon, bard, dragon, arrow and potion work; real game, EEex and component
 requirements remain.
+
+New in v0.8.12: Round Clock (361) counts time spent travelling, resting or advancing the world
+clock toward spell and item reuse, the next attack round, Hide in Shadows and the next
+contingency check. A thief whose lockout expires can use Stealth on the first paused frame.
+Choose 361 in the full installer or use `CBR_ROUND_CLOCK-v<version>-windows.zip`.
+
 Kit-specific bard spell progression remains available through EEex.
 Previously released components retain their documented acceptance status.
 See `docs/00-project-scope.md` for the broader project.
@@ -109,6 +115,7 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 332 | Cross-cutting audits | Heroism family: Heroism, Greater Heroism and the Potion of Heroism do not combine | Automated checks and lab install passed; in-game check pending |
 | 340 | Cross-cutting audits | Chris Revisions: Aid hit points only, Luck 90 seconds, Bless 30 seconds + 1 round per level, Bless and Chaotic Commands for druids, Prayer and Recitation not cumulative | Automated checks passed; in-game check pending |
 | 360 | Cross-cutting audits | EEex True Time Stop – fair Haste & Slow: frozen creatures' effects wait out a Time Stop; Haste and Slow leave periodic effects at the normal rate | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 and in the full CEBG stack with Spell Revisions; gameplay acceptance pending |
+| 361 | Cross-cutting audits | Round Clock credits elapsed world time toward personal cooldowns after travel, rest and scripted jumps | Single-player quiet labs on BG2:EE and IWD:EE 2.7.3.0. Multiplayer verified by static analysis only. |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 410 | Class and kit revisions | Druids: axes and short bows; fighter/druids also long bows (with or without Artisan's Kitpack) | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 with and without Artisan's Kitpack; gameplay acceptance pending |
 | 411 | Class and kit revisions | Alaghor of Clangeddin (Yeslick): the cleric weapons plus axes, with fighter/cleric limits (Artisan's Kitpack and EEex) | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 in CEBG's stack with Spell Revisions and Artisan's Kitpack; gameplay acceptance pending |
@@ -136,8 +143,8 @@ Owned descriptions are written in full; other languages retain their text with a
 line until a translation exists. The tail patch's components
 212 and 213 do only this, for an installation that already has the mechanic.
 
-Build the full mod, the separate tail patches and the standalone True Time Stop package with
-`python tools/package_timestop.py`.
+Run `python tools/package_timestop.py` to build the full mod, both SR tail patches and the
+standalone packages for True Time Stop and Round Clock.
 For an existing stack, use the [anti-magic tail patch](live-patch/CBR_SR_ANTIMAGIC/README.md)
 after authorization, without reinstalling SR or existing Rebalance components.
 The [collection handover](docs/handovers/2026-10-06-sr-antimagic-collection.md) covers
@@ -296,6 +303,23 @@ same two files, installed by its own `Setup-cbr_true_timestop.exe`. Use one of t
 installers; each refuses while the other is installed. In its own lab, plain BG2:EE 2.7.3.0
 with EEex 1.3.1, the package installed from its archive switched the correction on at start,
 corrected the same cases, and uninstalled back to the files from before the install.
+
+### Component 361 — Round Clock
+
+When travel, rest or a script advances the world clock, eligible party members and creatures in
+loaded areas recover spent spell and item aura, completed attack rounds, Hide in Shadows lockout
+and the contingency check delay. Recovery uses elapsed time and each creature's update speed.
+An interrupted rest with zero elapsed time grants zero recovery. During Time Stop, only the caster
+and immune creatures recover. The engine continues to handle casts and attacks already in progress.
+
+Use Windows x64 BG:EE/SoD, BG2:EE/EET or IWD:EE **2.7.3.0** with EEex v1.2.0 or v1.3.1.
+Select 361 in the full installer or use the Round Clock standalone. Component 360 is independent.
+Single-player quiet labs verified the first paused Stealth paint and click on BG2:EE alongside 360
+with LuaJIT, and on IWD:EE with LuaJIT and embedded Lua 5.2. The latest hook and toolbar changes
+were retested on BG2:EE. Waylaid routes and custom action bars remain open.
+Multiplayer has static verification only and has never been live-tested. A forced clock
+update on another thread skips personal recovery and increments `CBRRC.Status().off_thread_skips`.
+[Installer and gameplay notes](live-patch/CBR_ROUND_CLOCK/README.md) · [Verification](research/16-time-jump-round-and-cooldowns.md).
 
 ### Component 320 — Damageable combat clouds
 
