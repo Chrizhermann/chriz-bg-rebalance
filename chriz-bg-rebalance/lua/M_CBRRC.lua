@@ -11,6 +11,8 @@ local ok, why = pcall(function()
     EEex_GameState_AddInitializedListener(CBRRC.Start)
 end)
 if not ok then
-    CBRRC.refused = tostring(why):gsub("[\r\n]+", " ")
-    print("[CBR Round Clock] off, the game stays native: "..CBRRC.refused)
+    local okStr, text = pcall(tostring, why)
+    if not okStr or type(text) ~= "string" then text = "unprintable error" end
+    CBRRC.refused = text:gsub("[\r\n]+", " ")
+    pcall(print, "[CBR Round Clock] off, the game stays native: "..CBRRC.refused)
 end

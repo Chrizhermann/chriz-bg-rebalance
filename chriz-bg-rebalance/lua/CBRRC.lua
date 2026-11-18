@@ -8,6 +8,11 @@ C.core = true
 local U32 = 4294967296
 local function signed32(n) return (n + 2147483648) % U32 - 2147483648 end
 local function log(message) print("[CBR Round Clock] "..message:gsub("[\r\n]+", " ")) end
+local function safeString(value)
+    local ok, text = pcall(tostring, value)
+    if not ok or type(text) ~= "string" then return "unprintable error" end
+    return text
+end
 local function pointer(p) return p and p >= 0x10000 and p < 2^47 and p % 8 == 0 end
 local mem
 function C.UseMemory(m) mem = m end
@@ -15,6 +20,7 @@ function C.UseMemory(m) mem = m end
 -- UI work is deferred until the world toolbar is read or pressed. Keep a
 -- generation, never a sprite, button array or menu item from the clock hook.
 local pending, refreshing, updateButtons
+local refreshReported = false
 local function updateWorldToolbar()
     if e and worldScreen and e:GetActiveEngine() == worldScreen and EEex_Sprite_GetSelected() then
         return updateButtons()
@@ -28,7 +34,10 @@ local function refreshToolbar()
     local ok, refreshed = pcall(updateWorldToolbar)
     refreshing = false
     if ok and refreshed and pending == generation then pending = nil end
-    if not ok then log("toolbar refresh: "..tostring(refreshed)) end
+    if not ok and not refreshReported then
+        refreshReported = true
+        pcall(log, "toolbar refresh: "..safeString(refreshed))
+    end
 end
 
 local wrapped = setmetatable({}, {__mode="k"})
@@ -36,9 +45,7 @@ local bindingReported = false
 local function bindingSkipped(reason)
     if not bindingReported then
         bindingReported = true
-        local okStr, text = pcall(tostring, reason)
-        if not okStr or type(text) ~= "string" then text = "unprintable error" end
-        pcall(log, "toolbar binding skipped: "..text)
+        pcall(log, "toolbar binding skipped: "..safeString(reason))
     end
 end
 
@@ -66,7 +73,7 @@ local function bindToolbar()
                 bindingSkipped(key.." unavailable")
             elseif not wrapped[original] then
                 local function wrapper(self, ...)
-                    if pending and self == buttonArray then refreshToolbar() end
+                    if pending and self == buttonArray then pcall(refreshToolbar) end
                     return original(self, ...)
                 end
                 methods[key] = wrapper
@@ -216,7 +223,7 @@ end
 function CBRRC_Commit(...)
     local ok, result = pcall(C.Commit, ...)
     if ok then return result end
-    log("off, the game stays native: "..tostring(result))
+    pcall(log, "off, the game stays native: "..safeString(result))
     return -2  -- the gate disarms and counts this error exactly once
 end
 
@@ -532,7 +539,7 @@ local function setupToolbar(a, block)
         EEex_Menu_AddAfterMainFileReloadedListener(tryBindToolbar)
     end
     -- A toolbar hotkey can be dispatched before any item is painted.
-    EEex_Key_AddPressedListener(function() if pending then refreshToolbar() end end)
+    EEex_Key_AddPressedListener(function() if pending then pcall(refreshToolbar) end end)
 end
 
 local gateMayRun = false
@@ -557,7 +564,7 @@ local function patch(a)
     EEex_ExposeToLua(helper, "CBRRC_CaptureThread")
     local captured, why = pcall(CBRRC_CaptureThread)
     CBRRC_CaptureThread = nil
-    assert(captured and mem.u32(block + 8) ~= 0, "cannot capture main thread: "..tostring(why))
+    assert(captured and mem.u32(block + 8) ~= 0, "cannot capture main thread: "..safeString(why))
     local bridge = commitBridge()
     assert(bridge and bridge > 0, "cannot assemble Lua bridge")
     local dispatcher = EEex_JITNear(C.BuildGate(block, bridge))
@@ -592,7 +599,7 @@ local function patch(a)
             assert(readBytes(a.site, 7) == displaced, "cannot restore incomplete round clock hook")
         end
         gateMayRun = false
-        error("cannot install round clock hook: "..tostring(err), 0)
+        error("cannot install round clock hook: "..safeString(err), 0)
     end)
     EEex_EnableCodeProtection()
     if not ok then error(reason, 0) end
@@ -636,8 +643,8 @@ function C.Start()
             EEex_Free(C.block)
             C.block = nil
         end
-        C.refused = tostring(why)
-        log("off, the game stays native: "..C.refused)
+        C.refused = safeString(why):gsub("[\r\n]+", " ")
+        pcall(log, "off, the game stays native: "..C.refused)
     end
     return C.Status()
 end

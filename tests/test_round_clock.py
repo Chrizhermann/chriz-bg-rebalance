@@ -335,6 +335,20 @@ class StartupTests(unittest.TestCase):
                 h.lua.execute(edit)
                 self.refused(h, reason)
 
+    def test_loader_formats_unprintable_and_multiline_errors(self):
+        for runtime in (Lua52, LuaJIT):
+            for formatter, expected in (("error('boom tostring')", "unprintable error"),
+                                        (r"return 'first\r\nsecond'", "first second")):
+                with self.subTest(runtime=runtime, formatter=formatter):
+                    h = Host(runtime)
+                    h.lua.execute(f"""
+                        local why=setmetatable({{}}, {{__tostring=function() {formatter} end}})
+                        function Infinity_DoFile() error(why) end
+                    """)
+                    h.start()
+                    self.assertEqual(h.c.refused, expected)
+                    self.assertEqual(list(h.g.logs.values()), [OFF + expected])
+
     def test_pe_and_instruction_refusals_before_allocation(self):
         cases = [(0, b"ZM", "DOS"), (0x3C, struct.pack("<I", 0xFFFF), "PE offset"),
                  (0x80, b"PX", "x64"), (0x84, b"\x4c\x01", "x64"),
@@ -800,6 +814,39 @@ class PausedToolbarTests(unittest.TestCase):
                     self.assertEqual(h.lua.eval("buttonArray:OnLButtonPressed(5)"), (5, 1))
                     self.assertEqual(h.lua.eval("buttonArray:GetButtonEnabled(3)"), (3, True))
                     self.assertEqual(h.g.refreshed, 1)
+
+    def test_unprintable_refresh_error_preserves_paint_click_and_key(self):
+        for runtime in (Lua52, LuaJIT):
+            for broken_log in (False, True):
+                with self.subTest(runtime=runtime, broken_log=broken_log):
+                    h = Host(runtime).world()
+                    self.assert_scalar_commit(h)
+                    h.lua.execute("""
+                        local why=setmetatable({}, {__tostring=function() error("boom tostring") end})
+                        selectionReads=0
+                        function EEex_Sprite_GetSelected()
+                            selectionReads=selectionReads+1
+                            error(why)
+                        end
+                    """)
+                    if broken_log:
+                        h.lua.execute("""
+                            local record=print
+                            function print(message) record(message); error("log failed") end
+                        """)
+                    for slot in (5, 6):
+                        self.assertEqual(h.lua.eval(f"buttonArray:GetButtonEnabled({slot})"), (slot, True))
+                        self.assertEqual(h.lua.eval(f"buttonArray:OnLButtonPressed({slot})"), (slot, 0))
+                        h.g.keyPressed()
+                    self.assertEqual(h.g.selectionReads, 6)
+                    self.assertEqual(list(h.g.logs.values()).count(
+                        "[CBR Round Clock] toolbar refresh: unprintable error"), 1)
+                    h.lua.execute("EEex_Sprite_GetSelected=function() return 7 end")
+                    self.assertEqual(h.lua.eval("buttonArray:OnLButtonPressed(5)"), (5, 1))
+                    self.assertEqual(h.g.CBRRC_Commit(TIMER, 1, 915, 100, 0), 0)
+                    status = h.c.Status()
+                    self.assertTrue(status.enabled)
+                    self.assertEqual((status.commits, status.lua_errors), (2, 0))
 
     def test_mark_requires_positive_to_zero(self):
         h = Host().world()

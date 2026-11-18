@@ -508,7 +508,34 @@ The constructors load the relevant vtables at BG/BG2 `130EEC` and IWD `130F0C`. 
 
 ### Focused BG2:EE 2.7.3.0 quiet run
 
-WeiDU 249 installed components 360 and 361 together in the standing BG2 Magic Lab with EEex v1.3.1 and LuaJIT. The observed `CBRRC.lua` SHA-256 was `780fb70715e4443b67df3d852a12d0f3a4aea7f33115d6b2f1f77926598607fc`. The two trials ran in one guarded process using the BuffBot Clean Baseline save. The lab driver prepared the thief in memory. Each trial began with a normal Armor cast, a stopped attack and a thief with a positive Hide lockout and slot 5 disabled. The observer bracketed the real commit and sampled the first Stealth paint after the stock enabled predicate. The press used the stock button handler on that same paused frame.
+WeiDU 249 installed components 360 and 361 together in the standing BG2 Magic Lab with EEex v1.3.1 and LuaJIT. The worktree and installed `override` files matched byte for byte by SHA-256.
+
+| File | SHA-256 in the final smoke |
+|---|---|
+| `CBRRC.lua` | `37e7a2d1879eb3f8972638ab248c36e9cffde043d54b99c653ef628bef02f584` |
+| `M_CBRRC.lua` | `758b00a84b3f1ad1ebb5b14c61b53aa3363e9252ccd29056e90976b1c8bc1584` |
+
+The driver loaded a disposable copy of `000000010-BuffBot Clean Baseline` with the first portrait set to Thief. It paused the world, seeded the four cooldown fields on that character and selected the stock Thief action bar. During the render of slot 0, the driver issued the engine action `DayNight(13)`. A read-only observer sampled the counters around `CBRRC.Commit`. The first slot-5 paint listener ran after the stock enabled predicate and pressed `buttonArray:OnLButtonPressed(5)`. All four samples below were on **paused frame 391**. The disabled flag is the dword at `game+0x4140+5*0x2A0+0x29C`.
+
+| Paused sample | World tick | Cast aura +0x4990 | Attack round +0x4B9A | Hide +0x4E70 | Contingency +0x5040 | Slot 5 disabled | Modal |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Before `DayNight(13)` | 31506 | 36 | 27 | 90 | 82 | 1 | 0 |
+| Commit exit | 58500 | −1 | −2 | 0 | 0 | 1 | 0 |
+| First Stealth paint | 58500 | −1 | −2 | 0 | 0 | 0 | 0 |
+| After stock click | 58500 | −1 | −2 | 0 | 0 | 0 | 3 |
+
+`CBRRC.Status()` reported installed and enabled, one commit, three actors, zero Lua errors and zero off-thread skips. `CBRTC.Status()` reported installed and enabled with zero errors. Audio preflight read all seven session meters. The 16.1-second hidden-desktop run recorded `max_job_audio_peak = 0.0`, three process exits of `0x00000000`, matching initial and final pointer clips and an empty job.
+
+WeiDU removed both test components with exit 0. The pre-run and post-restore manifests map each relative path, using forward slashes, to its file SHA-256 or JSON null for a directory. The manifest digest covers UTF-8 `json.dumps(entries, sort_keys=True, indent=1)` with no trailing newline. Independent comparisons returned **0 extra, 0 missing, 0 changed** for each root. All five lab slots and `bg-game-install.lock` were free.
+
+| Restored root | Files / all entries | SHA-256 of both manifests |
+|---|---:|---|
+| `C:\Users\chris\CEBG-Tests\Magic-Lab-20261104\bg2ee` | 4,343 / 4,521 | `c64ea97503bc30aa754767088818ae2143f4d122b919632d7610c7a358efa792` |
+| `C:\Users\chris\OneDrive\Documents\Chriz BG Magic Lab BG2EE - 20261104` | 25 / 31 | `2f445be2b7fadfe73854ce43c08cfeae9d6683e36ecfe07de6f6e820c6e864a4` |
+
+#### Earlier Phase 2D run at `a030734`
+
+The two trials below used `CBRRC.lua` SHA-256 `780fb70715e4443b67df3d852a12d0f3a4aea7f33115d6b2f1f77926598607fc`. They ran in one guarded process using the BuffBot Clean Baseline save. The lab driver prepared the thief in memory. Each trial began with a normal Armor cast, a stopped attack and a thief with a positive Hide lockout and slot 5 disabled. The observer bracketed the real commit and sampled the first Stealth paint after the stock enabled predicate. The press used the stock button handler on that same paused frame.
 
 | Scripted action | Old → new world tick | Aura, idle attack, Hide, contingency at commit | Commit / first paint / click frame | Resume → follow-up Armor start |
 |---|---|---|---|---|
@@ -521,6 +548,12 @@ The audio preflight returned 0. The 167.2-second run closed the remote bridge on
 
 ### Offline verification and package identity
 
-Full discovery used `python -B -m unittest discover -s tests -p "test_*.py" -v`, an explicit standalone interpreter in `CBR_LUA`, and the archived dragon, flail and bracer fixtures. The final run passed all 1,002 tests in 567.953 seconds with zero skips, including all 45 Round Clock tests. The 51 staged private fixture files were removed. The standalone interpreter override takes priority over legacy game-path fallbacks. For fresh Win64 frame generation, put the libraries from `research/timestop-lab/requirements-native.txt` on the Python path and set `CBR_EEEX_SCRIPTS` to the release script directories, separated on Windows by a semicolon. The ordinary Win64 test also walks the recorded BG2 call sites using only the suite's standard dependencies.
+The six-module focused suite passed **78 tests in 38.467 seconds, zero skips**. With a throwing `__tostring`, both Lua 5.2 and LuaJIT preserved the stock paint and click return values through six failed refresh attempts, including two key presses. Each host recorded one refresh diagnostic even when its logger raised. Once the selection recovered, the pending bar refreshed, and `CBRRC_Commit` still returned 0 with `lua_errors = 0`. The startup loader also reported an unprintable error and normalized a multiline error on both runtimes. [Fault-isolation tests](../tests/test_round_clock.py).
+
+The bytes defining `BuildGate`, `commitBridge`, `CBRRC_CaptureThread` and `CBRRC_UpdateButtons` matched `a6205aa`. The Win64 audit walked the recorded call sites and generated fresh frames using the EEex v1.2.0 and v1.3.1 writers. For fresh Win64 frame generation, put the libraries from `research/timestop-lab/requirements-native.txt` on the Python path and set `CBR_EEEX_SCRIPTS` to the release script directories, separated on Windows by a semicolon. [Win64 regression test](../tests/test_round_clock_unwind.py).
+
+Full discovery with `python -B -m unittest discover -s tests -p "test_*.py"` ran **1,010 tests in 658.718 seconds**. There were 1,009 passes, zero failures, zero errors and one skip. `test_sr_bracers.BracersTests.test_captured_stream_install_and_tempus_helpers` reported `private captured resources not present` for `.worktrees/sr-bracers-captures`. The run used the archived dragon and flail fixtures, a standalone interpreter in `CBR_LUA`, and copies of all three 2.7.3.0 executable images with the SHA-256 values in the evidence table.
+
+The earlier Phase 2D full discovery at `a030734` passed all 1,002 tests in 567.953 seconds with zero skips, including 45 Round Clock tests. That run used the archived dragon, flail and bracer fixtures and removed the 51 staged files afterward.
 
 The Phase 2D package build keeps the installer version at `v0.8.11`. Four archive names are also used by the published release, so the branch builds are local verification artifacts. The Round Clock standalone is the fifth archive. Two independent invocations of `python -B tools/package_timestop.py --output <temporary-directory>` produced byte-identical ZIP pairs with matching SHA-256 sidecars and valid member CRCs.
