@@ -15,38 +15,66 @@ function C.UseMemory(m) mem = m end
 -- UI work is deferred until the world toolbar is read or pressed. Keep a
 -- generation, never a sprite, button array or menu item from the clock hook.
 local pending, refreshing, updateButtons
-local function markSelected(id)
-    EEex_Sprite_IterateSelectedIDs(function(selected)
-        if selected == id then pending = {}; return true end
-    end)
+local function updateWorldToolbar()
+    if e and worldScreen and e:GetActiveEngine() == worldScreen and EEex_Sprite_GetSelected() then
+        return updateButtons()
+    end
 end
 
 local function refreshToolbar()
     local generation = pending
     if not generation or refreshing or not C.installed then return end
-    if not e or not worldScreen or e:GetActiveEngine() ~= worldScreen
-        or not EEex_Sprite_GetSelected() then return end
     refreshing = true
-    local ok, refreshed = pcall(updateButtons)
+    local ok, refreshed = pcall(updateWorldToolbar)
     refreshing = false
     if ok and refreshed and pending == generation then pending = nil end
     if not ok then log("toolbar refresh: "..tostring(refreshed)) end
 end
 
-local bound = setmetatable({}, {__mode="k"})
+local wrapped = setmetatable({}, {__mode="k"})
+local bindingReported = false
+local function bindingSkipped(reason)
+    if not bindingReported then
+        bindingReported = true
+        log("toolbar binding skipped: "..tostring(reason))
+    end
+end
+
+local function callable(value)
+    if type(value) == "function" then return true end
+    if type(value) ~= "table" and type(value) ~= "userdata" then return false end
+    local mt = (debug and debug.getmetatable or getmetatable)(value)
+    return type(mt) == "table" and type(rawget(mt, "__call")) == "function"
+end
+
 local function bindToolbar()
-    local methods = buttonArray and getmetatable(buttonArray)
-    if not methods or bound[methods] then return end
+    local mt = getmetatable(buttonArray)
+    if type(mt) ~= "table" or (debug and debug.getmetatable and debug.getmetatable(buttonArray) ~= mt) then
+        return bindingSkipped("buttonArray metatable unavailable")
+    end
+    local index = rawget(mt, "__index")
     -- These are the engine's UI bindings. Stock toolbar items query enabled
     -- before painting; a queued UI click can reach OnLButtonPressed first.
     for _, key in ipairs({"GetButtonEnabled", "OnLButtonPressed"}) do
+        local methods = mt
+        if type(index) == "table" and index[key] ~= nil then methods = index end
         local original = methods[key]
-        methods[key] = function(self, ...)
-            if pending and self == buttonArray then refreshToolbar() end
-            return original(self, ...)
+        if not callable(original) then
+            bindingSkipped(key.." unavailable")
+        elseif not wrapped[original] then
+            local function wrapper(self, ...)
+                if pending and self == buttonArray then refreshToolbar() end
+                return original(self, ...)
+            end
+            methods[key] = wrapper
+            wrapped[wrapper] = true
         end
     end
-    bound[methods] = true
+end
+
+local function tryBindToolbar()
+    local ok, reason = pcall(bindToolbar)
+    if not ok then bindingSkipped(reason) end
 end
 
 local function elapsed(origin, arg, old, hourOrForce)
@@ -97,7 +125,7 @@ local attackAction = {
 local function age(sprite, id, stats, old, delta)
     local mask = mem.u8(sprite + 0x58)
     local u, firstParity = updates(old, delta, mask, id)
-    if u == 0 then return end
+    if u == 0 then return false end
     local action, cast = mem.s16(sprite + 0x3F8), mem.s16(sprite + 0x4990)
     if cast >= 0 and mem.i32(sprite + 0x4998) == 0
         and not ((action == 34 or action == 97) and mem.i32(sprite + 0x4994) ~= 0) then
@@ -116,9 +144,9 @@ local function age(sprite, id, stats, old, delta)
     local hide, poll = mem.i32(sprite + 0x4E70), mem.i32(sprite + 0x5040)
     if hide > 0 then
         mem.w32(sprite + 0x4E70, math.max(0, hide - u))
-        if u >= hide then markSelected(id) end
     end
     if poll > 0 then mem.w32(sprite + 0x5040, math.max(0, poll - u)) end
+    return hide > 0 and u >= hide
 end
 
 C.commits, C.actors, C.sessions = 0, 0, 0
@@ -126,7 +154,7 @@ function C.SessionEnded()
     pending = nil
     C.commits, C.actors, C.sessions = 0, 0, C.sessions + 1
     if C.block then
-        mem.w32(C.block + 4, 0)
+        if mem.u32(C.block) == 1 then mem.w32(C.block + 4, 0) end
         mem.w32(C.block + 12, 0)
     end
 end
@@ -146,7 +174,7 @@ function C.Commit(timer, origin, argDeltaOrNew, argOld, argHourOrForce)
     local network = mem.ptr(a.network)
     if not pointer(network) then return 0 end
     local owner
-    if mem.u8(network + 0x2C9) ~= 0 then owner = mem.u32(network + 0x374) end
+    if mem.u8(network + 0x2C9) == 1 then owner = mem.u32(network + 0x374) end
     local caster
     if mem.i32(game + 0x9690) ~= 0 then caster = mem.u32(game + 0x9694) end
     local party, areas = {}, {}
@@ -158,6 +186,7 @@ function C.Commit(timer, origin, argDeltaOrNew, argOld, argHourOrForce)
         if pointer(area) then areas[area] = true end
     end
     C.commits = C.commits + 1
+    local anyHideCleared = false
     for i = 0, max do
         local slot = a.slots + 16 * i
         local generation = mem.s16(slot)
@@ -169,12 +198,13 @@ function C.Commit(timer, origin, argDeltaOrNew, argOld, argHourOrForce)
                 and (party[id] or areas[mem.ptr(sprite + 0x18)]) then
                 local stats = sprite + (mem.i32(sprite + 0x4EA4) == 0 and 0x1DC8 or 0x1120)
                 if caster == nil or caster == id or mem.i32(stats + 0x2D8) ~= 0 then
-                    age(sprite, id, stats, old, delta)
+                    if age(sprite, id, stats, old, delta) then anyHideCleared = true end
                     C.actors = C.actors + 1
                 end
             end
         end
     end
+    if anyHideCleared then pending = {} end
     return 0
 end
 
@@ -323,7 +353,8 @@ function C.Inspect()
     assert(update == base + build.code + 0x267800, "incorrect toolbar refresh target")
     instruction(0x267800, "488BC4488958104889701848897820554154415541564157")
     local capacity = 0x7FFF
-    return {name=build.name, fn=fn, site=fn+15, returns=returns, slotLimit=capacity-1, update=update,
+    return {name=build.name, base=base, imageSize=build.size, fn=fn, site=fn+15,
+        returns=returns, slotLimit=capacity-1, update=update,
         chitin=reference(0x143AC6, "4C8B05", data+0x667548, 8, "data"),
         network=reference(0x17DBF5, "488B15", data+0x667560, 8, "data"),
         maxSlot=reference(0x27671B, "663905", data+0x68F8F4, 2, "data"),
@@ -333,94 +364,113 @@ end
 
 -- Block layout: enabled, Lua errors, owner thread, off-thread skips (four
 -- dwords), then the four verified 64-bit return PCs in origin order.
-local registers = {"rax","rdx","rcx","rbx","rbp","rsi","rdi","r8","r9","r10","r11","r12","r13","r14","r15"}
 local function decimal(address) return string.format("%.0f", address) end
-function C.BuildGate(block, luaCall)
-    local lines = {
-        "pushfq", "push rax", "push rdx", "mov rdx, "..decimal(block),
-        "cmp dword ptr [rdx], 1", "jne cbr_rc_fast_exit",
-        "mov rax, qword ptr [rsp+64]", -- return PC at native RSP+40, plus our first three pushes
-    }
-    local function emit(s) lines[#lines+1] = s end
-    for i = 1, 4 do
-        emit("cmp rax, qword ptr [rdx+"..(8+8*i).."]")
-        emit("je cbr_rc_origin"..i)
-    end
-    emit("jmp cbr_rc_fast_exit")
-    for i = 1, 4 do
-        emit("cbr_rc_origin"..i..":")
-        if i == 3 then
-            emit("cmp sil, 1")
-            emit("jne cbr_rc_fast_exit")
-        end
-        emit("mov eax, "..i)
-        if i < 4 then emit("jmp cbr_rc_thread") end
-    end
-    emit("cbr_rc_thread:")
-    emit("push rcx")
-    emit("mov ecx, dword ptr gs:[0x48]")
-    emit("cmp ecx, dword ptr [rdx+8]")
-    emit("je cbr_rc_main")
-    emit("lock inc dword ptr [rdx+12]")
-    emit("jmp cbr_rc_restore_rcx")
-    emit("cbr_rc_main:")
-    for i = 4, #registers do emit("push "..registers[i]) end
-    emit("#STACK_MOD(128)")
-    emit("lea rsp, [rsp-96]")
-    emit("#STACK_MOD(96)")
-    for i = 0, 5 do emit("movdqu xmmword ptr [rsp+"..(16*i).."], xmm"..i) end
-    emit("mov r12, qword ptr [rsp+192]")    -- original RCX, third saved GPR
-    emit("mov r13d, eax")                   -- origin ID
-    emit("mov r14d, ebx")                   -- committed delta or new time
-    emit("mov r15d, edi")                   -- pre-commit time for sync
-    emit("mov ebp, dword ptr [rsp+208]")    -- original EAX for the direct hour
-    emit("cmp eax, 3")
-    emit("jne cbr_rc_call")
-    emit("movzx ebp, sil")                  -- the fifth argument for a broadcast
-    emit("cbr_rc_call:")
-    local before = table.concat(lines, "\n").."\n"
-    lines = {}
-    emit("cmp rax, -2")
-    emit("jne cbr_rc_done")
-    emit("mov rdx, "..decimal(block))
-    emit("mov dword ptr [rdx], 0")
-    emit("inc dword ptr [rdx+4]")
-    emit("cbr_rc_done:")
-    for i = 0, 5 do emit("movdqu xmm"..i..", xmmword ptr [rsp+"..(16*i).."]") end
-    emit("lea rsp, [rsp+96]")
-    emit("#STACK_MOD(-96)")
-    for i = #registers, 4, -1 do emit("pop "..registers[i]) end
-    emit("#STACK_MOD(-128)")
-    emit("cbr_rc_restore_rcx:")
-    emit("pop rcx")
-    emit("cbr_rc_fast_exit:")
-    emit("pop rdx")
-    emit("pop rax")
-    emit("popfq")
-    return {before, luaCall, table.concat(lines, "\n").."\n"}
+
+-- EEex's two supported writers encode UWOP_ALLOC_SMALL (at most 128 bytes).
+-- Keep the EEex trampoline stack-neutral so its chain can use the checker's
+-- original RSP for saved RBX/RSI. Both calls below own separate Win64 frames.
+function C.BuildGate(block, bridge)
+    return {([[
+        #STACK_MOD(8)
+        #MAKE_PROLOG(40, rax rcx rdx r8 r9 r10)
+        lahf
+        seto al
+        mov word ptr [rsp+64], ax
+        mov rdx, %s
+        cmp dword ptr [rdx], 1
+        jne cbr_rc_exit
+        mov rax, qword ptr [rsp+#LAST_FRAME_TOP(48)]
+        cmp rax, qword ptr [rdx+16]
+        je cbr_rc_add
+        cmp rax, qword ptr [rdx+24]
+        je cbr_rc_advance
+        cmp rax, qword ptr [rdx+32]
+        je cbr_rc_sync
+        cmp rax, qword ptr [rdx+40]
+        jne cbr_rc_exit
+        mov eax, 4
+        jmp cbr_rc_thread
+        cbr_rc_add:
+        mov eax, 1
+        jmp cbr_rc_thread
+        cbr_rc_advance:
+        mov eax, 2
+        jmp cbr_rc_thread
+        cbr_rc_sync:
+        cmp sil, 1
+        jne cbr_rc_exit
+        mov eax, 3
+        cbr_rc_thread:
+        mov ecx, dword ptr gs:[0x48]
+        cmp ecx, dword ptr [rdx+8]
+        je cbr_rc_main
+        lock inc dword ptr [rdx+12]
+        jmp cbr_rc_exit
+        cbr_rc_main:
+        movdqu xmmword ptr [rsp+32], xmm0
+        movdqu xmmword ptr [rsp+48], xmm1
+        movdqu xmmword ptr [rsp+#LAST_FRAME_TOP(8)], xmm2
+        movdqu xmmword ptr [rsp+#LAST_FRAME_TOP(24)], xmm3
+        mov rcx, qword ptr [rsp+#PROLOG_OFFSET(rcx)]
+        mov edx, eax
+        mov r8d, ebx
+        mov r9d, edi
+        mov r10d, dword ptr [rsp+#PROLOG_OFFSET(rax)]
+        cmp eax, 3
+        jne cbr_rc_call
+        movzx r10d, sil
+        cbr_rc_call:
+        call %s
+        cmp rax, -2
+        jne cbr_rc_done
+        mov rdx, %s
+        mov dword ptr [rdx], 0
+        inc dword ptr [rdx+4]
+        cbr_rc_done:
+        movdqu xmm0, xmmword ptr [rsp+32]
+        movdqu xmm1, xmmword ptr [rsp+48]
+        movdqu xmm2, xmmword ptr [rsp+#LAST_FRAME_TOP(8)]
+        movdqu xmm3, xmmword ptr [rsp+#LAST_FRAME_TOP(24)]
+        cbr_rc_exit:
+        mov ax, word ptr [rsp+64]
+        add al, 127
+        sahf
+        #DESTROY_PROLOG
+        ret
+    ]]):format(decimal(block), decimal(bridge), decimal(block))}
 end
 
-local function commitCall()
+local function commitBridge()
     local args = {}
-    for i, reg in ipairs({"r12","r13","r14","r15","rbp"}) do
+    for i, reg in ipairs({"rcx","rdx","r8","r9","r10"}) do
         args[i] = function(offset)
             return {"mov qword ptr ss:[rsp+#$(1)], "..reg.." #ENDL", {offset}}
         end
     end
-    return EEex_FlattenTable({
-        "#MAKE_SHADOW_SPACE(72) #ENDL",
-        -- With shadow space already present, GenLuaCall's #ALIGN adds zero.
-        -- Initialize lua_pcallk's actual Win64 stack args (ctx and continuation).
-        "mov qword ptr ss:[rsp+32], 0 #ENDL mov qword ptr ss:[rsp+40], 0 #ENDL",
-        EEex_GenLuaCall("CBRRC_Commit", {args=args, returnType=EEex_LuaCallReturnType.Number}),
-        "jmp cbr_rc_lua_ok #ENDL call_error: #ENDL mov rax, -2 #ENDL",
-        "cbr_rc_lua_ok: #ENDL #DESTROY_SHADOW_SPACE #ENDL",
-    })
+    -- GenLuaCall uses 104 bytes and clobbers RBX. Its nested shadow request
+    -- reuses this prolog. Save XMM4/5 in this callee's incoming home slots.
+    return EEex_JITNear(EEex_FlattenTable({[[
+        #STACK_MOD(8)
+        #MAKE_PROLOG(72, rbx r11)
+        movdqu xmmword ptr [rsp+#LAST_FRAME_TOP(8)], xmm4
+        movdqu xmmword ptr [rsp+#LAST_FRAME_TOP(24)], xmm5
+        mov qword ptr ss:[rsp+32], 0
+        mov qword ptr ss:[rsp+40], 0
+    ]], EEex_GenLuaCall("CBRRC_Commit", {args=args, returnType=EEex_LuaCallReturnType.Number}), [[
+        jmp cbr_rc_result
+        call_error:
+        mov rax, -2
+        cbr_rc_result:
+        movdqu xmm4, xmmword ptr [rsp+#LAST_FRAME_TOP(8)]
+        movdqu xmm5, xmmword ptr [rsp+#LAST_FRAME_TOP(24)]
+        #DESTROY_PROLOG
+        ret
+    ]]}))
 end
 
 C.requiredFunctions = {"EEex_GameState_AddInitializedListener", "EEex_GameState_AddDestroyedListener",
-    "EEex_Menu_AddAfterMainFileLoadedListener", "EEex_Actionbar_AddButtonsUpdatedListener",
-    "EEex_Sprite_IterateSelectedIDs", "EEex_Sprite_GetSelected", "EEex_Key_AddPressedListener",
+    "EEex_Menu_AddAfterMainFileLoadedListener",
+    "EEex_Sprite_GetSelected", "EEex_Key_AddPressedListener",
     "EEex_GetImageBase", "EEex_ReadLString", "EEex_ReadU8", "EEex_Read16", "EEex_Read32",
     "EEex_ReadU32", "EEex_ReadPtr", "EEex_WriteU16", "EEex_Write32", "EEex_WritePtr",
     "EEex_Malloc", "EEex_Free", "EEex_JITNear", "EEex_ExposeToLua", "EEex_GenLuaCall",
@@ -451,10 +501,10 @@ local function patch(a)
     CBRRC_CaptureThread = nil
     assert(captured and mem.u32(block + 8) ~= 0, "cannot capture main thread: "..tostring(why))
     -- lua_CFunction. RBX preserves the Lua state over the engine call. The
-    -- push aligns RSP; both calls have 32 bytes of Win64 shadow space.
+    -- declared prolog describes both the 40-byte frame and the RBX save.
     local refresh = EEex_JITNear({([[
-        push rbx
-        sub rsp, 32
+        #STACK_MOD(8)
+        #MAKE_PROLOG(rbx)
         mov rbx, rcx
         mov rax, %s
         mov edx, dword ptr gs:[0x48]
@@ -470,8 +520,7 @@ local function patch(a)
         test rcx, rcx
         jz cbr_rc_ui_skip
         add rcx, 0x4140
-        mov rax, %s
-        call rax
+        call %s
         mov edx, 1
         jmp cbr_rc_ui_result
         cbr_rc_ui_skip:
@@ -480,20 +529,23 @@ local function patch(a)
         mov rcx, rbx
         call #L(Hardcoded_lua_pushboolean)
         mov eax, 1
-        add rsp, 32
-        pop rbx
+        #DESTROY_PROLOG
         ret
     ]]):format(decimal(block), decimal(a.chitin), decimal(a.update))})
     assert(refresh and refresh > 0, "cannot assemble toolbar refresh")
     EEex_ExposeToLua(refresh, "CBRRC_UpdateButtons")
     updateButtons, CBRRC_UpdateButtons = assert(CBRRC_UpdateButtons), nil
-    local body = EEex_FlattenTable(C.BuildGate(block, commitCall()))
+    local bridge = commitBridge()
+    assert(bridge and bridge > 0, "cannot assemble Lua bridge")
+    local dispatcher = EEex_JITNear(C.BuildGate(block, bridge))
+    assert(dispatcher and dispatcher > 0, "cannot assemble clock dispatcher")
+    local body = {"call ", dispatcher, " #ENDL"}
     EEex_GameState_AddDestroyedListener(C.SessionEnded)
-    bindToolbar()
-    EEex_Menu_AddAfterMainFileLoadedListener(bindToolbar)
-    EEex_Actionbar_AddButtonsUpdatedListener(function()
-        if not refreshing then pending = nil end
-    end)
+    tryBindToolbar()
+    EEex_Menu_AddAfterMainFileLoadedListener(tryBindToolbar)
+    if type(EEex_Menu_AddAfterMainFileReloadedListener) == "function" then
+        EEex_Menu_AddAfterMainFileReloadedListener(tryBindToolbar)
+    end
     -- A toolbar hotkey can be dispatched before any item is painted.
     EEex_Key_AddPressedListener(function() if pending then refreshToolbar() end end)
     EEex_DisableCodeProtection()
@@ -503,8 +555,14 @@ local function patch(a)
         gateMayRun = true
         local hooked, err = pcall(EEex_HookBeforeRestoreWithLabels, a.site, 0, 7, 7, {}, body)
         local after = readBytes(a.site, 7)
-        if hooked and after:byte(1) == 0xE9 and after:sub(6) == "\144\144"
-            and math.abs(mem.i32(a.site + 1)) > 7 then return end
+        if hooked and after:byte(1) == 0xE9 and after:sub(6) == "\144\144" then
+            local disp = mem.i32(a.site + 1)
+            local dest = a.site + 5 + disp
+            -- EEex packs JIT allocations bytewise; code pointers may be unaligned.
+            if math.abs(disp) > 7 and dest >= 0x10000 and dest < 2^47
+                and (dest < a.base or dest >= a.base + a.imageSize) then return end
+            err = "invalid trampoline destination"
+        end
         if after ~= displaced then
             -- The site was ours to write in this initialization window. Restore just
             -- these two original instructions if publication was incomplete.

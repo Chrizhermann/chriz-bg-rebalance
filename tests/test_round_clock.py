@@ -104,6 +104,12 @@ function EEex_JITNear(t)
     if asm:find("Hardcoded_lua_pushboolean",1,true) then
         refreshAsm = asm; return base-0x11000
     end
+    if asm:find("; test Lua call",1,true) then
+        bridgeAsm = asm; return base-0x12000
+    end
+    if asm:find("cbr_rc_thread",1,true) then
+        dispatchAsm = asm; return base-0x12500
+    end
     helper=asm; return base-0x10000
 end
 function EEex_ExposeToLua(a,name)
@@ -126,7 +132,8 @@ function EEex_EnableCodeProtection() assert(not protected); protected=true end
 function EEex_HookBeforeRestoreWithLabels(a,delay,n,resume,labels,body)
     assert(not protected and delay==0 and n==7 and resume==7 and #labels==0)
     hooks=hooks+1; hookAddress=a; gate=table.concat(body,"\n")
-    put(a,"\233\000\001\000\000\144\144")
+    put(a,"\233\000\000\000\000\144\144")
+    EEex_Write32(a+1, (base-0x13003)-(a+5))
 end
 function EEex_JITAt(a,body)
     assert(not protected and table.concat(body):find("0x36B06E71",1,true))
@@ -138,8 +145,11 @@ function EEex_GameState_AddDestroyedListener(f) destroy=f; destroys=destroys+1 e
 selected={}
 function EEex_Sprite_IterateSelectedIDs(f) for _,id in ipairs(selected) do if f(id) then break end end end
 function EEex_Sprite_GetSelected() return selected[1] end
-function EEex_Actionbar_AddButtonsUpdatedListener(f) updated=f end
+buttonListeners={}
+function EEex_Actionbar_AddButtonsUpdatedListener(f) table.insert(buttonListeners,f) end
+function updated() for _,f in ipairs(buttonListeners) do f() end end
 function EEex_Menu_AddAfterMainFileLoadedListener(f) menuLoaded=f end
+function EEex_Menu_AddAfterMainFileReloadedListener(f) menuReloaded=f end
 function EEex_Key_AddPressedListener(f) keyPressed=f end
 worldScreen={}; activeScreen=worldScreen
 e={GetActiveEngine=function() return activeScreen end}
@@ -363,6 +373,8 @@ class StartupTests(unittest.TestCase):
             ("EEex_GenLuaCall=function() error('arguments') end", "arguments", 0),
             ("EEex_HookBeforeRestoreWithLabels=function() error('hook failed') end", "hook failed", 0),
             ("EEex_HookBeforeRestoreWithLabels=function() end", "install", 0),
+            ("EEex_HookBeforeRestoreWithLabels=function(a) put(a,'\\233\\248\\255\\255\\255\\144\\144') end",
+             "invalid trampoline destination", 0),  # rel32 -8 resolves to site - 3
             ("local hook=EEex_HookBeforeRestoreWithLabels; EEex_HookBeforeRestoreWithLabels=function(...) "
              "hook(...); error('partial publication') end", "partial publication", 1),
         ):
@@ -383,39 +395,33 @@ class StartupTests(unittest.TestCase):
     def test_gate_layout_call_abi_and_native_exits(self):
         h = Host().synthetic_pe()
         h.start()
-        body = h.g.gate
-        regs = "rax rdx rcx rbx rbp rsi rdi r8 r9 r10 r11 r12 r13 r14 r15".split()
-        lines = [s.strip() for s in body.splitlines()]
-        self.assertEqual([s for s in lines if s.startswith("push")], ["pushfq", *["push "+r for r in regs]])
-        self.assertEqual([s for s in lines if s.startswith("pop")], ["pop "+r for r in reversed(regs)]+["popfq"])
-        self.assertIn("mov rax, qword ptr [rsp+64]", body)
-        for i in range(4):
-            self.assertIn(f"cmp rax, qword ptr [rdx+{16+8*i}]\nje cbr_rc_origin{i+1}", body)
-        self.assertIn("cmp sil, 1\njne cbr_rc_fast_exit", body)
-        self.assertIn("mov ecx, dword ptr gs:[0x48]\ncmp ecx, dword ptr [rdx+8]\nje cbr_rc_main\n"
-                      "lock inc dword ptr [rdx+12]\njmp cbr_rc_restore_rcx", body)
-        self.assertLess(body.index("cbr_rc_main:"), body.index("#MAKE_SHADOW_SPACE(72)"))
+        body, bridge = h.g.dispatchAsm, h.g.bridgeAsm
+        self.assertIn("#MAKE_PROLOG(40, rax rcx rdx r8 r9 r10)", body)
+        self.assertIn("word ptr [rsp+64], ax", body)
+        for i, label in enumerate(("add", "advance", "sync"), 2):
+            self.assertRegex(body, rf"cmp rax, qword ptr \[rdx\+{8*i}\]\s+je cbr_rc_{label}")
+        self.assertIn("cmp sil, 1", body)
+        self.assertIn("lock inc dword ptr [rdx+12]", body)
+        self.assertIn("mov rcx, qword ptr [rsp+#PROLOG_OFFSET(rcx)]", body)
+        for assignment in ("mov edx, eax", "mov r8d, ebx", "mov r9d, edi",
+                           "mov r10d, dword ptr [rsp+#PROLOG_OFFSET(rax)]", "movzx r10d, sil"):
+            self.assertIn(assignment, body)
+        for i, reg in enumerate(("rcx", "rdx", "r8", "r9", "r10")):
+            self.assertIn(f"mov qword ptr ss:[rsp+#$(1)], {reg} #ENDL\n{64+8*i}", bridge)
         for offset in (32,40):
-            self.assertLess(body.index(f"mov qword ptr ss:[rsp+{offset}], 0"), body.index("; test Lua call"))
+            self.assertLess(bridge.index(f"mov qword ptr ss:[rsp+{offset}], 0"), bridge.index("; test Lua call"))
         self.assertIn("mov eax, dword ptr gs:[0x48]", h.g.helper)
         self.assertIn(f"mov rdx, {BLOCK}", h.g.helper)
         self.assertIn("mov dword ptr [rdx+8], eax", h.g.helper)
         self.assertIn("xor eax, eax", h.g.helper)
-        for reg, src in (("r12","qword ptr [rsp+192]"), ("r13d","eax"), ("r14d","ebx"),
-                         ("r15d","edi"), ("ebp","dword ptr [rsp+208]")):
-            self.assertIn(f"mov {reg}, {src}", body)
-        self.assertIn("movzx ebp, sil", body)
-        for i, reg in enumerate(("r12","r13","r14","r15","rbp")):
-            self.assertIn(f"mov qword ptr ss:[rsp+#$(1)], {reg} #ENDL\n{64+8*i}", body)
-        self.assertIn("call_error: #ENDL mov rax, -2", body)
-        self.assertIn(f"cmp rax, -2\njne cbr_rc_done\nmov rdx, {BLOCK}\n"
-                      "mov dword ptr [rdx], 0\ninc dword ptr [rdx+4]", body)
-        for i in range(6):
-            self.assertIn(f"movdqu xmmword ptr [rsp+{16*i}], xmm{i}", lines)
-            self.assertIn(f"movdqu xmm{i}, xmmword ptr [rsp+{16*i}]", lines)
-        for amount in (128,96,-96,-128):
-            self.assertIn(f"#STACK_MOD({amount})", lines)
-        self.assertIn("#DESTROY_SHADOW_SPACE", body)
+        self.assertRegex(bridge, r"call_error:\s+mov rax, -2")
+        self.assertRegex(body, r"cmp rax, -2\s+jne cbr_rc_done\s+mov rdx, \d+\s+"
+                               r"mov dword ptr \[rdx\], 0\s+inc dword ptr \[rdx\+4\]")
+        for i, offset in enumerate(("32", "48", "#LAST_FRAME_TOP(8)", "#LAST_FRAME_TOP(24)",
+                                    "#LAST_FRAME_TOP(8)", "#LAST_FRAME_TOP(24)")):
+            asm = body if i < 4 else bridge
+            self.assertIn(f"movdqu xmmword ptr [rsp+{offset}], xmm{i}", asm)
+            self.assertIn(f"movdqu xmm{i}, xmmword ptr [rsp+{offset}]", asm)
 
 
 def simulate(old, delta, speed, actor_id, hasted, values):
@@ -564,7 +570,7 @@ class RecoveryTests(unittest.TestCase):
         h.number(GAME+0x6600, 0)              # party + loaded area, only once
         h.number(GAME+0x6604, 65537)          # party in transit, area is null
         h.number(GAME+0x6608, 11*65536+11)    # beyond party count
-        h.number(NETWORK+0x2C9, 2, 1)
+        h.number(NETWORK+0x2C9, 1, 1)
         h.number(NETWORK+0x374, 0)
         h.number(a.slots+3*16, -1, 2)
         h.number(a.slots+4*16+8, -1, 8)       # pointer tombstone, live generation
@@ -578,9 +584,10 @@ class RecoveryTests(unittest.TestCase):
         h.jump(123, 15)
         self.assertEqual([h.fields(s)[0] for s in sprites], [15,15,15]+[0]*9)
         self.assertEqual(h.c.actors, 3)
-        h.number(NETWORK+0x2C9, 0, 1)
-        h.jump(138, 15)
-        self.assertEqual(h.fields(sprites[10])[0], 15)
+        for index, flag in enumerate((0, 2, 255), 1):
+            h.number(NETWORK+0x2C9, flag, 1)
+            h.jump(123+15*index, 15)
+            self.assertEqual(h.fields(sprites[10])[0], 15*index)
 
     def test_registry_extremes_and_absent_singletons(self):
         h = Host().world()
@@ -614,8 +621,12 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(h.g.CBRRC_Commit(0,1,15,0,0), -2)
         self.assertEqual(h.g.logs[2], OFF+"callback failure")
         h.number(BLOCK, 0)
+        h.number(BLOCK+4, 1)
+        h.number(BLOCK+12, 3)
         h.g.destroy()
-        self.assertFalse(h.c.Status().enabled)
+        status = h.c.Status()
+        self.assertFalse(status.enabled)
+        self.assertEqual((status.lua_errors,status.off_thread_skips,status.sessions), (1,0,2))
 
 
 STEAM = Path(os.environ.get("CBR_STEAM_COMMON", r"C:\Program Files (x86)\Steam\steamapps\common"))
@@ -640,17 +651,17 @@ class PausedToolbarTests(unittest.TestCase):
                     self.assertEqual(h.lua.eval("buttonArray:GetButtonEnabled(3)"), (3, True))
                     self.assertEqual(h.g.refreshed, 1)
 
-    def test_mark_requires_selected_positive_to_zero(self):
+    def test_mark_requires_positive_to_zero(self):
         h = Host().world()
         s = h.sprite(0, 7)
-        for selected, hide, delta in ((7, 3, 1), (7, 0, 915), (8, 3, 915), (7, -1, 915)):
+        for selected, hide, delta in ((7, 3, 1), (7, 0, 915), (7, -1, 915)):
             h.lua.execute(f"selected={{{selected}}}")
             h.set_fields(s, (0, 0, hide, 88))
             h.jump(100, delta)
             h.lua.execute("buttonArray:GetButtonEnabled(5)")
         self.assertIsNone(h.g.refreshed)
 
-    def test_reacquires_world_bar_and_selection_and_respects_native_completion(self):
+    def test_reacquires_world_bar_and_selection_and_respects_session_end(self):
         h = Host().world()
         s = h.sprite(0, 7)
         h.lua.execute("selected={7}")
@@ -662,10 +673,86 @@ class PausedToolbarTests(unittest.TestCase):
         self.assertIsNone(h.g.refreshed)
         h.lua.execute("wrongThread=false; buttonArray:OnLButtonPressed(5)")
         self.assertEqual(h.g.refreshed, 1)
-        for completed in ("updated()", "destroy()"):
-            h.set_fields(s, (0, 0, 90, 88))
-            h.jump(100, 915)
-            h.lua.execute(completed+"; buttonArray:GetButtonEnabled(5)")
+        h.set_fields(s, (0, 0, 90, 88))
+        h.jump(100, 915)
+        h.lua.execute("destroy(); buttonArray:GetButtonEnabled(5)")
+        self.assertEqual(h.g.refreshed, 1)
+
+    def test_scalar_recovery_ignores_selection_and_defers_to_future_bar(self):
+        for runtime in (Lua52, LuaJIT):
+            h = Host(runtime).world()
+            sprites = [h.sprite(i, i+7) for i in range(2)]
+            h.lua.execute("selected={}; EEex_Sprite_IterateSelectedIDs=function() error('iterator') end; "
+                          "EEex_Sprite_GetSelected=function() error('selection read') end")
+            h.number(TIMER, 1015)
+            self.assertEqual(h.g.CBRRC_Commit(TIMER,1,915,100,0), 0)
+            self.assertEqual([h.fields(s) for s in sprites], [(-1,-2,0,0)]*2)
+            self.assertEqual((h.c.Status().enabled, h.c.Status().lua_errors, h.g.refreshed), (True,0,None))
+            h.lua.execute("selected={65544}; EEex_Sprite_GetSelected=function() return selected[1] end")
+            self.assertEqual(h.lua.eval("buttonArray:OnLButtonPressed(5)"), (5,1))
+
+    def test_earlier_buttons_updated_listener_commits_after_cache_calculation(self):
+        for runtime in (Lua52, LuaJIT):
+            h = Host(runtime)
+            h.lua.execute(f"EEex_Actionbar_AddButtonsUpdatedListener(function() CBRRC.Commit({TIMER},1,915,0,0) end)")
+            h.world()
+            s = h.sprite(0,7)
+            h.number(TIMER, 1015)
+            h.lua.execute("selected={7}; updated()")
+            self.assertEqual((h.fields(s), h.g.refreshed), ((-1,-2,0,0),None))
+            h.lua.execute("buttonArray:GetButtonEnabled(5)")
+            self.assertEqual(h.lua.eval("buttonArray:OnLButtonPressed(5)"), (5,1))
+
+    def test_skipped_bindings_remain_optional_and_log_once(self):
+        for runtime in (Lua52, LuaJIT):
+            for expression in ("nil", "{}", "setmetatable({},{__metatable=false})",
+                               "setmetatable({},{__metatable={}})"):
+                with self.subTest(runtime=runtime, expression=expression):
+                    h = Host(runtime)
+                    h.lua.execute("buttonArray="+expression)
+                    h.world()
+                    h.g.menuLoaded()
+                    h.g.menuReloaded()
+                    s = h.sprite(0,1)
+                    h.jump(0,915)
+                    self.assertEqual(h.fields(s), (-1,-2,0,0))
+                    self.assertEqual(sum("toolbar binding skipped:" in x for x in h.g.logs.values()), 1)
+                    self.assertTrue(h.c.Status().enabled)
+
+    def test_partial_and_inherited_bindings_and_menu_method_replacement(self):
+        for runtime in (Lua52, LuaJIT):
+            h = Host(runtime)
+            h.lua.execute("methods={OnLButtonPressed=function(self,x) return x,77 end}; "
+                          "buttonArray=setmetatable({}, {__index=methods}); "
+                          "EEex_Sprite_IterateSelectedIDs=nil; EEex_Actionbar_AddButtonsUpdatedListener=nil")
+            h.world()
+            s = h.sprite(0,7)
+            h.lua.execute("selected={7}; click=methods.OnLButtonPressed; menuReloaded(); "
+                          "assert(click==methods.OnLButtonPressed and methods.GetButtonEnabled==nil)")
+            h.jump(0,915)
+            self.assertEqual(h.lua.eval("buttonArray:OnLButtonPressed(5)"), (5,77))
+            self.assertEqual(h.g.refreshed, 1)
+            h.lua.execute("methods.GetButtonEnabled=false; menuReloaded(); assert(methods.GetButtonEnabled==false); "
+                          "methods.GetButtonEnabled=setmetatable({}, {__call=function(_,self,i) return i,true end}); "
+                          "menuReloaded(); paint=methods.GetButtonEnabled; "
+                          "methods.OnLButtonPressed=function(self,i) return 'new',i end; "
+                          "menuReloaded(); assert(methods.GetButtonEnabled==paint and methods.OnLButtonPressed~=click)")
+            h.set_fields(s, (0,0,1,0))
+            h.jump(0,915)
+            self.assertEqual(h.lua.eval("buttonArray:OnLButtonPressed(3)"), ("new",3))
+            self.assertEqual(h.g.refreshed, 2)
+            self.assertEqual(h.lua.eval("buttonArray:GetButtonEnabled(3)"), (3,True))
+
+    def test_callable_userdata_paint_and_optional_reload_listener(self):
+        for runtime in (Lua52, LuaJIT):
+            h = Host(runtime)
+            h.g.py_method = lambda this, i: (i, 20)
+            h.lua.execute("assert(type(py_method)=='userdata'); getmetatable(buttonArray).GetButtonEnabled=py_method; "
+                          "EEex_Menu_AddAfterMainFileReloadedListener=nil; selected={7}")
+            h.world()
+            h.sprite(0,7)
+            h.jump(0,915)
+            self.assertEqual(h.lua.eval("buttonArray:GetButtonEnabled(5)"), (5,20))
             self.assertEqual(h.g.refreshed, 1)
 
     def test_commit_inside_refresh_survives_the_old_completion(self):

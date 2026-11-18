@@ -2,13 +2,15 @@
 DEFINE_ACTION_FUNCTION cbr_install_round_clock_component
   STR_VAR source_dir = ~chriz-bg-rebalance/lua~
 BEGIN
-  ACTION_IF (GAME_IS ~iwdee~) BEGIN
-    OUTER_SPRINT cbr_rc_exe ~icewind.exe~
-    ACTION_IF NOT (FILE_EXISTS ~icewind.exe~) BEGIN FAIL @9372 END
-  END ELSE ACTION_IF (FILE_EXISTS ~Baldur.exe~) BEGIN
+  // First existing ExeNames entry in the stock InfinityLoader.ini.
+  ACTION_IF (FILE_EXISTS ~Baldur.exe~) BEGIN
     OUTER_SPRINT cbr_rc_exe ~Baldur.exe~
   END ELSE ACTION_IF (FILE_EXISTS ~BaldurII.exe~) BEGIN
     OUTER_SPRINT cbr_rc_exe ~BaldurII.exe~
+  END ELSE ACTION_IF (FILE_EXISTS ~icewind.exe~) BEGIN
+    OUTER_SPRINT cbr_rc_exe ~icewind.exe~
+  END ELSE ACTION_IF (FILE_EXISTS ~SiegeOfDragonspear.exe~) BEGIN
+    OUTER_SPRINT cbr_rc_exe ~SiegeOfDragonspear.exe~
   END ELSE BEGIN
     FAIL @9374
   END

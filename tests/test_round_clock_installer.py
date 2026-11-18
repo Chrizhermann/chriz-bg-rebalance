@@ -139,9 +139,22 @@ class RoundClockInstallerTests(unittest.TestCase):
         self.success(self.game(exes={"BaldurII.exe":good}))
         self.success(self.game(exes={"Baldur.exe":good,"BaldurII.exe":bad}))
         self.refused(self.game(exes={"Baldur.exe":bad,"BaldurII.exe":good}), "Baldur.exe is a different build")
-        self.refused(self.game(edition="iwdee", exes={"Baldur.exe":good}), "requires icewind.exe")
-        self.refused(self.game(edition="iwdee", exes={"Baldur.exe":good,"icewind.exe":bad}),
+        self.success(self.game(edition="iwdee", exes={"Baldur.exe":good,"icewind.exe":bad}))
+        self.refused(self.game(exes={"icewind.exe":bad,"SiegeOfDragonspear.exe":good}),
                      "icewind.exe is a different build")
+        self.refused(self.game(exes={"BaldurII.exe":bad,"icewind.exe":good}),
+                     "BaldurII.exe is a different build")
+
+    def test_sod_executable_alone_and_beside_baldur(self):
+        good = executable(timestamp=STAMPS["sod"])
+        bad = executable(timestamp=0x609437B3)
+        for exes in ({"SiegeOfDragonspear.exe":good}, {"SiegeOfDragonspear.exe":bad,"Baldur.exe":good}):
+            with self.subTest(names=list(exes)):
+                game = self.game(edition="sod", exes=exes)
+                self.success(game)
+                self.assertEqual(tree(game.override), game.before | PAYLOAD)
+        self.refused(self.game(edition="sod", exes={"Baldur.exe":bad,"SiegeOfDragonspear.exe":good}),
+                     "Baldur.exe is a different build")
 
     def refused(self, game, reason):
         stable, before, logged = game.stable_files(), tree(game.override), game.active_log()

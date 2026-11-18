@@ -109,6 +109,7 @@ Bugs found here are reported upstream first (see `research/02-upstream-scs-repor
 | 332 | Cross-cutting audits | Heroism family: Heroism, Greater Heroism and the Potion of Heroism do not combine | Automated checks and lab install passed; in-game check pending |
 | 340 | Cross-cutting audits | Chris Revisions: Aid hit points only, Luck 90 seconds, Bless 30 seconds + 1 round per level, Bless and Chaotic Commands for druids, Prayer and Recitation not cumulative | Automated checks passed; in-game check pending |
 | 360 | Cross-cutting audits | EEex True Time Stop – fair Haste & Slow: frozen creatures' effects wait out a Time Stop; Haste and Slow leave periodic effects at the normal rate | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 and in the full CEBG stack with Spell Revisions; gameplay acceptance pending |
+| 361 | Cross-cutting audits | Round Clock credits elapsed world time toward personal cooldowns after travel, rest and scripted jumps | Unreleased. Single-player quiet labs on BG2:EE and IWD:EE 2.7.3.0. Multiplayer verified by static analysis only. |
 | 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
 | 410 | Class and kit revisions | Druids: axes and short bows; fighter/druids also long bows (with or without Artisan's Kitpack) | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 with and without Artisan's Kitpack; gameplay acceptance pending |
 | 411 | Class and kit revisions | Alaghor of Clangeddin (Yeslick): the cleric weapons plus axes, with fighter/cleric limits (Artisan's Kitpack and EEex) | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 in CEBG's stack with Spell Revisions and Artisan's Kitpack; gameplay acceptance pending |
@@ -296,6 +297,23 @@ same two files, installed by its own `Setup-cbr_true_timestop.exe`. Use one of t
 installers; each refuses while the other is installed. In its own lab, plain BG2:EE 2.7.3.0
 with EEex 1.3.1, the package installed from its archive switched the correction on at start,
 corrected the same cases, and uninstalled back to the files from before the install.
+
+### Component 361 — Round Clock
+
+When travel, rest or a script advances the world clock, eligible party members and creatures in
+loaded areas recover spent spell and item aura, completed attack rounds, Hide in Shadows lockout
+and the contingency check delay. Recovery uses elapsed time and each creature's update speed.
+An interrupted rest with zero elapsed time grants zero recovery. During Time Stop, only the caster
+and immune creatures recover. The engine continues to handle casts and attacks already in progress.
+
+Use Windows x64 BG:EE/SoD, BG2:EE/EET or IWD:EE **2.7.3.0** with EEex v1.2.0 or v1.3.1.
+Select 361 in the full installer or use the Round Clock standalone. Component 360 is independent.
+Single-player quiet labs verified the first paused Stealth paint and click on BG2:EE alongside 360
+with LuaJIT, and on IWD:EE with LuaJIT and embedded Lua 5.2. The latest hook and toolbar changes
+were retested on BG2:EE. Waylaid routes and custom action bars remain open.
+Multiplayer has static verification only and has never been live-tested. A forced clock
+update on another thread skips personal recovery and increments `CBRRC.Status().off_thread_skips`.
+[Installer and gameplay notes](live-patch/CBR_ROUND_CLOCK/README.md) · [Verification](research/16-time-jump-round-and-cooldowns.md).
 
 ### Component 320 — Damageable combat clouds
 

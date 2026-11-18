@@ -1,6 +1,8 @@
 # 16. Personal rounds and cooldowns across world-time jumps
 
-**Phase 1 · 2026-11-18 · Proposed component 361 · Windows x64 2.7.3.0**
+**Component 361 · Windows x64 2.7.3.0 · 2026-11-18**
+
+Sections 1–7 record the Phase 1 design. The [Phase 2D verification](#phase-2d-review-fixes-and-verification) records the current hook, toolbar behavior, multiplayer scope and lab results.
 
 A character can finish casting, travel for hours, and still have a used aura. The world clock advances in one write. The engine later compresses some area and effect timers, but it leaves the sprite's cast counter, attack-round phase, Hide in Shadows lockout and contingency polling throttle untouched. The four counters have different owners and completion rules. A fifth field, script-imposed unselectability, also counts down on AI updates and shares storage with an effect.
 
@@ -360,7 +362,7 @@ On a later still-paused read of the original build the disabled flag had reached
 
 A second test issued `DayNight(8)` from slot 0's paused render, before slot 5's enabled query. Immediately before the press, both games still held disabled 1 with Hide 0. The press changed it to 0 and modal to 3. The first subsequent slot-5 paint saw 0 in the same frame. The click and paint occurred at tick 144000, BG2 frame 2715 and IWD frame 2711. No unpaused AI update intervened.
 
-The fix marks a selected actor's positive-to-zero Hide transition. The world UI resolves the current selection and button array when it reads enabled state, handles a press or receives a key. The Win64 helper rechecks the owner thread and activation flag before calling `CInfButtonArray::UpdateButtons`. A natural rebuild or session destruction clears the mark. A reentrant commit retains its newer mark. The independent stock world caller and callee entry validate the native target. Host cases exercise draw, input, panel and selection changes, nested refresh, ordinary rebuild and session teardown.
+The Phase 2B implementation marked a selected actor's positive-to-zero Hide transition and used a natural rebuild or session destruction to clear it. The world UI resolved the selection and button array on read, press or key. The Win64 helper rechecked the owner thread and activation flag before calling `CInfButtonArray::UpdateButtons`. Phase 2C reproduced a race in that completion listener. Phase 2D changed when a mark is created and who can consume it.
 
 ### Natural aura, committed jumps and follow-up casting
 
@@ -461,3 +463,64 @@ The standing BG2 restore used a pre-run byte copy and SHA-256 inventory of the e
 Both the disposable IWD game directory and dedicated Documents profile were removed. The verified recycler handled the OneDrive directory after its test files were deleted. Coverage is single-player Windows BG2:EE and IWD:EE 2.7.3.0 on these fixtures. Multiplayer, other executables, custom action bars and waylaid routes were outside this live run.
 
 The task scratch directory and private fixture copies were removed. The final slot check reported all five slots free and the exclusive `bg-game-install.lock` free. `git diff --check` passed. The three Phase 2B files also passed explicit whitespace checks.
+
+## Phase 2D review fixes and verification
+
+This revision addresses the Phase 2C review of `5489490`. BG2:EE supplied the fresh single-player smoke test. The IWD:EE LuaJIT and embedded Lua 5.2 gameplay results above are from Phase 2B. Waylaid travel, custom action bars and live multiplayer remain open.
+
+### Win64 stack walks and hook publication
+
+In EEex v1.2.0 and v1.3.1, the x64 function-table writer uses declared prologues to emit `UWOP_ALLOC_SMALL` and saves of nonvolatile registers. The old hook adjusted RSP with pushes, LEA and shadow space. Its runtime entry chained straight into the engine checker with zero local slots. The old standalone toolbar helper had no registered entry. Giving the chained hook its own nonempty prologue still let Windows recover the wrong RBX and RSI from the checker's home slots. The fixed hook therefore calls the dispatcher at the checker's original stack depth. The dispatcher, Lua bridge and toolbar helper each own an independently registered function. [EEex v1.2.0 writer](https://github.com/Bubb13/EEex/blob/v1.2.0/EEex/copy/EEex_scripts/EEex_Assembly_x86-64.lua#L517-L639) · [EEex v1.3.1 writer](https://github.com/Bubb13/EEex/blob/v1.3.1/EEex/copy/EEex_scripts/EEex_Assembly_x86-64.lua#L517-L639) · [Windows x64 unwind format](https://learn.microsoft.com/en-us/cpp/build/exception-handling-x64?view=msvc-170).
+
+| Registered interval | Stack at a nested call | BG2 lab UNWIND_INFO bytes before any chain descriptor |
+|---|---|---|
+| Checker trampoline | Same RSP as the original checker body before the CALL | `21 00 00 00` and the original checker RUNTIME_FUNCTION |
+| Clock dispatcher | 120 bytes below its function entry | `01 23 01 00 05 E2 00 00` |
+| Lua bridge for `CBRRC_Commit` | 120 bytes below entry, RBX saved at RSP+112 | `01 0F 03 00 0A 34 0E 00 05 E2 00 00` |
+| Toolbar Lua C function | 40 bytes below entry, RBX saved at RSP+32 | `01 0A 03 00 0A 34 04 00 05 42 00 00` |
+
+The Win64 test calls `kernel32.RtlLookupFunctionEntry` and `RtlVirtualUnwind` at the protected Lua call (`Hardcoded_lua_pcallk`), `CInfButtonArray::UpdateButtons` and `Hardcoded_lua_pushboolean`. It replays the lab's AsmJit instruction windows, including each six-byte CALL and its return PC. With the release scripts supplied, it also runs the real EEex preprocessor, Lua-call generator and function-table writer under Lua 5.2 and LuaJIT. Keystone assembles the output and Unicorn executes it to each exact call, supplying the stack bytes to Windows. Every step checks RIP, RSP and the nonvolatile registers. Moving the RBX save by one slot in each captured unwind record made Windows recover a wrong RBX at both the call and return PC for all three targets. Normal return also preserves the gate's volatile registers, arithmetic flags and XMM values through callees that clobber them. The BG2 process independently resolved all three call sites in its own EEex allocations and walked its registered tables with Windows. The walk reached the checker caller in three frames and the toolbar caller in one. Component 361 itself uses neither FFI nor LuaJIT-specific facilities. [Win64 regression test](../tests/test_round_clock_unwind.py).
+
+The published near jump must resolve to user code outside the entire loaded PE image. EEex packs its code pages bytewise, so a valid trampoline can be unaligned. The injected `E9 F8 FF FF FF 90 90` resolves to `site - 3`. Startup rejected it, restored both original instructions and kept the gate disarmed.
+
+### Selection, toolbar generations and installer identity
+
+The actor loop ages the four scalar fields of every eligible sprite. A positive Hide lockout reaching zero on any actor publishes one new generation after the loop finishes. The first world toolbar read, press or key reacquires the live selection. A successful native refresh consumes the generation it started with. An earlier buttons-updated dispatch can finish after a new jump without erasing that jump. Session destruction discards pending UI work and resets the counters, retaining `lua_errors` when the gate is disarmed.
+
+Binding is optional and runs on initial load and menu reload. Each callable is wrapped independently on the binding metatable or its table-valued `__index`. A replacement method receives a new wrapper. Host tests on both Lua runtimes cover missing and protected bindings, callable userdata and tables, reload on the same metatable, selection changes while paused and an upstream completion listener firing across a newer commit. [Lua regression tests](../tests/test_round_clock.py).
+
+Both WeiDU 249 installer forms probe the first existing entry in stock InfinityLoader's priority list, `Baldur.exe`, `BaldurII.exe`, `icewind.exe`, `SiegeOfDragonspear.exe`. Synthetic SoD installs verified the alias alone, both outcomes of `Baldur.exe` taking precedence, and restoration after standalone uninstall. [Full installer tests](../tests/test_round_clock_installer.py) · [Standalone installer tests](../tests/test_round_clock_standalone.py).
+
+### Multiplayer thread context on the three Steam executables
+
+The single direct call to `CBaldurMessage::OnTimeSynchBroadcast` is inside the message pump. The normal pump runs inline on the game-loop thread. Disassembly and loader symbols establish the following path independently on each of the three 2.7.3.0 images listed at the top.
+
+| Call or virtual dispatch (hex RVAs) | BG:EE and BG2:EE | IWD:EE |
+|---|---|---|
+| WinMain → SDL_main → CChitin::WinMain | `5672CF → 137150`, `137203 → 41CD90` | `56815F → 1371D0`, `137283 → 41DA40` |
+| Game loop → CChitin::Update, then vslot +E8 | `41CFCB → 41CAC0`, call at `41CBE5` | `41DAAB → 41D770`, call at `41D895` |
+| CBaldurChitin vtable slot → AsynchronousUpdate → message pump | `58DDE8 → 131C10`, `131C4E → 205060` | `58FDE8 → 131CA0`, `131CDE → 2050E0` |
+| Message pump → OnTimeSynchBroadcast → post-store clock checker | `2086F7 → 143A80`, `143AFB → 2513A0` | `208777 → 143B00`, `143B7B → 251420` |
+
+The constructors load the relevant vtables at BG/BG2 `130EEC` and IWD `130F0C`. The five other direct calls into the same pump are the close-session poll, store buy click, two world updates and ground click. BG/BG2 call sites are `13D33F, 2E2E31, 2EBF2E, 2EBF80, 2F38DC`. IWD sites are `13D3BF, 2E2EB1, 2EBFAE, 2EC000, 2F395C`. These calls dispatch on their invoking thread. The native area compressor compares the network byte at `+2C9` with exactly 1 before comparing the actor's owner with `network+374` (BG/BG2 `17DBF5–17DC15`, IWD +`80`). The host tests verify 0, 1, 2 and 255.
+
+**Multiplayer has static verification only and has never been live-tested.** Only an admitted call on the thread captured at initialization enters Lua. On any other thread the gate increments `off_thread_skips` and immediately returns to the native path. The engine has already stored the new clock. The skipped delta grants no personal recovery and is never replayed.
+
+### Focused BG2:EE 2.7.3.0 quiet run
+
+WeiDU 249 installed components 360 and 361 together in the standing BG2 Magic Lab with EEex v1.3.1 and LuaJIT. The observed `CBRRC.lua` SHA-256 was `780fb70715e4443b67df3d852a12d0f3a4aea7f33115d6b2f1f77926598607fc`. The two trials ran in one guarded process using the BuffBot Clean Baseline save. The lab driver prepared the thief in memory. Each trial began with a normal Armor cast, a stopped attack and a thief with a positive Hide lockout and slot 5 disabled. The observer bracketed the real commit and sampled the first Stealth paint after the stock enabled predicate. The press used the stock button handler on that same paused frame.
+
+| Scripted action | Old → new world tick | Aura, idle attack, Hide, contingency at commit | Commit / first paint / click frame | Resume → follow-up Armor start |
+|---|---|---|---|---|
+| `DayNight(13)` | 31763 → 58500 | (90, 33, 56, 38) → (−1, −2, 0, 0) | 922 / 922 / 922 | 58500 → 58501 |
+| `AdvanceTime(2400)` | 58920 → 94920 | (90, 33, 56, 83) → (−1, −2, 0, 0) | 1768 / 1768 / 1768 | 94920 → 94921 |
+
+In both trials the slot's `+0x29C` was 1 at commit exit and 0 on the first paint. The click changed modal 0 → 3 at the same paused tick. The follow-up spell was queued after native area compression drained. Final status was 361 installed and enabled, two commits, six actors credited, zero Lua errors and zero off-thread skips. Component 360 was enabled with zero errors.
+
+The audio preflight returned 0. The 167.2-second run closed the remote bridge on game shutdown. The guard measured audio peak 0.0, three process exits of `0x00000000`, no guard trip and no remaining job process. After uninstalling the two test components, a fresh SHA-256 and path comparison against both pre-run snapshots returned **0 extra, 0 missing, 0 changed** for the game (4,521 entries, 4,343 files) and profile (31 entries, 25 files). All five lab slots and the exclusive install lock were free.
+
+### Offline verification and package identity
+
+Full discovery used `python -B -m unittest discover -s tests -p "test_*.py" -v`, an explicit standalone interpreter in `CBR_LUA`, and the archived dragon, flail and bracer fixtures. The final run passed all 1,002 tests in 567.953 seconds with zero skips, including all 45 Round Clock tests. The 51 staged private fixture files were removed. The standalone interpreter override takes priority over legacy game-path fallbacks. For fresh Win64 frame generation, put the libraries from `research/timestop-lab/requirements-native.txt` on the Python path and set `CBR_EEEX_SCRIPTS` to the release script directories, separated on Windows by a semicolon. The ordinary Win64 test also walks the recorded BG2 call sites using only the suite's standard dependencies.
+
+The Phase 2D package build keeps the installer version at `v0.8.11`. Four archive names are also used by the published release, so the branch builds are local verification artifacts. The Round Clock standalone is the fifth archive. Two independent invocations of `python -B tools/package_timestop.py --output <temporary-directory>` produced byte-identical ZIP pairs with matching SHA-256 sidecars and valid member CRCs.

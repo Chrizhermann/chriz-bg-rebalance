@@ -37,6 +37,13 @@ def setUpModule():
 
 
 class StandaloneTests(main.RoundClockInstallerTests):
+    def test_sod_alias_install_and_uninstall_from_extracted_zip(self):
+        game = self.game(edition="sod", exes={"SiegeOfDragonspear.exe": main.executable(timestamp=main.STAMPS["sod"])})
+        self.success(game, form="slash")
+        self.assertEqual(tree(game.override), game.before | PAYLOAD)
+        self.assertEqual(game.invoke(form="slash", uninstall=True).returncode, 0)
+        self.assertEqual(tree(game.override), game.before)
+
     def test_archive_bytes_checksum_and_reproducibility(self):
         first = self.package
         with tempfile.TemporaryDirectory(prefix="cbr-361-repeat-") as tmp:
