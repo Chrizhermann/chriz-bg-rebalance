@@ -22,7 +22,7 @@ Loading a save or changing areas without advancing world time grants zero recove
 
 In a single-player BG2:EE 2.7.3.0 quiet lab, the final code (`70c9e06`) ran alongside component 360 with EEex v1.3.1 and LuaJIT. A scripted time jump cleared all four seeded cooldowns. The stock Stealth button enabled on its first paint and accepted the click on the same paused frame (388), before another AI tick.
 
-Earlier LuaJIT trials on BG2:EE and standalone IWD:EE checked spell and potion reuse after scripted jumps. BG2:EE trials also covered world-map travel, completed rest and an interrupted rest with zero elapsed ticks. The IWD:EE standalone accepted a stock Stealth click while paused under both LuaJIT and embedded Lua 5.2 on EEex v1.3.1.
+Earlier LuaJIT trials on BG2:EE and standalone IWD:EE started from a spell cast or potion use and measured the follow-up spell cast after scripted jumps; follow-up item use was not measured separately. BG2:EE trials also covered world-map travel, completed rest and an interrupted rest with zero elapsed ticks. The IWD:EE standalone accepted a stock Stealth click while paused under both LuaJIT and embedded Lua 5.2 on EEex v1.3.1.
 
 Waylaid travel, custom action bars and a full BG:EE/SoD runtime launch remain open. Multiplayer forced time synchronization has static evidence only. An update on another thread skips personal recovery and increments `CBRRC.Status().off_thread_skips`.
 
