@@ -101,6 +101,7 @@ function EEex_GenLuaCall(name, meta)
 end
 function EEex_JITNear(t)
     local asm = table.concat(t,"\n")
+    if t[1]=="call " then return base-0x13003 end  -- unaligned clock trampoline
     if asm:find("Hardcoded_lua_pushboolean",1,true) then
         refreshAsm = asm; return base-0x11000
     end
@@ -125,6 +126,7 @@ function EEex_ExposeToLua(a,name)
         return
     end
     assert(a==base-0x10000)
+    captureAddress=a
     _G[name]=function() EEex_Write32(block+8,0x1234) end
 end
 function EEex_DisableCodeProtection() assert(protected); protected=false end
@@ -132,8 +134,9 @@ function EEex_EnableCodeProtection() assert(not protected); protected=true end
 function EEex_HookBeforeRestoreWithLabels(a,delay,n,resume,labels,body)
     assert(not protected and delay==0 and n==7 and resume==7 and #labels==0)
     hooks=hooks+1; hookAddress=a; gate=table.concat(body,"\n")
+    local trampoline=EEex_JITNear(body)
     put(a,"\233\000\000\000\000\144\144")
-    EEex_Write32(a+1, (base-0x13003)-(a+5))
+    EEex_Write32(a+1, trampoline-(a+5))
 end
 function EEex_JITAt(a,body)
     assert(not protected and table.concat(body):find("0x36B06E71",1,true))
@@ -238,10 +241,12 @@ class Host:
             self.g.put(BASE+pc, op + struct.pack("<i", target-pc-len(op)-4))
         return self
 
-    def world(self):
+    def world(self, pe_edits=()):
         self.synthetic_pe()
+        for rva, data in pe_edits:
+            self.g.put(BASE+rva, data)
         self.start()
-        assert self.c.Status().enabled
+        assert self.c.Status().enabled, list(self.g.logs.values())
         for addr, size in ((BASE+0x667000, 4096), (BASE+0x68F000, 8192),
                            (CHITIN, 8192), (NETWORK, 4096), (GAME, 0xA000)):
             self.map(addr, bytes(size))
@@ -300,11 +305,13 @@ class StartupTests(unittest.TestCase):
         for runtime in (Lua52, LuaJIT):
             with self.subTest(runtime=runtime):
                 h = Host(runtime).synthetic_pe()
+                h.lua.execute("originalJITNear=EEex_JITNear")
                 h.start()
                 h.start()
                 self.assertTrue(h.c.Status().enabled, list(h.g.logs.values()))
                 self.assertEqual((h.g.loads, h.g.queues, h.g.destroys, h.g.hooks, h.g.allocations), (1,)*5)
                 self.assertTrue(h.g.protected)
+                self.assertTrue(h.lua.eval("EEex_JITNear==originalJITNear"))
                 self.assertEqual(h.g.hookAddress, BASE+FN+15)
                 self.assertEqual(h.g.EEex_ReadU32(BLOCK+8), 0x1234)
                 self.assertEqual([h.g.EEex_ReadPtr(BLOCK+16+8*i) for i in range(4)],
@@ -339,9 +346,7 @@ class StartupTests(unittest.TestCase):
                  (FN, b"\xcc", "found 0"), (FN+15, b"\xe9", "found 0"),
                  (0x10060, PATTERN, "found 2"), (0x59E75C, bytes(4), "hour"),
                  (0x188+40*9+36, struct.pack("<I", 0x40000040), "data section"),
-                 (0x188+40*9+8, struct.pack("<I", 0x31000), "data section"),
-                 (0x2EE2EF+1, bytes(4), "toolbar refresh target"),
-                 (0x267800, b"\xcc", "instruction")]
+                 (0x188+40*9+8, struct.pack("<I", 0x31000), "data section")]
         for pc in (0x25120C, 0x251251, 0x2512B0, 0x25136B, 0x143A80, 0x143AC1, 0x143ADD,
                    0x2F3B10, 0x2F656A, 0x276735):
             cases.append((pc, b"\xcc", "instruction"))
@@ -381,7 +386,9 @@ class StartupTests(unittest.TestCase):
             with self.subTest(edit=edit):
                 h = Host().synthetic_pe()
                 h.lua.execute(edit)
+                h.lua.execute("originalJITNear=EEex_JITNear")
                 self.refused(h, reason)
+                self.assertTrue(h.lua.eval("EEex_JITNear==originalJITNear"))
                 self.assertEqual(h.g.hooks, calls)
                 self.assertEqual(h.g.read(BASE+FN+15, 7).encode("latin-1"), PATTERN[15:22])
                 self.assertIsNone(h.c.block)
@@ -391,6 +398,26 @@ class StartupTests(unittest.TestCase):
         self.refused(h, "window changed")
         self.assertEqual(h.g.read(BASE+FN+15, 1), "X")
         self.assertEqual(h.g.hooks, 0)
+
+    def test_jump_to_capture_helper_restores_site_and_frees_block(self):
+        for runtime in (Lua52, LuaJIT):
+            with self.subTest(runtime=runtime):
+                h = Host(runtime).synthetic_pe()
+                h.lua.execute("""
+                    originalJITNear=EEex_JITNear
+                    local publish=EEex_HookBeforeRestoreWithLabels
+                    function EEex_HookBeforeRestoreWithLabels(site,...)
+                        publish(site,...)
+                        EEex_Write32(site+1, captureAddress-(site+5))
+                    end
+                """)
+                self.refused(h, "invalid trampoline destination")
+                self.assertFalse(h.c.Status().enabled)
+                self.assertIsNone(h.c.block)
+                self.assertEqual((h.g.hooks, h.g.allocations, h.g.frees), (1, 1, 1))
+                self.assertEqual(h.g.read(BASE+FN+15, 7).encode("latin-1"), PATTERN[15:22])
+                self.assertTrue(h.lua.eval("EEex_JITNear==originalJITNear"))
+                self.assertIsNone(h.g.refreshAsm)
 
     def test_gate_layout_call_abi_and_native_exits(self):
         h = Host().synthetic_pe()
@@ -636,6 +663,129 @@ IWD = STEAM / "Icewind Dale Enhanced Edition/icewind.exe"
 
 
 class PausedToolbarTests(unittest.TestCase):
+    def assert_scalar_commit(self, host):
+        sprite = host.sprite(0, 7)
+        host.number(TIMER, 1015)
+        self.assertEqual(host.g.CBRRC_Commit(TIMER, 1, 915, 100, 0), 0)
+        self.assertEqual(host.fields(sprite), (-1, -2, 0, 0))
+        status = host.c.Status()
+        self.assertTrue(status.installed and status.enabled)
+        self.assertIsNone(status.refused)
+        self.assertEqual((status.actors, status.commits, status.lua_errors), (1, 1, 0))
+
+    def test_toolbar_inspection_starts_with_core_already_armed(self):
+        for runtime in (Lua52, LuaJIT):
+            with self.subTest(runtime=runtime):
+                h = Host(runtime)
+                h.lua.execute(CORE)
+                h.lua.execute("""
+                    local inspect=CBRRC.InspectToolbar
+                    function CBRRC.InspectToolbar(a)
+                        local status=CBRRC.Status()
+                        inspectedAfterArm=status.installed and status.enabled and protected and hooks==1
+                        return inspect(a)
+                    end
+                """)
+                h.world()
+                self.assertTrue(h.g.inspectedAfterArm)
+                self.assertIsNotNone(h.g.refreshAsm)
+                self.assertIsNone(h.g.CBRRC_UpdateButtons)
+
+    def test_changed_toolbar_instructions_leave_scalar_recovery_active(self):
+        for runtime in (Lua52, LuaJIT):
+            for rva, data, reason in ((0x2EE2E1, b"\xcc", "instruction at RVA 2EE2E1"),
+                                      (0x2EE2EF, b"\xcc", "instruction at RVA 2EE2EF"),
+                                      (0x2EE2F0, bytes(4), "incorrect toolbar refresh target"),
+                                      (0x267800, b"\xcc", "instruction at RVA 267800")):
+                with self.subTest(runtime=runtime, rva=hex(rva)):
+                    h = Host(runtime).world([(rva, data)])
+                    self.assert_scalar_commit(h)
+                    self.assertTrue(any("toolbar binding skipped:" in line and reason in line
+                                        for line in h.g.logs.values()), list(h.g.logs.values()))
+                    self.assertIsNone(h.g.refreshAsm)
+                    self.assertIsNone(h.g.menuLoaded)
+
+    def test_missing_or_throwing_toolbar_apis_leave_scalar_recovery_active(self):
+        for runtime in (Lua52, LuaJIT):
+            for api in ("EEex_Menu_AddAfterMainFileLoadedListener", "EEex_Menu_AddAfterMainFileReloadedListener",
+                        "EEex_Key_AddPressedListener", "EEex_Sprite_GetSelected"):
+                for missing in (True, False):
+                    with self.subTest(runtime=runtime, api=api, missing=missing):
+                        h = Host(runtime)
+                        h.lua.execute(f"{api}=nil" if missing else f"{api}=function() error('{api}',0) end")
+                        h.world()
+                        self.assert_scalar_commit(h)
+                        if api == "EEex_Sprite_GetSelected" and not missing:
+                            h.g.keyPressed()
+                            self.assertIn("toolbar refresh: " + api, h.g.logs[len(h.g.logs)])
+                            self.assertTrue(h.c.Status().enabled)
+                        elif api == "EEex_Menu_AddAfterMainFileReloadedListener" and missing:
+                            h.lua.execute("selected={7}; keyPressed()")
+                            self.assertEqual(h.g.refreshed, 1)
+                        else:
+                            self.assertTrue(any("toolbar binding skipped:" in line and api in line
+                                                for line in h.g.logs.values()), list(h.g.logs.values()))
+
+    def test_refresh_assembly_and_partial_exposure_failures_are_optional(self):
+        for runtime in (Lua52, LuaJIT):
+            for stage in ("assembly", "exposure"):
+                with self.subTest(runtime=runtime, stage=stage):
+                    h = Host(runtime)
+                    h.lua.execute("""
+                        badError=setmetatable({}, {__tostring=function() error("formatting failed") end})
+                    """)
+                    if stage == "assembly":
+                        h.lua.execute("""
+                            local assemble=EEex_JITNear
+                            function EEex_JITNear(body)
+                                if table.concat(body):find("Hardcoded_lua_pushboolean",1,true) then
+                                    error(badError)
+                                end
+                                return assemble(body)
+                            end
+                        """)
+                    else:
+                        h.lua.execute("""
+                            local expose=EEex_ExposeToLua
+                            function EEex_ExposeToLua(address,name)
+                                expose(address,name)
+                                if name=="CBRRC_UpdateButtons" then error(badError) end
+                            end
+                        """)
+                    h.world()
+                    self.assert_scalar_commit(h)
+                    self.assertIsNone(h.g.CBRRC_UpdateButtons)
+                    self.assertIn("[CBR Round Clock] toolbar binding skipped: unprintable error",
+                                  h.g.logs.values())
+
+    def test_throwing_paint_lookup_or_assignment_still_wraps_click(self):
+        for runtime in (Lua52, LuaJIT):
+            for fault in ("lookup", "assignment"):
+                with self.subTest(runtime=runtime, fault=fault):
+                    h = Host(runtime)
+                    h.g.fault = fault
+                    h.lua.execute("""
+                        local bad=setmetatable({}, {__tostring=function() error("formatting failed") end})
+                        local click=buttonArray.OnLButtonPressed
+                        local methods=setmetatable({OnLButtonPressed=click}, {
+                            __index=function(_,key)
+                                assert(key=="GetButtonEnabled")
+                                if fault=="lookup" then error(bad) end
+                                return function() return true end
+                            end,
+                            __newindex=function() error(bad) end
+                        })
+                        buttonArray=setmetatable({}, {__index=methods})
+                        selected={7}
+                    """)
+                    h.world()
+                    h.g.menuReloaded()
+                    self.assert_scalar_commit(h)
+                    self.assertEqual(h.lua.eval("buttonArray:OnLButtonPressed(5)"), (5, 1))
+                    self.assertEqual(h.lua.eval("buttonArray:OnLButtonPressed(6)"), (6, 1))
+                    self.assertEqual(list(h.g.logs.values()).count(
+                        "[CBR Round Clock] toolbar binding skipped: unprintable error"), 1)
+
     def test_first_draw_click_and_hotkey_each_refresh_once(self):
         for runtime in (Lua52, LuaJIT):
             for entry in ("buttonArray:GetButtonEnabled(5)", "buttonArray:OnLButtonPressed(5)", "keyPressed()"):
@@ -784,6 +934,8 @@ class SteamImageTests(unittest.TestCase):
         self.assertTrue(h.c.Status().enabled, list(h.g.logs.values()))
         a = h.c.addresses
         self.assertEqual((a.fn-BASE,a.site-BASE), (0x2513A0+code,0x2513AF+code))
+        self.assertEqual(a.update, BASE+0x267800+code)
+        self.assertIsNotNone(h.g.refreshAsm)
         self.assertEqual([a.returns[i]-BASE for i in range(1,5)], [r+code+5 for r in CALLERS])
         self.assertEqual([a[key]-BASE-data for key in ("chitin","network","maxSlot","serial","slots")],
                          [0x667548,0x667560,0x68F8F4,0x68F8F8,0x68F910])

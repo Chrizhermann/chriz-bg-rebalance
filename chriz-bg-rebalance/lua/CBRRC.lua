@@ -36,7 +36,9 @@ local bindingReported = false
 local function bindingSkipped(reason)
     if not bindingReported then
         bindingReported = true
-        log("toolbar binding skipped: "..tostring(reason))
+        local okStr, text = pcall(tostring, reason)
+        if not okStr or type(text) ~= "string" then text = "unprintable error" end
+        pcall(log, "toolbar binding skipped: "..text)
     end
 end
 
@@ -56,19 +58,22 @@ local function bindToolbar()
     -- These are the engine's UI bindings. Stock toolbar items query enabled
     -- before painting; a queued UI click can reach OnLButtonPressed first.
     for _, key in ipairs({"GetButtonEnabled", "OnLButtonPressed"}) do
-        local methods = mt
-        if type(index) == "table" and index[key] ~= nil then methods = index end
-        local original = methods[key]
-        if not callable(original) then
-            bindingSkipped(key.." unavailable")
-        elseif not wrapped[original] then
-            local function wrapper(self, ...)
-                if pending and self == buttonArray then refreshToolbar() end
-                return original(self, ...)
+        local okKey, errKey = pcall(function()
+            local methods = mt
+            if type(index) == "table" and index[key] ~= nil then methods = index end
+            local original = methods[key]
+            if not callable(original) then
+                bindingSkipped(key.." unavailable")
+            elseif not wrapped[original] then
+                local function wrapper(self, ...)
+                    if pending and self == buttonArray then refreshToolbar() end
+                    return original(self, ...)
+                end
+                methods[key] = wrapper
+                wrapped[wrapper] = true
             end
-            methods[key] = wrapper
-            wrapped[wrapper] = true
-        end
+        end)
+        if not okKey then bindingSkipped(errKey) end
     end
 end
 
@@ -345,21 +350,25 @@ function C.Inspect()
     local hour = reference(0x2F655D, "8B05", base + build.ro + 0x59E75C, 4, "ro")
     assert(mem.u32(hour) == 4500, "incorrect world-screen hour")
     local data = base + build.data
-    -- The normal world UI pass re-fetches the current game and passes its
-    -- embedded array as the sole argument. EEex already hooks the SetState
-    -- caller, so validate the independent world caller and the callee entry.
-    instruction(0x2EE2E1, "488B88901000004881C140410000")
-    local update = relative(0x2EE2EF, "E8")
-    assert(update == base + build.code + 0x267800, "incorrect toolbar refresh target")
-    instruction(0x267800, "488BC4488958104889701848897820554154415541564157")
     local capacity = 0x7FFF
     return {name=build.name, base=base, imageSize=build.size, fn=fn, site=fn+15,
-        returns=returns, slotLimit=capacity-1, update=update,
+        returns=returns, slotLimit=capacity-1, codeBase=base+build.code,
+        instruction=instruction, relative=relative,
         chitin=reference(0x143AC6, "4C8B05", data+0x667548, 8, "data"),
         network=reference(0x17DBF5, "488B15", data+0x667560, 8, "data"),
         maxSlot=reference(0x27671B, "663905", data+0x68F8F4, 2, "data"),
         serial=reference(0x276729, "66390D", data+0x68F8F8, 2, "data"),
         slots=reference(0x276735, "4C8D05", data+0x68F910, 16*capacity, "data")}
+end
+
+function C.InspectToolbar(a)
+    -- The world UI passes the current game's embedded array. EEex already
+    -- hooks the SetState caller, so check the independent world caller and callee.
+    a.instruction(0x2EE2E1, "488B88901000004881C140410000")
+    local update = a.relative(0x2EE2EF, "E8")
+    assert(update == a.codeBase + 0x267800, "incorrect toolbar refresh target")
+    a.instruction(0x267800, "488BC4488958104889701848897820554154415541564157")
+    return update
 end
 
 -- Block layout: enabled, Lua errors, owner thread, off-thread skips (four
@@ -469,37 +478,18 @@ local function commitBridge()
 end
 
 C.requiredFunctions = {"EEex_GameState_AddInitializedListener", "EEex_GameState_AddDestroyedListener",
-    "EEex_Menu_AddAfterMainFileLoadedListener",
-    "EEex_Sprite_GetSelected", "EEex_Key_AddPressedListener",
     "EEex_GetImageBase", "EEex_ReadLString", "EEex_ReadU8", "EEex_Read16", "EEex_Read32",
     "EEex_ReadU32", "EEex_ReadPtr", "EEex_WriteU16", "EEex_Write32", "EEex_WritePtr",
     "EEex_Malloc", "EEex_Free", "EEex_JITNear", "EEex_ExposeToLua", "EEex_GenLuaCall",
     "EEex_FlattenTable", "EEex_HookBeforeRestoreWithLabels", "EEex_JITAt",
     "EEex_DisableCodeProtection", "EEex_EnableCodeProtection"}
 
-local gateMayRun = false
-local function patch(a)
-    local block = EEex_Malloc(48)
-    assert(pointer(block), "cannot allocate round clock block")
-    C.block = block
-    for offset = 0, 12, 4 do mem.w32(block + offset, 0) end
-    for i, pc in ipairs(a.returns) do EEex_WritePtr(block + 8 + i * 8, pc) end
-
-    -- EEex_ExposeToLua expects a lua_CFunction. Store the TID in memory and
-    -- return zero Lua results. Returning the TID in EAX would claim that many results.
-    local helper = EEex_JITNear({[[
-        mov eax, dword ptr gs:[0x48]
-        mov rdx, ]]..decimal(block)..[[
-
-        mov dword ptr [rdx+8], eax
-        xor eax, eax
-        ret
-    ]]})
-    assert(helper and helper > 0, "cannot assemble main-thread helper")
-    EEex_ExposeToLua(helper, "CBRRC_CaptureThread")
-    local captured, why = pcall(CBRRC_CaptureThread)
-    CBRRC_CaptureThread = nil
-    assert(captured and mem.u32(block + 8) ~= 0, "cannot capture main thread: "..tostring(why))
+local function setupToolbar(a, block)
+    for _, name in ipairs({"EEex_Sprite_GetSelected", "EEex_Menu_AddAfterMainFileLoadedListener",
+                           "EEex_Key_AddPressedListener"}) do
+        assert(type(_G[name]) == "function", "missing "..name)
+    end
+    a.update = C.InspectToolbar(a)
     -- lua_CFunction. RBX preserves the Lua state over the engine call. The
     -- declared prolog describes both the 40-byte frame and the RBX save.
     local refresh = EEex_JITNear({([[
@@ -534,13 +524,8 @@ local function patch(a)
     ]]):format(decimal(block), decimal(a.chitin), decimal(a.update))})
     assert(refresh and refresh > 0, "cannot assemble toolbar refresh")
     EEex_ExposeToLua(refresh, "CBRRC_UpdateButtons")
-    updateButtons, CBRRC_UpdateButtons = assert(CBRRC_UpdateButtons), nil
-    local bridge = commitBridge()
-    assert(bridge and bridge > 0, "cannot assemble Lua bridge")
-    local dispatcher = EEex_JITNear(C.BuildGate(block, bridge))
-    assert(dispatcher and dispatcher > 0, "cannot assemble clock dispatcher")
-    local body = {"call ", dispatcher, " #ENDL"}
-    EEex_GameState_AddDestroyedListener(C.SessionEnded)
+    assert(type(CBRRC_UpdateButtons) == "function", "cannot expose toolbar refresh")
+    updateButtons, CBRRC_UpdateButtons = CBRRC_UpdateButtons, nil
     tryBindToolbar()
     EEex_Menu_AddAfterMainFileLoadedListener(tryBindToolbar)
     if type(EEex_Menu_AddAfterMainFileReloadedListener) == "function" then
@@ -548,18 +533,55 @@ local function patch(a)
     end
     -- A toolbar hotkey can be dispatched before any item is painted.
     EEex_Key_AddPressedListener(function() if pending then refreshToolbar() end end)
+end
+
+local gateMayRun = false
+local function patch(a)
+    local block = EEex_Malloc(48)
+    assert(pointer(block), "cannot allocate round clock block")
+    C.block = block
+    for offset = 0, 12, 4 do mem.w32(block + offset, 0) end
+    for i, pc in ipairs(a.returns) do EEex_WritePtr(block + 8 + i * 8, pc) end
+
+    -- EEex_ExposeToLua expects a lua_CFunction. Store the TID in memory and
+    -- return zero Lua results. Returning the TID in EAX would claim that many results.
+    local helper = EEex_JITNear({[[
+        mov eax, dword ptr gs:[0x48]
+        mov rdx, ]]..decimal(block)..[[
+
+        mov dword ptr [rdx+8], eax
+        xor eax, eax
+        ret
+    ]]})
+    assert(helper and helper > 0, "cannot assemble main-thread helper")
+    EEex_ExposeToLua(helper, "CBRRC_CaptureThread")
+    local captured, why = pcall(CBRRC_CaptureThread)
+    CBRRC_CaptureThread = nil
+    assert(captured and mem.u32(block + 8) ~= 0, "cannot capture main thread: "..tostring(why))
+    local bridge = commitBridge()
+    assert(bridge and bridge > 0, "cannot assemble Lua bridge")
+    local dispatcher = EEex_JITNear(C.BuildGate(block, bridge))
+    assert(dispatcher and dispatcher > 0, "cannot assemble clock dispatcher")
+    local body = {"call ", dispatcher, " #ENDL"}
+    EEex_GameState_AddDestroyedListener(C.SessionEnded)
     EEex_DisableCodeProtection()
     local ok, reason = pcall(function()
         assert(readBytes(a.site, 7) == displaced, "clock hook window changed before installation")
-        -- EEex assembles the complete trampoline before writing the jump at the site.
+        -- EEex keeps the one JITNear result private when publishing the site jump.
         gateMayRun = true
+        local origJITNear, trampoline = EEex_JITNear, nil
+        _G.EEex_JITNear = function(...)
+            trampoline = origJITNear(...)
+            return trampoline
+        end
         local hooked, err = pcall(EEex_HookBeforeRestoreWithLabels, a.site, 0, 7, 7, {}, body)
+        _G.EEex_JITNear = origJITNear
         local after = readBytes(a.site, 7)
         if hooked and after:byte(1) == 0xE9 and after:sub(6) == "\144\144" then
             local disp = mem.i32(a.site + 1)
             local dest = a.site + 5 + disp
             -- EEex packs JIT allocations bytewise; code pointers may be unaligned.
-            if math.abs(disp) > 7 and dest >= 0x10000 and dest < 2^47
+            if trampoline ~= nil and dest == trampoline and math.abs(disp) > 7 and dest >= 0x10000 and dest < 2^47
                 and (dest < a.base or dest >= a.base + a.imageSize) then return end
             err = "invalid trampoline destination"
         end
@@ -576,6 +598,12 @@ local function patch(a)
     if not ok then error(reason, 0) end
     C.addresses, C.installed = a, true
     mem.w32(block, 1)
+
+    local okUi, errUi = pcall(setupToolbar, a, block)
+    if not okUi then
+        CBRRC_UpdateButtons = nil
+        bindingSkipped(errUi)
+    end
 end
 
 function C.Status()

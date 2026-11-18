@@ -283,8 +283,9 @@ class WindowsUnwindTests(unittest.TestCase):
         """)
         lua.execute(CORE)
         g.CBRRC.Inspect = lua.eval("""function() return {name="fixture",base=base,imageSize=0x4000,
-            site=base+0x20f,chitin=base+0x2800,update=base+0x900,
+            site=base+0x20f,chitin=base+0x2800,
             returns={base+0x400,base+0x410,base+0x420,base+0x430}} end""")
+        g.CBRRC.InspectToolbar = lua.eval("function() return base+0x900 end")
         status = g.CBRRC.Start()
         self.assertTrue(status.enabled, list(g.logs.values()))
         gate = base_fn + 20 + g.EEex_Read32(base_fn + 16)
