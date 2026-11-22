@@ -3,6 +3,7 @@
 // Component names (match DESIGNATED numbers)
 @100 = ~SCS: Telekinetic Storm — restore save vs. spell for half damage (+ bypass Mirror Image)~
 @101 = ~SCS: Adventurer's Mart — restore the five Freedom scrolls (spell tweak orphaned in v35)~
+@102 = ~Ducal Palace Coronation: fix Belt & Liia Confusion immunity and ally/confused friendly-fire hostility~
 @110 = ~EEex + SCS: Apex Dragons — lethal claws and bites (can cause permanent death)~
 @111 = ~SCS: five dragon encounters — wing buffet at most once per 18 seconds~
 @120 = ~SCS + Spell Revisions: repair false weapon-protection semantics~
@@ -218,6 +219,9 @@ Allies receive the tide as a bonus while enemies suffer an equal penalty for 5 r
 @9101 = ~This component is for BG2:EE / EET games.~
 @9102 = ~Sword Coast Stratagems (spell tweaks or AI components) is not installed — nothing to restore.~
 @9103 = ~ribald.sto / scrl9z.itm not found in this game.~
+@9104 = ~Ducal Palace Coronation fix requires BG:EE (with or without SoD) or EET.~
+@9105 = ~Ducal Palace Coronation fix is already installed by the other CBR installer (BG Rebalance component 102 or its standalone package). Use one installer for it, never both.~
+@9106 = ~Ducal Palace Coronation fix installed. Belt and Liia are now immune to Confusion, Fear, and Charm, and neither confused allies/party members nor a single stray AoE hit will trigger instant hostility or Game Over.~
 @9110 = ~These dragon components support BG2:EE / EET only.~
 @9111 = ~SCS Smarter Dragons component 6540 is not installed. Install SCS before these tail components.~
 @9112 = ~The lethal dragon component requires EEex (M___EEex.lua). Its physical-death rider uses EEex to bypass death-effect immunity without stripping protections.~

@@ -33,6 +33,7 @@ ALWAYS
   INCLUDE ~chriz-bg-rebalance/lib/time_stop_haste_clocks.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/round_clock.tpa~
   INCLUDE ~chriz-bg-rebalance/lib/class_weapon_access.tpa~
+  INCLUDE ~chriz-bg-rebalance/lib/ducal_palace.tpa~
 
 
   DEFINE_ACTION_FUNCTION cbr_setup_spell
@@ -264,6 +265,12 @@ COPY_EXISTING ~ribald.sto~ ~override~
   BUT_ONLY
 
 END ELSE BEGIN PRINT ~CBR 101: the store or Freedom scroll is absent; continuing.~ END
+
+BEGIN @102 DESIGNATED 102 GROUP @1100 LABEL ~cbr_ducal_palace_hostility_fix~
+REQUIRE_PREDICATE (GAME_IS ~bgee eet~) @9104
+REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~cbr_ducal_palace/setup-cbr_ducal_palace.tp2~ 102) @9105
+LAF cbr_install_ducal_palace_fix END
+PRINT @9106
 
 BEGIN @110 DESIGNATED 110 GROUP @1100 LABEL ~cbr_scs_dragon_vorpal~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) @9110

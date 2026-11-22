@@ -1,0 +1,13 @@
+BACKUP ~weidu_external/backup/cbr_ducal_palace~
+AUTHOR ~Christopher Hermann (github.com/Chrizhermann/chriz-bg-rebalance)~
+VERSION ~v0.8.12~
+ALWAYS
+  INCLUDE ~CBR_DUCAL_PALACE/lib/ducal_palace.tpa~
+END
+LANGUAGE ~English~ ~english~ ~CBR_DUCAL_PALACE/languages/english/setup.tra~
+
+BEGIN @102 DESIGNATED 102 LABEL ~cbr_ducal_palace_hostility_fix_standalone~
+REQUIRE_PREDICATE (GAME_IS ~bgee eet~) @9104
+REQUIRE_PREDICATE NOT (MOD_IS_INSTALLED ~setup-chriz-bg-rebalance.tp2~ 102) @9105
+LAF cbr_install_ducal_palace_fix END
+PRINT @9106
