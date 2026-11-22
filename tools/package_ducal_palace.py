@@ -1,6 +1,6 @@
 """Build the unpublished standalone CBR_DUCAL_PALACE live-patch archive.
 
-Takes its library and English strings from the full mod source.
+Takes its library from the full mod source and its English strings from the standalone tail.
 Does not inspect or write a game installation, invoke WeiDU, or use the network.
 """
 from __future__ import annotations
@@ -39,7 +39,7 @@ def build(output: Path) -> list[Path]:
         f"{package}/{tp2}": tail / tp2,
         f"{package}/README.md": tail / "README.md",
         f"{package}/lib/ducal_palace.tpa": source / "lib/ducal_palace.tpa",
-        f"{package}/languages/english/setup.tra": source / "languages/english/setup.tra",
+        f"{package}/languages/english/setup.tra": tail / "languages/english/setup.tra",
     }
     archive = output / f"{package}-{version}-windows.zip"
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:

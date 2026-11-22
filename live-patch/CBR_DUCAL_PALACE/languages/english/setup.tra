@@ -1,0 +1,6 @@
+// CBR_DUCAL_PALACE - Standalone Ducal Palace Coronation Fix (English)
+
+@102 = ~Ducal Palace Coronation: fix Belt & Liia Confusion immunity and ally/confused friendly-fire hostility~
+@9104 = ~Ducal Palace Coronation fix requires BG:EE (with or without SoD) or EET.~
+@9105 = ~Ducal Palace Coronation fix is already installed (either via this standalone package or BG Rebalance component 102). Use one installer for it, never both.~
+@9106 = ~Ducal Palace Coronation fix installed. Belt and Liia are now immune to Confusion, Fear, and Charm, and neither confused allies/party members nor a single stray AoE hit will trigger instant hostility or Game Over.~

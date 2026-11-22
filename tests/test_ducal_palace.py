@@ -39,7 +39,7 @@ MEMBERS = {
     TAIL_TP2: ROOT / "live-patch" / TAIL_TP2,
     f"{PACKAGE}/README.md": ROOT / "live-patch" / PACKAGE / "README.md",
     f"{PACKAGE}/lib/ducal_palace.tpa": ROOT / "chriz-bg-rebalance/lib/ducal_palace.tpa",
-    f"{PACKAGE}/languages/english/setup.tra": ROOT / "chriz-bg-rebalance/languages/english/setup.tra",
+    f"{PACKAGE}/languages/english/setup.tra": ROOT / "live-patch" / PACKAGE / "languages/english/setup.tra",
 }
 
 
