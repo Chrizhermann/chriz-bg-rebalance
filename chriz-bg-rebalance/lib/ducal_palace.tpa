@@ -79,7 +79,7 @@ BEGIN
         WRITE_SHORT (cbr_dp_ins + 0x24) probability1
         WRITE_SHORT (cbr_dp_ins + 0x26) probability2
         WRITE_LONG  (cbr_dp_ins + 0x54) resist_dispel
-        WRITE_LONG  (cbr_dp_ins + 0x9c) special
+        WRITE_LONG  (cbr_dp_ins + 0x40) special
       END ELSE BEGIN
         WRITE_SHORT (cbr_dp_ins + 0x00) opcode
         WRITE_BYTE  (cbr_dp_ins + 0x02) target

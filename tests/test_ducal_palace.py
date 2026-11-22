@@ -111,7 +111,7 @@ def make_cre(
             struct.pack_into("<HH", fx_buf, o + 0x24, pr1, 0)
             fx_buf[o + 0x28 : o + 0x28 + len(res)] = res
             struct.pack_into("<I", fx_buf, o + 0x54, rd)
-            struct.pack_into("<I", fx_buf, o + 0x9C, spec)
+            struct.pack_into("<I", fx_buf, o + 0x40, spec)
         else:
             struct.pack_into("<HBBIIBB", fx_buf, o, op, tgt, 0, p1, p2, tim, rd)
             struct.pack_into("<BB", fx_buf, o + 0x12, pr1, 0)
@@ -149,7 +149,7 @@ def parse_cre(data: bytes) -> tuple[int, int, int, int, list[dict[str, object]]]
             pr1 = struct.unpack_from("<H", data, o + 0x24)[0]
             res = data[o + 0x28 : o + 0x30].split(b"\0", 1)[0].decode("ascii")
             rd = struct.unpack_from("<I", data, o + 0x54)[0]
-            spec = struct.unpack_from("<I", data, o + 0x9C)[0]
+            spec = struct.unpack_from("<I", data, o + 0x40)[0]
         else:
             op, tgt, _pwr, p1, p2, tim, rd = struct.unpack_from("<HBBIIBB", data, o)
             pr1 = data[o + 0x12]
