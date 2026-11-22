@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"
+COMPONENTS_REF = ROOT / "docs" / "components-reference.md"
 SCOPE = ROOT / "docs" / "00-project-scope.md"
 RESEARCH = ROOT / "research" / "11-emotion-hope-courage.md"
 TRA = ROOT / "chriz-bg-rebalance" / "languages" / "english" / "setup.tra"
@@ -19,11 +20,12 @@ ASSET_DIR = ROOT / "chriz-bg-rebalance" / "resources" / "emotion_iwdee"
 class EmotionHopeCourageDocsTests(unittest.TestCase):
     def test_readme_documents_component_behavior_compatibility_and_provenance(self) -> None:
         readme = README.read_text(encoding="utf-8")
-        lower = readme.lower()
-        normalized = re.sub(r"\s+", " ", lower)
+        details = COMPONENTS_REF.read_text(encoding="utf-8")
+        normalized = re.sub(r"\s+", " ", details.lower())
 
         self.assertRegex(readme, r"(?m)^\|\s*301\s*\|.*Emotion, Courage.*Emotion, Hope")
-        self.assertRegex(readme, r"(?m)^### Component 301 .*Emotion, Courage.*Emotion, Hope")
+        self.assertIn("docs/components-reference.md", readme)
+        self.assertRegex(details, r"(?m)^### Component 301 .*Emotion, Courage.*Emotion, Hope")
         for phrase in (
             "deliberately overwrites",
             "install it after IWDification, SCS, Spell Revisions",
@@ -49,7 +51,7 @@ class EmotionHopeCourageDocsTests(unittest.TestCase):
 
         for credit in ("IWDification", "Sword Coast Stratagems (SCS)"):
             self.assertIn(credit, readme)
-        self.assertIn("research/11-emotion-hope-courage.md", readme)
+        self.assertIn("research/11-emotion-hope-courage.md", details)
         self.assertRegex(
             readme,
             r"(?m)^.*--force-install-list\s+(?:\d+\s+)*301\s+--language\b",

@@ -1,0 +1,824 @@
+# BG Rebalance — Detailed Component & Engine Reference
+
+> Full component-by-component technical and research reference preserved from the `v0.8.12` README. For the player-facing overview and quick start, see [README.md](../README.md).
+
+## Release Summary (up to v0.8.12)
+
+**Version: v0.8.12.** Pierce Magic has a bounded five-round MR
+reduction; Spellstrike causes 15% spell failure for two rounds.
+Hardiness has a recommended 40% physical-only
+profile, a 30% alternative, and an optional SR damage-resistance add-on.
+The new options also cover BG2-strength EET arrows, SR-compatible Bracers of
+Blinding Strike, party physical resistance capped at 90%, and damageable clouds.
+Apex Dragons supports both SCS difficulty-control systems.
+Component 302 gives Flail of the Ages' Slow a saving throw and
+lets its +5 version work with Haste; v0.8.2 extends it to modded flail layouts. Component 301 makes Emotion, Courage and
+Emotion, Hope mutually exclusive. Since v0.8.3, each temporary potion type works once at a
+time (330/331), and Heroism, Greater Heroism and the Potion of Heroism no longer combine (332).
+Since v0.8.4, 130, 220, 301, 320 and the Tempus components 400–404 keep other mods' changes
+to what they patch; the bracers no longer stack with Haste cast first; and party physical
+resistance (310) leaves short immunity spells such as Divine Protection at 100%.
+Since v0.8.5, Chris Revisions (340) holds Christopher's own spell balance changes. Aid grants only
+hit points, Luck lasts 90 seconds, Bless lasts 30 seconds + 1 round per level, Bless and Chaotic
+Commands are open to druids again, and Prayer and Recitation no longer stack.
+Since v0.8.6, True Time Stop – fair Haste & Slow (360; released as Time Stop and Haste effect
+clocks) is an EEex component for 64-bit 2.7.3.0. In a Time Stop the frozen creatures' durations,
+poison, regeneration and repeated effects wait, and Haste and Slow no longer change how fast
+those effects run.
+Since v0.8.7, 360 has its new name and a standalone download for BG2:EE / EET 2.7.3.0 games
+with EEex and without BG Rebalance, `CBR_TRUE_TIMESTOP-v<version>-windows.zip`. Each of the two
+installers refuses while the other is installed.
+Since v0.8.8: Druid weapons (410) lets druids and every druid kit use axes and short bows, and
+fighter/druids also long bows. Alaghor of Clangeddin weapons (411) gives Yeslick NPC's kit the
+cleric weapons plus axes instead of the thief weapons; it needs Artisan's Kitpack and EEex.
+Since v0.8.9: Pierce Magic (210) and Spellstrike (211) describe themselves in Spell Revisions'
+layout, and the scrolls, the Wand of Spell Striking and other spells that show the old mechanic
+now say what the effects do. The anti-magic tail patch gains texts-only components 212 and 213
+for installations that already have the mechanic.
+Since v0.8.10: Flail of the Ages (302) installs without Spell Revisions, where SCS's own
+Haste and Slow system is in place, and its +5 version now also lets Potion of Haste and Haste
+rings work, with and without Spell Revisions. The Slow saving throws are unchanged.
+Since v0.8.11: every component writes the result it chose even when a player or another mod
+changed the old spell, item, kit or table. This covers the Tempus, Spell Revisions, SCS, Hope,
+cloud, Flail, weapon, bard, dragon, arrow and potion work; real game, EEex and component
+requirements remain.
+
+New in v0.8.12: Round Clock (361) counts time spent travelling, resting or advancing the world
+clock toward spell and item reuse, the next attack round, Hide in Shadows and the next
+contingency check. A thief whose lockout expires can use Stealth on the first paused frame.
+Choose 361 in the full installer or use `CBR_ROUND_CLOCK-v<version>-windows.zip`.
+
+Kit-specific bard spell progression remains available through EEex.
+Previously released components retain their documented acceptance status.
+See `docs/00-project-scope.md` for the broader project.
+
+## Installation policy
+
+Under [We overwrite](../AGENTS.md#we-overwrite), this mod writes its decided result
+regardless of old values, descriptions, effect counts or another mod's edits.
+SCS and Spell Revisions are optional unless a feature truly needs them; mod
+versions are never prerequisites. Missing optional targets or unreadable files
+are logged individually, while the remaining changes continue. EEex requirements,
+native hook signatures and choices between our own components stay.
+
+This policy supersedes older compatibility instructions throughout the repository,
+including dated plans, handovers and research. Historical test and playtest results
+describe those builds only; they do not establish acceptance of this policy update.
+
+## Credits — stand on the shoulders of giants
+
+This mod draws on three outstanding open-source mods and Bubb's EEex. Its Tempus Holy Power
+components also work without them, and component 301 can supply its own Hope and Courage spells
+on a plain BG2:EE/EET spell set; other components declare their own prerequisites:
+
+- **[Sword Coast Stratagems (SCS)](https://github.com/Gibberlings3/SwordCoastStratagems)** by
+  DavidW — the gold standard for Infinity Engine AI and tactics. Install it. This mod merely
+  files down a few rough edges.
+- **[Spell Revisions (SR)](https://github.com/Gibberlings3/SpellRevisions)** by Demivrgvs & the
+  Gibberlings3 team — a thoughtful, comprehensive spell rebalance. Most of its changes are
+  excellent; this mod adjusts the handful that don't fit my table.
+- **[EEex](https://github.com/Bubb13/EEex)** by Bubb — engine extensions used by the optional
+  lethal-dragon component and this mod's other EEex integrations.
+- **[IWDification](https://github.com/Gibberlings3/iwdification)** by CamDawg and contributors —
+  the established Icewind Dale spell port whose spell allocation, detectable-state, and
+  donor-scroll distribution precedents informed component 301.
+
+Code patterns in this repo are frequently adapted from SCS (open source). Component 301 uses
+original CBR code and English text informed by the PnP/IWD spell concepts and read-only study of
+the installed IWDification/SCS implementations. Its standalone presentation files are original
+IWDEE game assets extracted from a pristine user-owned installation and credited in
+`chriz-bg-rebalance/resources/emotion_iwdee/README.md`; no IWDification or SCS binary was copied.
+Bugs found here are reported upstream first (see `research/02-upstream-scs-report-draft.md`).
+
+
+## Components
+
+| # | Group | Component | Status |
+|---|-------|-----------|--------|
+| 100 | SCS adjustments | Telekinetic Storm: restore save vs. spell for half damage (+ bypass Mirror Image) | ✅ implemented |
+| 101 | SCS adjustments | Restore five Freedom scrolls to the Adventurer's Mart | ✅ implemented |
+| 110 | SCS adjustments | EEex Apex Dragons: lethal claws and bites, with possible permanent death | Optional; released; combat acceptance pending |
+| 111 | SCS adjustments | Five dragon encounters: 18-second wing-buffet cooldown | Optional; released; combat acceptance pending |
+| 120 | SCS adjustments | Repair the SCS/SR false Improved Mantle weapon-protection semantics | ✅ implemented |
+| 121 | SCS adjustments | EEex ambient caster readiness + one honest first-contact defense | ✅ implemented; v1.2 ambient + neutral-to-hostile urgent path live accepted; legacy live pending |
+| 130 | SCS adjustments | EET elemental arrows: BG2-strength acid, cold and fire | Automated checks passed; in-engine check pending |
+| 200 / 201 | SR adjustments | Hardiness: 40% / 30% physical resistance only | Implemented; choose one; live acceptance pending |
+| 202 | SR adjustments | Hardiness: optional extra 20% damage resistances | Requires 200 or 201; live acceptance pending |
+| 210 | SR adjustments | EEex Pierce Magic: halve MR, bounded to 10-40 points, for five rounds | Automated checks passed; live acceptance pending |
+| 211 | SR adjustments | Spellstrike: 15% spell failure for two rounds | Automated checks passed; live acceptance pending |
+| 220 | SR adjustments | Bracers of Blinding Strike: self-only SR Improved Haste | Automated checks passed; both cast orders checked in the 2.7.3.0 lab |
+| 301 | Cross-cutting audits | Emotion, Courage / Emotion, Hope: mutually exclusive beneficial emotions | ✅ implemented and automated-verified; delivery/mutual exclusion live-verified, status-entry retest pending |
+| 302 | Cross-cutting audits | Flail of the Ages: saves against Slow; +5 allows Haste | Isolated WeiDU checks passed; in-game check pending |
+| 310 | Cross-cutting audits | Party physical resistance: half effectiveness above 80%, maximum 90%; short immunity windows keep 100% | Automated checks passed; in-engine check pending |
+| 320 | Cross-cutting audits | Combat clouds: 75% damage resistance instead of invulnerability | Automated checks passed; combat check pending |
+| 330 / 331 | Cross-cutting audits | Potion uniqueness: one dose of each temporary potion type at a time (331: Potions of Genius still stack) | Automated checks and lab install passed; in-game check pending |
+| 332 | Cross-cutting audits | Heroism family: Heroism, Greater Heroism and the Potion of Heroism do not combine | Automated checks and lab install passed; in-game check pending |
+| 340 | Cross-cutting audits | Chris Revisions: Aid hit points only, Luck 90 seconds, Bless 30 seconds + 1 round per level, Bless and Chaotic Commands for druids, Prayer and Recitation not cumulative | Automated checks passed; in-game check pending |
+| 360 | Cross-cutting audits | EEex True Time Stop – fair Haste & Slow: frozen creatures' effects wait out a Time Stop; Haste and Slow leave periodic effects at the normal rate | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 and in the full CEBG stack with Spell Revisions; gameplay acceptance pending |
+| 361 | Cross-cutting audits | Round Clock credits elapsed world time toward personal cooldowns after travel, rest and scripted jumps | Single-player quiet labs on BG2:EE and IWD:EE 2.7.3.0. Multiplayer verified by static analysis only. |
+| 401–403 | Class and kit revisions | Cleric of Tempus: revised Holy Power | ✅ implemented; choose one compatibility mode |
+| 410 | Class and kit revisions | Druids: axes and short bows; fighter/druids also long bows (with or without Artisan's Kitpack) | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 with and without Artisan's Kitpack; gameplay acceptance pending |
+| 411 | Class and kit revisions | Alaghor of Clangeddin (Yeslick): the cleric weapons plus axes, with fighter/cleric limits (Artisan's Kitpack and EEex) | Lab-verified in BG2:EE 2.7.3.0 + EEex 1.3.1 in CEBG's stack with Spell Revisions and Artisan's Kitpack; gameplay acceptance pending |
+| 420 | Class and kit revisions | Shared EEex bard progression provider | BG2EE/EET 2.7.3 user playtest passed; IWDEE support checked offline |
+| 421 | Class and kit revisions | Bard/Jester IWD7; Blade/Skald vanilla6 | Implemented; requires 420 |
+
+### Components 210–211 — SR anti-magic
+
+Component 210 requires **EEex** and launching through InfinityLoader; Spell Revisions
+is optional. These are independent choices. Pierce Magic halves current
+MR, reducing it by at least 10 and at most 40 percentage points, with a zero floor
+and rounding the reduction up. The reduction lasts five rounds; recasts renew the
+same amount. It combines with Lower Resistance. Spellstrike causes 15% arcane/divine
+spell failure for two rounds, refreshing its own effect instead of stacking.
+
+Both preserve protection removal, Spell Shield interception and installed invisible
+targeting. Pierce Shield and Entropy Shield are unchanged. Native
+first-hit/refresh/save-load acceptance remains separate from automated checks.
+
+Each also writes the spell's description in Spell Revisions' layout (header, intro, list of
+removed protections, mechanic) and brings every text that still shows the old mechanic up to
+date: scrolls that learn or cast the spell, the Pierce Magic charge line of the Wand of Spell
+Striking, and other spells that cast the same payload (Artisan's Kitpack's monk Spellstrike).
+Owned descriptions are written in full; other languages retain their text with a log
+line until a translation exists. The tail patch's components
+212 and 213 do only this, for an installation that already has the mechanic.
+
+Run `python tools/package_timestop.py` to build the full mod, both SR tail patches and the
+standalone packages for True Time Stop and Round Clock.
+For an existing stack, use the [anti-magic tail patch](../live-patch/CBR_SR_ANTIMAGIC/README.md)
+after authorization, without reinstalling SR or existing Rebalance components.
+The [collection handover](handovers/2026-10-06-sr-antimagic-collection.md) covers
+the new source pin, dependencies, selections and recipe checks still required.
+
+### Component 130 — BG2-strength elemental arrows in EET
+
+Acid arrows deal **1d3 acid**, cold arrows **1d2 cold**, and standard/kobold
+fire arrows **1d2 fire** without their +2 attack/physical-damage bonus.
+Other special arrows, original saving throws and SCS troll helpers are unchanged.
+Only each arrow's bow-fired hit changes: other abilities, other damage riders and
+their description text stay as they are, in the male and female strings. If
+another ability shares the hit's damage effect, the hit gets its own copy first.
+This fills the EET gap in SCS's own elemental-arrow option; it requires EET.
+Install after other arrow/item changes, including SCS when present.
+
+### Component 220 — SR Bracers of Blinding Strike
+
+The bracers grant **SR Improved Haste (+1 APR)**, still self-only and once per day,
+for as long as their own activation lasts (20 seconds on the stock item). The
+effective bonuses and existing Tempus bridge are retained. The installer follows
+delivery links and writes the private self-only copy and owned haste protections.
+Ordinary/Improved Haste cannot stack with the bracers by changing cast order.
+Spell Revisions is optional; install after other Haste/item changes.
+Wish's mechanics are not changed by this component.
+
+### Components 330–332 — Potion uniqueness and the Heroism family
+
+**330** makes every temporary potion type unique on its drinker; **331** does the
+same but lets Potions of Genius stack as before. Choose one. Different potion
+types still combine. Drinking the same type again:
+
+- potions with a temporary maximum hit point bonus (Heroism, Power and similar
+  potions from other mods) keep the first dose until it expires; a second dose
+  is used up without effect;
+- every other type restarts its normal duration instead of stacking its bonus.
+
+Instant healing, cures, permanent and quest effects are unchanged. SCS's potion
+copies count as the same type as the originals.
+
+**332** links Heroism, Greater Heroism (Bardic Wonders), their copies and the
+Potion of Heroism: the first one active on a creature wins, and the others have
+no effect on it until it ends (no refresh, no upgrade). Each creature counts
+separately. Song of Heroism, Aid and the Potion of Power stay separate. Greater
+Heroism's description is updated. Works with or without 330/331.
+
+Potions are recognised by what they do, not by file name, so potions from other
+mods are included. The installer owns the dose-blocking behavior; changed or mixed
+payloads are not grounds to omit it. No EEex is needed. Effects already active in an existing save can
+stack one more time; new doses behave as described.
+[Design and limits](../research/2026-10-14-potion-uniqueness-heroism-family.md).
+
+### Component 340 — Chris Revisions
+
+Christopher's own spell balance changes, in one component. With or without
+Spell Revisions, the same final values apply.
+
+- **Aid** grants only hit points: 1d8 +1 per caster level (maximum +10) for
+  one turn per level. The +1 to attack rolls, damage and saving throws is gone,
+  so Aid no longer adds to the Bless-style bonuses. Casting it again replaces
+  the bonus instead of stacking it. Bardic Wonders' Troubadour copy of Aid
+  changes with it.
+- **Luck** lasts **90 seconds** (15 rounds) instead of 5 turns (Spell
+  Revisions) or 3 rounds (unmodded). Its bonuses are unchanged.
+- **Bless** lasts **30 seconds + 1 round per caster level**: 36 seconds at
+  level 1, 90 at level 10 and 150 from level 20, instead of 5 turns (Spell
+  Revisions) or 6 rounds (unmodded). Its bonus is unchanged, and SCS's instant
+  prebuff copy of Bless changes with it. Druids, and rangers with them, can
+  cast Bless again, as in the unmodded game.
+- **Chaotic Commands** is available to druids again at spell level 5, as in
+  the unmodded game; Spell Revisions had made it a cleric-only spell.
+- **Prayer and Recitation** (IWD divine spells, for example from IWDification)
+  no longer stack. On each creature, Recitation's bonus (+2 to attack and
+  saves) replaces Prayer's (+1 to attack, damage and saves), and blocks it
+  while it lasts. Recitation's penalty does the same to Prayer's penalty. A
+  bonus from one side and a penalty from the other still combine. Bless and
+  Chant still stack with everything.
+
+Each part finds its spells through SPELL.IDS and is skipped when they are not
+installed. Missing optional targets or unreadable resources are logged individually;
+the other parts still apply. Complete English descriptions of the spells and their
+scrolls are written; other languages retain their text with a log line.
+No EEex is needed. Effects already active in a save keep their old
+values until they end. Existing druids should receive Chaotic Commands and
+Bless at their next level-up; this is not yet checked in the game.
+[Aid, Luck and Chaotic Commands](../research/2026-10-23-aid-luck-chaotic-commands.md),
+[Prayer and Recitation](../research/2026-10-23-prayer-recitation.md),
+[Bless](../research/2026-10-23-bless.md).
+
+### Component 360 — True Time Stop – fair Haste & Slow
+
+Christopher's rule: in a Time Stop everything but the caster and Time-Stop-immune creatures
+stops; Haste and Slow change only actions and movement.
+
+The engine freezes creatures in a Time Stop but lets their effects run on: a frozen creature's
+spells and potions can run out, and its poison or regeneration counts down, while it cannot act.
+Engine Haste also speeds up a creature's regeneration, poison, disease and repeated effects,
+and Slow slows them down, because they advance with the creature's own updates. With 360:
+
+- **Time Stop.** The frozen creatures' effects wait: spell and item durations, delayed effects,
+  poison, disease, regeneration and repeated effects continue after the stop with the time they
+  had left. The caster and Time-Stop-immune creatures keep their normal clocks.
+- **Haste and Slow.** Regeneration, poison, disease and repeated effects pulse at the normal rate
+  on hasted and slowed creatures. Actions, attacks and movement stay hasted or slowed.
+- **Normal speed** stays as it is. Clouds and other area effects already wait out a stop natively
+  and are left alone.
+
+Spell Revisions' Haste and Improved Haste do not use the engine's Haste, so their creatures'
+periodic effects never ran faster and stay as they are; engine Haste from items, potions such as
+Oil of Speed and other mods is corrected. Time Stop is corrected with or without Spell Revisions.
+
+**Requirements.** BG2:EE or EET on game version **2.7.3.0, 64-bit**, and **EEex** (verified with
+1.3.1 and its LuaJIT option), installed before this component; start the game through
+InfinityLoader. Steam's `Baldur.exe` and GOG's `BaldurII.exe` of 2.7.3.0 are the same file; the
+installer reads the executable's header and refuses any other build, such as 2.6.6.0. Beamdog's
+2.7.3.0 build could not be compared: it installs only if it is that same file. Install 360 before
+starting a playthrough; adding or removing it during one is not supported.
+
+**When it does not run.** At every game start, before changing anything, the correction checks
+EEex, the executable (its build, the four effect worker classes and all eight code locations it
+changes) and how EEex sees the effect lists. If anything differs, the game runs natively. Either
+way one line in InfinityLoader's console (and in `InfinityLoader.log` where logging is on) says
+what happened:
+
+```text
+[CBR Time Stop/Haste] on (BG2:EE/EET 2.7.3.0): effects of creatures frozen by Time Stop wait; Haste and Slow leave periodic effects at the normal rate
+[CBR Time Stop/Haste] off, the game stays native: <reason>
+```
+
+There is never a message in the game. Should the correction hit an error while playing, it
+switches itself off until the game restarts, the game continues natively, and the log says why.
+Saved games contain nothing of it: after a load each creature's clocks start fresh, and effects
+that were already running end on time.
+
+**Known limits.** Saving during a Time Stop, and dispel, cure or death during one, are not
+covered yet. Equipping or unequipping items during a stop was not tested in the lab. A slowed
+creature's pulses can come a tick or two late around a stop, and after a load an effect that was
+already running can move its remaining pulses by one.
+The [lab notes](../research/timestop-lab/README.md) list the details.
+
+Verified: 31 automated checks (`tests/test_time_stop_haste_clocks.py` runs the correction in
+LuaJIT: start without a console, loads, every refusal and an error while playing;
+`tests/test_time_stop_haste_clocks_installer.py` runs WeiDU on synthetic games). In a plain
+BG2:EE 2.7.3.0 + EEex 1.3.1 lab, installed with WeiDU, it switched itself on at the main menu
+and corrected a Time Stop, Haste, a save and reload and the stop and Haste after it. In the full
+CEBG stack (EET, Recommended preset, Spell Revisions) it switched itself on at start, stayed on
+through loading a save from the main menu and corrected Spell Revisions' Time Stop and Oil of
+Speed. Design and evidence:
+[research note 10](../research/10-timestop-haste-engine-clocks.md) and the
+[Time Stop lab](../research/timestop-lab/README.md).
+
+**Standalone.** Games without BG Rebalance can use the
+[standalone package](../live-patch/CBR_TRUE_TIMESTOP/README.md),
+`CBR_TRUE_TIMESTOP-v<version>-windows.zip`: the same correction with the same checks and the
+same two files, installed by its own `Setup-cbr_true_timestop.exe`. Use one of the two
+installers; each refuses while the other is installed. In its own lab, plain BG2:EE 2.7.3.0
+with EEex 1.3.1, the package installed from its archive switched the correction on at start,
+corrected the same cases, and uninstalled back to the files from before the install.
+
+### Component 361 — Round Clock
+
+When travel, rest or a script advances the world clock, eligible party members and creatures in
+loaded areas recover spent spell and item aura, completed attack rounds, Hide in Shadows lockout
+and the contingency check delay. Recovery uses elapsed time and each creature's update speed.
+An interrupted rest with zero elapsed time grants zero recovery. During Time Stop, only the caster
+and immune creatures recover. The engine continues to handle casts and attacks already in progress.
+
+Use Windows x64 BG:EE/SoD, BG2:EE/EET or IWD:EE **2.7.3.0** with EEex v1.2.0 or v1.3.1.
+Select 361 in the full installer or use the Round Clock standalone. Component 360 is independent.
+Single-player quiet labs verified the first paused Stealth paint and click on BG2:EE alongside 360
+with LuaJIT, and on IWD:EE with LuaJIT and embedded Lua 5.2. The latest hook and toolbar changes
+were retested on BG2:EE. Waylaid routes and custom action bars remain open.
+Multiplayer has static verification only and has never been live-tested. A forced clock
+update on another thread skips personal recovery and increments `CBRRC.Status().off_thread_skips`.
+[Installer and gameplay notes](../live-patch/CBR_ROUND_CLOCK/README.md) · [Verification](../research/16-time-jump-round-and-cooldowns.md).
+
+### Component 320 — Damageable combat clouds
+
+Cloud-granted damage immunity (a resistance of 100% or more) becomes **75%**.
+Regeneration, duration, poison immunity and AI remain unchanged. Supported forms include SR/SCS genies,
+the known EE/SoD combat clouds, Ascension Bodhi's combat form and SCS vampire
+tactical mist. Scripted death escapes and quest protections stay intact.
+
+Each combat form receives its decided resistance profile, including when an old
+effect is missing, duplicated or edited. Channels outside that profile stay open.
+Cloud-added MR100 is neutralized; SCS tactical mist has MR0 while transformed.
+Normal-form data is unchanged, but a cloud's flat-set values can temporarily
+replace stronger natural resistance. Install after the cloud-form providers.
+No EEex is required. Complete English summon descriptions accompany the owned
+profiles; other languages retain their text with a log line. An unreadable resource
+costs only that resource; changed resistance values do not veto the profile.
+See [scope and exclusions](../research/2026-10-06-damageable-cloud-forms.md).
+
+### Component 310 — Party physical resistance
+
+Physical resistance above **80% counts at half strength**, up to **90%**:
+90% becomes 85%, and 100% becomes 90%. Odd points round down. Applies separately
+to slashing, crushing, piercing and missile resistance for party members only.
+Enemies, summons and elemental/magic resistance are unchanged.
+
+**Short immunity windows keep 100%.** While a single timed effect grants full
+immunity to a damage type on its own (SCS's Divine Protection and Greater Divine
+Protection set all four to 100% for three rounds), that type is not capped. The
+exception starts and ends with that effect, including dispels and saved games.
+Stacked bonuses, equipment, kit passives and shapeshift forms stay capped. A
+window delivered through an opcode-177 EFF wrapper is not recognised (none is
+known); it stays at 90%.
+
+Requires EEex and BG2:EE/EET. Launch through InfinityLoader. This operates on
+the resistance the engine has calculated, including its normal stacking rules;
+it does not change individual spells or items. Stoneskin and weapon-immunity
+spells still work normally. No saved-game files or base creature stats are edited.
+
+The requested **95% alternative is not available yet**: the engine truncates
+resistance above 100% before the normal EEex callback. Simply changing the ceiling
+would still produce at most 90%. That alternative needs a separate engine change.
+CEBG selections are maintained separately by the collection.
+[Design and engine evidence](../research/2026-10-06-physical-resistance-softcap.md).
+### Components 200–202 — SR Hardiness
+
+Works on BG2:EE/EET with or without Spell Revisions. Both normal
+Hardiness and Wish-granted Hardiness receive the same resistance profile:
+
+- **200 (recommended): 40% physical resistance only.** Removes SR's extra resistances.
+- **201: 30% physical resistance only.** Mutually exclusive with 200.
+- **202 (optional): add 20% resistance** to acid, cold, electricity, fire, magic
+  damage, magical fire and magical cold. Install after either 200 or 201.
+
+This is a recommendation of the **vanilla resistance profile**, not a complete
+vanilla restoration. Duration, casting, dispel flags, stacking protections and
+existing Breach behavior are preserved. No Magic Resistance or poison resistance
+is added. Descriptions on both resources receive new strings; shared text is not
+rewritten. Install after SR's HLAs and other mods changing these spells.
+
+For an existing stack, use the separate [tail patch](../live-patch/CBR_SR_HARDINESS/README.md)
+without reinstalling SR or previously installed BG Rebalance components. Use only
+one Hardiness installer family. Build local Windows packages with
+`python tools/package_sr_hardiness.py`.
+
+**An older collection does not gain these components automatically.** The
+[collection handover](handovers/2026-10-07-release-collection.md) specifies
+dependencies, defaults and declaration order for a fresh-install integration.
+
+### Component 302 — Flail of the Ages
+
+The on-hit Slow now allows a **save vs. breath**: **−2 for +3**, **−4 for either
++4 version**, and **−6 for +5**. A successful save prevents Slow and its associated
+Haste removal and feedback; the weapon's damage is unaffected. Its existing
+chance to trigger, Slow duration and other properties are preserved. Lower-tier
+versions do not change.
+
+The **+5 version keeps Free Action but allows Haste and Improved Haste**, including
+Spell Revisions' versions. Other Free Action sources and the Slow spell are not
+changed. Item descriptions show the new rules without replacing shared game text.
+
+Requires BG2:EE/EET, but not SCS, Spell Revisions or EEex. Install after SCS, Spell
+Revisions and other changes to these items or their descriptions. The base-game
+items and CEBG's English EET/SR/SCS/Artisan/UB items are covered by automated checks.
+The pending compatibility update also handles multiple melee abilities/Slow effects,
+extra and shared effect records, reordered layouts and changed descriptions.
+Linked helpers keep their public identity. The owned Slow path receives the
+save through a private copy where needed, while unrelated damage and public
+helper resources stay separate.
+The owned Slow behavior is written even when its old effects are missing.
+This is not a universal item-overhaul or translation compatibility claim.
+
+This component is included in v0.7.0 and intended as a CEBG default.
+It has not been installed into a live game. Existing-save hotpatching is a separate
+question: the component neither edits saves nor promises to replace effects already
+stored in them. [Evidence and boundaries](../research/15-flail-of-ages.md).
+
+### Component 410 — Druid weapons
+
+Supports **BG2:EE and EET**, with or without **Artisan's Kitpack** and with or without
+Spell Revisions. Christopher's request (2026-10-27): classes and kits that may train a weapon
+should also be able to use it, with as little change as possible; druids and fighter/druids
+get more weapons.
+
+**410** lets druids and every druid kit train axes and short bows to Proficient (one pip)
+and use them; fighter/druids may also train long bows and specialize (two pips) in all three.
+A limit another mod already raised higher stays. Kits are found through KITLIST's class
+column; a kit that uses a class's own WEAPPROF column follows that class, and a kit that
+shares its column with another kit must receive its decided allocation as well.
+
+- **With Artisan's Kitpack's EEex weapon permissions**, the component adds the class grants
+  for these weapons to `C0PR#CL.SPL`, in every ability, right after the Kitpack's own grants
+  (kit chains and `C0PR#KG` keep running last). Items with the Kitpack's permission check
+  keep it. The grant writes do not require a particular prior layout or cell value.
+- **Without the Kitpack**, it removes the druid and fighter/druid restrictions (usability
+  flags and opcode 319 "not usable by" for these two classes) from every axe and short bow a
+  fighter may use, and the fighter/druid restriction from long bows. Other classes'
+  restrictions and every other item stay as they are.
+- The English class descriptions of the druid and the fighter/druid name the new weapons
+  (the BG2, BG1 and SoD text tables where present). Other languages keep their text.
+
+With the Kitpack, characters get the new permissions when `C0PR#CL` runs: when a creature is
+created and at each level-up. A saved game's existing party members get them at their next
+level-up. Install after Artisan's Kitpack (and its "Update EEex-based Weapon Usability
+Changes" tweak, if used) and after every mod that adds druid kits or changes WEAPPROF; a
+later run of that tweak keeps the change, because it rebuilds the class grants from the
+raised WEAPPROF columns. The component uninstalls cleanly.
+
+Verified: 11 automated checks (`tests/test_class_weapon_access.py` runs WeiDU on synthetic
+games: with and without the Kitpack, an incomplete or unknown grant table, higher limits,
+another KITLIST column order, grants on an equivalent SPLPROT row, several `C0PR#CL`
+abilities, other languages, a rerun and uninstall). In BG2:EE 2.7.3.0 + EEex 1.3.1 labs
+installed with WeiDU (Artisan's Kitpack chriz.3 with Spell Revisions and the "Update
+EEex-based Weapon Usability Changes" tweak; chriz.4-rc2 without Spell Revisions, in another
+order; no Kitpack), a druid, a Beastfriend, a Hivemaster and a fighter/druid could equip the
+axe and the short bow, and only the fighter/druid the long bow; mace and long sword stayed
+closed. That held after joining the party, after a level-up and after a save and reload, and
+with the Kitpack also after its helper creature was re-created. The level-up screen offered
+axe and short bow up to one pip to the druids and axe, short bow and long bow up to two pips
+to the fighter/druid. Uninstalling restored every file in `override`.
+
+### Component 411 — Alaghor of Clangeddin weapons
+
+Supports **BG2:EE and EET** with **Artisan's Kitpack** (its EEex weapon permissions) and
+**EEex**, with or without Spell Revisions. Christopher's decision (2026-10-27, confirmed
+2026-10-29): Yeslick NPC's Alaghor of Clangeddin kit, Yeslick's kit, trains and uses the
+cleric weapons plus axes, Clangeddin's weapon, up to two pips; the thief weapons its
+WEAPPROF column allowed drop out, and pips already spent stay.
+
+**411** rewrites the kit's own WEAPPROF column: the cleric weapons at the fighter/cleric
+limit (the cleric limit where fighter/clerics have none), the axe at its fighter/cleric
+limit or else the highest fighter/cleric limit of a cleric weapon, every other weapon 0.
+Every other row, the fighting styles among them, takes the fighter/cleric value, so
+Yeslick's styles stay as they are. It adds the kit's axe grant to `C0PR#CL.SPL` and names
+the axes in the kit's English description. Shared columns do not veto the decided kit allocation.
+
+The engine takes a kit's own column only when the kit's KITLIST class is the character's
+class, so a fighter/cleric with this cleric kit trains from FIGHTER_CLERIC
+([research note](../research/2026-10-29-multiclass-kit-proficiency-column.md)). An EEex hook
+(`M_CBRKP.lua`, its pattern `EEex_scripts/extra_pattern_dbs/CBRKP.db` and the registry
+`CBRKPKIT.2DA`) makes the engine read the kit's column for fighter/clerics with this kit.
+Every other character, and every other use of the kit's class (kit abilities, the class
+name on the record screen), stays native. The installer refuses an executable in which the
+hooked instructions do not occur exactly once; at game start the hook checks them again
+and, if another mod changed them, leaves the game native with one line in the log.
+
+Launched without EEex, Yeslick keeps the fighter/cleric limits. Install after Yeslick NPC,
+Artisan's Kitpack (and its "Update EEex-based Weapon Usability Changes" tweak, if used) and
+every mod that changes WEAPPROF. The component uninstalls cleanly.
+
+Verified: 14 automated checks in `tests/test_class_weapon_access.py`. They run WeiDU on
+synthetic games and cover:
+- the kit column's exact cells, with and without fighter/clerics who train every weapon;
+- a rerun, and another mod's registration kept;
+- an unsupported registry;
+- EEex missing or without the conditional-jump helper;
+- no executable, `BaldurII.exe` and a patched decoy, and executables without exactly one
+  compatible lookup;
+- the kit grant row, a shared column, and 410 and 411 together.
+
+8 more checks in `tests/test_kit_proficiency_runtime.py` run the hook's Lua against a
+simulated EEex: registered and duplicate pairs, changed bytes, a missing label, an empty or
+invalid registry, a failing hook, and no EEex.
+
+On 2026-10-29 a BG2:EE 2.7.3.0 + EEex 1.3.1 lab was installed with WeiDU in CEBG's order:
+Yeslick NPC, Spell Revisions, Artisan's Kitpack chriz.4 with its "Update EEex-based Weapon
+Usability Changes" tweak, then 410 and 411. Results:
+- The game log reported the hook active.
+- At level-up, Yeslick and two fighter/clerics with the kit were offered the axe and the
+  cleric weapons up to two pips, no thief weapon, and their fighting styles unchanged.
+- One of them spent its free pip on the axe. It kept its long-sword pip and its long sword.
+- All three could equip the axe and the mace.
+- A fighter/cleric without the kit was offered no axe and could not equip one.
+- This held after joining the party, after the Kitpack's helper creature was re-created,
+  after the level-up and after a save and reload.
+- Uninstalling restored every file in `override` and removed the pattern file.
+
+Spell Revisions only appends SPLPROT rows, which 411 finds by their content. The automated
+checks run without it.
+
+Not lab-tested: EEex v1.2.0 and 2.6.6.0. The hooked instructions were checked in both
+executables, and EEex v1.2.0's conditional-jump helper is byte-identical to v1.3.1's.
+
+### Components 420–421 — Kit-specific bard progression
+
+Supports **Windows BG2EE/EET and IWDEE with compatible EEex**. The native lookup was
+verified in both games' **2.7.3.0** executables; BG2EE/EET also passed the user's in-game
+check. IWDEE still needs an in-game check. EEex 1.2 and 1.3 supply the required APIs;
+the installer checks capabilities and the actual executable instructions instead of
+requiring one exact version or file address. Component 420 supplies one engine hook
+and shared table registry; 421 selects IWD progression through seventh-level spells
+for ordinary Bards and Jesters, and vanilla progression through sixth level for
+Blades and Skalds. Other classes and unregistered kits keep their native behavior.
+Future builds can use the provider if their lookup remains compatible and uniquely
+identifiable; a changed or ambiguous lookup is rejected before installation.
+
+For Artisan's bard kits, install the kits first, then 420, 421, and **Bardic Wonders
+Balance Patch component 3010** last. It gives Dancer vanilla6, Kapellmeister and
+Darkbloom IWD8, and the other supported bard kits IWD7. Darkbloom is optional and is
+skipped when absent. Progression adds no Spell Revisions restriction; Darkbloom's
+separate copied-spell issue under SR remains outside this component. Existing extra
+slots, slot penalties, caster levels and innate HLAs remain unchanged. Descriptions
+update with the chosen policy.
+
+These components work without SCS, SR or the collection. The shared installer API
+is `override/CBRSPAPI.TPA`; adapters add numeric class/kit-to-table registrations to
+`CBRSPKIT.2DA`. API 1's native hook handles bards only. No duplicate runtime is
+needed in downstream mods. Tables come from the BG2EE bard progression and the
+IWD/un-nerfed progression documented by **Tweaks Anthology / Gibberlings3**; the
+hook uses **Bubb's EEex** infrastructure.
+
+Standalone Bardic Wonders users may install **420 → 3010** without 421, retaining
+their existing base Bard and native-kit progression. The collection selects
+**420 → 421 → 3010** for the complete policy. No component rewrites CDTweaks'
+`MXSPLBRD.2DA`; registered kits use their selected private table, while unregistered
+kits retain the shared table. Install after kits and description-changing tweaks.
+
+The normal level-up path applies the new capacities. This first build does not
+automatically rewrite existing saved spellbooks on load. See the
+[short in-game check](bard-progression-playtest.md) and
+[engine evidence](../research/09-kit-spell-progression-and-caster-level.md).
+
+### Component 100 — Telekinetic Storm save fix
+
+SCS's *extra arcane spells* component adds Telekinetic Storm (level 8, 1d6/level magic damage,
+AoE). Its description promises "Saving Throw: 1/2", and the damage effect carries the
+*save-for-half* flag — but no save **type** is set, so the engine never rolls a save and the
+spell always deals full damage (16d6–20d6). It also misses the EE-conventional
+*bypass mirror image* flag for AoE damage. Sibling spells in the same SCS source file
+(Stormbolts, Icy Ray) set both `s_save_vs_spell=1` and `s_bypass_mirror_image=1`; Telekinetic
+Storm's author simply forgot them. Still present on SCS master as of 2026-07-02.
+
+The component resolves the spell dynamically via `spell.ids` (`WIZARD_TELEKINETIC_STORM`) and
+ORs `save vs. spell (bit 0) + bypass mirror image (bit 24)` into the save-type field of every
+save-for-half damage effect, across all level-scaled ability headers. Idempotent.
+
+Full diagnosis: `research/01-telekinetic-storm-save-bug.md`.
+
+### Component 110 — Apex Dragons: lethal claws and bites
+
+**Optional difficulty increase. Requires EEex.** Install after SCS when present.
+
+**A failed saving throw can cause permanent death (chunking). A chunked companion cannot
+be raised or resurrected through normal gameplay.** The native engine still honors its
+gore, difficulty and permanent-death protection settings; those may convert the result to
+ordinary death. This component does not override those settings.
+
+| Dragon | Chance per qualifying melee hit | Save vs. death |
+|---|---:|---:|
+| Firkraag | 15% | -4 penalty |
+| Thaxll'ssillyia | 5% | -2 penalty |
+| Nizidramanii'yt | 10% | -2 penalty |
+| Saladrex | 10% | -2 penalty |
+| Watcher's Keep guardian | 5% | -2 penalty |
+
+The extra attack effect activates at **Hardcore and Insane** in SCS's Dragon difficulty
+settings (including the intermediate setting between them). When that setting follows
+the game's slider, it activates on Hard and Insane. Lower settings remove the extra effect.
+
+The hit's physical death effect bypasses **Death Ward, death-effect immunity, Stoneskin
+and physical damage resistance**. The victim retains their protections against other
+attacks and spells. The effect requires a qualifying melee hit: weapon immunity can stop
+it, and scripted minimum-HP protection remains intact. The engine resolves the chance and
+one death save before EEex applies the death effect; there is no extra damage prerequisite.
+
+This first pass changes neither HP nor auras. It adds no escorts or spells. Adalon and ToB
+dragon changes are deferred. Exact actor-identity guards keep other users of the shared
+combat scripts and weapons on their existing behavior; the Thaxll'ssillyia donor alias
+shares his identity. The separate SR Death Ward correction is not a prerequisite.
+
+Runtime additions are five patched BCS scripts, four private SPLs, three EFFs and one
+autoload Lua module in `override`; WeiDU also maintains its normal installation records.
+The component writes its owned script behavior even when previous blocks differ.
+Script reload may reach already-spawned dragons,
+but saved-encounter and combat acceptance remain pending. Do not install into an active
+playthrough on the strength of fixture tests alone.
+
+Research: [runtime scope](../research/14-dragon-runtime-scope.md),
+[physical death delivery](../research/19-dragon-vorpal-delivery.md).
+
+### Component 111 — Less frequent dragon wing buffet
+
+This independent option increases the wing-buffet cooldown from **6 to 18 seconds** for
+the same five dragon identities. It works at all their existing SCS difficulty settings
+and **does not require EEex or component 110**. Existing spell conditions, response weights,
+and other dragons' behavior are preserved. It does not change the buffet spell itself.
+
+Both components belong after SCS in the installation order. Their installer, resource and
+script behavior is covered by isolated automated checks; actual combat acceptance remains
+pending. See [wing-buffet research](../research/15-dragon-wing-buffet.md) and the
+[v0.4.0 release notes](release-notes/v0.4.0.md).
+
+### Component 120 — SCS / Spell Revisions weapon-protection compatibility
+
+On the researched Spell Revisions install, both `WIZARD_IMPROVED_MANTLE` and
+`WIZARD_MOMENT_OF_PRESCIENCE` resolve to the same level-eight spell. Moment of Prescience
+does not grant weapon immunity, but SCS's generated common-mage scripts and detectable-spell
+metadata still treat that slot as if it did.
+
+Component 120 dynamically resolves the final `SPELL.IDS`, classifies the installed spells by
+their reachable opcode-120 effects, and repairs only three proven SCS contexts: false
+first-round and renewal choices are removed, while Chain Contingency keeps its generated
+helper and substitutes the closest lower genuine protection. Only the exact false metadata
+markers are removed; Moment of Prescience's real AC, saving-throw, duration, school, text,
+and other gameplay effects remain unchanged. If its owned block is missing, the
+installer supplies it; old script shapes do not veto the repair.
+
+This is a compatibility repair, not a redesign of Moment of Prescience. If a later Spell
+Revisions version restores a genuine Improved Mantle at that mapping, the semantic
+classifier makes component 120 a byte-no-op. The compiled-block transformer is a small,
+namespaced adaptation of SCS v35.21's `alter_script.tph`; credit for the underlying AI and
+script system belongs to DavidW. Spell Revisions and Moment of Prescience are by Demivrgvs
+and the Gibberlings3 team.
+
+### Component 121 — EEex ambient readiness bridge
+
+This is an interim bridge for SCS casters, not the eventual full EEex AI overhaul. At install
+time it resolves the final `SPELL.IDS`, reads installed spell effects, and imports
+SCS's own cosmetic-free prebuff mapping. It then ships one stamped `M_CBRRDY.lua`; it does
+not patch SCS combat scripts or spell mechanics. It requires BG2:EE/EET and EEex's
+`M_*.lua` autoload bootstrap. Available SCS mappings enrich the manifest without
+being an installation prerequisite. It uses one deferred lists-resolved callback as the sole scheduler and one
+synchronous lists-resolved callback as an ambient pending-confirmation observer; the latter
+does no classification, scheduling, or urgent work. Legacy EEex instead uses one synchronous
+callback as the full scheduler. The expected listener counts are therefore `1 deferred + 1
+synchronous = 2` on v1.2 and `0 + 1 = 1` on legacy. If the synchronous observer API is
+missing on the current path, ambient readiness cannot run while the urgent layer may keep
+using the deferred scheduler. Both modes read the direct `m_worldTime.m_gameTime` field used
+by EEex itself as raw 15-Hz engine ticks. The component does not hardcode EEex WeiDU
+component numbers or impose a component-specific LuaJIT requirement. Missing prerequisites
+omit only the affected feature; unreadable resources are logged individually.
+Component 120 is independent, but installing 120 first is recommended on the currently
+researched SR setup.
+
+The first v1.2 live pass exposed a bad `GetCurrentTime()` assumption. The corrected-clock
+rerun delivered the expected Vigil buffs, but a read-only inspection found every memorized
+count unchanged and every component ledger empty. Exact EEex v1.2 source and BG2EE 2.6.6
+disassembly explain the split result: immediate opcode 146 with `dwFlags=1` resolves the
+outer effect, then publishes its child spell through `CMessageFireSpell` /
+`CGameAIBase::FireSpell` after the deferred scheduler returns. It does not create action 181.
+The accounting correction has 76 focused automated tests passing, and the full repository
+suite passes 254 tests. A fresh-process `AR3000` diagnostic against runtime SHA-256
+`EF38A1A0BF942A2B3AB294FAE48DA2548E9413DBD5FE7CB255406C413E06DD3D` then passed ambient
+delivery and one-slot accounting on all four neutral Vigil casters: every exact marker and
+schema-2 charged ledger was present, with the expected `2 -> 1` or `1 -> 0` slot delta and no
+ambient failure. The first urgent attempt exposed a second EEex binding correction:
+`virtual_ClearActions` requires an explicit Boolean. After changing the passive-only replacement
+path to `virtual_ClearActions(false)`, the stamped lab runtime SHA-256
+`9957348E7DB69EE24CA149787887B9AD36012B0F34A2D665CE041611F32B3D08` passed the retest.
+An attack order alone correctly left the neutral Vigil group ineligible; after the first hit
+made Brother Pol hostile, the component started his exact normal `SPWI708` cast, spent its one
+contact attempt and one Mantle slot, left the opcode-120 protection active, and kept
+`urgent_faulted=0`. A generic mage already executing non-passive action 22 was not displaced.
+The legacy fallback still has no corrected live gameplay pass.
+
+The ambient layer considers only recognized, settled SCS casters and conservative installed
+self-buffs lasting at least 2,400 seconds. A caster must really have the spell memorized. The
+deferred scheduler requests delivery once and retains only an exact primitive spellbook
+locator, original flags/count, and deadline. When the child marker resolves, the synchronous
+observer locates an available memorized copy before spending it and committing the ledger.
+Changed unrelated slot flags and spell-level metadata do not veto that transaction.
+Only an actual engine spellbook reset (normally rest) opens that charge again. Natural expiry
+may be maintained for free while the caster is safe, out of combat, and cannot see the party.
+Dispel, early removal, or suspicious early loss suppresses maintenance until the next real
+reset. Save/load, area change, and elapsed time are not treated as rests.
+
+Two narrow SCS races are accounted explicitly. If exact SCS action 181 starts while the first
+delivery is still pending, the immediately following matching action 147 may supply the one
+real charge; a later callback must observe the exact one-slot loss and child marker before the
+ledger is committed, without a component debit. After an ordinary component debit, the
+marshaled version-2 ledger retains its exact locator plus original/debited flags; one later
+exact SCS `181 -> 147` pair, with `instantprep == 0` at both starts, can restore only that
+component-debited record, and only after a later callback observes SCS's exact one-slot loss.
+Canceled, non-adjacent, renewed, combat, or ambiguous sequences do not reimburse. A queued
+component child that arrives after an SCS-paid commit is merely a bounded redundant finite
+effect; it does not debit or create another entitlement. Transient delivery state is
+deliberately discarded on import/reset or sprite replacement. In the narrow boundary where
+a queued child survives that discard, one finite free effect can remain, but it receives
+neither a ledger nor free maintenance; retroactively charging from a generic SCS marker would
+not prove ownership.
+
+Existing ledger export/import and genuine spellbook-reset bookkeeping remain active even
+when ambient gameplay is disabled, externally owned, or faulted, so retirement neither loses
+a valid charge nor retains one across a real reset. Generic action/confirmation handling does
+not create sessions. Only an exact SCS action 181 plus known delivery may reconstruct
+ephemeral state from an existing valid charged/reimbursable version-2 UDAux ledger, without
+allocating UDAux, to preserve reimbursement across save/load or hot reload before the first
+deferred tick.
+
+The urgent layer gives a hostile caster one fast but ordinary self-cast on clear first
+contact. It may replace only proven idle/wander/movement work, never attacks, casts,
+dialogue, cutscenes, tactical/unknown queues, or Project Image actors. The engine owns the
+slot, aura, casting time, visuals, and interruption. Candidates are Absolute Immunity,
+genuine Improved Mantle, Mantle, then Protection from Magical Weapons, filtered by installed
+opcode-120 semantics and actual memorization. The episode is spent when casting starts and
+rearms only after a full round without seeing the party. Players can therefore bait or
+interrupt the response, but continuous sight cannot farm repeated casts. The passive-only
+replacement uses `virtual_ClearActions(false)`; the Boolean is required by the EEex binding,
+and the call is unreachable unless the current and every queued action passed the conservative
+allowlist.
+
+The two layers can be retired independently without uninstalling the component:
+
+- `CBR_RDY_AMBIENT_ENABLED = 0` disables ambient maintenance;
+- `CBR_RDY_URGENT_ENABLED = 0` disables the first-contact reaction; and
+- `CBR_RDY_EXTERNAL_OWNER` is a bitmask for a replacement AI: bit 1 claims ambient, bit 2
+  claims urgent, and value 3 claims both.
+
+Callback faults are logged locally and later callbacks remain usable. Offensive AI, target selection,
+sequencers, later-round defense choices, non-caster potion logic, and the future full EEex AI
+are deliberately out of scope.
+### Component 301 — Emotion, Courage / Emotion, Hope
+
+Component 301 owns the final level-four wizard spells at their dynamically resolved
+`SPELL.IDS` slots. The last beneficial Emotion applied wins on each creature, while recasting
+the same spell refreshes it. Courage grants +1 THAC0, +3 damage, and +5 Hit Points and ends fear
+and morale failure. Hope grants +2 morale, +2 THAC0, +2 damage, and +2 to all saving throws and
+ends Emotion, Hopelessness and Symbol, Hopelessness. Fear and Symbol, Hopelessness remove their
+matching benefit in the hostile mechanic's save/MR domain. Emotion, Hopelessness retains its
+established unconditional Hope removal before its separately saved hostile effects.
+
+**Compatibility notice:** Component 301 deliberately overwrites the effective Emotion,
+Courage and Emotion, Hope mechanics and English descriptions. Install it after IWDification,
+SCS, Spell Revisions, and other spell, scroll, or store overhauls. A spell mod installed later
+can overwrite component 301 again.
+
+When the symbols already exist, the component retains their allocated slots, valid installed
+visual/audio references, and existing learn-scroll placement. When either symbol is missing,
+it allocates the missing spell dynamically in a normal level-four wizard slot and creates a
+private CBR learn-scroll. The standalone spells use the original blue IWDEE A/B/C icons,
+independently extracted 13x13 IWDEE heart status icons, and a privately namespaced copy of
+IWDEE's allies-only Emotion projectile, VVC, animation, and sounds. Each fallback receives a
+dynamic `STATDESC.2DA` row and one 300-second opcode-142 entry, so `Courage` or `Hope` appears
+in the character-sheet status list. The scrolls are constructed cleanly from the same contract
+as IWDification: point targeting, range 50, opcode 148 at caster level 10, followed by a
+separate opcode-147 learning ability.
+
+The dynamically discovered Enchanted Weapon and Emotion, Hopelessness scrolls are distribution
+anchors only; their item abilities, icons, and other bytes are not cloned. Component 301 mirrors
+their store entries while preserving each store's quantities, charges, flags, and ordering.
+Missing distribution anchors are logged without blocking the spells or private scrolls.
+Existing spell slots without a resource are supplied as well. The component
+does not add fixed area, creature, save, or spellbook edits, so a store already cached in an
+active save may not acquire a new entry without separate save work.
+
+The first disposable UI pass exposed an enemy-only HOLD projectile and a donor-cloned Courage
+scroll in the earlier build; that build could not apply either buff and was discarded. The
+corrected UI test then confirmed real spell delivery, the complete stat sequences, and
+Hope/Courage replacement, but exposed one remaining presentation defect: the fallback spells
+had no character-sheet status entry. Regression tests now require the IWDEE allies-only
+projectile, blue icons, point-target scroll contract, dynamic STATDESC rows, D-icons, and
+opcode 142. A final manual status-list retest remains. Full binary evidence, provenance, and
+the controlled-test boundary are in
+`research/11-emotion-hope-courage.md`.
+
+### Components 401–403 — Cleric of Tempus Holy Power
+
+These mutually exclusive choices install the same five-tier Holy Power redesign. Component 401
+uses automatic semantic detection and is the recommended choice. Components 402 and 403 are
+advanced overrides that force true-doubling or additive Improved Haste compatibility.
+
+Spell Revisions and SCS are optional. Install after either when present, and after The Artisan's
+Kitpack and other mods that change spells or cleric kits. The installer resolves Divine Power
+and Improved Haste through `SPELL.IDS`,
+materializes the six effective input resources at their canonical `override` paths inside the
+WeiDU transaction, and writes its owned result. WeiDU itself backs up and restores
+touched files on uninstall. It adds no game-facing strings and performs no `dialog.tlk` write.
+Artisan's cleric permission grants remain separate from the owned Holy Power grants.
+Historical layout evidence is in `research/13-tempus-artisan-clab-packing.md`.
+
+Haste delivery is read to locate the owned transformation; changed values, helper
+contents or ability counts are not installation prerequisites. See
+`research/14-tempus-delegated-haste.md` for historical captures and isolated test evidence.
+
+Existing characters automatically use the patched `OHTMPS1` resource. Branwen at level 13
+already has the intended three uses, so this component needs no save edit for her. Characters
+already above level 25 may retain excess uses granted by the old CLAB in their saved creature;
+removing those requires a separately controlled save repair.
+
+This component intentionally does not include weapon-training changes, Chaos of Battle,
+Divination-school removal, or an EEex APR-cap experiment. Those are separate Tempus design
+components.
+
